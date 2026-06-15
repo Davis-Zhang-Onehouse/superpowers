@@ -1,0 +1,13 @@
+# Installed to ~/.superpowers-sync/config by bootstrap. Edit paths as needed.
+REPO="__REPO__"
+LIVE_BRANCH="live"
+UPSTREAM_REMOTE="upstream"
+CONTROL_DIR="$HOME/.superpowers-sync"
+WORKTREE="$CONTROL_DIR/rebase-wt"
+STATE_FILE="$CONTROL_DIR/state"
+STATUS_FILE="$CONTROL_DIR/STATUS"
+PENDING_FILE="$CONTROL_DIR/PENDING"
+HISTORY="$CONTROL_DIR/history.ndjson"
+RETENTION_DAYS=90
+# Set by Task 1 experiment: empty if plugin serves the live tree, else a refresh command.
+SPSYNC_REFRESH_CMD=""
