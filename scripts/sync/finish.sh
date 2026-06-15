@@ -7,7 +7,8 @@ SPSYNC_SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 load_state
 
 [ -f "$STATUS_FILE" ] || { echo "No paused rebase."; exit 0; }
-NEW="$(cat "$PENDING_FILE")"
+NEW="$(cat "$PENDING_FILE" 2>/dev/null || true)"
+[ -n "$NEW" ] || { echo "PENDING tag missing in $PENDING_FILE; cannot finish. Remove $STATUS_FILE manually if stuck."; exit 1; }
 
 # Refuse if the rebase isn't actually finished in the worktree.
 rebase_in_progress() {
