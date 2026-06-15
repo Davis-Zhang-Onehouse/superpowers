@@ -63,7 +63,11 @@ echo "If Task 1 found COPY behavior, set SPSYNC_REFRESH_CMD in $CTRL/config now.
 
 echo "== 5. cron (03:30 daily) =="
 LINE="30 3 * * * /usr/bin/env bash $CTRL/sync.sh >> $CTRL/cron.log 2>&1"
-( crontab -l 2>/dev/null | grep -v "$CTRL/sync.sh"; echo "$LINE" ) | crontab -
+tmpcron="$(mktemp)"
+crontab -l 2>/dev/null | grep -v "$CTRL/sync.sh" > "$tmpcron" || true   # tolerate no crontab / no match
+echo "$LINE" >> "$tmpcron"
+crontab "$tmpcron"
+rm -f "$tmpcron"
 
 echo "== 6. shell banner =="
 SNIP='[ -f "$HOME/.superpowers-sync/STATUS" ] && cat "$HOME/.superpowers-sync/STATUS"'
