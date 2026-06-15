@@ -6,15 +6,18 @@ SCRIPTS_SRC="$REPO/scripts/sync"
 GH_UPSTREAM="obra/superpowers"
 
 echo "== 1. Remotes & fork =="
+# Ensure 'upstream' points at the OSS repo (rename a matching 'origin' exactly once).
 if ! git -C "$REPO" remote | grep -qx upstream; then
-  # Guard: only rename 'origin' if it actually points at the upstream OSS repo.
   origin_url="$(git -C "$REPO" remote get-url origin 2>/dev/null || true)"
   case "$origin_url" in
     *obra/superpowers*) : ;;
     *) echo "Refusing to rename: origin is '$origin_url', not obra/superpowers. Fix remotes manually."; exit 1;;
   esac
   git -C "$REPO" remote rename origin upstream
-  gh repo fork "$GH_UPSTREAM" --clone=false --remote=false
+fi
+# Ensure a personal fork exists on GitHub and 'origin' points at it (idempotent).
+if ! git -C "$REPO" remote | grep -qx origin; then
+  gh repo fork "$GH_UPSTREAM" 2>&1 | tail -3 || true   # no-op if the fork already exists
   me="$(gh api user -q .login)"
   git -C "$REPO" remote add origin "https://github.com/$me/superpowers.git"
 fi
