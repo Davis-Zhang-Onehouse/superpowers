@@ -12,7 +12,6 @@ printf 'line1\nMY-EDIT\nline3\n' > "$WORKTREE/skills/foo/SKILL.md"
 g "$WORKTREE" add skills/foo/SKILL.md
 GIT_EDITOR=true g "$WORKTREE" -c rerere.enabled=true rebase --continue
 run_finish                                          # rerere now remembers this resolution
-sleep 1  # avoid snapshot tag timestamp collision within the same test
 
 # Reset live and BASE_TAG so the same conflict recurs on the next sync
 g "$FORK" reset --hard v1.0.0
