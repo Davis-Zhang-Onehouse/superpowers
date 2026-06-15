@@ -43,7 +43,7 @@ git -C "$REPO" switch live
 
 echo "== 3. control dir + scripts =="
 mkdir -p "$CTRL"
-cp "$SCRIPTS_SRC"/{lib.sh,sync.sh,finish.sh,rollback.sh} "$CTRL/"
+cp "$SCRIPTS_SRC"/{lib.sh,sync.sh,finish.sh,rollback.sh,apply.sh} "$CTRL/"
 chmod +x "$CTRL"/*.sh
 if [ ! -f "$CTRL/config" ]; then
   sed "s#__REPO__#$REPO#" "$SCRIPTS_SRC/config.template" > "$CTRL/config"
