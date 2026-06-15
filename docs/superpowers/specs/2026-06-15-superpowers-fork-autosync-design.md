@@ -65,7 +65,8 @@ succeeds and `live` is atomically repointed.
 |------|----------------|
 | `sync.sh` | Daily driver. Fetch tags → if newer release, rebase my commits onto it in `rebase-wt` → on success repoint `live` + stamp snapshot + log; on conflict pause + write `STATUS` |
 | `finish.sh` | Run after I resolve a paused rebase: complete the swap, stamp snapshot, record resolution in audit log, clear `STATUS` |
-| `rollback.sh` | `list` / `to <snapshot>` / `rework <snapshot>` — timeline, switch, branch-off-to-rework |
+| `rollback.sh` | `list` / `to <snapshot>` / `rework <snapshot>` / `promote` — timeline, switch, branch-off-to-rework |
+| `apply.sh` | `[-m "msg"]` — commit + snapshot + refresh the live plugin after a manual skill edit |
 | `state` | `BASE_TAG`, current snapshot pointer, repo path |
 | `STATUS` | Present only while a rebase is paused; drives the shell banner |
 | `history.ndjson` | Append-only audit log, one JSON line per run |
@@ -128,14 +129,29 @@ Git is the version engine; no custom storage.
    add the `.zshrc` banner snippet.
 5. Verify end-to-end: edit a skill → open a new session → confirm the change is live.
 
-## Open integration point (resolve first in implementation)
+## Resolved integration point (Task 1 finding)
 
-`claude plugin marketplace add` accepts a local path, but it is **not yet verified**
-whether Claude Code serves a local-path marketplace from the live working tree or
-copies it into the plugin cache. The implementation's first task is a short
-experiment to confirm "live" truly means live. If Claude copies to cache, `sync.sh`
-and `finish.sh` gain a one-line re-register/refresh step so changes still apply
-automatically. The goal (auto-applied changes) holds either way.
+Empirically verified during bootstrap: Claude Code **copies** a local-path
+marketplace plugin into its cache (`~/.claude/plugins/cache/<marketplace>/...`) — it
+does **not** serve the live working tree. Confirmed that:
+
+- `claude plugin marketplace update` alone does **not** re-copy.
+- `claude plugin install` is a **no-op** when already installed.
+- Only **uninstall + reinstall** refreshes the cached copy.
+
+Therefore `SPSYNC_REFRESH_CMD` is set to
+`claude plugin marketplace update <mkt>; claude plugin uninstall superpowers@<mkt>; claude plugin install superpowers@<mkt>`
+and is invoked by `finalize_live` (after each sync) and by `apply.sh` (after each
+manual edit). The "auto-applied changes" goal holds via this refresh.
+
+## Manual-edit workflow (`apply.sh`)
+
+The daily sync only snapshots/refreshes on upstream rebases and `promote`. For the
+day-to-day "improve my own skills" loop, `apply.sh [-m "msg"]` (run on `live`):
+commits pending changes, stamps a `snapshot/<ts>` tag, logs an `edit` event, prunes,
+and runs `SPSYNC_REFRESH_CMD`. This gives every manual edit a rollback point and
+applies it to the live plugin (loaded on the next Claude session). It refuses to run
+off `live` or while a rebase is paused.
 
 ## Non-goals (YAGNI)
 
