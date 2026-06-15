@@ -7,7 +7,12 @@ GH_UPSTREAM="obra/superpowers"
 
 echo "== 1. Remotes & fork =="
 if ! git -C "$REPO" remote | grep -qx upstream; then
-  # current 'origin' points at upstream OSS; rename it and create a real fork
+  # Guard: only rename 'origin' if it actually points at the upstream OSS repo.
+  origin_url="$(git -C "$REPO" remote get-url origin 2>/dev/null || true)"
+  case "$origin_url" in
+    *obra/superpowers*) : ;;
+    *) echo "Refusing to rename: origin is '$origin_url', not obra/superpowers. Fix remotes manually."; exit 1;;
+  esac
   git -C "$REPO" remote rename origin upstream
   gh repo fork "$GH_UPSTREAM" --clone=false --remote=false
   me="$(gh api user -q .login)"
@@ -15,15 +20,20 @@ if ! git -C "$REPO" remote | grep -qx upstream; then
 fi
 git -C "$REPO" fetch upstream --tags --quiet
 LATEST="$(git -C "$REPO" tag -l 'v*' --sort=-v:refname | head -n1)"
+[ -n "$LATEST" ] || { echo "No vX.Y.Z release tag found on upstream. Aborting."; exit 1; }
 
 echo "== 2. live branch on $LATEST + rerere =="
 git -C "$REPO" config rerere.enabled true
 if ! git -C "$REPO" rev-parse -q --verify live >/dev/null; then
-  # base live on latest release; current local commits (e.g. specs/scripts) replay on top
+  # Base live on the latest RELEASE tag, replaying ONLY the commits unique to this
+  # branch (my tooling/skills) — not any post-release upstream commits, which return
+  # with the next release. merge-base(live, upstream/main) is the last shared upstream
+  # commit; everything after it is mine.
   cur="$(git -C "$REPO" rev-parse --abbrev-ref HEAD)"
   git -C "$REPO" branch live "$cur"
   git -C "$REPO" switch live
-  git -C "$REPO" rebase --onto "$LATEST" "$(git -C "$REPO" merge-base "$LATEST" live)" live || {
+  base="$(git -C "$REPO" merge-base live upstream/main)"
+  git -C "$REPO" rebase --onto "$LATEST" "$base" live || {
     echo "Resolve initial rebase, then re-run bootstrap."; exit 1; }
 fi
 git -C "$REPO" switch live
@@ -41,8 +51,10 @@ echo "== 4. switch plugin to live local marketplace =="
 # Remove the cache-based install so there is one source of truth.
 claude plugin uninstall superpowers@claude-plugins-official --scope user 2>/dev/null || true
 claude plugin marketplace add "$REPO" --scope user 2>&1 | tail -2
-MKT="$(claude plugin marketplace list 2>/dev/null | sed -n 's/.*\b\([a-z0-9-]*\) .*'"$REPO"'.*/\1/p' | head -n1)"
-MKT="${MKT:-superpowers}"
+# Marketplace name comes from the top-level "name" in .claude-plugin/marketplace.json
+MKT="$(grep -m1 '"name"' "$REPO/.claude-plugin/marketplace.json" | sed 's/.*"name"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/')"
+[ -n "$MKT" ] || { echo "Could not determine marketplace name from marketplace.json"; exit 1; }
+echo "Installing superpowers@$MKT (live local marketplace)…"
 claude plugin install "superpowers@$MKT" --scope user 2>&1 | tail -2
 echo "If Task 1 found COPY behavior, set SPSYNC_REFRESH_CMD in $CTRL/config now."
 
