@@ -5,6 +5,7 @@ set -euo pipefail
 SPSYNC_SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 . "$SPSYNC_SCRIPT_DIR/lib.sh"
 load_state
+: "${BASE_TAG:=}"
 
 # Parse the upstream tag a snapshot was built on, from its annotation "sync onto vX.Y.Z (...)"
 snap_base() { g "$REPO" tag -l --format='%(contents)' "$1" | sed -n 's/.*sync onto \(v[0-9.]*\).*/\1/p' | head -n1; }
