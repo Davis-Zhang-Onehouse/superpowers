@@ -9,5 +9,8 @@ STATUS_FILE="$CONTROL_DIR/STATUS"
 PENDING_FILE="$CONTROL_DIR/PENDING"
 HISTORY="$CONTROL_DIR/history.ndjson"
 RETENTION_DAYS=90
-# Set by Task 1 experiment: empty if plugin serves the live tree, else a refresh command.
-SPSYNC_REFRESH_CMD=""
+# Task 1 finding: Claude Code COPIES a local-marketplace plugin into its cache, so edits do
+# NOT auto-apply — the cache must be refreshed by uninstall+reinstall (install-only is a no-op
+# when already installed; marketplace update alone does not re-copy). Adjust the marketplace
+# name (superpowers-dev) if yours differs. Empty disables refresh (use only if CC serves live).
+SPSYNC_REFRESH_CMD="claude plugin marketplace update superpowers-dev >/dev/null 2>&1; claude plugin uninstall superpowers@superpowers-dev --scope user >/dev/null 2>&1; claude plugin install superpowers@superpowers-dev --scope user >/dev/null 2>&1"
