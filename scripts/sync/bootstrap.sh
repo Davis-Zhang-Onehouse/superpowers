@@ -16,7 +16,7 @@ if ! git -C "$REPO" remote | grep -qx upstream; then
   git -C "$REPO" remote rename origin upstream
   gh repo fork "$GH_UPSTREAM" --clone=false --remote=false
   me="$(gh api user -q .login)"
-  git -C "$REPO" remote add origin "git@github.com:$me/superpowers.git"
+  git -C "$REPO" remote add origin "https://github.com/$me/superpowers.git"
 fi
 git -C "$REPO" fetch upstream --tags --quiet
 LATEST="$(git -C "$REPO" tag -l 'v*' --sort=-v:refname | head -n1)"
