@@ -11,8 +11,9 @@ set_state() { # set_state KEY VALUE  (idempotent rewrite)
   mv "$tmp" "$STATE_FILE"
 }
 
-latest_tag() { # highest semver vX.Y.Z tag known to the repo
-  g "$REPO" tag -l 'v*' --sort=-v:refname | head -n1
+latest_tag() { # highest STABLE vX.Y.Z release tag (excludes pre-releases like v1.2.0-rc1)
+  g "$REPO" tag -l 'v[0-9]*.[0-9]*.[0-9]*' --sort=-v:refname \
+    | grep -E '^v[0-9]+\.[0-9]+\.[0-9]+$' | head -n1
 }
 
 log_event() { # log_event RESULT NEWTAG SNAPSHOT [conflicts]
@@ -50,11 +51,16 @@ new_snapshot_tag() { # echo a unique snapshot/<ts> tag name (avoids same-second 
   printf '%s' "$cand"
 }
 
-finalize_live() { # finalize_live NEWTAG RESULT  — adopt sync-rebase into live, snapshot, log, prune, refresh
+finalize_live() { # finalize_live NEWTAG RESULT — adopt sync-rebase into live, snapshot, log, prune, refresh
   local newtag="$1" result="$2" stamp
-  g "$REPO" reset --hard sync-rebase >/dev/null   # live is checked out & clean (verified)
-  g "$REPO" worktree remove --force "$WORKTREE" 2>/dev/null || true
-  g "$REPO" branch -D sync-rebase >/dev/null 2>&1 || true
+  # Always adopt onto the live branch, never whatever happens to be checked out.
+  g "$REPO" switch -q "$LIVE_BRANCH" || { echo "finalize_live: cannot switch to $LIVE_BRANCH" >&2; return 1; }
+  # Tolerate a crash-resumed finish where sync-rebase was already adopted/deleted.
+  if g "$REPO" rev-parse -q --verify sync-rebase >/dev/null 2>&1; then
+    g "$REPO" reset --hard sync-rebase >/dev/null   # live tree verified clean by caller
+    g "$REPO" worktree remove --force "$WORKTREE" 2>/dev/null || true
+    g "$REPO" branch -D sync-rebase >/dev/null 2>&1 || true
+  fi
   set_state BASE_TAG "$newtag"
   stamp="$(new_snapshot_tag)"
   g "$REPO" tag -a "$stamp" -m "sync onto $newtag ($result)"

@@ -45,7 +45,7 @@ chmod +x "$CTRL"/*.sh
 if [ ! -f "$CTRL/config" ]; then
   sed "s#__REPO__#$REPO#" "$SCRIPTS_SRC/config.template" > "$CTRL/config"
 fi
-echo "BASE_TAG=$LATEST" > "$CTRL/state"
+[ -f "$CTRL/state" ] || echo "BASE_TAG=$LATEST" > "$CTRL/state"
 
 echo "== 4. switch plugin to live local marketplace =="
 # Remove the cache-based install so there is one source of truth.
