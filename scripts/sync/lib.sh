@@ -40,13 +40,23 @@ prune_snapshots() { # delete snapshot/* tags older than RETENTION_DAYS
   done
 }
 
+new_snapshot_tag() { # echo a unique snapshot/<ts> tag name (avoids same-second collisions)
+  local base cand n
+  base="snapshot/$(date +%Y-%m-%d-%H%M%S)"
+  cand="$base"; n=1
+  while g "$REPO" rev-parse -q --verify "refs/tags/$cand" >/dev/null 2>&1; do
+    cand="${base}-$n"; n=$((n + 1))
+  done
+  printf '%s' "$cand"
+}
+
 finalize_live() { # finalize_live NEWTAG RESULT  — adopt sync-rebase into live, snapshot, log, prune, refresh
   local newtag="$1" result="$2" stamp
   g "$REPO" reset --hard sync-rebase >/dev/null   # live is checked out & clean (verified)
   g "$REPO" worktree remove --force "$WORKTREE" 2>/dev/null || true
   g "$REPO" branch -D sync-rebase >/dev/null 2>&1 || true
   set_state BASE_TAG "$newtag"
-  stamp="snapshot/$(date +%Y-%m-%d-%H%M%S)"
+  stamp="$(new_snapshot_tag)"
   g "$REPO" tag -a "$stamp" -m "sync onto $newtag ($result)"
   log_event "$result" "$newtag" "$stamp"
   prune_history; prune_snapshots
