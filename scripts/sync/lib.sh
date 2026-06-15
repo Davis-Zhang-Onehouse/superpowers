@@ -36,6 +36,19 @@ prune_snapshots() { # delete snapshot/* tags older than RETENTION_DAYS
   local cutoff; cutoff="$(date -u -d "-${RETENTION_DAYS} days" +%s)"
   g "$REPO" for-each-ref --format='%(refname:short) %(creatordate:unix)' 'refs/tags/snapshot/*' |
   while read -r tag epoch; do
-    [ "$epoch" -lt "$cutoff" ] && g "$REPO" tag -d "$tag" >/dev/null
+    if [ "$epoch" -lt "$cutoff" ]; then g "$REPO" tag -d "$tag" >/dev/null; fi
   done
+}
+
+finalize_live() { # finalize_live NEWTAG RESULT  — adopt sync-rebase into live, snapshot, log, prune, refresh
+  local newtag="$1" result="$2" stamp
+  g "$REPO" reset --hard sync-rebase >/dev/null   # live is checked out & clean (verified)
+  g "$REPO" worktree remove --force "$WORKTREE" 2>/dev/null || true
+  g "$REPO" branch -D sync-rebase >/dev/null 2>&1 || true
+  set_state BASE_TAG "$newtag"
+  stamp="snapshot/$(date +%Y-%m-%d-%H%M%S)"
+  g "$REPO" tag -a "$stamp" -m "sync onto $newtag ($result)"
+  log_event "$result" "$newtag" "$stamp"
+  prune_history; prune_snapshots
+  [ -n "${SPSYNC_REFRESH_CMD:-}" ] && eval "$SPSYNC_REFRESH_CMD" || true
 }
