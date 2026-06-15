@@ -5,10 +5,24 @@ set -euo pipefail
 SPSYNC_SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 . "$SPSYNC_SCRIPT_DIR/lib.sh"
 load_state
+: "${BASE_TAG:=}"
 
 # Don't start a new sync while a paused rebase awaits resolution.
 if [ -f "$STATUS_FILE" ]; then
   echo "A rebase is paused — resolve it and run finish.sh (see $STATUS_FILE)."; exit 0
+fi
+
+# Only operate when the repo is on the live branch (rework/other branches are off-limits).
+cur_branch="$(g "$REPO" rev-parse --abbrev-ref HEAD)"
+if [ "$cur_branch" != "$LIVE_BRANCH" ]; then
+  log_event skipped-branch "" ""
+  echo "Repo is on '$cur_branch', not '$LIVE_BRANCH'; skipping sync."; exit 0
+fi
+
+# Need a known base to rebase from.
+if [ -z "$BASE_TAG" ]; then
+  log_event error-no-base "" ""
+  echo "No BASE_TAG in $STATE_FILE; run bootstrap.sh first."; exit 1
 fi
 
 g "$REPO" fetch "$UPSTREAM_REMOTE" --tags --quiet
