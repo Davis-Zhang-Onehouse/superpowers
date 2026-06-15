@@ -50,5 +50,7 @@ finalize_live() { # finalize_live NEWTAG RESULT  — adopt sync-rebase into live
   g "$REPO" tag -a "$stamp" -m "sync onto $newtag ($result)"
   log_event "$result" "$newtag" "$stamp"
   prune_history; prune_snapshots
-  [ -n "${SPSYNC_REFRESH_CMD:-}" ] && eval "$SPSYNC_REFRESH_CMD" || true
+  if [ -n "${SPSYNC_REFRESH_CMD:-}" ]; then
+    eval "$SPSYNC_REFRESH_CMD" || log_event refresh-failed "$newtag" "$stamp"
+  fi
 }
