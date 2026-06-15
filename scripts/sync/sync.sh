@@ -2,7 +2,8 @@
 set -euo pipefail
 : "${SPSYNC_CONFIG:=$HOME/.superpowers-sync/config}"
 . "$SPSYNC_CONFIG"
-. "$(dirname "$0")/lib.sh"
+SPSYNC_SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
+. "$SPSYNC_SCRIPT_DIR/lib.sh"
 load_state
 
 # Don't start a new sync while a paused rebase awaits resolution.
@@ -35,14 +36,21 @@ rebase_step() {
 }
 continue_step() { GIT_EDITOR=true g "$WORKTREE" rebase --continue; }
 
+# Upper bound on continue attempts: at most one per replayed commit (+ margin).
+maxsteps=$(( $(g "$WORKTREE" rev-list --count "$BASE_TAG..$LIVE_BRANCH") + 2 ))
 result="clean"
 if ! rebase_step; then
+  steps=0
   while true; do
     if g "$WORKTREE" diff --name-only --diff-filter=U | grep -q .; then
       result="paused"; break                      # genuine new conflict
     fi
+    steps=$((steps + 1))
+    if [ "$steps" -gt "$maxsteps" ]; then
+      result="paused"; break                      # abnormal: not converging, hand to human
+    fi
     if continue_step; then result="rerere-resolved"; break; fi
-    # else loop: rerere staged this step, continue moves to next
+    # else: rerere staged this step; loop to advance to the next commit
   done
 fi
 
