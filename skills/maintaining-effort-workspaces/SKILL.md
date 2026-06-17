@@ -27,7 +27,7 @@ A long-running effort (one issue worked across many sessions) accumulates progre
 1. **One entry point, fixed name.** Every effort folder has a `HANDOFF.md` at its root — *the* first file a resuming session reads. Everything else hangs off it via links.
 2. **Durable vs. live, never mixed.** A doc is DURABLE (rarely changes; no CI run-ids, no "in progress") or LIVE (a dated snapshot understood to rot). Volatile state lives **only** in `HANDOFF.md`'s snapshot or `STATE.md`'s CI column — never in durable docs.
 3. **One fact, one home.** The PR-stack table lives in exactly one file (`STATE.md`). Everywhere else *links* to it. Copies drift.
-4. **Capture evidence into the folder, not `/tmp`.** A claim of "green" cites a file in `evidence/`, referenced by relative path — `/tmp` is gone on resume.
+4. **Evidence is captured into the folder, indexed, and reproducible — never `/tmp`.** A claim of "green" cites a file in `evidence/`, referenced by relative path (`/tmp` is gone on resume). Every artifact records its **provenance** (the job-id / command / commit that produced it), and `evidence/INDEX.md` maps each acceptance criterion → artifact → source → how to regenerate. An unlabeled pile of logs is nearly as useless as no logs.
 
 Plus two register rules: **registers append, never rewrite** (decisions/issues/assumptions accrete with stable IDs + dates), and **the charter is sacred** (goal/scope/acceptance/constraints written once, edited deliberately, so your partner never re-pastes them).
 
@@ -38,14 +38,16 @@ Plus two register rules: **registers append, never rewrite** (decisions/issues/a
   HANDOFF.md      ← ENTRY POINT. workspace folder + resume cmd + session log + live snapshot + index
   CHARTER.md      ← DURABLE. goal · scope(in/out) · acceptance · standing rules · env
   STATE.md        ← single source of truth: repo → branch → tip githash → PR → CI status
-  RUNBOOK.md      ← how to build / run tests / repro the gap / prove it ran
+  RUNBOOK.md      ← how to build / run / repro / prove it ran — incl. a modes matrix (per mode → command → proving run) when the deliverable has >1 mode
   DECISIONS.md    ← DURABLE. dated decision log + rationale (D-1, D-2, …)
   ISSUES.md       ← DURABLE. stable-ID register: OPEN/FIXED/DEFERRED/DOCUMENTED + tickets
   ASSUMPTIONS.md  ← DURABLE. unverified beliefs: OPEN/VERIFIED/REFUTED/SANCTIONED/DEFERRED
   investigations/ ← one subfolder per deep dive: <topic>/{analysis,validation,callstack}.md
-  evidence/       ← captured logs/artifacts referenced as proof (NOT /tmp)
+  evidence/       ← captured proof (NOT /tmp). evidence/INDEX.md maps criterion→artifact→source→regenerate
   plans/ specs/   ← superpowers plan & spec docs (existing convention)
 ```
+
+No new top-level doc per concern — resist it. "How to run each mode" is RUNBOOK; "what's proven, by what" is `evidence/INDEX.md`; "what code, where" is STATE. A `CAPABILITIES.md`/`MODES.md`/`STATUS.md` almost always overlaps one of those — fold it in (invariant 3).
 
 Small efforts may fold `STATE`+`RUNBOOK` into `HANDOFF` and `ASSUMPTIONS` into `ISSUES` — but **always keep `HANDOFF.md` and `CHARTER.md`**. Never invent a new name for an existing role (no `progress.md` *and* `TRACKING.md` *and* `STATUS.md` — that drift is the failure this skill prevents).
 
@@ -58,17 +60,27 @@ Small efforts may fold `STATE`+`RUNBOOK` into `HANDOFF` and `ASSUMPTIONS` into `
 - **Write the fact to its home, then link.** New PR → a row in `STATE.md`, referenced from `HANDOFF.md` by link. Never paste the table twice.
 - **A surprise → a row in `ISSUES.md` or `ASSUMPTIONS.md` the moment it's spotted**, with a status — even "OPEN, unchecked". This is how hiccups/unverified assumptions get tracked instead of lost.
 - **A decision → a dated `DECISIONS.md` row** with rationale, the moment it's made.
+- **A proof → an `evidence/` artifact + an `evidence/INDEX.md` row**, captured the moment you assert it. The row names the criterion, the artifact, the source (job-id/command/commit), and the one-liner to regenerate. Don't let "it's green" live only in the transcript.
 - **Durable docs carry no volatile state.** Tempted to write a CI run-id into `CHARTER`/`DECISIONS`/`ISSUES`? It belongs in `HANDOFF`'s snapshot or `STATE`'s CI column.
 - **Header every doc:** `Updated: <date> by <uuid> | Status: DURABLE | LIVE`.
+
+## When the Deliverable Is a Validated Capability (not just a fix)
+
+The invariants optimize for *resuming a task*. When the effort instead **hands off a working, validated thing** (a tool, a pipeline, a reproducible benchmark), add three habits so a cold reader can re-prove it and build on it — not just read that it worked. Do this **in the existing docs, not a new one**:
+
+- **A modes matrix in `RUNBOOK.md`.** When the deliverable has more than one mode/config (e.g. default vs custom-image vs debug), one set of build/run commands isn't enough: add a small table — each mode → the exact command → the **proving run** (job-id + run dir) → the evidence it produced. This is still "how to run it" (RUNBOOK), just made multi-mode — not a separate `CAPABILITIES.md`.
+- **Provenance on every artifact.** A raw log with no "came from job X via command Y at commit Z" is a dead-end for the next person. Put it in the artifact header or the `evidence/INDEX.md` row.
+- **Prefer a runnable re-derivation over a screenshot.** The strongest proof is a committed script that re-checks the claim in one command (e.g. `validate_<x>.sh <logdir>` → PASS), not a pasted log a reader must eyeball. Capture raw run/job records as the data points; make the *judgment* reproducible.
 
 ## The Resume Contract (what a cold session does in ~60s)
 
 1. Read `HANDOFF.md` → workspace folder + resume command(s), session log, where-we-are, next action, index.
 2. Read `CHARTER.md` → stay in scope; don't re-ask criteria/constraints.
 3. Skim `STATE.md` → know the working set; don't re-elicit branches/PRs.
-4. Open `RUNBOOK.md` → rebuild + rerun validation without re-pasting commands.
+4. Open `RUNBOOK.md` → rebuild, rerun validation, and (via its modes matrix) invoke each mode without re-pasting commands.
 5. Glance `ASSUMPTIONS.md` + `ISSUES.md` → know open risks and what's deferred (so you don't re-propose a REFUTED approach).
-6. Only then dive into `investigations/` for the specific task.
+6. Check `evidence/INDEX.md` → know which claims are proven, by which artifact, and how to re-derive.
+7. Only then dive into `investigations/` for the specific task.
 
 If those six files can't carry a fresh session from cold to productive, the layout failed.
 
@@ -83,3 +95,8 @@ If those six files can't carry a fresh session from cold to productive, the layo
 | Recording resume uuid but not the workspace folder | Record both — uuid alone resumes onto the wrong tree. |
 | Re-pasting goal/scope each session | Write it once in `CHARTER.md`. |
 | Overwriting issue/decision history | Registers append; add rows, don't rewrite. |
+| `evidence/` is an unlabeled pile of logs | `evidence/INDEX.md`: criterion → artifact → source → regenerate. |
+| "We proved X" lives only in this session's grep output | Capture the artifact + a re-derivation command/script into `evidence/`. |
+| Multi-mode tool, but only the one path you ran is documented | A modes matrix in `RUNBOOK.md`: every mode → command → proving run. |
+| Spinning up `CAPABILITIES.md`/`MODES.md`/`STATUS.md` for it | Fold into RUNBOOK (how-to) / `evidence/INDEX.md` (proof) / STATE (what-where). One fact, one home. |
+| An evidence log with no idea which job/commit produced it | Provenance in the artifact header or its INDEX row. |
