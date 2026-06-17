@@ -129,3 +129,42 @@ prompts/runJavaTests.sh … ; prompts/runScalaTests.sh … ; prompts/runschemaEv
 ```
 
 **Status vocabulary:** `OPEN` (believed, unchecked) · `VERIFIED` · `REFUTED` · `SANCTIONED` (known risk, accepted by your partner) · `DEFERRED` (won't check now, tracked). Issues also use `FIXED` / `DOCUMENTED`.
+
+---
+
+## `evidence/INDEX.md` — proof, indexed (every "it's green" cites a row here)
+
+```markdown
+# Evidence index — acceptance criteria → artifact → source
+Updated: <date>
+
+| # | Criterion | Artifact (this folder) | What it shows | Source (job/run/commit) |
+|---|-----------|------------------------|---------------|-------------------------|
+| 1 | <criterion 1> | `<file>` | <one line> | job `<id>` / `runs/<ts>` |
+| 2 | <criterion 2> | `<file>` | <one line> | <command @ commit> |
+
+## How to regenerate each artifact
+- `<file>`: `<one-line command that re-produces it>`
+- `<proof>`: re-run <mode> (see ../RUNBOOK.md modes matrix), then `scripts/validate_<x>.sh <logdir>`.
+```
+
+The full raw run/job records (params, logs, repro) are the primary data points — link them from here;
+bulky raw logs may be gitignored if the index says how to re-pull them while they still exist upstream.
+
+---
+
+## Multi-mode? Add a modes matrix to `RUNBOOK.md` (NOT a new `CAPABILITIES.md`)
+
+When the deliverable has more than one mode/config, RUNBOOK gains a small table near the top — it's
+still "how to run it", just made multi-mode. One fact, one home (invariant 3).
+
+```markdown
+## Modes (one harness, selected by profile/flag)
+| Mode | Select | Key config | Proven by (job / run) → evidence |
+|------|--------|------------|----------------------------------|
+| <default> | `<profile/command>`        | <…> | `<job-id>` / `runs/<ts>` → `evidence/<file>` |
+| <variant> | `<profile/command + flag>` | <…> | `<job-id>` / `runs/<ts>` → `evidence/<file>` |
+```
+
+Then the per-mode copy/paste commands and the "reproduce any past run" one-liner go in RUNBOOK's
+existing Build/Run sections — not a separate doc.
