@@ -62,7 +62,10 @@ claude plugin install "superpowers@$MKT" --scope user 2>&1 | tail -2
 echo "If Task 1 found COPY behavior, set SPSYNC_REFRESH_CMD in $CTRL/config now."
 
 echo "== 5. cron (03:30 daily) =="
-LINE="30 3 * * * /usr/bin/env bash $CTRL/sync.sh >> $CTRL/cron.log 2>&1"
+# Inline PATH so cron (default PATH=/usr/bin:/bin) can find claude/gh, which live in
+# ~/.local/bin and Homebrew. Both Homebrew prefixes are included (Apple Silicon + Intel).
+CRON_PATH="$HOME/.local/bin:/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin"
+LINE="30 3 * * * PATH=$CRON_PATH /usr/bin/env bash $CTRL/sync.sh >> $CTRL/cron.log 2>&1"
 tmpcron="$(mktemp)"
 crontab -l 2>/dev/null | grep -v "$CTRL/sync.sh" > "$tmpcron" || true   # tolerate no crontab / no match
 echo "$LINE" >> "$tmpcron"
