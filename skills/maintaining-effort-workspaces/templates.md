@@ -29,7 +29,7 @@ Updated: <date> by session <latest-uuid>  |  Status: LIVE SNAPSHOT (rots — ver
 ## Session log  (append one row per session — so ANY past session is resumable)
 | Date | Workspace | Resume cmd | Did what |
 |------|-----------|------------|----------|
-| 2026-06-15 | ~/ws2 | `cd ~/ws2 && claude --resume f223d878-…` | libstdc++ fix shipped green (PR #360); wrote routine |
+| 2026-06-15 | ~/ws2 | `cd ~/ws2 && claude --resume f223d878-…` | libstdc++ fix shipped green ([#360](https://github.com/<org>/gluten-internal/pull/360)); wrote routine |
 | 2026-06-12 | ~/ws2 | `cd ~/ws2 && claude --resume c801b58c-…` | M1 concluded; M2 x86 baseline captured |
 
 ## Index (where each thing lives — click through, don't duplicate)
@@ -79,10 +79,14 @@ Updated: <date> by session <latest-uuid>  |  Status: LIVE SNAPSHOT (rots — ver
 # <Effort> — STATE   (the PR/branch stack; one home for this fact)
 Updated: <date>
 
-| Repo | Branch | Tip githash | PR | CI status (as of) | Contents |
-|------|--------|-------------|----|-------------------|----------|
-| gluten-internal | mor_productionization | c879c42da | #360 | green 2026-06-15 (run 27443719426) | … |
-| velox-internal  | mor_productionization | … | #128 | … | … |
+| Repo | Branch | Tip githash | PR (full URL) | CI status (as of) | Contents |
+|------|--------|-------------|---------------|-------------------|----------|
+| gluten-internal | mor_productionization | c879c42da | [#360](https://github.com/<org>/gluten-internal/pull/360) | green 2026-06-15 ([run 27443719426](https://github.com/<org>/gluten-internal/actions/runs/27443719426)) | … |
+| velox-internal  | mor_productionization | … | [#128](https://github.com/<org>/velox-internal/pull/128) | … | … |
+
+Record every external reference as a **full URL** (markdown link) — the PR `[#360](…/pull/360)`, the CI
+run `[run 27443719426](…/actions/runs/27443719426)` — never a bare `#360` or bare run-id. The stack
+spans repos, so a bare number is ambiguous and isn't clickable when a cold session resumes.
 
 ## Working set (what to check out to get the latest)
 - gluten: <branch@sha>   velox: <branch@sha>   hudi-rs: <…>
@@ -138,9 +142,9 @@ prompts/runJavaTests.sh … ; prompts/runScalaTests.sh … ; prompts/runschemaEv
 # Evidence index — acceptance criteria → artifact → source
 Updated: <date>
 
-| # | Criterion | Artifact (this folder) | What it shows | Source (job/run/commit) |
-|---|-----------|------------------------|---------------|-------------------------|
-| 1 | <criterion 1> | `<file>` | <one line> | job `<id>` / `runs/<ts>` |
+| # | Criterion | Artifact (this folder) | What it shows | Source (job/run/commit — link, not bare id) |
+|---|-----------|------------------------|---------------|---------------------------------------------|
+| 1 | <criterion 1> | `<file>` | <one line> | [run <id>](https://github.com/<org>/<repo>/actions/runs/<id>) |
 | 2 | <criterion 2> | `<file>` | <one line> | <command @ commit> |
 
 ## How to regenerate each artifact
@@ -160,10 +164,10 @@ still "how to run it", just made multi-mode. One fact, one home (invariant 3).
 
 ```markdown
 ## Modes (one harness, selected by profile/flag)
-| Mode | Select | Key config | Proven by (job / run) → evidence |
-|------|--------|------------|----------------------------------|
-| <default> | `<profile/command>`        | <…> | `<job-id>` / `runs/<ts>` → `evidence/<file>` |
-| <variant> | `<profile/command + flag>` | <…> | `<job-id>` / `runs/<ts>` → `evidence/<file>` |
+| Mode | Select | Key config | Proven by (job / run, linked) → evidence |
+|------|--------|------------|------------------------------------------|
+| <default> | `<profile/command>`        | <…> | [run <id>](…/actions/runs/<id>) → `evidence/<file>` |
+| <variant> | `<profile/command + flag>` | <…> | [run <id>](…/actions/runs/<id>) → `evidence/<file>` |
 ```
 
 Then the per-mode copy/paste commands and the "reproduce any past run" one-liner go in RUNBOOK's
