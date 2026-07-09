@@ -48,7 +48,21 @@ chmod +x "$CTRL"/*.sh
 if [ ! -f "$CTRL/config" ]; then
   sed "s#__REPO__#$REPO#" "$SCRIPTS_SRC/config.template" > "$CTRL/config"
 fi
-[ -f "$CTRL/state" ] || echo "BASE_TAG=$LATEST" > "$CTRL/state"
+# BASE_TAG must equal the release tag `live` is actually built on. Derive it from the
+# nearest stable vX.Y.Z tag that is an ancestor of live — correct whether live was just
+# created on $LATEST above OR came from a clone based on an older release. This also
+# self-heals a drifted BASE_TAG on re-run (git describe is ground truth). Falls back to
+# $LATEST if no stable tag is reachable (e.g. tags not yet fetched).
+LIVE_BASE="$(git -C "$REPO" describe --tags --abbrev=0 \
+  --match 'v[0-9]*.[0-9]*.[0-9]*' --exclude '*-*' live 2>/dev/null || true)"
+[ -n "$LIVE_BASE" ] || LIVE_BASE="$LATEST"
+if [ -f "$CTRL/state" ]; then
+  tmp="$(mktemp)"; grep -v '^BASE_TAG=' "$CTRL/state" > "$tmp" || true
+  echo "BASE_TAG=$LIVE_BASE" >> "$tmp"; mv "$tmp" "$CTRL/state"
+else
+  echo "BASE_TAG=$LIVE_BASE" > "$CTRL/state"
+fi
+echo "   BASE_TAG=$LIVE_BASE (live is based on this release tag)"
 
 echo "== 4. switch plugin to live local marketplace =="
 # Remove the cache-based install so there is one source of truth.
