@@ -71,7 +71,15 @@ fi
 if [ "$result" = "paused" ]; then
   conflicts="$(g "$WORKTREE" diff --name-only --diff-filter=U | tr '\n' ',' )"
   echo "$NEW" > "$PENDING_FILE"
-  printf '%s\n' "⚠ superpowers rebase PAUSED in $WORKTREE onto $NEW — conflicts: ${conflicts%,}. cd there, resolve, 'git rebase --continue', then run finish.sh" > "$STATUS_FILE"
+  {
+    echo "⚠ superpowers auto-sync PAUSED: rebase onto $NEW hit conflicts."
+    echo "  Conflicted files: ${conflicts%,}"
+    echo "  Resolve (copy-paste — everything after 'git add' is automatic):"
+    echo "    cd \"$WORKTREE\""
+    echo "    # edit the files above: resolve <<<<<<< ======= >>>>>>> markers"
+    echo "    git add -A"
+    echo "    \"$CONTROL_DIR/finish.sh\"   # continues the rebase, adopts into live, refreshes the plugin"
+  } > "$STATUS_FILE"
   log_event paused "$NEW" "" "${conflicts%,}"
   exit 0
 fi
