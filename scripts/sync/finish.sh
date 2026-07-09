@@ -19,10 +19,30 @@ rebase_in_progress() {
   done
   return 1
 }
-if rebase_in_progress; then
-  echo "Rebase still in progress in $WORKTREE — resolve conflicts and run 'git rebase --continue' first."
-  exit 1
-fi
+# Drive the rebase to completion automatically: keep running 'git rebase --continue'
+# while every conflict has been resolved+staged. Stop only if genuine unmerged files
+# remain (the one thing a human must fix), telling the user exactly what to do.
+maxsteps=$(( $(g "$WORKTREE" rev-list --count "$BASE_TAG..$LIVE_BRANCH" 2>/dev/null || echo 200) + 5 ))
+steps=0
+while rebase_in_progress; do
+  if g "$WORKTREE" diff --name-only --diff-filter=U | grep -q .; then
+    echo "⚠ Unresolved conflicts remain — edit these, then re-run finish.sh:"
+    g "$WORKTREE" diff --name-only --diff-filter=U | sed 's/^/    /'
+    echo
+    echo "  cd \"$WORKTREE\""
+    echo "  # resolve <<<<<<< ======= >>>>>>> markers in the files above"
+    echo "  git add -A"
+    echo "  \"$SPSYNC_SCRIPT_DIR/finish.sh\""
+    exit 1
+  fi
+  steps=$((steps + 1))
+  if [ "$steps" -gt "$maxsteps" ]; then
+    echo "Rebase not converging after $steps steps — inspect $WORKTREE manually."; exit 1
+  fi
+  if ! GIT_EDITOR=true g "$WORKTREE" rebase --continue >/dev/null 2>&1; then
+    echo "git rebase --continue failed with no unmerged files — inspect $WORKTREE."; exit 1
+  fi
+done
 
 finalize_live "$NEW" "manual-resolved"
 rm -f "$STATUS_FILE" "$PENDING_FILE"

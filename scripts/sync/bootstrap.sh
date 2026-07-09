@@ -6,14 +6,17 @@ SCRIPTS_SRC="$REPO/scripts/sync"
 GH_UPSTREAM="obra/superpowers"
 
 echo "== 1. Remotes & fork =="
-# Ensure 'upstream' points at the OSS repo (rename a matching 'origin' exactly once).
+# Ensure 'upstream' -> the canonical OSS repo, whatever we cloned from.
 if ! git -C "$REPO" remote | grep -qx upstream; then
   origin_url="$(git -C "$REPO" remote get-url origin 2>/dev/null || true)"
   case "$origin_url" in
-    *obra/superpowers*) : ;;
-    *) echo "Refusing to rename: origin is '$origin_url', not obra/superpowers. Fix remotes manually."; exit 1;;
+    *obra/superpowers*)
+      # Cloned the canonical repo directly: promote origin to 'upstream' (fork added below).
+      git -C "$REPO" remote rename origin upstream ;;
+    *)
+      # Cloned your fork (origin is the fork) or origin missing: just add 'upstream'.
+      git -C "$REPO" remote add upstream "https://github.com/$GH_UPSTREAM.git" ;;
   esac
-  git -C "$REPO" remote rename origin upstream
 fi
 # Ensure a personal fork exists on GitHub and 'origin' points at it (idempotent).
 if ! git -C "$REPO" remote | grep -qx origin; then
@@ -43,7 +46,7 @@ git -C "$REPO" switch live
 
 echo "== 3. control dir + scripts =="
 mkdir -p "$CTRL"
-cp "$SCRIPTS_SRC"/{lib.sh,sync.sh,finish.sh,rollback.sh,apply.sh} "$CTRL/"
+cp "$SCRIPTS_SRC"/{lib.sh,sync.sh,finish.sh,rollback.sh,apply.sh,status.sh} "$CTRL/"
 chmod +x "$CTRL"/*.sh
 if [ ! -f "$CTRL/config" ]; then
   sed "s#__REPO__#$REPO#" "$SCRIPTS_SRC/config.template" > "$CTRL/config"
