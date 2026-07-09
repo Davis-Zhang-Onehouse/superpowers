@@ -37,7 +37,7 @@ Plus two register rules: **registers append, never rewrite** (decisions/issues/a
 <effort>/
   HANDOFF.md      ← ENTRY POINT. workspace folder + resume cmd + session log + live snapshot + index
   CHARTER.md      ← DURABLE. goal · scope(in/out) · acceptance · standing rules · env
-  STATE.md        ← single source of truth: repo → branch → tip githash → PR → CI status
+  STATE.md        ← single source of truth: repo → branch → tip githash → PR (full URL) → CI status
   RUNBOOK.md      ← how to build / run / repro / prove it ran — incl. a modes matrix (per mode → command → proving run) when the deliverable has >1 mode
   DECISIONS.md    ← DURABLE. dated decision log + rationale (D-1, D-2, …)
   ISSUES.md       ← DURABLE. stable-ID register: OPEN/FIXED/DEFERRED/DOCUMENTED + tickets
@@ -57,10 +57,10 @@ Small efforts may fold `STATE`+`RUNBOOK` into `HANDOFF` and `ASSUMPTIONS` into `
 
 - **End every session by updating `HANDOFF.md`** — treat it like a commit, the last action before stopping: refresh the one-paragraph "where we are", the next action, the live snapshot, the "Resume here" header, AND **append a row to the session log** (`date | workspace | resume cmd | did what`). A single "Resume:" line loses every session but the latest; the log keeps each one re-attachable.
 - **Record both the workspace folder AND the session uuid.** `claude --resume <uuid>` attaches the conversation but does **not** restore the working directory — without the `cd`, a resumed session operates on the wrong tree. (The uuid is the transcript filename under `~/.claude/projects/-home-ubuntu-ws<N>…/`.)
-- **Write the fact to its home, then link.** New PR → a row in `STATE.md`, referenced from `HANDOFF.md` by link. Never paste the table twice.
+- **Write the fact to its home, then link.** New PR → a row in `STATE.md`, referenced from `HANDOFF.md` by link. Never paste the table twice. **Record the PR's full URL, never a bare `#123`** — the stack spans multiple repos, so a bare number is ambiguous *and* not clickable on resume; write it as a markdown link (`[#360](https://github.com/<org>/<repo>/pull/360)`) so it stays readable and jumps straight to the PR. **The same holds for every external reference — CI/workflow runs, issues, tickets, commits: link it, never a bare id.** A CI run is `[run 27443719426](https://github.com/<org>/<repo>/actions/runs/27443719426)`, not `run 27443719426`; a resuming session should reach any of them in one click, without hand-building the URL.
 - **A surprise → a row in `ISSUES.md` or `ASSUMPTIONS.md` the moment it's spotted**, with a status — even "OPEN, unchecked". This is how hiccups/unverified assumptions get tracked instead of lost.
 - **A decision → a dated `DECISIONS.md` row** with rationale, the moment it's made.
-- **A proof → an `evidence/` artifact + an `evidence/INDEX.md` row**, captured the moment you assert it. The row names the criterion, the artifact, the source (job-id/command/commit), and the one-liner to regenerate. Don't let "it's green" live only in the transcript.
+- **A proof → an `evidence/` artifact + an `evidence/INDEX.md` row**, captured the moment you assert it. The row names the criterion, the artifact, the source (job/command/commit — as a clickable link for CI runs, not a bare id), and the one-liner to regenerate. Don't let "it's green" live only in the transcript.
 - **Durable docs carry no volatile state.** Tempted to write a CI run-id into `CHARTER`/`DECISIONS`/`ISSUES`? It belongs in `HANDOFF`'s snapshot or `STATE`'s CI column.
 - **Header every doc:** `Updated: <date> by <uuid> | Status: DURABLE | LIVE`.
 
@@ -91,6 +91,7 @@ If those six files can't carry a fresh session from cold to productive, the layo
 | Three docs each claiming to be "the" status | One `HANDOFF.md`. Others link to it. |
 | CI run-ids / "watcher …" in `CHARTER`/`DECISIONS` | Quarantine volatile state to `HANDOFF` snapshot or `STATE`. |
 | PR table pasted in two files | One home (`STATE.md`); link elsewhere. |
+| PR / CI-run / issue recorded as a bare id (`#123`, `run 4711`) | Record the full URL as a markdown link (`[#123](…/pull/123)`, `[run 4711](…/actions/runs/4711)`) — clickable on resume, unambiguous across a multi-repo stack. |
 | Proof logs in `/tmp` | `evidence/<date>-<name>.log`, referenced by relative path. |
 | Recording resume uuid but not the workspace folder | Record both — uuid alone resumes onto the wrong tree. |
 | Re-pasting goal/scope each session | Write it once in `CHARTER.md`. |
