@@ -1,6 +1,11 @@
 # Shared helpers. Caller must have already sourced $SPSYNC_CONFIG.
 g() { git -C "$1" "${@:2}"; }
 
+# Portable "N days ago" in UTC. BSD/macOS date uses -v; GNU/Linux date uses -d.
+days_ago_utc() { # days_ago_utc DAYS FORMAT   e.g. days_ago_utc 90 +%s
+  date -u -v-"$1"d "$2" 2>/dev/null || date -u -d "-$1 days" "$2"
+}
+
 load_state() { [ -f "$STATE_FILE" ] && . "$STATE_FILE" || true; }
 
 set_state() { # set_state KEY VALUE  (idempotent rewrite)
@@ -24,7 +29,7 @@ log_event() { # log_event RESULT NEWTAG SNAPSHOT [conflicts]
 
 prune_history() { # drop ndjson lines whose ts is older than RETENTION_DAYS
   [ -f "$HISTORY" ] || return 0
-  local cutoff tmp; cutoff="$(date -u -d "-${RETENTION_DAYS} days" +%Y-%m-%dT%H:%M:%SZ)"
+  local cutoff tmp; cutoff="$(days_ago_utc "$RETENTION_DAYS" +%Y-%m-%dT%H:%M:%SZ)"
   tmp="$(mktemp)"
   while IFS= read -r line; do
     local ts; ts="$(printf '%s' "$line" | sed -n 's/.*"ts":"\([^"]*\)".*/\1/p')"
@@ -34,7 +39,7 @@ prune_history() { # drop ndjson lines whose ts is older than RETENTION_DAYS
 }
 
 prune_snapshots() { # delete snapshot/* tags older than RETENTION_DAYS
-  local cutoff; cutoff="$(date -u -d "-${RETENTION_DAYS} days" +%s)"
+  local cutoff; cutoff="$(days_ago_utc "$RETENTION_DAYS" +%s)"
   g "$REPO" for-each-ref --format='%(refname:short) %(creatordate:unix)' 'refs/tags/snapshot/*' |
   while read -r tag epoch; do
     if [ "$epoch" -lt "$cutoff" ]; then g "$REPO" tag -d "$tag" >/dev/null; fi
