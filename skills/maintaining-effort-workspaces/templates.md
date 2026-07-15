@@ -44,21 +44,51 @@ Updated: <date> by session <latest-uuid>  |  Status: LIVE SNAPSHOT (rots — ver
 
 ---
 
-## `CHARTER.md` — durable, the anti-re-paste card
+## `CHARTER.md` — durable, the anti-re-paste card (organized as the instant lifecycle)
 
 ```markdown
 # <Effort> — CHARTER   (durable; edit deliberately)
+Instant: <base_instant>-<curr_instant>-<state>-<opType>-<instantName>
 
 ## Goal (e2e)
 <the end state, in your partner's words>
+
+## Setup to begin with
+<the starting state this instant forks from>
+- Base instant: <main | parent curr_instant>   # mirrors base_instant in the folder name
+- Branches / checkouts at start: <Empty | e.g. gluten=mor_prod@c879c42, velox=mor_prod@…>
+
+## First 3 raw prompts (verbatim — the partner's original framing)
+1. > <first prompt, exactly as sent>
+2. > <second prompt>
+3. > <third prompt>
 
 ## Scope
 - IN:  <e.g. Hudi MOR v9, commit-time ordering, schema-on-write only>
 - OUT: <e.g. schema-on-read, position-based, python/datafusion, ARM dims>
 
-## Acceptance criteria
-- [ ] <criterion 1, measurable>
-- [ ] <criterion 2>
+## Acceptance criteria (NL → executable proof → self-review)
+Each criterion is proven by the CODE ITSELF put to execution — a green test run, a
+script that greps for a beacon runtime log, or a GitHub CI run — not by assertion.
+Brainstorm (superpowers:brainstorming) to sharpen any vague criterion. Keep the
+self-review current as evidence accrues.
+
+### AC-1 <short name>
+- [ ] Statement (NL): <what must be true, in plain language>
+- Proof (executable): <green test X | `grep 'read_file_slice returned OK' <log>` | [CI run](…/actions/runs/<id>)>
+- Self-review: <does the evidence in evidence/INDEX.md actually fulfill this yet? gaps?>
+
+### AC-2 <short name>
+- [ ] Statement (NL): <…>
+- Proof (executable): <…>
+- Self-review: <…>
+
+## Setup to end up with (the handoff)
+- Deliverables: <PRs (links); test-run links showing the beacon log; images; jars + where
+  to fetch them; code-investigation summary; RCA doc (link)>
+- Reproducible stack (trivial to run — a few cmds + grep, at most):
+  <PR stack; build scripts; scripts that exercise the requirements; artifacts + their
+  location — all pointered from RUNBOOK.md / evidence/INDEX.md>
 
 ## Standing constraints / rules
 - <e.g. M1 must stay green>
@@ -117,22 +147,52 @@ prompts/runJavaTests.sh … ; prompts/runScalaTests.sh … ; prompts/runschemaEv
 
 ---
 
-## `ISSUES.md` / `ASSUMPTIONS.md` — registers with stable IDs + status
+## `ISSUES.md` — one sub-section per issue (prose, NOT a table)
+
+Tables are hostile to the bulk text an issue needs (multi-line symptoms, a real RCA).
+Each issue is its own sub-section with a stable ID; the register starts empty and
+appends as you go — never rewrite history, add follow-up under the same issue.
 
 ```markdown
-# ISSUES   (durable; append, don't rewrite)
-| ID | Issue | Status | Fix / ticket |
-|----|-------|--------|--------------|
-| OI-11 | gcc-toolset-11 cxx Slice element_type | DEFERRED | ENG-43030 |
+# ISSUES   (durable; append-only; one sub-section per issue)
 
-# ASSUMPTIONS   (the unverified-beliefs register)
+## OI-11 gcc-toolset-11 cxx Slice element_type
+### Symptom
+<what was observed — error text, failing test, the surprising behavior. Bulk text OK.>
+### Root cause
+<the underlying cause. If deep, keep this to a line and link the full RCA:
+see investigations/slice-elementtype/analysis.md>
+### Action taken
+<what was done: workaround, patch (PR link), config change, or "none yet">
+### Status
+DEFERRED — tracked as [ENG-43030](https://…/ENG-43030)
+
+## OI-12 <next issue title>
+### Symptom
+<…>
+### Root cause
+<…>
+### Action taken
+<…>
+### Status
+OPEN — unchecked
+```
+
+**Status vocabulary:** `OPEN` (seen, unchecked) · `FIXED` · `DEFERRED` (won't tackle now, tracked) · `DOCUMENTED` (known, accepted). Link the ticket as a full URL, never a bare id.
+
+---
+
+## `ASSUMPTIONS.md` — the unverified-beliefs register (stable IDs + status)
+
+```markdown
+# ASSUMPTIONS   (the unverified-beliefs register; append, don't rewrite)
 | ID | Assumption (believed, not yet proven) | Status | Evidence / next check |
 |----|---------------------------------------|--------|-----------------------|
 | AS-1 | "ship our own libstdc++.so.6" is possible on centos-7 | REFUTED 06-12 | devtoolset ships only static archives → evidence/2026-06-12-local-validation-findings.md |
 | AS-3 | testSecondaryIndexCreation failure is pre-existing | VERIFIED 06-11 | also fails vanilla (no gluten) |
 ```
 
-**Status vocabulary:** `OPEN` (believed, unchecked) · `VERIFIED` · `REFUTED` · `SANCTIONED` (known risk, accepted by your partner) · `DEFERRED` (won't check now, tracked). Issues also use `FIXED` / `DOCUMENTED`.
+**Status vocabulary:** `OPEN` (believed, unchecked) · `VERIFIED` · `REFUTED` · `SANCTIONED` (known risk, accepted by your partner) · `DEFERRED` (won't check now, tracked).
 
 ---
 
@@ -172,3 +232,36 @@ still "how to run it", just made multi-mode. One fact, one home (invariant 3).
 
 Then the per-mode copy/paste commands and the "reproduce any past run" one-liner go in RUNBOOK's
 existing Build/Run sections — not a separate doc.
+
+---
+
+## `COMPACTED.md` — metadata for a `…-compact-…` instant (compact instants ONLY)
+
+Written by `/maintain-workspace-effort compact`. It makes the fold auditable: what was
+folded in, every promise the compact now owns, and the single stack that re-proves them.
+
+```markdown
+# <name> — COMPACTED   (fold record for main-<curr_instant>-complete-compact-<name>)
+Updated: <date>
+
+## Included instants (folded into this one; originals kept on disk)
+- 07181613-07191011-complete-append-addfeature1
+- 07181613-07191013-complete-append-addfeature2
+- 07181613-07191016-complete-append-addfeature3
+
+## Merged acceptance criteria (union of the above; see CHARTER.md for proof + self-review)
+- [ ] AC-1 <from addfeature1>
+- [ ] AC-2 <from addfeature2>
+- [ ] AC-3 <from addfeature3>
+
+## Compacted "Setup to end up with"
+- Consolidated deliverables: <the merged PR stack, images, jars — links; superseding the
+  per-feature handoffs>
+- Single reproducible stack: <one build + one validation run (see RUNBOOK.md) that
+  re-derives ALL evidence for the merged criteria — a few cmds + grep, at most>
+- Evidence: every merged criterion has a row in evidence/INDEX.md pointing at the
+  consolidated artifact and how to regenerate it.
+```
+
+The merged criteria default to the **union** of the inputs'. If the partner narrows or
+supersedes some, note which and why in DECISIONS.md — don't silently drop a promise.
