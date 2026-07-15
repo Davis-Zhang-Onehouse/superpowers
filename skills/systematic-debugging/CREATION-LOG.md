@@ -113,7 +113,18 @@ When encountering a bug:
 **Time investment:** 5-10 minutes
 **Time saved:** Hours of symptom-whack-a-mole
 
+## Revision 2026-07-15: Evidence-Grounded RCA
+
+**Problem reported:** the skill did not produce fact-grounded RCA — conclusions were reached without capturing the raw artifacts that back the descriptive claims. Added `evidence-grounded-rca.md`, an "Evidence Law", a capture-first Phase-1 Step 0, a grounded why-chain, and matching Red-Flags/rationalization rows.
+
+**RED (baseline, current skill, 3 subagent reps on an artifact-laden CI-NPE scenario):** all 3 traced correctly and rejected the symptom fix — but none captured the original raw artifacts (2 saved only their own repro derivatives), none wrote a durable RCA doc, citations were prose not `path:line`, and 1/3 presented an inference as established fact (the exact reported failure). Reps diverged in rigor.
+
+**GREEN (revised skill, same scenario, 3 reps):** 3/3 captured all raw artifacts into `evidence/` with provenance + `INDEX.md` (claim→artifact→source→regenerate), 3/3 cited every causal link by `file:locator` or flagged it as an ASSUMPTION with justification + how-to-verify, 3/3 rejected the null-check symptom fix, and reps **converged** on the same grounded report shape (symptom→5 whys→root cause→open assumptions→fix). Durable RCA doc written where the harness allowed the Write tool (a subagent-sandbox quirk, not a skill gap).
+
+**Key insight:** convergence-vs-divergence across reps was the signal. The baseline's fact-grounding was luck-of-the-draw; the Evidence Law + FACT/ASSUMPTION node grammar made it binding.
+
 ---
 
 *Created: 2025-10-03*
+*Revised: 2026-07-15 (evidence-grounded RCA)*
 *Purpose: Reference example for skill extraction and bulletproofing*

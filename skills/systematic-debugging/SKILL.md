@@ -1,6 +1,6 @@
 ---
 name: systematic-debugging
-description: Use when encountering any bug, test failure, or unexpected behavior, before proposing fixes
+description: Use when encountering any bug, test failure, or unexpected behavior, before proposing fixes - especially when an RCA is being concluded without raw artifacts captured, or causal claims are asserted from memory rather than cited evidence
 ---
 
 # Systematic Debugging
@@ -18,6 +18,14 @@ NO FIXES WITHOUT ROOT CAUSE INVESTIGATION FIRST
 ```
 
 If you haven't completed Phase 1, you cannot propose fixes.
+
+## The Evidence Law
+
+```
+EVERY RCA CLAIM IS A CITED FACT OR A FLAGGED ASSUMPTION — NEVER AN UNBACKED ASSERTION
+```
+
+The symptom is a **captured artifact**. Every link from symptom to root cause is either a **FACT** (cites an artifact you captured, by path + locator) or an **ASSUMPTION** (stated out loud with a justification and how to verify). An RCA whose claims are asserted from memory, or whose artifacts were read but never captured, is not done — regardless of how right it sounds. Capturing raw artifacts and grounding each claim is not optional polish; it IS the investigation. See `evidence-grounded-rca.md` in this directory.
 
 ## When to Use
 
@@ -48,6 +56,15 @@ You MUST complete each phase before proceeding to the next.
 ### Phase 1: Root Cause Investigation
 
 **BEFORE attempting ANY fix:**
+
+0. **Open the evidence store and capture the symptom artifact**
+
+   Do this first, before analysis — you decide *where captured artifacts land* up front.
+   - If an effort workspace is in use (`superpowers:maintaining-effort-workspaces`), capture into that instant's `evidence/` and write the RCA to `investigations/<symptom>/analysis.md`.
+   - Otherwise `mktemp -d` a dedicated RCA folder and archive there.
+   - **Capture the raw artifact that defines the symptom** (the CI log, the failing test output, the error dump) into that folder, and anchor the symptom to it by exact quote + locator. The symptom is a captured artifact, not a paraphrase.
+
+   Full mechanics — location logic, capture commands for CI/test/S3/code artifacts, provenance, the `evidence/INDEX.md` format, and the report template — are in `evidence-grounded-rca.md` in this directory.
 
 1. **Read Error Messages Carefully**
    - Don't skip past errors or warnings
@@ -84,6 +101,8 @@ You MUST complete each phase before proceeding to the next.
    THEN investigate that specific component
    ```
 
+   **Capture each layer's output into `evidence/`** (with provenance — the job-id/command that produced it), don't just eyeball it in the terminal. The claim "layer 2→3 is where it breaks" must cite the captured artifact showing it.
+
    **Example (multi-layer system):**
    ```bash
    # Layer 1: Workflow
@@ -116,6 +135,8 @@ You MUST complete each phase before proceeding to the next.
    - What called this with bad value?
    - Keep tracing up until you find the source
    - Fix at source, not at symptom
+
+   **Record the trace as a grounded why-chain** (symptom → 5 whys and more → root cause) where each link is a cited FACT or a flagged ASSUMPTION per the Evidence Law. Do not present an inferred link as a fact — capture the artifact that confirms it, or label it an assumption with how to verify. See `evidence-grounded-rca.md`.
 
 ### Phase 2: Pattern Analysis
 
@@ -225,6 +246,10 @@ If you catch yourself thinking:
 - Proposing solutions before tracing data flow
 - **"One more fix attempt" (when already tried 2+)**
 - **Each fix reveals new problem in different place**
+- **"The artifacts explain it, no need to capture/reproduce"** (uncaptured link = assumption, label it)
+- **Stating a "why" from memory or one read-through** instead of citing a captured artifact
+- **Writing the RCA only in the chat reply** instead of a durable folder
+- **`evidence/` is empty but you're about to name a root cause**
 
 **ALL of these mean: STOP. Return to Phase 1.**
 
@@ -253,12 +278,16 @@ If you catch yourself thinking:
 | "Reference too long, I'll adapt the pattern" | Partial understanding guarantees bugs. Read it completely. |
 | "I see the problem, let me fix it" | Seeing symptoms ≠ understanding root cause. |
 | "One more fix attempt" (after 2+ failures) | 3+ failures = architectural problem. Question pattern, don't fix again. |
+| "The artifacts clearly explain it, capturing is busywork" | If a link isn't captured, it's an assumption. Label it or capture it — don't assert it. |
+| "I read the log/file, that's my evidence" | Reading ≠ capturing. A claim cites a file in `evidence/`; the transcript is gone on resume. |
+| "I'll put the RCA in my reply, that's enough" | The reply isn't durable. Write `analysis.md` + capture artifacts so it survives the session. |
+| "This why is obviously true" | Obvious-but-uncited is how wrong RCAs read convincingly. Cite the artifact or flag the assumption. |
 
 ## Quick Reference
 
 | Phase | Key Activities | Success Criteria |
 |-------|---------------|------------------|
-| **1. Root Cause** | Read errors, reproduce, check changes, gather evidence | Understand WHAT and WHY |
+| **1. Root Cause** | Capture symptom artifact, read errors, reproduce, gather+capture evidence, build grounded why-chain | WHAT and WHY, every link cited or flagged |
 | **2. Pattern** | Find working examples, compare | Identify differences |
 | **3. Hypothesis** | Form theory, test minimally | Confirmed or new hypothesis |
 | **4. Implementation** | Create test, fix, verify | Bug resolved, tests pass |
@@ -278,6 +307,20 @@ If systematic investigation reveals issue is truly environmental, timing-depende
 
 These techniques are part of systematic debugging and available in this directory:
 
+- **`evidence-grounded-rca.md`** - Capture raw artifacts, build a symptom→root-cause why-chain where every link is a cited FACT or flagged ASSUMPTION, archive the RCA to a durable folder
 - **`root-cause-tracing.md`** - Trace bugs backward through call stack to find original trigger
 - **`defense-in-depth.md`** - Add validation at multiple layers after finding root cause
 - **`condition-based-waiting.md`** - Replace arbitrary timeouts with condition polling
+
+**Related skills:**
+- **superpowers:test-driven-development** - For creating failing test case (Phase 4, Step 1)
+- **superpowers:verification-before-completion** - Verify fix worked before claiming success
+- **superpowers:maintaining-effort-workspaces** - When an effort spans sessions, the evidence store IS that instant's `evidence/` + `investigations/`; the RCA and captured artifacts persist there
+
+## Real-World Impact
+
+From debugging sessions:
+- Systematic approach: 15-30 minutes to fix
+- Random fixes approach: 2-3 hours of thrashing
+- First-time fix rate: 95% vs 40%
+- New bugs introduced: Near zero vs common
