@@ -92,10 +92,10 @@ Plus two register rules: **registers append, never rewrite** (decisions/issues/a
 
 ```
 <instant>/
-  HANDOFF.md      ← ENTRY POINT. workspace folder + resume cmd + session log + live snapshot + index
-  CHARTER.md      ← DURABLE. Setup-to-begin-with · first-3-raw-prompts · acceptance(NL→proof→self-review) · Setup-to-end-up-with · rules · env
-  STATE.md        ← single source of truth: repo → branch → tip githash → PR (full URL) → CI status
-  RUNBOOK.md      ← how to build / run / repro / prove it ran — incl. a modes matrix when the deliverable has >1 mode
+  HANDOFF.md      ← ENTRY POINT + "setup you end up with". resume cmd + session log + live snapshot + delivered PR stack + pointers to the scripts (→RUNBOOK) + where each AC's proof lives (→evidence/INDEX) + index. Points, never duplicates.
+  CHARTER.md      ← DURABLE. Setup-to-begin-with · first-3-raw-prompts · acceptance(NL→proof→self-review) · Setup-to-end-up-with (the up-front PROMISE) · rules · env
+  STATE.md        ← what-code-where + HOW each artifact was built & tested. dev steps noted as you go, distilled into a reviewer guide (artifact → built-by → provenance/CI-run → tested-by → which version used where) + repo→branch→githash→PR(full URL)→CI table
+  RUNBOOK.md      ← runnable commands ONLY (build / run / repro / prove-it-ran; modes matrix if >1 mode). NO reviewer narrative — HANDOFF/STATE link here for the commands.
   DECISIONS.md    ← DURABLE. dated decision log + rationale (D-1, D-2, …)
   ISSUES.md       ← DURABLE. append-only register; ONE SUB-SECTION PER ISSUE (Symptom/Root cause/Action taken/Status) — not a table
   ASSUMPTIONS.md  ← DURABLE. unverified beliefs: OPEN/VERIFIED/REFUTED/SANCTIONED/DEFERRED
@@ -105,7 +105,7 @@ Plus two register rules: **registers append, never rewrite** (decisions/issues/a
   plans/ specs/   ← superpowers plan & spec docs (existing convention)
 ```
 
-No new top-level doc per concern — resist it. "How to run each mode" is RUNBOOK; "what's proven, by what" is `evidence/INDEX.md`; "what code, where" is STATE. A `CAPABILITIES.md`/`MODES.md`/`STATUS.md` almost always overlaps one of those — fold it in (invariant 3).
+No new top-level doc per concern — resist it. **"how each artifact was built & tested (the reviewer narrative)" is STATE**; "commands to run" is RUNBOOK; "what's proven, by what" is `evidence/INDEX.md`; "the delivered handoff / where to find things" is HANDOFF. A `CAPABILITIES.md`/`MODES.md`/`STATUS.md`/`BUILD.md` almost always overlaps one of those — fold it in (invariant 3). Note the RUNBOOK↔STATE split: the *reviewer narrative* of how the deliverable was built (which image/jar, provenance, the multi-step chain, which version ran where) lives in **STATE** and accretes as you develop; RUNBOOK holds only the copy-paste commands and links back. Putting the build narrative in RUNBOOK is the common mistake.
 
 Small efforts may fold `STATE`+`RUNBOOK` into `HANDOFF` and `ASSUMPTIONS` into `ISSUES` — but **always keep `HANDOFF.md` and `CHARTER.md`**. Never invent a new name for an existing role.
 
@@ -167,6 +167,17 @@ When the effort **hands off a working, validated thing** (a tool, a pipeline, a 
 
 If those files can't carry a fresh session from cold to productive, the layout failed.
 
+## The Reviewer Contract (what a cold REVIEWER checks — companion to the Resume Contract)
+
+A reviewer asks different questions than a resumer: not "where do I continue?" but **"what was delivered, how was it built, how is it proven, and how do I re-run it?"** Answer them in this order:
+
+1. `HANDOFF.md` → the **delivered handoff**: the PR stack, links to the scripts (→ RUNBOOK), and where each acceptance criterion's proof lives (→ `evidence/INDEX.md`).
+2. `STATE.md` → **HOW each artifact was built & tested** — the reviewer guide distilled from the build/test steps you noted *as you developed* (artifact → built-by → provenance / CI-run → tested-by → which version was used in which test). Multi-step build chains (CI job → published artifact → local assembly → run) belong here, narrated once, end-to-end.
+3. `evidence/INDEX.md` → the **proofs** (criterion → artifact → source → regenerate).
+4. `RUNBOOK.md` → **re-run the commands** yourself.
+
+If a reviewer can't answer *delivered / how-built / how-proven / how-to-rerun* from those four in order — without spelunking scattered notes — the layout failed. The build-&-test narrative is the piece most often misfiled: it goes in **STATE** (accreted + distilled), never in RUNBOOK.
+
 ## Common Mistakes
 
 | Mistake | Fix |
@@ -185,3 +196,4 @@ If those files can't carry a fresh session from cold to productive, the layout f
 | Recording resume uuid but not the workspace folder | Record both — uuid alone resumes onto the wrong tree. |
 | `evidence/` is an unlabeled pile of logs | `evidence/INDEX.md`: criterion → artifact → source → regenerate. |
 | Spinning up `CAPABILITIES.md`/`MODES.md`/`STATUS.md` | Fold into RUNBOOK / `evidence/INDEX.md` / STATE. One fact, one home. |
+| How-the-deliverable-was-built narrative written in RUNBOOK (or scattered across INDEX/HANDOFF) | Narrative → **STATE** (noted as you dev, distilled into a reviewer guide); RUNBOOK = commands only; HANDOFF + `evidence/INDEX.md` link to it. See the Reviewer Contract. |
