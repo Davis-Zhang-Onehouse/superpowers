@@ -237,7 +237,7 @@ existing Build/Run sections — not a separate doc.
 
 ## `COMPACTED.md` — metadata for a `…-compact-…` instant (compact instants ONLY)
 
-Written by `/maintain-workspace-effort compact`. It makes the fold auditable: what was
+Written by `/maintain-workspace compact`. It makes the fold auditable: what was
 folded in, every promise the compact now owns, and the single stack that re-proves them.
 
 ```markdown
