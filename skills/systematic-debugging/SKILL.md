@@ -62,7 +62,7 @@ You MUST complete each phase before proceeding to the next.
 0. **Open the evidence store and capture the symptom artifact**
 
    Do this first, before analysis — you decide *where captured artifacts land* up front.
-   - If an effort workspace is in use (`superpowers:maintaining-effort-workspaces`), capture into that instant's `evidence/` and write the RCA to `investigations/<symptom>/analysis.md`.
+   - If an effort workspace is in use (`superpowers:maintain-workspace`), capture into that instant's `evidence/` and write the RCA to `investigations/<symptom>/analysis.md`.
    - Otherwise `mktemp -d` a dedicated RCA folder and archive there.
    - **Capture the raw artifact that defines the symptom** (the CI log, the failing test output, the error dump) into that folder, and anchor the symptom to it by exact quote + locator. The symptom is a captured artifact, not a paraphrase.
 
@@ -316,7 +316,7 @@ These techniques are part of systematic debugging and available in this director
 **Related skills:**
 - **superpowers:test-driven-development** - For creating failing test case (Phase 4, Step 1)
 - **superpowers:verification-before-completion** - Verify fix worked before claiming success
-- **superpowers:maintaining-effort-workspaces** - When an effort spans sessions, the evidence store IS that instant's `evidence/` + `investigations/`; the RCA and captured artifacts persist there
+- **superpowers:maintain-workspace** - When an effort spans sessions, the evidence store IS that instant's `evidence/` + `investigations/`; the RCA and captured artifacts persist there
 
 ## Real-World Impact
 
