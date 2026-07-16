@@ -12,7 +12,7 @@ This is the technique behind Phase 1 of `systematic-debugging`. Use it for every
 
 Decide *where artifacts land before you capture the first one*. Two cases:
 
-**A. An effort workspace is in use** (see `superpowers:maintaining-effort-workspaces` — your partner pointed you at an instant folder; it has a `HANDOFF.md`). Use the instant's existing structure — do not invent a new one:
+**A. An effort workspace is in use** (see `superpowers:maintain-workspace` — your partner pointed you at an instant folder; it has a `HANDOFF.md`). Use the instant's existing structure — do not invent a new one:
 
 ```
 <instant>/evidence/               ← raw artifacts land here (invariant 4: never /tmp)

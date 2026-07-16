@@ -1,6 +1,6 @@
 ---
-name: maintaining-effort-workspaces
-description: Use when one effort spans multiple sessions, forks, rewinds, or parallel features and state keeps getting lost — you re-elicit status/PR links/scope/repro commands or "where did we leave off", your partner re-pastes context, or you need to create/resume/compact an effort snapshot. Also the home of the /maintain-workspace-effort command.
+name: maintain-workspace
+description: Use when one effort spans multiple sessions, forks, rewinds, or parallel features and state keeps getting lost — you re-elicit status/PR links/scope/repro commands or "where did we leave off", your partner re-pastes context, or you need to create/resume/compact an effort snapshot. Also the home of the /maintain-workspace command.
 ---
 
 # Maintaining Effort Workspaces
@@ -20,7 +20,7 @@ Efforts also **branch**: a base capability is forked into several parallel featu
 - Work on one issue/feature is **spanning multiple sessions** (or you expect it to).
 - You run **concurrent/forked sessions**, spin up **parallel features** off a shared base, or get **rewound**, and state gets lost.
 - Your partner keeps re-asking or re-pasting: "status?", "PR links?", "what's the scope again?", the build command, "is it actually green?".
-- You're invoked via **`/maintain-workspace-effort new|compact`** (see the command section).
+- You're invoked via **`/maintain-workspace new|compact`** (see the command section).
 
 **Not for** single-session tasks or anything that finishes before you stop. `HANDOFF.md` + `CHARTER.md` is the floor; the rest scales with the effort.
 
@@ -45,7 +45,7 @@ An **instant** is one effort snapshot: a self-contained subfolder under the base
 **Layout — the base dir holds instants; each instant holds the canonical files:**
 
 ```
-<base-dir>/                                       ← you point me here
+<base-dir>/                                       ← the mandatory --base folder you point me at
   main-07181613-complete-append-toyExample/       ← an instant (see Canonical Layout below)
   07181613-07191011-inflight-append-addfeature1/  ← forked off toyExample's curr_instant
   07181613-07191013-inflight-append-addfeature2/
@@ -54,28 +54,30 @@ An **instant** is one effort snapshot: a self-contained subfolder under the base
 
 **Lifecycle:** an instant is born `inflight`; when its acceptance criteria are met you **`mv` it** to `…-complete-…` (or `…-abort-…` if dropped). Children point at the parent's `curr_instant`, not its folder name, so the rename never breaks a reference. `abort` instants are kept as history, never swept.
 
-## The `/maintain-workspace-effort` Command
+## The `/maintain-workspace` Command
 
-Invocation: `/maintain-workspace-effort <ops> [param]`, `ops ∈ {new, compact}`. The command loads this skill; follow the matching flow.
+Invocation: `/maintain-workspace <op> --base <base-folder-path> [--from <base-instant>] [--instants <a,b,c>]`, `op ∈ {new, compact}`. Args are key-value except the leading `op`. The command loads this skill; follow the matching flow.
 
-**`new [base-instant]`** — resume the effort or fork a new instant. The optional param is the **base to build on** (never a name); the new instant's name is derived from its purpose. The base defaults to the latest instant, or is the one you name:
+**`--base <base-folder-path>` is always mandatory** — it is the folder that holds the instants (where they are created and found). If it is not supplied, **stop and elicit it in chat**; never silently default to the current working directory.
+
+**`new`** — resume the effort or fork a new instant. `--from <base-instant>` is the optional **base to build on** (an existing instant, never a name); the new instant's name is derived from its purpose. The base defaults to the latest instant under `--base`, or is the one you name via `--from`:
 
 ```dot
 digraph new_op {
-  "base instant (named param, else max curr_instant)" [shape=box];
+  "base instant (--from, else max curr_instant under --base)" [shape=box];
   "state?" [shape=diamond];
   "cd in and resume it" [shape=box];
   "fork child: <baseCurr>-<now>-inflight-append-<derivedName>" [shape=box];
-  "base instant (named param, else max curr_instant)" -> "state?";
+  "base instant (--from, else max curr_instant under --base)" -> "state?";
   "state?" -> "cd in and resume it" [label="inflight"];
   "state?" -> "fork child: <baseCurr>-<now>-inflight-append-<derivedName>" [label="complete"];
 }
 ```
 
-- **Parallel siblings** fork off a *shared* base, so name that base as the param: three features off a completed `toyExample` are all `07181613-…-append-featureN`, not chained onto each other. With no param, `new` forks off the single latest instant — which chains, not branches.
-- Forking = create the child folder, bootstrap its canonical files from templates, and carry forward `Setup to begin with` from the base's `STATE`/end state. `base_instant` = the base's `curr_instant` (a timestamp — survives the base's later renames).
+- **Parallel siblings** fork off a *shared* base, so name that base via `--from`: three features off a completed `toyExample` are all `07181613-…-append-featureN`, not chained onto each other. With no `--from`, `new` forks off the single latest instant — which chains, not branches.
+- Forking = create the child folder under `--base`, bootstrap its canonical files from templates, and carry forward `Setup to begin with` from the base's `STATE`/end state. `base_instant` = the base's `curr_instant` (a timestamp — survives the base's later renames).
 
-**`compact <instantA,instantB,…>`** — fold complete instants into one. Create `main-<now>-complete-compact-<name>/`, write `COMPACTED.md` (below), and consolidate CHARTER/STATE/RUNBOOK/evidence. **Consumed instants stay on disk untouched.**
+**`compact`** — fold complete instants into one. `--instants <instantA,instantB,…>` is **mandatory** (elicit it in chat if absent). Create `main-<now>-complete-compact-<name>/` under `--base`, write `COMPACTED.md` (below), and consolidate CHARTER/STATE/RUNBOOK/evidence. **Consumed instants stay on disk untouched.**
 
 ## The Four Invariants (hold *within* every instant)
 
