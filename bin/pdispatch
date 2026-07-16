@@ -1,0 +1,77 @@
+#!/usr/bin/env bash
+#
+# pdispatch — entry point for the parallel-TODO dispatch toolkit (skill: dispatchInstants).
+#
+# Runs from anywhere (this dir is on PATH and ships with the superpowers repo). With no
+# args it prints the toolkit map + the end-to-end use case. Subcommands route to the tools.
+#
+set -euo pipefail
+SELF="$(readlink -f "$0" 2>/dev/null || echo "$0")"
+BIN_DIR="$(cd "$(dirname "$SELF")" && pwd)"
+REPO="$(cd "$BIN_DIR/.." && pwd)"
+SKILL="$REPO/skills/dispatchInstants"
+
+b=$'\033[1m'; d=$'\033[2m'; g=$'\033[32m'; y=$'\033[33m'; c=$'\033[36m'; r=$'\033[0m'
+
+overview() {
+cat <<EOF
+${b}parallel-TODO dispatch${r}  ${d}(skill: dispatchInstants — $SKILL)${r}
+
+Turn ONE base ${b}effort-workspace instant${r} that has produced a solid base + many independent
+TODOs (e.g. a ranked list of ANSI gaps) into MANY parallel, interactive workers — each in its
+own pre-built workspace (~/wsN, no rebuild) and its own forked child instant, RCA-first,
+reporting back onto the base.
+
+${b}TWO DECOUPLED RESOURCES${r}
+  ${c}instant${r}  = state  (charter/HANDOFF/RCA/evidence). Forked off the base; permanent.
+  ${c}slot${r}     = code   (a ~/wsN checkout). Leased → worked → released → re-leased.
+  A TODO = one child instant ${b}leasing${r} one slot. The base instant is the bulletin board.
+
+${b}THE TOOLKIT${r}  ${d}(all on PATH via this repo's bin/)${r}
+  ${g}pdispatch pool${r}  <add|list|status|claim|release|reap>   lease manager over an OPT-IN
+                                                        set of ~/wsN slots. Atomic (mkdir),
+                                                        crash-safe (dead-tmux reap).
+  ${g}pdispatch todo${r}  --base <instant> --title .. --brief ..  dispatch ONE TODO: claim slot →
+                                                        duplicate golden (no rebuild) → fork
+                                                        child instant + RCA-first CHARTER →
+                                                        launch interactive tmux claude →
+                                                        record it. Clean rollback on failure.
+  ${g}pdispatch board${r} <base-instant>                         derived fleet dashboard:
+                                                        running / 🅿 parked / ✅ complete / ✖ abort.
+  ${g}pdispatch doc${r}                                          show the SKILL.md + design spec.
+
+${b}RELATED SKILLS IT BUILDS ON${r}  ${d}(all in this repo — checkout & go)${r}
+  superpowers:maintain-workspace     the instant model (fork / state-rename / cold resume).
+  superpowers:duplicateWorkSpace     fast, no-rebuild ~/wsN checkout (claim-time duplication).
+  superpowers:systematic-debugging   each worker runs this FIRST → the RCA (gold vs actual).
+
+${b}END-TO-END USE CASE${r}
+  0. one-time:  ${g}pdispatch pool add ~/ws5 ~/ws6${r}   ${d}# enroll ONLY genuinely-free slots${r}
+                ${g}echo ~/ws1 > ~/.claude-ws-pool/golden${r}  ${d}# the pre-built source${r}
+  1. per TODO:  ${g}pdispatch todo --base <base-instant> --title "close gap X" \\ ${r}
+                ${g}               --brief brief.md --golden ~/ws1 --evidence "RANKING.md#1"${r}
+                → a real interactive ${b}claude${r} starts in tmux, seeded to run RCA-first, then
+                  branch on scope (small→TDD; large→brainstorm→plan→subagents), autonomously,
+                  parking a decision only when it genuinely needs you.
+  2. watch:     ${g}pdispatch board <base-instant>${r}
+  3. answer:    ${g}tmux attach -t dt-<id>${r}   ${d}# only sessions flagged 🅿 PARKED${r}
+  4. recycle:   ${g}pdispatch pool release ws5${r}  ${d}# after its TODO is merged; slot re-leases${r}
+                ${g}pdispatch pool reap${r}         ${d}# reclaim a crashed session's slot${r}
+
+${d}Design & rationale: $SKILL/docs/  ·  proofs: the parallelDispatch effort instant's evidence/${r}
+EOF
+}
+
+cmd="${1:-help}"; shift || true
+case "$cmd" in
+  pool)    exec "$SKILL/wspool.sh" "$@";;
+  todo)    exec "$SKILL/dispatch-todo.sh" "$@";;
+  board)   exec "$SKILL/dispatch-board.sh" "$@";;
+  doc|docs|design)
+           echo "SKILL.md : $SKILL/SKILL.md"
+           echo "design   : $SKILL/docs/"
+           ls "$SKILL/docs/" 2>/dev/null | sed 's/^/  - /'
+           echo; sed -n '1,60p' "$SKILL/SKILL.md";;
+  help|-h|--help|"") overview;;
+  *) echo "pdispatch: unknown subcommand '$cmd'" >&2; echo; overview; exit 2;;
+esac
