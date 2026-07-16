@@ -26,6 +26,13 @@ Updated: <date> by session <latest-uuid>  |  Status: LIVE SNAPSHOT (rots — ver
 - In flight: <CI run id / build / watcher> — expected: <green-set / criterion>
 - Blockers: <…>
 
+## Setup you end up with (delivered handoff — point, don't duplicate)
+The deliverable, as a reviewer/next-session navigates it. Links out; the details live in their one home.
+- **PR stack:** <[#408](…) fix> · <[#410](…) CI> — full table in STATE.md.
+- **Artifacts + how they were built:** <fixed image tag@digest / jars> — the how/provenance is STATE.md § "How each artifact was built & tested".
+- **Play with it:** <one-command scripts> → see RUNBOOK.md § <section> (don't re-paste commands here).
+- **Proof each acceptance criterion is met:** AC-1 → evidence/INDEX #<n> · AC-2 → #<n> · … (INDEX maps criterion→artifact→source→regenerate).
+
 ## Session log  (append one row per session — so ANY past session is resumable)
 | Date | Workspace | Resume cmd | Did what |
 |------|-----------|------------|----------|
@@ -34,8 +41,8 @@ Updated: <date> by session <latest-uuid>  |  Status: LIVE SNAPSHOT (rots — ver
 
 ## Index (where each thing lives — click through, don't duplicate)
 - Scope / acceptance / constraints → CHARTER.md
-- PR & branch stack (the table you keep asking for) → STATE.md
-- How to rebuild / rerun tests / repro → RUNBOOK.md
+- PR & branch stack + **how each artifact was built & tested (reviewer guide)** → STATE.md
+- Runnable commands to rebuild / rerun tests / repro → RUNBOOK.md
 - Decisions → DECISIONS.md · Issues → ISSUES.md · Unverified assumptions → ASSUMPTIONS.md
 - Deep dives → investigations/<topic>/
 ```
@@ -103,20 +110,33 @@ self-review current as evidence accrues.
 
 ---
 
-## `STATE.md` — single source of truth for "what code, where"
+## `STATE.md` — what code where + HOW each artifact was built & tested (the reviewer guide)
 
 ```markdown
-# <Effort> — STATE   (the PR/branch stack; one home for this fact)
+# <Effort> — STATE   (what code where + how each artifact was built & tested)
 Updated: <date>
 
+## PR / branch stack
 | Repo | Branch | Tip githash | PR (full URL) | CI status (as of) | Contents |
 |------|--------|-------------|---------------|-------------------|----------|
 | gluten-internal | mor_productionization | c879c42da | [#360](https://github.com/<org>/gluten-internal/pull/360) | green 2026-06-15 ([run 27443719426](https://github.com/<org>/gluten-internal/actions/runs/27443719426)) | … |
 | velox-internal  | mor_productionization | … | [#128](https://github.com/<org>/velox-internal/pull/128) | … | … |
 
-Record every external reference as a **full URL** (markdown link) — the PR `[#360](…/pull/360)`, the CI
-run `[run 27443719426](…/actions/runs/27443719426)` — never a bare `#360` or bare run-id. The stack
-spans repos, so a bare number is ambiguous and isn't clickable when a cold session resumes.
+Record every external reference as a **full URL** (markdown link) — never a bare `#360` or run-id.
+
+## How each artifact was built & tested (REVIEWER GUIDE — note steps as you dev, distil over time)
+The narrative a reviewer needs — NOT the commands (those are RUNBOOK; link to them). Start rough as you
+build; distil into this shape as it firms up. One entry per artifact:
+
+### <artifact, e.g. the fixed operator image>
+- **What it is / vs baseline:** `<tag@digest>` = `<derivation>` (e.g. stock `X@d1` + swapped `Y.jar`); the
+  baseline (unfixed) artifact is `<tag@digest>`, used for the RED/before run.
+- **Built by:** `<the automated step>` → `<where it's published>` (e.g. CI `adhoc_x.yml` amd64 → CodeArtifact).
+  Needs: `<preconditions — e.g. which branches/PRs must be present>`.
+- **Provenance:** `<run/job link>` @ `<commit>` → `<exact version/name>` (`<size/digest>`) — the audit chain.
+- **Assembled by:** `<script/one-command>` (→ RUNBOOK §… for the command).
+- **Tested by / used where:** `<which milestone/test used this exact version>` → proof in `evidence/INDEX.md` #<n>.
+- **Caveats:** `<lineage / arch / not-run-here notes>`.
 
 ## Working set (what to check out to get the latest)
 - gluten: <branch@sha>   velox: <branch@sha>   hudi-rs: <…>
