@@ -1,0 +1,308 @@
+#!/usr/bin/env bash
+#
+# dispatch-todo.sh — dispatch ONE TODO as its own parallel worker:
+#   claim a workspace slot  ->  duplicate the golden checkout into it (no rebuild)
+#   ->  fork a maintain-workspace CHILD INSTANT off the base  ->  seed its CHARTER
+#   with the RCA-first mandate  ->  launch an INTERACTIVE tmux `claude` session
+#   ->  write an immutable dispatch record on the base (the bulletin board).
+#
+# Every step rolls back the previous ones on failure: a mid-way error never leaks
+# a lease or leaves a half-built child instant.
+#
+# Design: dispatchInstants/docs/2026-07-16-dispatch-instants-design.md §4, DECISIONS D-1/D-3/D-8.
+#
+# Usage:
+#   dispatch-todo.sh --base <base-instant> --title "<short title>" --brief <file|-> \
+#       [--golden <ws-path>] [--slot <ws>] [--evidence <ptr>]... \
+#       [--no-launch] [--no-duplicate]
+#
+# Env (for hermetic tests / overrides):
+#   POOL_DIR          passed through to wspool.sh
+#   WSPOOL_SH         path to wspool.sh          (default: alongside this script)
+#   DUPLICATE_WS_SH   path to duplicate-workspace.sh
+#                     (default: ../duplicateWorkSpace/duplicate-workspace.sh)
+#
+set -euo pipefail
+
+SELF="$(readlink -f "$0" 2>/dev/null || echo "$0")"; HERE="$(cd "$(dirname "$SELF")" && pwd)"
+WSPOOL_SH="${WSPOOL_SH:-$HERE/wspool.sh}"
+# Resolve duplicate-workspace.sh (repo-self-contained): env override → repo sibling skill
+# → on PATH. No machine-specific paths, so a fresh checkout works anywhere.
+if [ -z "${DUPLICATE_WS_SH:-}" ]; then
+  if [ -x "$HERE/../duplicateWorkSpace/duplicate-workspace.sh" ]; then
+    DUPLICATE_WS_SH="$HERE/../duplicateWorkSpace/duplicate-workspace.sh"
+  elif command -v duplicate-workspace.sh >/dev/null 2>&1; then
+    DUPLICATE_WS_SH="$(command -v duplicate-workspace.sh)"
+  elif command -v duplicate-workspace >/dev/null 2>&1; then
+    DUPLICATE_WS_SH="$(command -v duplicate-workspace)"
+  fi
+fi
+DUPLICATE_WS_SH="${DUPLICATE_WS_SH:-duplicate-workspace.sh}"
+
+c_red=$'\033[31m'; c_grn=$'\033[32m'; c_yel=$'\033[33m'; c_bold=$'\033[1m'; c_rst=$'\033[0m'
+err()  { printf '%sERROR:%s %s\n' "$c_red" "$c_rst" "$*" >&2; }
+warn() { printf '%sWARN:%s %s\n'  "$c_yel" "$c_rst" "$*" >&2; }
+info() { printf '%s\n' "$*"; }
+step() { printf '%s==>%s %s\n' "$c_bold" "$c_rst" "$*"; }
+
+# ---- args -------------------------------------------------------------------
+BASE="" TITLE="" BRIEF="" GOLDEN="" SLOT="" NO_LAUNCH=0 NO_DUP=0
+declare -a EVIDENCE=()
+while [ "$#" -gt 0 ]; do
+  case "$1" in
+    --base)        BASE="$2"; shift 2;;
+    --title)       TITLE="$2"; shift 2;;
+    --brief)       BRIEF="$2"; shift 2;;
+    --golden)      GOLDEN="$2"; shift 2;;
+    --slot)        SLOT="$2"; shift 2;;
+    --evidence)    EVIDENCE+=("$2"); shift 2;;
+    --no-launch)   NO_LAUNCH=1; shift;;
+    --no-duplicate) NO_DUP=1; shift;;
+    -h|--help)     sed -n '2,32p' "$0" | sed 's/^# \{0,1\}//'; exit 0;;
+    *) err "unknown arg: $1"; exit 2;;
+  esac
+done
+
+[ -n "$BASE" ]  || { err "--base <base-instant> required"; exit 2; }
+[ -n "$TITLE" ] || { err "--title required"; exit 2; }
+[ -n "$BRIEF" ] || { err "--brief <file|-> required"; exit 2; }
+BASE="$(realpath -m -- "$BASE")"
+[ -f "$BASE/HANDOFF.md" ] && [ -f "$BASE/CHARTER.md" ] \
+  || { err "--base does not look like a maintain-workspace instant (needs HANDOFF.md + CHARTER.md): $BASE"; exit 2; }
+[ -x "$WSPOOL_SH" ] || { err "wspool.sh not found/executable at $WSPOOL_SH"; exit 2; }
+
+# golden: explicit, else pool default file, else error
+if [ -z "$GOLDEN" ]; then
+  gf="${POOL_DIR:-$HOME/.claude-ws-pool}/golden"
+  [ -f "$gf" ] && GOLDEN="$(head -1 "$gf")"
+fi
+[ -n "$GOLDEN" ] || { err "no --golden and no ${POOL_DIR:-$HOME/.claude-ws-pool}/golden file"; exit 2; }
+GOLDEN="$(realpath -m -- "$GOLDEN")"
+[ -d "$GOLDEN" ] || { err "golden workspace does not exist: $GOLDEN"; exit 2; }
+
+# ---- derive names (maintain-workspace grammar) ------------------------------
+# The instant name is 5 fields split on '-': <base>-<curr>-<state>-<opType>-<instantName>.
+# The instantName field MUST be dashless (camelCase) or the grammar can't be parsed back —
+# so the child folder stays locatable after a state-rename. TODO_ID (record filename / tmux
+# session) is free-form and may carry dashes.
+NOW="$(date +%m%d%H%M)"
+camel() { printf '%s' "$1" | tr '[:upper:]' '[:lower:]' \
+            | sed -E 's/[^a-z0-9]+/ /g' \
+            | awk '{o="";for(i=1;i<=NF;i++){w=$i; o=(i==1)?w:o toupper(substr(w,1,1)) substr(w,2)} print o}'; }
+INAME="$(camel "$TITLE")"
+[ -n "$INAME" ] || INAME="todo"
+TODO_ID="${INAME}-${NOW}"
+BASE_DIR="$(dirname "$BASE")"                          # instants are siblings here
+BASE_NAME="$(basename "$BASE")"
+BASE_CURR="$(printf '%s' "$BASE_NAME" | cut -d- -f2)"  # field 2 = curr_instant (survives renames)
+[ -n "$BASE_CURR" ] || BASE_CURR="main"
+CHILD_NAME="${BASE_CURR}-${NOW}-inflight-append-${INAME}"
+CHILD="$BASE_DIR/$CHILD_NAME"
+TMUX_SESSION="dt-${TODO_ID}"
+DISPATCH_DIR="$BASE/dispatch"
+RECORD="$DISPATCH_DIR/${TODO_ID}.json"
+
+# golden guard (D-3): golden must be OUTSIDE the pool and != the slot we'll claim
+if [ -n "$SLOT" ] && [ "$(basename "$GOLDEN")" = "$(basename "$SLOT")" ]; then
+  err "golden ($GOLDEN) is the same slot as --slot — refusing (would clobber the source)"; exit 2
+fi
+if POOL_DIR="${POOL_DIR:-}" "$WSPOOL_SH" status "$(basename "$GOLDEN")" 2>/dev/null | grep -q '^SLOT='; then
+  err "golden ($GOLDEN) is ENROLLED in the pool — a golden source must be outside the leasable pool"; exit 2
+fi
+
+if [ -e "$CHILD" ]; then err "child instant already exists: $CHILD"; exit 2; fi
+
+# ---- rollback machinery -----------------------------------------------------
+CLAIMED_SLOT=""      # basename of the slot we leased (empty until claimed)
+CHILD_MADE=0
+RECORD_MADE=0
+SUCCESS=0
+cleanup() {
+  [ "$SUCCESS" -eq 1 ] && return 0
+  warn "dispatch failed — rolling back"
+  [ "$RECORD_MADE" -eq 1 ] && rm -f "$RECORD" && warn "  removed dispatch record"
+  [ "$CHILD_MADE" -eq 1 ] && rm -rf "$CHILD" && warn "  removed child instant $CHILD_NAME"
+  if [ -n "$CLAIMED_SLOT" ]; then
+    POOL_DIR="${POOL_DIR:-}" "$WSPOOL_SH" release "$CLAIMED_SLOT" >/dev/null 2>&1 && warn "  released lease $CLAIMED_SLOT"
+  fi
+}
+trap cleanup EXIT
+
+# ---- 1. claim a workspace slot ---------------------------------------------
+step "claiming a workspace slot"
+claim_args=(--todo "$TODO_ID" --tmux "$TMUX_SESSION" --base "$BASE" --child "$CHILD")
+[ -n "$SLOT" ] && claim_args+=(--slot "$SLOT")
+set +e
+WS="$(POOL_DIR="${POOL_DIR:-}" "$WSPOOL_SH" claim "${claim_args[@]}")"
+claim_rc=$?
+set -e
+if [ "$claim_rc" -ne 0 ]; then
+  if [ "$claim_rc" -eq 3 ]; then
+    err "pool full — no free slot. Enroll one ('wspool.sh add ~/wsN') or wait for a release."
+  else
+    err "wspool claim failed (rc=$claim_rc)"
+  fi
+  exit "$claim_rc"
+fi
+CLAIMED_SLOT="$(basename "$WS")"
+info "  leased $CLAIMED_SLOT -> $WS"
+
+# ---- 2. duplicate golden -> slot (no rebuild) ------------------------------
+if [ "$NO_DUP" -eq 0 ]; then
+  step "duplicating golden ($GOLDEN) -> $WS (no rebuild)"
+  [ -x "$DUPLICATE_WS_SH" ] || { err "duplicate-workspace.sh not executable at $DUPLICATE_WS_SH"; exit 1; }
+  "$DUPLICATE_WS_SH" "$GOLDEN" "$WS" --force
+else
+  warn "  --no-duplicate: leaving $WS as-is"
+fi
+
+# ---- 3. fork child instant + bootstrap canonical files ----------------------
+step "forking child instant $CHILD_NAME"
+mkdir -p "$CHILD"/{investigations,evidence,plans,specs}
+CHILD_MADE=1
+
+# read brief (file or stdin)
+if [ "$BRIEF" = "-" ]; then BRIEF_TEXT="$(cat)"; else BRIEF_TEXT="$(cat "$BRIEF")"; fi
+EVI_MD=""
+for e in "${EVIDENCE[@]}"; do EVI_MD+="  - $e"$'\n'; done
+[ -n "$EVI_MD" ] || EVI_MD="  - (none supplied)"$'\n'
+TODAY="$(date +%Y-%m-%d)"
+
+cat > "$CHILD/CHARTER.md" <<EOF
+# ${TITLE} — CHARTER   (durable; edit deliberately)
+Instant: ${CHILD_NAME}
+Updated: ${TODAY} | Status: DURABLE
+Dispatched by parallelDispatch from base instant: ${BASE_NAME}
+
+## Goal (e2e)
+${TITLE}
+
+## Setup to begin with
+- Base instant: ${BASE_CURR}  (forked from ${BASE_NAME})
+- Workspace: ${WS}  (slot ${CLAIMED_SLOT}, leased; duplicated from golden ${GOLDEN} — pre-built, no rebuild)
+
+## First raw prompt / brief (the dispatch)
+${BRIEF_TEXT}
+
+## Evidence pointers from the base (start your RCA here)
+${EVI_MD}
+## Acceptance criteria (NL → executable proof → self-review)
+
+### AC-1 RCA delivered (RCA-FIRST — do this before ANY fix)
+- [ ] Statement (NL): investigations/<topic>/analysis.md documents the **Spark-Java (gold) vs
+      Gluten-Velox (actual)** behavioral diff for this gap, with **cited real artifacts**
+      captured into evidence/ (NOT /tmp), and a reproducible command.
+- Proof (executable): the analysis doc + evidence/INDEX.md rows exist and cite a runnable repro
+  (a test/log grep) that a cold reader can re-run.
+- Self-review: <pending — fill as the RCA accrues>
+
+### AC-2 Resolution (branch on scope AFTER the RCA)
+- [ ] Statement (NL): either a green fix (PR link + test/CI proof) OR — if scope is large —
+      a written plan (specs/ + plans/) executed via subagent-driven-development.
+- Proof (executable): green test/CI run (linked, full URL) OR the plan doc + its execution evidence.
+- Self-review: <pending>
+
+## Setup to end up with (the handoff)
+- Deliverables: RCA doc (investigations/), then fix PR or plan+execution; evidence/INDEX.md rows.
+- Report-back: transition this instant's folder state (inflight→complete/abort) at session end;
+  if you need the operator, park the question under a '## Parked decision' block in HANDOFF.md.
+
+## Standing constraints / rules
+- **RCA-FIRST:** run superpowers:systematic-debugging to produce the RCA before any code change.
+  Frame everything as Spark-Java = GOLD (expected) vs Gluten-Velox = ACTUAL.
+- **Scope branch (after RCA):** small/localized/clear → test-driven-development directly;
+  large/multi-file/ambiguous → brainstorming → writing-plans → subagent-driven-development.
+- **Autonomous-first:** run as far as you can without the operator; stop and PARK only at a real
+  fork (ambiguous requirement, fix-vs-plan you can't resolve, or a blocker).
+- Maintain this instant per superpowers:maintain-workspace throughout (evidence in evidence/, not /tmp).
+EOF
+
+cat > "$CHILD/HANDOFF.md" <<EOF
+Updated: ${TODAY} | Status: LIVE SNAPSHOT (rots)
+
+# ${TITLE} — HANDOFF   (read me first)
+
+## Resume here
+- Instant: ${CHILD}
+- Workspace (code checked out here): ${WS}   (slot ${CLAIMED_SLOT})
+- Resume: \`cd ${WS} && claude --resume <uuid>\`   (record the uuid in the session log below once known)
+- Dispatched: ${TODAY} from base ${BASE_NAME} (tmux session: ${TMUX_SESSION})
+
+## Where we are (one paragraph)
+Freshly dispatched. Nothing done yet. Next: run the RCA-first mandate (see CHARTER AC-1).
+
+## Next action
+1. Read CHARTER.md. Run superpowers:systematic-debugging on the gap → RCA in investigations/.
+2. After the RCA, branch on scope (CHARTER standing rules) and proceed.
+
+## Parked decision (for the operator — empty unless I need you)
+<none>
+
+## Live snapshot (volatile — dated)
+- In flight: RCA not started.
+
+## Session log
+| Date | Workspace | Resume cmd | Did what |
+|------|-----------|------------|----------|
+| ${TODAY} | ${WS} | (dispatched) | Instant forked + workspace leased by parallelDispatch; awaiting first session action. |
+
+## Index
+- Scope / acceptance / brief → CHARTER.md
+- Decisions → DECISIONS.md · Issues → ISSUES.md · Assumptions → ASSUMPTIONS.md
+- RCA / deep dives → investigations/  · Proof → evidence/INDEX.md
+EOF
+
+# minimal canonical stubs (maintain-workspace invariants; the session fleshes them out)
+printf '# %s — STATE\nUpdated: %s\n\n| Repo | Branch | Tip | PR | CI | Notes |\n|---|---|---|---|---|---|\n| (fill as work lands) | | | | | |\n' "$TITLE" "$TODAY" > "$CHILD/STATE.md"
+printf '# %s — RUNBOOK\nUpdated: %s\n\n## Build / run / repro\n- Workspace: %s (pre-built; see duplicateWorkSpace).\n- (add exact repro commands as you find them during the RCA)\n' "$TITLE" "$TODAY" "$WS" > "$CHILD/RUNBOOK.md"
+printf '# DECISIONS   (durable; append-only; dated)\nUpdated: %s\n' "$TODAY" > "$CHILD/DECISIONS.md"
+printf '# ISSUES   (durable; append-only; one sub-section per issue)\nUpdated: %s\n' "$TODAY" > "$CHILD/ISSUES.md"
+printf '# ASSUMPTIONS   (append, do not rewrite)\nUpdated: %s\n\n| ID | Assumption | Status | Evidence/next check |\n|---|---|---|---|\n' "$TODAY" > "$CHILD/ASSUMPTIONS.md"
+printf '# Evidence index\nUpdated: %s\n\n| # | Criterion | Artifact | Shows | Source |\n|---|---|---|---|---|\n' "$TODAY" > "$CHILD/evidence/INDEX.md"
+info "  child instant bootstrapped with RCA-first seeded CHARTER"
+
+# ---- 4. write immutable dispatch record on the base -------------------------
+step "recording dispatch on base"
+mkdir -p "$DISPATCH_DIR"
+DISPATCHED_AT="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+BRIEF_ABS="$([ "$BRIEF" = "-" ] && echo "(stdin)" || realpath -m -- "$BRIEF")"
+# JSON with evidence array
+{
+  printf '{\n'
+  printf '  "todo_id": "%s",\n' "$TODO_ID"
+  printf '  "title": %s,\n' "$(printf '%s' "$TITLE" | python3 -c 'import json,sys;print(json.dumps(sys.stdin.read()))')"
+  printf '  "child_instant": "%s",\n' "$CHILD"
+  printf '  "ws": "%s",\n' "$WS"
+  printf '  "slot": "%s",\n' "$CLAIMED_SLOT"
+  printf '  "golden": "%s",\n' "$GOLDEN"
+  printf '  "tmux": "%s",\n' "$TMUX_SESSION"
+  printf '  "base_instant": "%s",\n' "$BASE"
+  printf '  "brief": "%s",\n' "$BRIEF_ABS"
+  printf '  "dispatched_at": "%s"\n' "$DISPATCHED_AT"
+  printf '}\n'
+} > "$RECORD"
+RECORD_MADE=1
+info "  wrote $RECORD"
+
+# ---- 5. launch the interactive session --------------------------------------
+SEED="You are a dispatched worker for a parallel TODO. Your effort instant is ${CHILD} and your code is checked out here in ${WS} (this is your cwd). Read HANDOFF.md then CHARTER.md in the instant and begin. Follow the charter's RCA-first mandate: run systematic-debugging to produce the RCA (Spark-Java = gold vs Gluten-Velox = actual) BEFORE any fix, then branch on scope. Keep the instant maintained per maintain-workspace; when you finish or hit a decision fork, update HANDOFF.md, park any operator question under a '## Parked decision' block, and transition the instant folder state."
+
+if [ "$NO_LAUNCH" -eq 0 ]; then
+  step "launching interactive tmux session $TMUX_SESSION"
+  tmux new-session -d -s "$TMUX_SESSION" -c "$WS"
+  # send the seeded claude invocation; %q keeps the multi-word prompt a single arg
+  tmux send-keys -t "$TMUX_SESSION" "claude $(printf '%q' "$SEED")" Enter
+  info "  session live. Attach with:  tmux attach -t $TMUX_SESSION"
+else
+  warn "  --no-launch: session NOT started. Start it later with:"
+  info "    tmux new-session -d -s $TMUX_SESSION -c $WS"
+  info "    tmux send-keys -t $TMUX_SESSION \"claude $(printf '%q' "$SEED")\" Enter"
+fi
+
+SUCCESS=1
+echo
+step "DISPATCHED ${c_grn}${TODO_ID}${c_rst}"
+info "  workspace : $WS (slot $CLAIMED_SLOT)"
+info "  instant   : $CHILD"
+info "  record    : $RECORD"
+info "  attach    : tmux attach -t $TMUX_SESSION"
