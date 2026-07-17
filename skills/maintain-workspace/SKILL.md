@@ -77,7 +77,7 @@ digraph new_op {
 - **Parallel siblings** fork off a *shared* base, so name that base via `--from`: three features off a completed `toyExample` are all `07181613-…-append-featureN`, not chained onto each other. With no `--from`, `new` forks off the single latest instant — which chains, not branches.
 - Forking = create the child folder under `--base`, bootstrap its canonical files from templates, and carry forward `Setup to begin with` from the base's `STATE`/end state. `base_instant` = the base's `curr_instant` (a timestamp — survives the base's later renames).
 
-**`compact`** — fold complete instants into one. `--instants <instantA,instantB,…>` is **mandatory** (elicit it in chat if absent). Create `main-<now>-complete-compact-<name>/` under `--base`, write `COMPACTED.md` (below), and consolidate CHARTER/STATE/RUNBOOK/evidence. **Consumed instants stay on disk untouched.**
+**`compact`** — fold instants into one. `--instants <instantA,instantB,…>` is **mandatory** (elicit it in chat if absent). Create `main-<now>-inflight-compact-<name>/` under `--base` (**born `inflight`** — renamed to `…-complete-compact-…` once every merged AC is proven on the stack), write `COMPACTED.md` (Compaction section below + full recipe in `compaction.md`), and consolidate CHARTER/STATE/RUNBOOK/evidence. Inputs should be `complete`; an `inflight` input may be folded but its unmet ACs merge in as open. **Consumed instants stay on disk untouched.**
 
 ## The Four Invariants (hold *within* every instant)
 
@@ -99,7 +99,7 @@ Plus two register rules: **registers append, never rewrite** (decisions/issues/a
   DECISIONS.md    ← DURABLE. dated decision log + rationale (D-1, D-2, …)
   ISSUES.md       ← DURABLE. append-only register; ONE SUB-SECTION PER ISSUE (Symptom/Root cause/Action taken/Status) — not a table
   ASSUMPTIONS.md  ← DURABLE. unverified beliefs: OPEN/VERIFIED/REFUTED/SANCTIONED/DEFERRED
-  COMPACTED.md    ← compact instants ONLY. included instants · merged acceptance · compacted Setup-to-end-up-with
+  COMPACTED.md    ← compact instants ONLY. included instants · one stacked PR chain · merged acceptance (all MET) · evidence disposition (regen | carried+why) · lingering-issue reconciliation (open|addressed|transformed) · compacted Setup-to-end-up-with (see compaction.md)
   investigations/ ← one subfolder per deep dive: <topic>/{analysis,validation,callstack}.md
   evidence/       ← captured proof (NOT /tmp). evidence/INDEX.md maps criterion→artifact→source→regenerate
   plans/ specs/   ← superpowers plan & spec docs (existing convention)
@@ -138,13 +138,14 @@ The charter is the anti-re-paste card. It is organized as the instant's lifecycl
 
 ## Compaction
 
-When several complete instants become one deliverable, `compact` folds them into `main-<now>-complete-compact-<name>/`. Beyond consolidating STATE/RUNBOOK/evidence, it MUST carry `COMPACTED.md` metadata so the fold is auditable:
+When several instants become one deliverable, `compact` folds them into `main-<now>-inflight-compact-<name>/` — **born `inflight`**, renamed to `…-complete-compact-…` only once every merged AC is proven on the stack. Compaction **stacks existing work — it is not new feature dev**: you fork the inputs' PRs into a single chain and re-prove them together, you do not build new behavior. It MUST satisfy a **four-part contract**, recorded in `COMPACTED.md` so the fold is auditable:
 
-- **Included instants** — the exact folder names consumed (e.g. `07181613-07191011-complete-append-addfeature1`, `…addfeature2`, `…addfeature3`).
-- **Merged acceptance criteria** — the **union** of the inputs' criteria by default. A cold reader sees every promise the compact now owns.
-- **Compacted "Setup to end up with"** — the consolidated deliverables plus a **single stack whose setup re-derives all evidence for the merged criteria**. The whole point: one instant that proves everything its inputs proved, runnable with trivial effort.
+1. **One stacked PR chain (per repo).** For inputs whose PRs live in the **same repo**, fork and restack them on top of each other into a **single chain** (`base → feature1 → feature2 → …`) — one reviewable stack, not N parallel branches. The compacted `STATE.md` PR table reflects that chain; note the restack base and any rebase fix-ups.
+2. **Every merged acceptance criterion is MET.** The compact owns the **union** of the inputs' ACs, and each must be *proven on the compacted stack*, not merely listed. A criterion with no passing proof on the new stack blocks the compact.
+3. **Evidence is regenerated or carried-over-with-justification.** For each merged criterion, either **regenerate** its evidence on the compacted stack (per invariant 4) or **carry the original artifact over WITH an explicit justification** that it still holds on the new stack (byte-identical PR, or a static code-independent RCA). A rebase fix-up or a cross-repo/native rebuild (cache-MISS) voids byte-identical carry-over — runtime proofs must be regenerated. Silent reuse of stale evidence is not allowed.
+4. **Every lingering issue / follow-up is reconciled.** Inputs marked `complete` may carry open concerns in their `ISSUES.md` / `HANDOFF.md`. Examine **all** of them against the new stack; each resolves to exactly one of: **remains-open** (still open — we only stacked PRs, no new dev), **addressed** (closed by another input's PR, or trivial and handled inline), or **transformed** (partly addressed / became a different follow-up, with what remains). Nothing is dropped silently; `remains-open` and `transformed` items also become live sub-sections in the compact's `ISSUES.md`.
 
-Consumed instants remain on disk as history.
+The compacted **`RUNBOOK.md` stays self-contained** — one build + one validation run re-derives ALL evidence for the merged criteria. Consumed instants remain on disk as history. **Full recipe + the required `COMPACTED.md` slots: see `compaction.md` in this skill directory.**
 
 ## When the Deliverable Is a Validated Capability (not just a fix)
 
@@ -192,7 +193,11 @@ If a reviewer can't answer *delivered / how-built / how-proven / how-to-rerun* f
 | Charter distilled scope but dropped the partner's words | Keep the **first 3 raw prompts** verbatim in CHARTER. |
 | Issues crammed into a table | One sub-section per issue: Symptom / Root cause / Action taken / Status. |
 | Proof logs in `/tmp` | `evidence/<date>-<name>.log`, referenced by relative path. |
-| Compact instant with no record of what it folded | `COMPACTED.md`: included instants · union acceptance · compacted Setup-to-end-up-with. |
+| Compact instant with no record of what it folded | `COMPACTED.md`: included instants · one stacked PR chain · union acceptance (all MET) · evidence disposition · lingering-issue reconciliation. See compaction.md. |
+| Compact leaves inputs' PRs as N parallel branches | Fork & restack same-repo PRs into ONE chain (`base → f1 → f2 → …`); STATE table reflects the chain. |
+| Merged AC marked done because an input once proved it | Re-prove each merged AC **on the compacted stack** — an input's isolated proof doesn't cover the restack. |
+| Input evidence reused with no note | Regenerate on the stack, OR carry over with an explicit justification (why it still holds) in the disposition table. |
+| An input's open issue / follow-up vanishes in the compact | Reconcile EVERY concern to remains-open · addressed · transformed; carry open/transformed ones into the compact's ISSUES.md. |
 | Recording resume uuid but not the workspace folder | Record both — uuid alone resumes onto the wrong tree. |
 | `evidence/` is an unlabeled pile of logs | `evidence/INDEX.md`: criterion → artifact → source → regenerate. |
 | Spinning up `CAPABILITIES.md`/`MODES.md`/`STATUS.md` | Fold into RUNBOOK / `evidence/INDEX.md` / STATE. One fact, one home. |
