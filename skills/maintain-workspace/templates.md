@@ -116,13 +116,16 @@ self-review current as evidence accrues.
 # <Effort> — STATE   (what code where + how each artifact was built & tested)
 Updated: <date>
 
-## PR / branch stack
-| Repo | Branch | Tip githash | PR (full URL) | CI status (as of) | Contents |
-|------|--------|-------------|---------------|-------------------|----------|
-| gluten-internal | mor_productionization | c879c42da | [#360](https://github.com/<org>/gluten-internal/pull/360) | green 2026-06-15 ([run 27443719426](https://github.com/<org>/gluten-internal/actions/runs/27443719426)) | … |
-| velox-internal  | mor_productionization | … | [#128](https://github.com/<org>/velox-internal/pull/128) | … | … |
+## PR / branch stack   (REQUIRED slot — must exist even for a single PR; HANDOFF links here, never re-pastes)
+| Repo | Branch | Tip githash | PR (full-URL link) | CI (PR checks page → latest run) | Contents |
+|------|--------|-------------|--------------------|----------------------------------|----------|
+| gluten-internal | mor_productionization | c879c42da | [#360](https://github.com/<org>/gluten-internal/pull/360) | [#360 checks](https://github.com/<org>/gluten-internal/pull/360/checks) — green 2026-06-15 ([run 27443719426](https://github.com/<org>/gluten-internal/actions/runs/27443719426)) | … |
+| velox-internal  | mor_productionization | …         | [#128](https://github.com/<org>/velox-internal/pull/128) | [#128 checks](https://github.com/<org>/velox-internal/pull/128/checks) — pending | … |
 
-Record every external reference as a **full URL** (markdown link) — never a bare `#360` or run-id.
+**REQUIRED cell format — a cell with a bare id is INCOMPLETE:**
+- **PR** = a full-URL markdown link `[#N](…/pull/N)`. A branch with no PR yet → write `branch only (no PR yet)`, never blank and never a bare `#N`.
+- **CI** = the PR's **checks page** link `[#N checks](…/pull/N/checks)` (so every CI run is reachable *from its PR*), then the dated conclusion, optionally the specific `[run <id>](…/actions/runs/<id>)`. Never a bare run-id.
+- This is the ONE home for the stack. `HANDOFF.md`'s "PR stack" line links here; do not paste the table twice.
 
 ## How each artifact was built & tested (REVIEWER GUIDE — note steps as you dev, distil over time)
 The narrative a reviewer needs — NOT the commands (those are RUNBOOK; link to them). Start rough as you
