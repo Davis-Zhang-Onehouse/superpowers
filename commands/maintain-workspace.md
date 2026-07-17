@@ -28,11 +28,13 @@ Resume the effort or fork a new instant, per the skill's `new` flow. All instant
 
 ## If op = `compact`
 
-Fold the instants in `--instants` into one, per the skill's Compaction section (all under `--base`):
+Fold the instants in `--instants` into one, per the skill's Compaction section and `compaction.md` (all under `--base`). Compaction **stacks existing work — it is not new feature dev**:
 
-1. Verify each listed instant is `…-complete-…` (warn on any that isn't).
-2. Create `<base>/main-<MMDDHHMM-now>-complete-compact-<name>/`.
-3. Write `COMPACTED.md` from the template: **included instants**, **merged acceptance criteria (union of inputs')**, **compacted "Setup to end up with"** with a single stack that re-derives all evidence for the merged criteria.
-4. Consolidate STATE / RUNBOOK / evidence/INDEX.md. **Leave the consumed instants on disk untouched.**
+1. Verify each listed instant is `…-complete-…`. **Warn on any that isn't** — an `inflight` input may still be folded, but its unmet acceptance criteria merge in as **open** ACs the compact must later prove on the stack.
+2. Create `<base>/main-<MMDDHHMM-now>-inflight-compact-<name>/` — **born `inflight`**; rename to `…-complete-compact-…` only once every merged AC is proven on the stack (the rename IS the state transition). Bootstrap the canonical files.
+3. **Fork & stack the inputs' PRs** — for same-repo PRs, restack them into a **single chain** (`base → f1 → f2 → …`); record the chain (restack base + rebase fix-ups) in STATE.md.
+4. Write `COMPACTED.md` from the template in `compaction.md`, satisfying the **four-part contract**: **① the stacked PR chain** · **② merged acceptance criteria** (union — **each proven on the compacted stack**, not just listed) · **③ evidence disposition** (each criterion REGENERATED, or CARRIED-OVER with an explicit justification) · **④ lingering-issue reconciliation** (every open concern from each input's ISSUES.md/HANDOFF.md → **remains-open | addressed | transformed**, nothing dropped) · compacted "Setup to end up with".
+5. Consolidate STATE / RUNBOOK / evidence/INDEX.md. **RUNBOOK stays self-contained** — one build + one validation run re-derives all evidence for the merged criteria. **Leave the consumed instants on disk untouched.**
+6. Carry every `remains-open` / `transformed` issue into the compact's ISSUES.md as a live sub-section (origin noted).
 
 Follow the Four Invariants and the maintenance discipline throughout. End by updating HANDOFF.md.

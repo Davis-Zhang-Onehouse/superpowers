@@ -257,31 +257,8 @@ existing Build/Run sections — not a separate doc.
 
 ## `COMPACTED.md` — metadata for a `…-compact-…` instant (compact instants ONLY)
 
-Written by `/maintain-workspace compact`. It makes the fold auditable: what was
-folded in, every promise the compact now owns, and the single stack that re-proves them.
-
-```markdown
-# <name> — COMPACTED   (fold record for main-<curr_instant>-complete-compact-<name>)
-Updated: <date>
-
-## Included instants (folded into this one; originals kept on disk)
-- 07181613-07191011-complete-append-addfeature1
-- 07181613-07191013-complete-append-addfeature2
-- 07181613-07191016-complete-append-addfeature3
-
-## Merged acceptance criteria (union of the above; see CHARTER.md for proof + self-review)
-- [ ] AC-1 <from addfeature1>
-- [ ] AC-2 <from addfeature2>
-- [ ] AC-3 <from addfeature3>
-
-## Compacted "Setup to end up with"
-- Consolidated deliverables: <the merged PR stack, images, jars — links; superseding the
-  per-feature handoffs>
-- Single reproducible stack: <one build + one validation run (see RUNBOOK.md) that
-  re-derives ALL evidence for the merged criteria — a few cmds + grep, at most>
-- Evidence: every merged criterion has a row in evidence/INDEX.md pointing at the
-  consolidated artifact and how to regenerate it.
-```
-
-The merged criteria default to the **union** of the inputs'. If the partner narrows or
-supersedes some, note which and why in DECISIONS.md — don't silently drop a promise.
+Written by `/maintain-workspace compact`. The full compaction recipe **and** the
+`COMPACTED.md` template (with its four required slots — stacked PR chain · merged
+acceptance all-MET · evidence disposition · lingering-issue reconciliation) live in
+**`compaction.md`** in this skill directory. Copy the template from there — it is
+kept in one home so the recipe and its slots never drift.
