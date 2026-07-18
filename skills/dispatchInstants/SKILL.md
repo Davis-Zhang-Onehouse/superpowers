@@ -85,7 +85,7 @@ fleet view from that. Partial completions with follow-ups stay in the TODO's own
   resolves `duplicate-workspace.sh` as `../duplicateWorkSpace/…` first, so no machine path needed).
 - Entry points: `bin/{pdispatch,wspool,dispatch-todo,dispatch-board,duplicate-workspace}` — all
   **relative** symlinks, so they survive a checkout at any path.
-- Self-tests: `skills/dispatchInstants/tests/{wspool-concurrency,dispatch-smoke,board-smoke}.sh`
+- Self-tests: `skills/dispatchInstants/tests/{wspool-concurrency,dispatch-smoke,board-smoke,adopt-smoke}.sh`
   — hermetic (temp dirs + stubs), path-independent; run any/all to verify on a fresh checkout.
 
 **On a new machine:** (1) check out the repo; (2) install/enable the superpowers plugin from it
