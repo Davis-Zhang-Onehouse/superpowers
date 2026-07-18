@@ -56,6 +56,8 @@ export WSPOOL_SH="$SKILL/wspool.sh"
 
 # ---- fake base instant + pool ----------------------------------------------
 export POOL_DIR="$ROOT/pool"
+export BOARD_DIR="$ROOT/board"            # global dispatch-record store (D-11); records land here
+RECS_DIR="$BOARD_DIR/records"
 BASEDIR="$ROOT/tasks/effortX"                          # holds instants (siblings)
 BASE="$BASEDIR/main-07152335-complete-append-someBase"
 mkdir -p "$BASE"
@@ -84,9 +86,10 @@ grep -q 'RCA-FIRST'       "$CHILD/CHARTER.md" && echo "  ok: CHARTER carries RCA
 grep -q 'Spark-Java=GOLD' "$CHILD/CHARTER.md" && echo "  ok: CHARTER frames gold-vs-actual" || { echo "  XX: CHARTER missing gold framing"; FAILED=1; }
 grep -q 'RANKING.md#1'    "$CHILD/CHARTER.md" && echo "  ok: CHARTER carries evidence pointers" || { echo "  XX: evidence pointers missing"; FAILED=1; }
 grep -q 'int4 overflow'   "$CHILD/CHARTER.md" && echo "  ok: CHARTER carries the brief" || { echo "  XX: brief missing"; FAILED=1; }
-# dispatch record
-REC="$(ls "$BASE"/dispatch/*.json 2>/dev/null | head -1)"
-checkf "dispatch record json" "$REC"
+# dispatch record — now in the machine-global store, NOT under the base
+checknf "no per-base dispatch dir created" "$BASE/dispatch"
+REC="$(ls "$RECS_DIR"/*.json 2>/dev/null | head -1)"
+checkf "dispatch record json (global store)" "$REC"
 python3 -c "import json,sys; d=json.load(open('$REC')); assert d['ws']=='$WS'; assert d['child_instant']=='$CHILD'; assert d['tmux'].startswith('dt-'); print('  ok: record JSON valid + fields match')" || { echo "  XX: record json invalid"; FAILED=1; }
 # duplicate invoked with golden -> ws --force
 dupcall=$(grep -c -- "--force" "$DUP_LOG" 2>/dev/null || echo 0)
@@ -112,10 +115,10 @@ check "lease count unchanged (early lease released)" "$leased2" "1"
 
 echo "== Test 3: rollback-late — tmux launch fails => child+record+lease all removed =="
 : > "$TMUX_LOG"
-recs_before=$(ls "$BASE"/dispatch/*.json 2>/dev/null | wc -l | tr -d ' ')
+recs_before=$(ls "$RECS_DIR"/*.json 2>/dev/null | wc -l | tr -d ' ')
 FAIL_TMUX=1 "$DISPATCH" --base "$BASE" --title "will fail launch" --brief - --profile ansi --golden "$GOLDEN" --no-duplicate <<<"brief" >/dev/null 2>&1
 rc3=$?
-recs_after=$(ls "$BASE"/dispatch/*.json 2>/dev/null | wc -l | tr -d ' ')
+recs_after=$(ls "$RECS_DIR"/*.json 2>/dev/null | wc -l | tr -d ' ')
 child_late=$(find "$BASEDIR" -maxdepth 1 -name '*-willFailLaunch' -type d | wc -l | tr -d ' ')
 leased3=$(find "$POOL_DIR/leases" -mindepth 1 -maxdepth 1 -type d | wc -l | tr -d ' ')
 check "dispatch exited non-zero on launch failure" "$([ $rc3 -ne 0 ] && echo yes || echo no)" "yes"

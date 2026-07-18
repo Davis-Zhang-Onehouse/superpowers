@@ -47,6 +47,8 @@ STUB
 chmod +x "$BIN"/tmux "$BIN"/claude
 export WSPOOL_SH="$SKILL/wspool.sh"
 export POOL_DIR="$ROOT/pool"
+export BOARD_DIR="$ROOT/board"            # global dispatch-record store (D-11)
+REG="$BOARD_DIR/REGISTRY.md"
 
 BASEDIR="$ROOT/tasks/eff"
 BASE="$BASEDIR/main-07152335-complete-append-someBase"; mkdir -p "$BASE"
@@ -68,15 +70,14 @@ CHILD1="$(mkchild someBase-07160000-inflight-append-gapAlpha)"
 WS1="$ROOT/wsA"; mkdir -p "$WS1"; "$SKILL"/wspool.sh add "$WS1" >/dev/null
 out1="$(FAKE_ALIVE=1 "$ADOPT" --base "$BASE" --instant "$CHILD1" --slot "$WS1" --resume uuid-1 2>&1)" \
   || { echo "$out1"; echo "  XX: adopt errored"; FAILED=1; }
-REC1="$BASE/dispatch/gapAlpha.json"
-checkf "dispatch record written" "$REC1"
+REC1="$BOARD_DIR/records/gapAlpha.json"
+checkf "dispatch record written (global store)" "$REC1"
 python3 -c "import json;d=json.load(open('$REC1'));assert d['adopted'] is True;assert d['slot']=='wsA';assert d['child_instant'].endswith('gapAlpha');assert d['resume_session']=='uuid-1';print('  ok: record adopted:true + slot + child + resume match')" || { echo "  XX: record fields wrong"; FAILED=1; }
 leased=$(find "$POOL_DIR/leases" -mindepth 1 -maxdepth 1 -type d | wc -l | tr -d ' ')
 check "slot leased after adopt" "$leased" "1"
 hasnt "live session NOT relaunched (no new-session)" "new-session" "$ROOT/tmux.log"
 # board renders it as running, with the slot LEASED and the attach cmd
-REG="$BASE/dispatch/REGISTRY.md"
-FAKE_ALIVE=1 "$BOARD" "$BASE" >/dev/null 2>&1
+FAKE_ALIVE=1 "$BOARD" >/dev/null 2>&1
 has "board lists the adopted TODO" "gapAlpha" "$REG"
 has "board row shows running"      "running"  "$REG"
 has "board row shows LEASED slot"  "wsA: LEASED" "$REG"
@@ -86,7 +87,7 @@ echo "== Test 2: a parked instant renders as PARKED on the board =="
 CHILD2="$(mkchild someBase-07160001-inflight-append-gapBeta parked)"
 WS2="$ROOT/wsB"; mkdir -p "$WS2"; "$SKILL"/wspool.sh add "$WS2" >/dev/null
 FAKE_ALIVE=1 "$ADOPT" --base "$BASE" --instant "$CHILD2" --slot "$WS2" --resume uuid-2 --no-launch >/dev/null 2>&1
-FAKE_ALIVE=1 "$BOARD" "$BASE" >/dev/null 2>&1
+FAKE_ALIVE=1 "$BOARD" >/dev/null 2>&1
 has "board flags the parked TODO" "PARKED" "$REG"
 has "board summary counts 1 parked" "1 parked" "$REG"
 
@@ -96,7 +97,7 @@ CHILD3="$(mkchild someBase-07160002-inflight-append-gapGamma)"
 WS3="$ROOT/wsC"; mkdir -p "$WS3"; "$SKILL"/wspool.sh add "$WS3" >/dev/null
 FAKE_ALIVE=0 "$ADOPT" --base "$BASE" --instant "$CHILD3" --slot "$WS3" --resume uuid-3 >/dev/null 2>&1
 has "dead session was relaunched (new-session)" "new-session" "$ROOT/tmux.log"
-checkf "record still written for relaunched adopt" "$BASE/dispatch/gapGamma.json"
+checkf "record still written for relaunched adopt" "$BOARD_DIR/records/gapGamma.json"
 
 echo
 if [ "$FAILED" -eq 0 ]; then echo "PASS: dispatch-adopt AC (board update: in-place + parked + relaunch)"; exit 0

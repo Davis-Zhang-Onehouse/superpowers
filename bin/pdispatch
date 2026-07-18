@@ -45,8 +45,10 @@ ${b}THE TOOLKIT${r}  ${d}(all on PATH via this repo's bin/)${r}
                                                         board WITHOUT recreating it: claim lease →
                                                         adopt-live-or-relaunch+resume session →
                                                         write record. Idempotent.
-  ${g}pdispatch board${r} <base-instant>                         derived fleet dashboard:
-                                                        running / 🅿 parked / ✅ complete / ✖ abort.
+  ${g}pdispatch board${r}                                        derived fleet dashboard (NO path —
+                                                        global, like 'pool list'): rows grouped by
+                                                        base; running / 🅿 parked / ✅ complete / ✖ abort.
+                                                        Records live in ~/.claude-dispatch-board/.
   ${g}pdispatch doc${r}                                          show the SKILL.md + design spec.
 
 ${b}RELATED SKILLS IT BUILDS ON${r}  ${d}(all in this repo — checkout & go)${r}
@@ -62,7 +64,7 @@ ${b}END-TO-END USE CASE${r}
                 → a real interactive ${b}claude${r} starts in tmux, seeded to run RCA-first, then
                   branch on scope (small→TDD; large→brainstorm→plan→subagents), autonomously,
                   parking a decision only when it genuinely needs you.
-  2. watch:     ${g}pdispatch board <base-instant>${r}
+  2. watch:     ${g}pdispatch board${r}   ${d}# global; no path — shows every base's fleet${r}
   3. answer:    ${g}tmux attach -t dt-<id>${r}   ${d}# only sessions flagged 🅿 PARKED${r}
   4. recycle:   ${g}pdispatch pool release ws5${r}  ${d}# after its TODO is merged; slot re-leases${r}
                 ${g}pdispatch pool reap${r}         ${d}# reclaim a crashed session's slot${r}

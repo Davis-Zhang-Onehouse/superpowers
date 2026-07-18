@@ -9,8 +9,14 @@ every choice here.
 
 | Resource | What | Lifecycle | Registry |
 |---|---|---|---|
-| **Instant** (state) | a maintain-workspace child folder under `operations/tasks/<effort>/` | forked off base; `inflight`→`complete`/`abort` | base instant's `dispatch/` |
+| **Instant** (state) | a maintain-workspace child folder under `operations/tasks/<effort>/` | forked off base; `inflight`→`complete`/`abort` | machine-global `~/.claude-dispatch-board/` (D-11; superseded per-base `dispatch/`) |
 | **Workspace** (code) | one of `~/ws1..ws6`, a pre-built checkout | leased → worked → released → re-leased | machine-global `~/.claude-ws-pool/` |
+
+> **D-11 (2026-07-18):** the dispatch board is now machine-global
+> (`~/.claude-dispatch-board/records/<todo-id>.json` + a single global `REGISTRY.md`), and
+> `dispatch-board.sh` / `pdispatch board` take **no arguments** (like `pool list`); the old
+> per-base-path form errors out. §2b/§5 below describe the original per-base layout — see
+> `2026-07-18-global-dispatch-board-design.md` for the current contract.
 
 A TODO is **one child instant leasing one ws slot**. Instant = permanent context. Slot = recyclable code.
 The base instant is the **bulletin board**: every dispatch and report-back is a file there, so a cold
@@ -30,13 +36,17 @@ base session sees the whole fleet without asking the operator.
 A slot is FREE iff enrolled in `pool` AND `leases/<slot>/` does not exist.
 A lease is STALE iff `leases/<slot>/meta`'s `TMUX` session is not alive (`tmux has-session`).
 
-### 2b. Per-base-instant dispatch dir: `<base-instant>/dispatch/`
+### 2b. Dispatch records — SUPERSEDED by D-11 (now machine-global)
+Original layout was per-base `<base-instant>/dispatch/<todo-id>.json` + `REGISTRY.md`. As of D-11
+records live in the machine-global store and the board is single + global:
 ```
-<base-instant>/
-  dispatch/
-    <todo-id>.json         # IMMUTABLE dispatch record (one writer: dispatch-todo). See 4c.
-    REGISTRY.md            # DERIVED dashboard (phase 3, dispatch-board). Never hand-edited.
+~/.claude-dispatch-board/
+  records/
+    <todo-id>.json         # IMMUTABLE dispatch record (writers: dispatch-todo / dispatch-adopt). See 4c.
+  REGISTRY.md              # DERIVED global dashboard, ALL bases (dispatch-board). Never hand-edited.
 ```
+Hand-authored briefs/reports still live under `<base-instant>/dispatch/` (records reference briefs
+by absolute path); only the `*.json` records + `REGISTRY.md` moved out.
 
 ## 3. Tool ① — `wspool.sh` (the crown jewel; race-safe + crash-safe)
 
@@ -85,7 +95,8 @@ dispatch-todo.sh \
 4. **Fork child instant:** `mkdir` child dir under base; copy canonical files from maintain-workspace
    `templates.md`; **seed** CHARTER (D-8) with title/brief/evidence + RCA-first mandate + scope-branch
    rule; seed HANDOFF (resume header, ws path, session log stub). On failure → release lease, rm child, exit.
-5. **Write dispatch record** `<base>/dispatch/<TODO_ID>.json` (4c).
+5. **Write dispatch record** (4c). Originally `<base>/dispatch/<TODO_ID>.json`; per D-11 now the
+   machine-global `~/.claude-dispatch-board/records/<TODO_ID>.json`.
 6. **Launch** (unless `--no-launch`): `tmux new-session -d -s <TMUX_SESSION> -c <claimed-ws>`, then
    `tmux send-keys` a `claude "<seed prompt>"` invocation (4b). Print attach hint.
 
@@ -108,7 +119,11 @@ Status is NOT stored here (it's derived from child folder-state + HANDOFF, D-5).
 stable mapping the dashboard joins against.
 
 ## 5. Tool ③ — `dispatch-board.sh` (phase 3; fully derived)
-`dispatch-board.sh <base-instant>` → writes `<base>/dispatch/REGISTRY.md`:
+**Per D-11 this is now argument-less and global:** `dispatch-board.sh` (no args) reads
+`~/.claude-dispatch-board/records/*.json` (plus a fallback merge of any legacy
+`<base>/dispatch/*.json` for bases seen in the store), groups rows by base, and writes the single
+global `~/.claude-dispatch-board/REGISTRY.md`. Passing a base path errors out. Per-row derivation is
+unchanged from the original phase-3 description below:
 for each `<todo-id>.json`, resolve the child instant's current folder (glob by name stem — the
 `-inflight-`/`-complete-`/`-abort-` suffix moved when the child `mv`'d it), read its state + the
 `## Parked decision` block if present, join the ws lease from `wspool status`, and render a row:
