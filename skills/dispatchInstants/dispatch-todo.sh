@@ -45,8 +45,26 @@ warn() { printf '%sWARN:%s %s\n'  "$c_yel" "$c_rst" "$*" >&2; }
 info() { printf '%s\n' "$*"; }
 step() { printf '%s==>%s %s\n' "$c_bold" "$c_rst" "$*"; }
 
+# render_template <template-file>  ->  stdout, with {{VAR}} placeholders filled.
+# Unknown {{...}} placeholders are left literal. python3 (already a dep) avoids
+# sed-escaping hazards for multi-line brief/evidence and slash-heavy paths.
+render_template() {
+  local tpl="$1"
+  TPL_TITLE="$TITLE" TPL_TODO_ID="$TODO_ID" TPL_CHILD="$CHILD" \
+  TPL_CHILD_NAME="$CHILD_NAME" TPL_WS="$WS" TPL_SLOT="$CLAIMED_SLOT" \
+  TPL_GOLDEN="$GOLDEN" TPL_BASE_NAME="$BASE_NAME" TPL_BASE_CURR="$BASE_CURR" \
+  TPL_TMUX_SESSION="$TMUX_SESSION" TPL_TODAY="$TODAY" \
+  TPL_BRIEF="$BRIEF_TEXT" TPL_EVIDENCE="$EVI_MD" \
+  python3 - "$tpl" <<'PY'
+import os, re, sys
+tpl = open(sys.argv[1]).read()
+vars = {k[4:]: v for k, v in os.environ.items() if k.startswith("TPL_")}
+sys.stdout.write(re.sub(r"\{\{([A-Z_]+)\}\}", lambda m: vars.get(m.group(1), m.group(0)), tpl))
+PY
+}
+
 # ---- args -------------------------------------------------------------------
-BASE="" TITLE="" BRIEF="" GOLDEN="" SLOT="" NO_LAUNCH=0 NO_DUP=0
+BASE="" TITLE="" BRIEF="" GOLDEN="" SLOT="" PROFILE="" NO_LAUNCH=0 NO_DUP=0
 declare -a EVIDENCE=()
 while [ "$#" -gt 0 ]; do
   case "$1" in
@@ -55,6 +73,7 @@ while [ "$#" -gt 0 ]; do
     --brief)       BRIEF="$2"; shift 2;;
     --golden)      GOLDEN="$2"; shift 2;;
     --slot)        SLOT="$2"; shift 2;;
+    --profile)     PROFILE="$2"; shift 2;;
     --evidence)    EVIDENCE+=("$2"); shift 2;;
     --no-launch)   NO_LAUNCH=1; shift;;
     --no-duplicate) NO_DUP=1; shift;;
@@ -79,6 +98,32 @@ fi
 [ -n "$GOLDEN" ] || { err "no --golden and no ${POOL_DIR:-$HOME/.claude-ws-pool}/golden file"; exit 2; }
 GOLDEN="$(realpath -m -- "$GOLDEN")"
 [ -d "$GOLDEN" ] || { err "golden workspace does not exist: $GOLDEN"; exit 2; }
+
+# ---- resolve profile (required; no silent default) --------------------------
+# The child CHARTER + interactive SEED come from a profile dir (charter.md +
+# seed.txt [+ optional handoff.md]). Selection order: --profile, else
+# $DISPATCH_PROFILE, else ${POOL_DIR:-~/.claude-ws-pool}/profile. If none set,
+# error (never silently pick one). A value with a slash (or leading '.') is a
+# path; a bare word is a name under this skill's profiles/ dir.
+PROFILES_DIR="$HERE/profiles"
+PROFILE_SEL="$PROFILE"
+[ -n "$PROFILE_SEL" ] || PROFILE_SEL="${DISPATCH_PROFILE:-}"
+if [ -z "$PROFILE_SEL" ]; then
+  pf="${POOL_DIR:-$HOME/.claude-ws-pool}/profile"
+  [ -f "$pf" ] && PROFILE_SEL="$(head -1 "$pf")"
+fi
+if [ -z "$PROFILE_SEL" ]; then
+  err "no profile selected. Pass --profile <name|path>, set \$DISPATCH_PROFILE, or write a name/path to ${POOL_DIR:-$HOME/.claude-ws-pool}/profile"
+  { echo "available shipped profiles:"; ls "$PROFILES_DIR" 2>/dev/null | sed 's/^/  - /'; } >&2
+  exit 2
+fi
+case "$PROFILE_SEL" in
+  */*|.*) PROFILE_DIR="$(realpath -m -- "$PROFILE_SEL")";;   # path
+  *)      PROFILE_DIR="$PROFILES_DIR/$PROFILE_SEL";;          # bare name
+esac
+[ -d "$PROFILE_DIR" ]             || { err "profile dir not found: $PROFILE_DIR"; exit 2; }
+[ -f "$PROFILE_DIR/charter.md" ] || { err "profile missing charter.md: $PROFILE_DIR"; exit 2; }
+[ -f "$PROFILE_DIR/seed.txt" ]   || { err "profile missing seed.txt: $PROFILE_DIR"; exit 2; }
 
 # ---- derive names (maintain-workspace grammar) ------------------------------
 # The instant name is 5 fields split on '-': <base>-<curr>-<state>-<opType>-<instantName>.
@@ -168,56 +213,12 @@ for e in "${EVIDENCE[@]}"; do EVI_MD+="  - $e"$'\n'; done
 [ -n "$EVI_MD" ] || EVI_MD="  - (none supplied)"$'\n'
 TODAY="$(date +%Y-%m-%d)"
 
-cat > "$CHILD/CHARTER.md" <<EOF
-# ${TITLE} — CHARTER   (durable; edit deliberately)
-Instant: ${CHILD_NAME}
-Updated: ${TODAY} | Status: DURABLE
-Dispatched by parallelDispatch from base instant: ${BASE_NAME}
+render_template "$PROFILE_DIR/charter.md" > "$CHILD/CHARTER.md"
 
-## Goal (e2e)
-${TITLE}
-
-## Setup to begin with
-- Base instant: ${BASE_CURR}  (forked from ${BASE_NAME})
-- Workspace: ${WS}  (slot ${CLAIMED_SLOT}, leased; duplicated from golden ${GOLDEN} — pre-built, no rebuild)
-
-## First raw prompt / brief (the dispatch)
-${BRIEF_TEXT}
-
-## Evidence pointers from the base (start your RCA here)
-${EVI_MD}
-## Acceptance criteria (NL → executable proof → self-review)
-
-### AC-1 RCA delivered (RCA-FIRST — do this before ANY fix)
-- [ ] Statement (NL): investigations/<topic>/analysis.md documents the **Spark-Java (gold) vs
-      Gluten-Velox (actual)** behavioral diff for this gap, with **cited real artifacts**
-      captured into evidence/ (NOT /tmp), and a reproducible command.
-- Proof (executable): the analysis doc + evidence/INDEX.md rows exist and cite a runnable repro
-  (a test/log grep) that a cold reader can re-run.
-- Self-review: <pending — fill as the RCA accrues>
-
-### AC-2 Resolution (branch on scope AFTER the RCA)
-- [ ] Statement (NL): either a green fix (PR link + test/CI proof) OR — if scope is large —
-      a written plan (specs/ + plans/) executed via subagent-driven-development.
-- Proof (executable): green test/CI run (linked, full URL) OR the plan doc + its execution evidence.
-- Self-review: <pending>
-
-## Setup to end up with (the handoff)
-- Deliverables: RCA doc (investigations/), then fix PR or plan+execution; evidence/INDEX.md rows.
-- Report-back: transition this instant's folder state (inflight→complete/abort) at session end;
-  if you need the operator, park the question under a '## Parked decision' block in HANDOFF.md.
-
-## Standing constraints / rules
-- **RCA-FIRST:** run superpowers:systematic-debugging to produce the RCA before any code change.
-  Frame everything as Spark-Java = GOLD (expected) vs Gluten-Velox = ACTUAL.
-- **Scope branch (after RCA):** small/localized/clear → test-driven-development directly;
-  large/multi-file/ambiguous → brainstorming → writing-plans → subagent-driven-development.
-- **Autonomous-first:** run as far as you can without the operator; stop and PARK only at a real
-  fork (ambiguous requirement, fix-vs-plan you can't resolve, or a blocker).
-- Maintain this instant per superpowers:maintain-workspace throughout (evidence in evidence/, not /tmp).
-EOF
-
-cat > "$CHILD/HANDOFF.md" <<EOF
+if [ -f "$PROFILE_DIR/handoff.md" ]; then
+  render_template "$PROFILE_DIR/handoff.md" > "$CHILD/HANDOFF.md"
+else
+  cat > "$CHILD/HANDOFF.md" <<EOF
 Updated: ${TODAY} | Status: LIVE SNAPSHOT (rots)
 
 # ${TITLE} — HANDOFF   (read me first)
@@ -229,17 +230,17 @@ Updated: ${TODAY} | Status: LIVE SNAPSHOT (rots)
 - Dispatched: ${TODAY} from base ${BASE_NAME} (tmux session: ${TMUX_SESSION})
 
 ## Where we are (one paragraph)
-Freshly dispatched. Nothing done yet. Next: run the RCA-first mandate (see CHARTER AC-1).
+Freshly dispatched. Nothing done yet. Next: follow the CHARTER acceptance criteria.
 
 ## Next action
-1. Read CHARTER.md. Run superpowers:systematic-debugging on the gap → RCA in investigations/.
-2. After the RCA, branch on scope (CHARTER standing rules) and proceed.
+1. Read CHARTER.md and begin at its first acceptance criterion.
+2. Keep this instant maintained per superpowers:maintain-workspace.
 
 ## Parked decision (for the operator — empty unless I need you)
 <none>
 
 ## Live snapshot (volatile — dated)
-- In flight: RCA not started.
+- In flight: not started.
 
 ## Session log
 | Date | Workspace | Resume cmd | Did what |
@@ -251,6 +252,7 @@ Freshly dispatched. Nothing done yet. Next: run the RCA-first mandate (see CHART
 - Decisions → DECISIONS.md · Issues → ISSUES.md · Assumptions → ASSUMPTIONS.md
 - RCA / deep dives → investigations/  · Proof → evidence/INDEX.md
 EOF
+fi
 
 # minimal canonical stubs (maintain-workspace invariants; the session fleshes them out)
 printf '# %s — STATE\nUpdated: %s\n\n| Repo | Branch | Tip | PR | CI | Notes |\n|---|---|---|---|---|---|\n| (fill as work lands) | | | | | |\n' "$TITLE" "$TODAY" > "$CHILD/STATE.md"
@@ -285,18 +287,23 @@ RECORD_MADE=1
 info "  wrote $RECORD"
 
 # ---- 5. launch the interactive session --------------------------------------
-SEED="You are a dispatched worker for a parallel TODO. Your effort instant is ${CHILD} and your code is checked out here in ${WS} (this is your cwd). Read HANDOFF.md then CHARTER.md in the instant and begin. Follow the charter's RCA-first mandate: run systematic-debugging to produce the RCA (Spark-Java = gold vs Gluten-Velox = actual) BEFORE any fix, then branch on scope. Keep the instant maintained per maintain-workspace; when you finish or hit a decision fork, update HANDOFF.md, park any operator question under a '## Parked decision' block, and transition the instant folder state."
+SEED="$(render_template "$PROFILE_DIR/seed.txt")"
 
 if [ "$NO_LAUNCH" -eq 0 ]; then
   step "launching interactive tmux session $TMUX_SESSION"
   tmux new-session -d -s "$TMUX_SESSION" -c "$WS"
-  # send the seeded claude invocation; %q keeps the multi-word prompt a single arg
-  tmux send-keys -t "$TMUX_SESSION" "claude $(printf '%q' "$SEED")" Enter
+  # send the seeded claude invocation; %q keeps the multi-word prompt a single arg.
+  # --remote-control (named after the tmux session) is REQUIRED for all dispatched
+  # sessions so they can be driven remotely; the explicit name keeps the SEED prompt
+  # from being consumed as the optional [name] arg.
+  # --permission-mode auto: dispatched workers must run autonomously (the config-dir
+  # default is "manual", which stalls unattended sessions on the first tool prompt).
+  tmux send-keys -t "$TMUX_SESSION" "claude --permission-mode auto --remote-control $(printf '%q' "$TMUX_SESSION") $(printf '%q' "$SEED")" Enter
   info "  session live. Attach with:  tmux attach -t $TMUX_SESSION"
 else
   warn "  --no-launch: session NOT started. Start it later with:"
   info "    tmux new-session -d -s $TMUX_SESSION -c $WS"
-  info "    tmux send-keys -t $TMUX_SESSION \"claude $(printf '%q' "$SEED")\" Enter"
+  info "    tmux send-keys -t $TMUX_SESSION \"claude --permission-mode auto --remote-control $(printf '%q' "$TMUX_SESSION") $(printf '%q' "$SEED")\" Enter"
 fi
 
 SUCCESS=1
