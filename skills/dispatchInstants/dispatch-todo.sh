@@ -144,8 +144,12 @@ BASE_CURR="$(printf '%s' "$BASE_NAME" | cut -d- -f2)"  # field 2 = curr_instant 
 CHILD_NAME="${BASE_CURR}-${NOW}-inflight-append-${INAME}"
 CHILD="$BASE_DIR/$CHILD_NAME"
 TMUX_SESSION="dt-${TODO_ID}"
-DISPATCH_DIR="$BASE/dispatch"
-RECORD="$DISPATCH_DIR/${TODO_ID}.json"
+# Dispatch records live in the machine-global board store (D-11), NOT under the base.
+# BOARD_DIR is env-overridable (default ~/.claude-dispatch-board) for hermetic tests,
+# mirroring POOL_DIR for the pool.
+BOARD_DIR="${BOARD_DIR:-$HOME/.claude-dispatch-board}"
+RECORDS_DIR="$BOARD_DIR/records"
+RECORD="$RECORDS_DIR/${TODO_ID}.json"
 
 # golden guard (D-3): golden must be OUTSIDE the pool and != the slot we'll claim
 if [ -n "$SLOT" ] && [ "$(basename "$GOLDEN")" = "$(basename "$SLOT")" ]; then
@@ -263,9 +267,9 @@ printf '# ASSUMPTIONS   (append, do not rewrite)\nUpdated: %s\n\n| ID | Assumpti
 printf '# Evidence index\nUpdated: %s\n\n| # | Criterion | Artifact | Shows | Source |\n|---|---|---|---|---|\n' "$TODAY" > "$CHILD/evidence/INDEX.md"
 info "  child instant bootstrapped with RCA-first seeded CHARTER"
 
-# ---- 4. write immutable dispatch record on the base -------------------------
-step "recording dispatch on base"
-mkdir -p "$DISPATCH_DIR"
+# ---- 4. write immutable dispatch record into the global board store ---------
+step "recording dispatch (global board store)"
+mkdir -p "$RECORDS_DIR"
 DISPATCHED_AT="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
 BRIEF_ABS="$([ "$BRIEF" = "-" ] && echo "(stdin)" || realpath -m -- "$BRIEF")"
 # JSON with evidence array

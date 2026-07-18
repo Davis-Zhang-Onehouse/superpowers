@@ -15,16 +15,17 @@ model) + `duplicateWorkSpace` (fast, no-rebuild checkouts).
 - **Instant** = state (charter / HANDOFF / RCA / evidence). Forked off the base; permanent history.
 - **Workspace** = a `~/wsN` code checkout. Leased → worked → released → re-leased. Recyclable.
 
-A TODO = one child instant **leasing** one ws slot. The **base instant is the bulletin board**: every
-dispatch (`dispatch/<id>.json`) and every report-back (child folder-state + HANDOFF) lives there, so a
-cold base session sees the whole fleet without asking you.
+A TODO = one child instant **leasing** one ws slot. Dispatch records live in a **machine-global board
+store** (`~/.claude-dispatch-board/records/<id>.json`, like the pool at `~/.claude-ws-pool/`); each
+report-back is the child's own folder-state + HANDOFF. `pdispatch board` (no path) derives the whole
+fleet across every base from that store, so any session sees all in-flight work without asking you.
 
 ## The three tools
 | Tool | Job |
 |------|-----|
 | `wspool.sh` | machine-global, **race-safe** (atomic `mkdir` lease) + **crash-safe** (dead-tmux reap) lease manager over an **opt-in** set of ws slots. |
 | `dispatch-todo.sh` | one command: claim slot → duplicate golden (no rebuild) → fork child instant + seed an **RCA-first CHARTER** → launch interactive tmux `claude` → record the dispatch. Rolls back cleanly on any failure. |
-| `dispatch-board.sh` | the fleet dashboard — fully **derived** from records + child folder-states + leases (running / parked / complete / abort). Never hand-edited. |
+| `dispatch-board.sh` | the fleet dashboard — takes **no arguments** (global, like `pool list`); fully **derived** from the global record store + child folder-states + leases (running / parked / complete / abort), grouped by base. Never hand-edited. |
 
 ## Entry point
 `pdispatch` (in this repo's `bin/`, on PATH) is the single entry point. Run it with no args for
@@ -70,7 +71,7 @@ HANDOFF only when it genuinely needs you.
 
 ## Watching the fleet & responding
 ```bash
-pdispatch board /path/to/<base-instant>   # writes/prints <base>/dispatch/REGISTRY.md
+pdispatch board                            # NO path — writes/prints ~/.claude-dispatch-board/REGISTRY.md (all bases)
 tmux attach -t dt-<id>                     # jump into a session flagged 🅿 PARKED
 pdispatch pool reap                        # reclaim a crashed holder's slot
 pdispatch pool release ws5                 # free a slot when its TODO is done + merged
@@ -94,8 +95,9 @@ fleet view from that. Partial completions with follow-ups stay in the TODO's own
 your free `~/wsN` slots. Nothing outside the repo is required.
 
 ## Design & rationale
-`docs/2026-07-16-dispatch-instants-design.md`. Proofs: `tests/*.sh` (shipped, path-independent) —
-each prints `PASS`/`FAIL`.
+`docs/2026-07-16-dispatch-instants-design.md`; the global board store is
+`docs/2026-07-18-global-dispatch-board-design.md` (D-11). Proofs: `tests/*.sh` (shipped,
+path-independent) — each prints `PASS`/`FAIL`.
 
 ## Constraints
 Zero external deps (bash + git + tmux + coreutils + python3). No rsync/scp/curl/ssh. The pool is
