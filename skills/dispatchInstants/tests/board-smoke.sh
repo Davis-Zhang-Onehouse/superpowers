@@ -36,8 +36,8 @@ G="$ROOT/wsG"; mkdir -p "$G"; A="$ROOT/wsA"; B="$ROOT/wsB"; mkdir -p "$A" "$B"
 "$SKILL"/wspool.sh add "$A" "$B" >/dev/null
 
 echo "== dispatch two TODOs (--no-launch) =="
-c1out="$("$SKILL"/dispatch-todo.sh --base "$BASE" --title "gap alpha" --brief - --golden "$G" --no-launch <<<"brief alpha")"
-c2out="$("$SKILL"/dispatch-todo.sh --base "$BASE" --title "gap beta"  --brief - --golden "$G" --no-launch <<<"brief beta")"
+c1out="$("$SKILL"/dispatch-todo.sh --base "$BASE" --title "gap alpha" --brief - --profile ansi --golden "$G" --no-launch <<<"brief alpha")"
+c2out="$("$SKILL"/dispatch-todo.sh --base "$BASE" --title "gap beta"  --brief - --profile ansi --golden "$G" --no-launch <<<"brief beta")"
 C1="$(sed -n 's/.*instant   : //p' <<<"$c1out" | head -1)"
 C2="$(sed -n 's/.*instant   : //p' <<<"$c2out" | head -1)"
 [ -d "$C1" ] && [ -d "$C2" ] && echo "  ok: two child instants created" || { echo "  XX: children missing"; FAILED=1; }
