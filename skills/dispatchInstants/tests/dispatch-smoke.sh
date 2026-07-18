@@ -130,6 +130,27 @@ grc=0
 check "dispatch refuses enrolled golden" "$([ $grc -ne 0 ] && echo yes || echo no)" "yes"
 "$SKILL"/wspool.sh remove --force "$(basename "$GOLDEN")" >/dev/null
 
+echo "== Test 5: no profile selected (no flag/env/pool file) => error =="
+prc=0
+DISPATCH_PROFILE= "$DISPATCH" --base "$BASE" --title "no profile" --brief - --golden "$GOLDEN" --no-launch <<<"b" >/dev/null 2>&1 || prc=$?
+check "dispatch errors when no profile is selected" "$([ $prc -ne 0 ] && echo yes || echo no)" "yes"
+
+echo "== Test 6: unknown profile name => error =="
+urc=0
+"$DISPATCH" --base "$BASE" --title "bad profile" --brief - --golden "$GOLDEN" --profile doesNotExist --no-launch <<<"b" >/dev/null 2>&1 || urc=$?
+check "dispatch errors on unknown profile name" "$([ $urc -ne 0 ] && echo yes || echo no)" "yes"
+
+echo "== Test 7: custom profile dir => content + substitution =="
+CUSTOM="$ROOT/customProfile"; mkdir -p "$CUSTOM"
+printf 'CUSTOM CHARTER for {{TITLE}} in {{WS}}\nBRIEF: {{BRIEF}}\n' > "$CUSTOM/charter.md"
+printf 'custom seed for {{TITLE}}\n' > "$CUSTOM/seed.txt"
+BRIEF7="$ROOT/brief7.md"; printf 'my custom brief body\n' > "$BRIEF7"
+out7="$("$DISPATCH" --base "$BASE" --title "Custom Effort X" --brief "$BRIEF7" --golden "$GOLDEN" --profile "$CUSTOM" --no-launch 2>&1)" || { echo "$out7"; echo "  XX: custom-profile dispatch errored"; FAILED=1; }
+CHILD7="$(printf '%s\n' "$out7" | sed -n 's/.*instant   : //p' | head -1)"
+grep -q 'CUSTOM CHARTER for Custom Effort X' "$CHILD7/CHARTER.md" && echo "  ok: custom CHARTER title substituted" || { echo "  XX: custom CHARTER not rendered"; FAILED=1; }
+grep -q 'my custom brief body' "$CHILD7/CHARTER.md" && echo "  ok: custom CHARTER brief substituted" || { echo "  XX: brief not substituted"; FAILED=1; }
+! grep -q '{{TITLE}}' "$CHILD7/CHARTER.md" && echo "  ok: no unrendered placeholders left" || { echo "  XX: placeholders left unrendered"; FAILED=1; }
+
 echo
-if [ "$FAILED" -eq 0 ]; then echo "PASS: dispatch-todo AC-2 (launcher + clean rollback + guards)"; exit 0
+if [ "$FAILED" -eq 0 ]; then echo "PASS: dispatch-todo AC-2 (launcher + clean rollback + guards + profiles)"; exit 0
 else echo "FAIL: dispatch-todo AC-2"; exit 1; fi
