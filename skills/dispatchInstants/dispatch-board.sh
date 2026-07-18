@@ -12,7 +12,10 @@
 # read also merges any leftover legacy <base>/dispatch/*.json for every base_instant seen in
 # the global store (dedup by todo_id; global wins) so a stray/late legacy record still shows.
 #
-# Writes $BOARD_DIR/REGISTRY.md (all bases) and prints it. Read-only w.r.t. all instants.
+# Two renderings from one derivation:
+#   - $BOARD_DIR/REGISTRY.md : persisted MARKDOWN (all bases) — a file artifact.
+#   - stdout                 : a terminal-friendly, stacked-block view (ANSI colors only
+#                              when stdout is a TTY, so pipes/redirects stay clean).
 #
 # Design: dispatchInstants/docs/2026-07-18-global-dispatch-board-design.md (supersedes
 #         2026-07-16-dispatch-instants-design.md §5).
@@ -93,11 +96,11 @@ for base in "${!SEEN_BASE[@]}"; do
   done
 done
 
-# ---- build rows, grouped by base -------------------------------------------
-tmp="$(mktemp)"; body="$(mktemp)"
-n_run=0 n_park=0 n_done=0 n_abort=0 n_gone=0
-declare -A GROUP=()          # base_instant -> accumulated markdown rows
+# ---- derive structured rows, grouped by base -------------------------------
+US=$'\x1f'                    # field separator (never appears in titles/paths)
+declare -A GROUP=()          # base_instant -> record-lines (US-joined fields, \n-separated)
 declare -A GROUP_LABEL=()    # base_instant -> display label (basename)
+n_run=0 n_park=0 n_done=0 n_abort=0 n_gone=0
 
 for rec in "${RECS[@]}"; do
   eval "$(python3 - "$rec" <<'PY'
@@ -111,26 +114,36 @@ PY
   GROUP_LABEL[$R_BASE_INSTANT]="$(basename "$R_BASE_INSTANT")"
 
   cur="$(current_child "$R_CHILD_INSTANT" || true)"
+  raw=""
   if [ -z "$cur" ]; then
-    status="⚠ gone"; n_gone=$((n_gone+1)); child_disp="$R_CHILD_INSTANT (missing)"
+    kind=gone; n_gone=$((n_gone+1)); child_disp="$R_CHILD_INSTANT (missing)"
   else
-    st="$(basename "$cur" | cut -d- -f3)"
-    child_disp="$cur"
+    st="$(basename "$cur" | cut -d- -f3)"; child_disp="$cur"
     case "$st" in
-      complete) status="✅ complete"; n_done=$((n_done+1));;
-      abort)    status="✖ abort"; n_abort=$((n_abort+1));;
-      inflight)
-        if is_parked "$cur"; then status="🅿 PARKED — needs you"; n_park=$((n_park+1));
-        else status="▶ running"; n_run=$((n_run+1)); fi;;
-      *) status="? $st";;
+      complete) kind=complete; n_done=$((n_done+1));;
+      abort)    kind=abort;    n_abort=$((n_abort+1));;
+      inflight) if is_parked "$cur"; then kind=parked; n_park=$((n_park+1)); else kind=running; n_run=$((n_run+1)); fi;;
+      *)        kind=other; raw="$st";;
     esac
   fi
-  ls_state="$(lease_state_for "$R_SLOT")"
-  ws_disp="$R_WS ($R_SLOT: $ls_state)"
-  attach="\`tmux attach -t $R_TMUX\`"
-  GROUP[$R_BASE_INSTANT]+="$(printf '| %s | %s | %s | %s | %s |' "$R_TITLE" "$status" "$ws_disp" "$attach" "$child_disp")"$'\n'
+  lease="$(lease_state_for "$R_SLOT")"
+  GROUP[$R_BASE_INSTANT]+="${kind}${US}${raw}${US}${R_TITLE}${US}${R_WS}${US}${R_SLOT}${US}${lease}${US}${R_TMUX}${US}${child_disp}"$'\n'
 done
 
+# stable base ordering, reused by both renderers
+mapfile -t BASES < <(printf '%s\n' "${!GROUP[@]}" | sort)
+
+# ---- render 1: persisted markdown REGISTRY.md (file artifact) ---------------
+md_status(){ case "$1" in
+  running)  printf '▶ running';;
+  parked)   printf '🅿 PARKED — needs you';;
+  complete) printf '✅ complete';;
+  abort)    printf '✖ abort';;
+  gone)     printf '⚠ gone';;
+  *)        printf '? %s' "$2";;
+esac; }
+
+body="$(mktemp)"
 {
   printf '# Dispatch board (global)\n'
   printf 'Updated: %s | Status: LIVE (DERIVED — do not hand-edit; run `pdispatch board`)\n' "$TODAY"
@@ -140,16 +153,19 @@ done
 if [ "${#RECS[@]}" -eq 0 ]; then
   printf 'No TODOs dispatched yet (global store %s is empty).\n' "$RECORDS_DIR" >> "$body"
 else
-  # stable base ordering
-  while IFS= read -r base; do
+  for base in "${BASES[@]}"; do
     [ -z "$base" ] && continue
-    printf '## %s\n' "${GROUP_LABEL[$base]}" >> "$body"
-    printf '`%s`\n\n' "$base" >> "$body"
+    printf '## %s\n`%s`\n\n' "${GROUP_LABEL[$base]}" "$base" >> "$body"
     printf '| TODO | Status | WS (lease) | Attach | Child instant |\n' >> "$body"
     printf '|------|--------|-----------|--------|---------------|\n' >> "$body"
-    printf '%s\n' "${GROUP[$base]}" >> "$body"
-  done < <(printf '%s\n' "${!GROUP[@]}" | sort)
-
+    while IFS= read -r line; do
+      [ -z "$line" ] && continue
+      IFS="$US" read -r kind raw title ws slot lease tmux child <<<"$line"
+      printf '| %s | %s | %s (%s: %s) | `tmux attach -t %s` | %s |\n' \
+        "$title" "$(md_status "$kind" "$raw")" "$ws" "$slot" "$lease" "$tmux" "$child" >> "$body"
+    done <<<"${GROUP[$base]}"
+    printf '\n' >> "$body"
+  done
   {
     printf '**Summary:** ▶ %d running · 🅿 %d parked · ✅ %d complete · ✖ %d abort' "$n_run" "$n_park" "$n_done" "$n_abort"
     [ "$n_gone" -gt 0 ] && printf ' · ⚠ %d gone' "$n_gone"
@@ -157,7 +173,62 @@ else
     [ "$n_park" -gt 0 ] && printf '\n> 🅿 %d session(s) need you — attach and answer the `## Parked decision` block.\n' "$n_park"
   } >> "$body"
 fi
+mv "$body" "$OUT"
 
-mv "$body" "$tmp"
-mv "$tmp" "$OUT"
-cat "$OUT"
+# ---- render 2: terminal-friendly stacked view to stdout --------------------
+if [ -t 1 ]; then
+  b=$'\033[1m'; d=$'\033[2m'; rst=$'\033[0m'
+  cyan=$'\033[36m'; grn=$'\033[32m'; yel=$'\033[33m'; red=$'\033[31m'
+else
+  b=""; d=""; rst=""; cyan=""; grn=""; yel=""; red=""
+fi
+
+term_tag(){ local kind="$1" raw="$2" glyph word col
+  case "$kind" in
+    running)  glyph='▶'; word='running';    col="$grn";;
+    parked)   glyph='🅿'; word='PARKED';     col="$b$yel";;
+    complete) glyph='✅'; word='done';       col="$d";;
+    abort)    glyph='✖'; word='abort';      col="$red";;
+    gone)     glyph='⚠'; word='gone';       col="$red";;
+    *)        glyph='?'; word="${raw:-?}";  col="";;
+  esac
+  printf '%s%s %-7s%s' "$col" "$glyph" "$word" "$rst"
+}
+term_lease(){ case "$1" in
+  LEASED) printf '%s%s%s' "$yel" "$1" "$rst";;
+  FREE)   printf '%s%s%s' "$grn" "$1" "$rst";;
+  STALE)  printf '%s%s%s' "$red" "$1" "$rst";;
+  *)      printf '%s%s%s' "$d"   "$1" "$rst";;
+esac; }
+home_short(){ printf '%s' "${1/#$HOME/\~}"; }
+
+if [ "${#RECS[@]}" -eq 0 ]; then
+  printf '%sDispatch board%s — no TODOs dispatched yet\n' "$b" "$rst"
+  printf '%sstore %s%s\n' "$d" "$(home_short "$RECORDS_DIR")" "$rst"
+else
+  printf '%sDispatch board%s — %s%d TODOs%s · %s▶ %d running%s · %s🅿 %d parked%s · %s✅ %d complete%s' \
+    "$b" "$rst" "$b" "${#RECS[@]}" "$rst" "$grn" "$n_run" "$rst" "$b$yel" "$n_park" "$rst" "$d" "$n_done" "$rst"
+  [ "$n_abort" -gt 0 ] && printf ' · %s✖ %d abort%s' "$red" "$n_abort" "$rst"
+  [ "$n_gone"  -gt 0 ] && printf ' · %s⚠ %d gone%s'  "$red" "$n_gone"  "$rst"
+  printf '\n%sstore %s · updated %s%s\n' "$d" "$(home_short "$RECORDS_DIR")" "$TODAY" "$rst"
+
+  for base in "${BASES[@]}"; do
+    [ -z "$base" ] && continue
+    printf '\n%s%s▌ %s%s\n' "$b" "$cyan" "${GROUP_LABEL[$base]}" "$rst"
+    while IFS= read -r line; do
+      [ -z "$line" ] && continue
+      IFS="$US" read -r kind raw title ws slot lease tmux child <<<"$line"
+      printf '  %s  %s\n' "$(term_tag "$kind" "$raw")" "$title"
+      case "$kind" in
+        running|parked) att="tmux attach -t $tmux";;
+        *)              att="$tmux";;
+      esac
+      printf '              %s %s · %s%s%s\n' "$slot" "$(term_lease "$lease")" "$d" "$att" "$rst"
+    done <<<"${GROUP[$base]}"
+  done
+
+  if [ "$n_park" -gt 0 ]; then
+    [ "$n_park" -eq 1 ] && noun="1 session needs" || noun="$n_park sessions need"
+    printf '\n%s🅿 %s you%s — attach & answer its "## Parked decision".\n' "$b$yel" "$noun" "$rst"
+  fi
+fi
