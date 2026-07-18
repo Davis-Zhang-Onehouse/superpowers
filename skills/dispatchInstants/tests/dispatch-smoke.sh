@@ -68,7 +68,7 @@ SLOTA="$ROOT/wsA"; SLOTB="$ROOT/wsB"; mkdir -p "$SLOTA" "$SLOTB"
 echo "== Test 1: happy path (--no-launch off; stub tmux) =="
 BRIEF="$ROOT/brief1.md"; printf 'Close ANSI gap: int4 overflow. Spark throws ARITHMETIC_OVERFLOW; Velox returns wrapped value.\n' > "$BRIEF"
 out="$("$DISPATCH" --base "$BASE" --title "Close ANSI gap int4 overflow" --brief "$BRIEF" \
-        --golden "$GOLDEN" --evidence "RANKING.md#1" --evidence "c1/analysis.md" 2>&1)" || { echo "$out"; echo "FAIL: dispatch errored"; exit 1; }
+        --profile ansi --golden "$GOLDEN" --evidence "RANKING.md#1" --evidence "c1/analysis.md" 2>&1)" || { echo "$out"; echo "FAIL: dispatch errored"; exit 1; }
 CHILD="$(printf '%s\n' "$out" | sed -n 's/.*instant   : //p' | head -1)"
 WS="$(printf '%s\n' "$out" | sed -n 's/.*workspace : \([^ ]*\).*/\1/p' | head -1)"
 checkf "child instant dir" "$CHILD"
@@ -80,14 +80,10 @@ check "instantName field is dashless camelCase" "$iname" "closeAnsiGapInt4Overfl
 checkf "child CHARTER" "$CHILD/CHARTER.md"
 checkf "child HANDOFF" "$CHILD/HANDOFF.md"
 checkf "child investigations/" "$CHILD/investigations"
-rca=$(grep -c 'RCA-FIRST' "$CHILD/CHARTER.md" 2>/dev/null || echo 0)
-[ "$rca" -ge 1 ] && echo "  ok: CHARTER carries RCA-FIRST mandate" || { echo "  XX: CHARTER lacks RCA-FIRST"; FAILED=1; }
-gold=$(grep -c 'Spark-Java = GOLD' "$CHILD/CHARTER.md" 2>/dev/null || echo 0)
-[ "$gold" -ge 1 ] && echo "  ok: CHARTER frames gold-vs-actual" || { echo "  XX: CHARTER missing gold framing"; FAILED=1; }
-evi=$(grep -c 'RANKING.md#1' "$CHILD/CHARTER.md" 2>/dev/null || echo 0)
-[ "$evi" -ge 1 ] && echo "  ok: CHARTER carries evidence pointers" || { echo "  XX: evidence pointers missing"; FAILED=1; }
-brf=$(grep -c 'int4 overflow' "$CHILD/CHARTER.md" 2>/dev/null || echo 0)
-[ "$brf" -ge 1 ] && echo "  ok: CHARTER carries the brief" || { echo "  XX: brief missing"; FAILED=1; }
+grep -q 'RCA-FIRST'       "$CHILD/CHARTER.md" && echo "  ok: CHARTER carries RCA-FIRST mandate" || { echo "  XX: CHARTER lacks RCA-FIRST"; FAILED=1; }
+grep -q 'Spark-Java=GOLD' "$CHILD/CHARTER.md" && echo "  ok: CHARTER frames gold-vs-actual" || { echo "  XX: CHARTER missing gold framing"; FAILED=1; }
+grep -q 'RANKING.md#1'    "$CHILD/CHARTER.md" && echo "  ok: CHARTER carries evidence pointers" || { echo "  XX: evidence pointers missing"; FAILED=1; }
+grep -q 'int4 overflow'   "$CHILD/CHARTER.md" && echo "  ok: CHARTER carries the brief" || { echo "  XX: brief missing"; FAILED=1; }
 # dispatch record
 REC="$(ls "$BASE"/dispatch/*.json 2>/dev/null | head -1)"
 checkf "dispatch record json" "$REC"
@@ -106,7 +102,7 @@ check "one slot leased after happy dispatch" "$leased" "1"
 echo "== Test 2: rollback-early — duplicate fails => lease released, no child =="
 : > "$DUP_LOG"; : > "$TMUX_LOG"
 before_children=$(find "$BASEDIR" -maxdepth 1 -name '*-inflight-append-*' -type d | wc -l | tr -d ' ')
-DUP_RC=1 "$DISPATCH" --base "$BASE" --title "will fail dup" --brief - --golden "$GOLDEN" <<<"brief" >/dev/null 2>&1
+DUP_RC=1 "$DISPATCH" --base "$BASE" --title "will fail dup" --brief - --profile ansi --golden "$GOLDEN" <<<"brief" >/dev/null 2>&1
 rc=$?
 after_children=$(find "$BASEDIR" -maxdepth 1 -name '*-inflight-append-*' -type d | wc -l | tr -d ' ')
 leased2=$(find "$POOL_DIR/leases" -mindepth 1 -maxdepth 1 -type d | wc -l | tr -d ' ')
@@ -117,7 +113,7 @@ check "lease count unchanged (early lease released)" "$leased2" "1"
 echo "== Test 3: rollback-late — tmux launch fails => child+record+lease all removed =="
 : > "$TMUX_LOG"
 recs_before=$(ls "$BASE"/dispatch/*.json 2>/dev/null | wc -l | tr -d ' ')
-FAIL_TMUX=1 "$DISPATCH" --base "$BASE" --title "will fail launch" --brief - --golden "$GOLDEN" --no-duplicate <<<"brief" >/dev/null 2>&1
+FAIL_TMUX=1 "$DISPATCH" --base "$BASE" --title "will fail launch" --brief - --profile ansi --golden "$GOLDEN" --no-duplicate <<<"brief" >/dev/null 2>&1
 rc3=$?
 recs_after=$(ls "$BASE"/dispatch/*.json 2>/dev/null | wc -l | tr -d ' ')
 child_late=$(find "$BASEDIR" -maxdepth 1 -name '*-willFailLaunch' -type d | wc -l | tr -d ' ')
@@ -130,7 +126,7 @@ check "lease released (late rollback, still just the Test-1 lease)" "$leased3" "
 echo "== Test 4: golden guard — golden enrolled in pool is refused =="
 "$SKILL"/wspool.sh add "$GOLDEN" >/dev/null       # wrongly enroll the golden
 grc=0
-"$DISPATCH" --base "$BASE" --title "bad golden" --brief - --golden "$GOLDEN" --no-launch <<<"b" >/dev/null 2>&1 || grc=$?
+"$DISPATCH" --base "$BASE" --title "bad golden" --brief - --profile ansi --golden "$GOLDEN" --no-launch <<<"b" >/dev/null 2>&1 || grc=$?
 check "dispatch refuses enrolled golden" "$([ $grc -ne 0 ] && echo yes || echo no)" "yes"
 "$SKILL"/wspool.sh remove --force "$(basename "$GOLDEN")" >/dev/null
 
