@@ -42,12 +42,23 @@ pdispatch pool list
 ## Dispatching a TODO (do this from the base-instant session, once per TODO)
 ```bash
 pdispatch todo \
-  --base   /path/to/<base-instant>                 # the instant holding the TODOs (bulletin board)
-  --title  "Close ANSI gap: int4 overflow"         # → dashless camelCase instant name + tmux session
-  --brief  brief.md                                # the TODO description / charter seed (file or -)
-  --golden ~/ws1                                    # pre-built source (must be OUTSIDE the pool)
+  --base    /path/to/<base-instant>                # the instant holding the TODOs (bulletin board)
+  --profile ansi                                    # which CHARTER+SEED profile (name under profiles/ or a path); REQUIRED
+  --title   "Close ANSI gap: int4 overflow"        # → dashless camelCase instant name + tmux session
+  --brief   brief.md                               # the TODO description / charter seed (file or -)
+  --golden  ~/ws1                                   # pre-built source (must be OUTSIDE the pool)
   --evidence "RANKING.md#1"  --evidence "c1/analysis.md"   # pointers the worker starts its RCA from
 ```
+
+## Profiles (the CHARTER + SEED content)
+Each worker's `CHARTER.md` and interactive kickoff SEED come from a **profile** — a
+directory `profiles/<name>/` (or any path) holding `charter.md` + `seed.txt` (+ an
+optional `handoff.md`), templated with `{{TITLE}} {{WS}} {{BRIEF}} {{EVIDENCE}} …`.
+Select one with `--profile <name|path>`; a profile is **REQUIRED** (no silent default)
+— you can also set `$DISPATCH_PROFILE` or write a name/path to
+`~/.claude-ws-pool/profile`. The shipped `ansi` profile carries the Gluten-Velox
+ANSI-gap pipeline; copy it to `profiles/<your-effort>/` (or anywhere) to make your
+own effort's profile without touching the script.
 Exit 3 = pool full (enroll a slot or wait). On success it prints the child instant, the leased ws,
 and `tmux attach -t dt-<id>`.
 
