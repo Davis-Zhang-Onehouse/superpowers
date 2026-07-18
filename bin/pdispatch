@@ -31,11 +31,20 @@ ${b}THE TOOLKIT${r}  ${d}(all on PATH via this repo's bin/)${r}
   ${g}pdispatch pool${r}  <add|list|status|claim|release|reap>   lease manager over an OPT-IN
                                                         set of ~/wsN slots. Atomic (mkdir),
                                                         crash-safe (dead-tmux reap).
-  ${g}pdispatch todo${r}  --base <instant> --title .. --brief ..  dispatch ONE TODO: claim slot →
+  ${g}pdispatch todo${r}  --base <instant> --profile <name> --title .. --brief ..
+                                                        dispatch ONE FRESH TODO: claim slot →
                                                         duplicate golden (no rebuild) → fork
-                                                        child instant + RCA-first CHARTER →
-                                                        launch interactive tmux claude →
-                                                        record it. Clean rollback on failure.
+                                                        child instant + render CHARTER/SEED from
+                                                        the chosen profile → launch interactive
+                                                        tmux claude → record it. Clean rollback
+                                                        on failure. --profile is REQUIRED (the
+                                                        CHARTER+SEED content; see profiles/).
+  ${g}pdispatch adopt${r} --base <instant> --instant <existing> --slot <ws> [--resume <uuid>]
+                                                        adopt an EXISTING instant (resumed /
+                                                        migrated / hand-made) into the pool +
+                                                        board WITHOUT recreating it: claim lease →
+                                                        adopt-live-or-relaunch+resume session →
+                                                        write record. Idempotent.
   ${g}pdispatch board${r} <base-instant>                         derived fleet dashboard:
                                                         running / 🅿 parked / ✅ complete / ✖ abort.
   ${g}pdispatch doc${r}                                          show the SKILL.md + design spec.
@@ -66,6 +75,7 @@ cmd="${1:-help}"; shift || true
 case "$cmd" in
   pool)    exec "$SKILL/wspool.sh" "$@";;
   todo)    exec "$SKILL/dispatch-todo.sh" "$@";;
+  adopt)   exec "$SKILL/dispatch-adopt.sh" "$@";;
   board)   exec "$SKILL/dispatch-board.sh" "$@";;
   doc|docs|design)
            echo "SKILL.md : $SKILL/SKILL.md"
