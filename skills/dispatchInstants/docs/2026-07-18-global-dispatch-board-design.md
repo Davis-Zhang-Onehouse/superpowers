@@ -93,11 +93,19 @@ Rendering:
 - Per-row derivation is unchanged: current child folder located by the dashless-instantName
   glob, status from folder state + `## Parked decision`, lease from `wspool status <slot>`.
 
-Output:
+Output — two renderings from one derivation:
 
-- Always writes the complete `$BOARD_DIR/REGISTRY.md` and prints the same full board to stdout.
-- Never writes a per-base `REGISTRY.md`. There is no filter argument, so there is no partial
-  render that could truncate the file.
+- **`$BOARD_DIR/REGISTRY.md`**: the persisted MARKDOWN artifact (grouped tables, full absolute
+  paths) — renders well in editors / on GitHub and is what other readers `cat`. Always the
+  complete board; never a per-base `REGISTRY.md`.
+- **stdout**: a terminal-friendly, stacked-block view — one `▌ <base>` header per group, then
+  per TODO a status-tag line (`🅿 PARKED` / `▶ running` / `✅ done` / `✖ abort` / `⚠ gone`) + the
+  title, and an indented detail line (`<slot> <LEASE> · <attach>`). ANSI colors are emitted only
+  when stdout is a TTY (`[ -t 1 ]`), so piping/redirecting yields clean plain text. Long absolute
+  paths are dropped from the terminal view (kept in the markdown file) to stay readable at ~80
+  columns.
+
+There is no filter argument, so there is no partial render that could truncate the markdown file.
 
 ### 4c. `pdispatch` umbrella
 

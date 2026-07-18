@@ -63,6 +63,15 @@ has "shows attach cmd" "tmux attach -t dt-" "$BRD"
 has "shows a child instant path" "$C1" "$BRD"
 run_ct=$(grep -c '▶ running' "$BRD"); check "three running rows" "$run_ct" "3"
 
+echo "== stdout is the terminal-friendly stacked view (not the markdown table) =="
+TOUT="$("$SKILL"/dispatch-board.sh)"          # captured => non-TTY => plain (no ANSI) stacked view
+grep -q 'Dispatch board — '              <<<"$TOUT" && echo "  ok: terminal header rendered"      || { echo "  XX: no terminal header"; FAILED=1; }
+grep -qF "▌ $(basename "$BASE")"          <<<"$TOUT" && echo "  ok: groups by base (▌ marker)"      || { echo "  XX: no ▌ base group in stdout"; FAILED=1; }
+grep -q '▶ running'                       <<<"$TOUT" && echo "  ok: shows a status tag"             || { echo "  XX: no status tag in stdout"; FAILED=1; }
+if grep -q '| TODO | Status |' <<<"$TOUT"; then echo "  XX: stdout still emits the markdown table"; FAILED=1; else echo "  ok: stdout is not the raw markdown table"; fi
+# and the file keeps the markdown table
+has "REGISTRY.md keeps the markdown table" "| TODO | Status | WS (lease) | Attach | Child instant |" "$BRD"
+
 echo "== deprecation: passing a base path errors out =="
 drc=0; dmsg="$("$SKILL"/dispatch-board.sh "$BASE" 2>&1)" || drc=$?
 check "board with a path exits 2" "$drc" "2"
