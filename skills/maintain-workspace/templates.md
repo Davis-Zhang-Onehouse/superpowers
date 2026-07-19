@@ -5,31 +5,57 @@ See `SKILL.md` for the invariants, layout, and resume contract these templates s
 
 ---
 
-## `HANDOFF.md` — the entry point (the only doc allowed to rot)
+## `HANDOFF.md` — the entry point (current state + handoff; the only doc allowed to rot)
+
+Two clearly-headed parts in one file: **(A) Current state** (what-code-where + how-built — absorbs the old STATE.md) and **(B) Handoff** (the explicit pickup guide). One reconciled doc, so "status" and "how to pick up" can't drift apart.
 
 ```markdown
 # <Effort> — HANDOFF   (read me first)
+Updated: <date> by session <latest-uuid>  |  Status: LIVE (current state + handoff; rots — reconcile to DECISIONS)
 
-## Resume here
-- Workspace folder (where the code is checked out): `~/ws2`   # which of ~/ws1·ws2·ws3·…
-- Resume the latest session:  `cd ~/ws2 && claude --resume <latest-uuid>`
-- Repo checkouts used: gluten=`~/ws2/gluten-internal` · velox=`~/ws2/velox-internal` · …
-Updated: <date> by session <latest-uuid>  |  Status: LIVE SNAPSHOT (rots — verify against STATE/CI)
+# ===== PART A · CURRENT STATE =====
 
 ## Where we are (one paragraph)
 <2-4 sentences: what's delivered, what's in flight, the single next action.>
-
-## Next action (the very next thing to do)
-1. <concrete step + the command or PR to look at>
 
 ## Live snapshot (volatile — dated)
 - In flight: <CI run id / build / watcher> — expected: <green-set / criterion>
 - Blockers: <…>
 
+## PR / branch stack   (REQUIRED slot — must exist even for a single PR; the ONE home for the stack)
+| Repo | Branch | Tip githash | PR (full-URL link) | CI (PR checks page → latest run) | Contents |
+|------|--------|-------------|--------------------|----------------------------------|----------|
+| gluten-internal | mor_productionization | c879c42da | [#360](https://github.com/<org>/gluten-internal/pull/360) | [#360 checks](https://github.com/<org>/gluten-internal/pull/360/checks) — green 2026-06-15 ([run 27443719426](https://github.com/<org>/gluten-internal/actions/runs/27443719426)) | … |
+| velox-internal  | mor_productionization | …         | [#128](https://github.com/<org>/velox-internal/pull/128) | [#128 checks](https://github.com/<org>/velox-internal/pull/128/checks) — pending | … |
+
+**REQUIRED cell format — a bare id is INCOMPLETE:** PR = full-URL link `[#N](…/pull/N)` (branch with no PR yet → `branch only (no PR yet)`, never blank/bare `#N`); CI = the PR's **checks page** `[#N checks](…/pull/N/checks)` + dated conclusion (+ optional `[run <id>](…/actions/runs/<id>)`), never a bare run-id.
+
+## How each artifact was built & tested (REVIEWER GUIDE — note steps as you dev, distil over time)
+The narrative a reviewer needs — NOT the commands (those are RUNBOOK; link to them). One entry per artifact:
+### <artifact, e.g. the fixed operator image>
+- **What it is / vs baseline:** `<tag@digest>` = `<derivation>`; baseline (unfixed) = `<tag@digest>` (the RED/before run).
+- **Built by:** `<automated step>` → `<where published>`. Needs: `<preconditions>`.
+- **Provenance:** `<run/job link>` @ `<commit>` → `<exact version>` (`<digest>`) — the audit chain.
+- **Assembled by:** `<script/one-command>` (→ RUNBOOK §… for the command).
+- **Tested by / used where:** `<milestone/test that used this exact version>` → proof in `evidence/INDEX.md` #<n>.
+- **Caveats:** `<lineage / arch / not-run-here notes>`.
+
+## Working set (what to check out to get the latest)
+- gluten: <branch@sha>   velox: <branch@sha>   …    ## Published artifacts: <codeartifact pkg @ version>
+
+# ===== PART B · HANDOFF (pickup guide) =====
+
+## Resume here
+- Workspace folder (where the code is checked out): `~/ws2`   # which of ~/ws1·ws2·ws3·…
+- Resume the latest session:  `cd ~/ws2 && claude --resume <latest-uuid>`
+- Repo checkouts used: gluten=`~/ws2/gluten-internal` · velox=`~/ws2/velox-internal` · …
+
+## Next action (the very next thing to do)
+1. <concrete step + the command or PR to look at>
+
 ## Setup you end up with (delivered handoff — point, don't duplicate)
-The deliverable, as a reviewer/next-session navigates it. Links out; the details live in their one home.
-- **PR stack:** <[#408](…) fix> · <[#410](…) CI> — full table in STATE.md.
-- **Artifacts + how they were built:** <fixed image tag@digest / jars> — the how/provenance is STATE.md § "How each artifact was built & tested".
+- **PR stack:** see the PR/branch table in Part A (don't re-paste it).
+- **Artifacts + how they were built:** see Part A § "How each artifact was built & tested".
 - **Play with it:** <one-command scripts> → see RUNBOOK.md § <section> (don't re-paste commands here).
 - **Proof each acceptance criterion is met:** AC-1 → evidence/INDEX #<n> · AC-2 → #<n> · … (INDEX maps criterion→artifact→source→regenerate).
 
@@ -41,7 +67,7 @@ The deliverable, as a reviewer/next-session navigates it. Links out; the details
 
 ## Index (where each thing lives — click through, don't duplicate)
 - Scope / acceptance / constraints → CHARTER.md
-- PR & branch stack + **how each artifact was built & tested (reviewer guide)** → STATE.md
+- PR & branch stack + **how each artifact was built & tested** → Part A above
 - Runnable commands to rebuild / rerun tests / repro → RUNBOOK.md
 - Decisions → DECISIONS.md · Issues → ISSUES.md · Unverified assumptions → ASSUMPTIONS.md
 - Deep dives → investigations/<topic>/
@@ -110,46 +136,45 @@ self-review current as evidence accrues.
 
 ---
 
-## `STATE.md` — what code where + HOW each artifact was built & tested (the reviewer guide)
+## `DECISIONS.md` — the decision register (one section per decision, the authoritative timeline)
+
+Append-only. Each decision is its own section with rationale subsections — NOT a one-line row. A superseded
+decision is never deleted or rewritten: set its Status to `SUPERSEDED by D-<n>` and add the new section. This
+register is the **tie-breaker** when the living docs (HANDOFF/RUNBOOK) disagree — the latest ACTIVE entry wins.
 
 ```markdown
-# <Effort> — STATE   (what code where + how each artifact was built & tested)
-Updated: <date>
+# DECISIONS   (durable; append-only register; the authoritative decision timeline / tie-breaker)
 
-## PR / branch stack   (REQUIRED slot — must exist even for a single PR; HANDOFF links here, never re-pastes)
-| Repo | Branch | Tip githash | PR (full-URL link) | CI (PR checks page → latest run) | Contents |
-|------|--------|-------------|--------------------|----------------------------------|----------|
-| gluten-internal | mor_productionization | c879c42da | [#360](https://github.com/<org>/gluten-internal/pull/360) | [#360 checks](https://github.com/<org>/gluten-internal/pull/360/checks) — green 2026-06-15 ([run 27443719426](https://github.com/<org>/gluten-internal/actions/runs/27443719426)) | … |
-| velox-internal  | mor_productionization | …         | [#128](https://github.com/<org>/velox-internal/pull/128) | [#128 checks](https://github.com/<org>/velox-internal/pull/128/checks) — pending | … |
+## D-1 — <short imperative title>   (<date>, ACTIVE)
+### Context
+<the situation/problem that forced a choice — what was ambiguous or blocked, the constraints in play.>
+### Decision
+<what we chose, stated so a cold reader can act on it — exact ref/flag/path where relevant.>
+### Rationale
+<why this option; the key evidence or principle. Name the alternatives considered and why they lost.>
+### Consequences
+<what this changes downstream — new work enabled/blocked, follow-ups, risks accepted. Link ISSUES if it opened one.>
 
-**REQUIRED cell format — a cell with a bare id is INCOMPLETE:**
-- **PR** = a full-URL markdown link `[#N](…/pull/N)`. A branch with no PR yet → write `branch only (no PR yet)`, never blank and never a bare `#N`.
-- **CI** = the PR's **checks page** link `[#N checks](…/pull/N/checks)` (so every CI run is reachable *from its PR*), then the dated conclusion, optionally the specific `[run <id>](…/actions/runs/<id>)`. Never a bare run-id.
-- This is the ONE home for the stack. `HANDOFF.md`'s "PR stack" line links here; do not paste the table twice.
-
-## How each artifact was built & tested (REVIEWER GUIDE — note steps as you dev, distil over time)
-The narrative a reviewer needs — NOT the commands (those are RUNBOOK; link to them). Start rough as you
-build; distil into this shape as it firms up. One entry per artifact:
-
-### <artifact, e.g. the fixed operator image>
-- **What it is / vs baseline:** `<tag@digest>` = `<derivation>` (e.g. stock `X@d1` + swapped `Y.jar`); the
-  baseline (unfixed) artifact is `<tag@digest>`, used for the RED/before run.
-- **Built by:** `<the automated step>` → `<where it's published>` (e.g. CI `adhoc_x.yml` amd64 → CodeArtifact).
-  Needs: `<preconditions — e.g. which branches/PRs must be present>`.
-- **Provenance:** `<run/job link>` @ `<commit>` → `<exact version/name>` (`<size/digest>`) — the audit chain.
-- **Assembled by:** `<script/one-command>` (→ RUNBOOK §… for the command).
-- **Tested by / used where:** `<which milestone/test used this exact version>` → proof in `evidence/INDEX.md` #<n>.
-- **Caveats:** `<lineage / arch / not-run-here notes>`.
-
-## Working set (what to check out to get the latest)
-- gluten: <branch@sha>   velox: <branch@sha>   hudi-rs: <…>
-## Published artifacts
-- <codeartifact pkg @ version>
+## D-2 — <next decision>   (<date>, SUPERSEDED by D-5 2026-07-18)
+### Context
+<…>
+### Decision
+<the choice as originally made — left intact for the record.>
+### Rationale
+<…>
+### Consequences
+<…>
 ```
+
+**Status vocabulary:** `ACTIVE` · `SUPERSEDED by D-<n> (<date>)`. Keep volatile state (CI run-ids, "in progress") OUT — that belongs in HANDOFF's current-state snapshot.
 
 ---
 
 ## `RUNBOOK.md` — how to play with it (commands live here, not in prose)
+
+RUNBOOK is a LIVING doc: keep exactly ONE current recipe per task. When the recipe changes, edit it in place
+and move the old one under a `## Superseded (HISTORICAL — do NOT run)` heading with a one-line reason + the
+DECISIONS ref — never leave two co-equal recipes for a resumer to pick wrong from.
 
 ````markdown
 # <Effort> — RUNBOOK
@@ -265,3 +290,14 @@ Written by `/maintain-workspace compact`. The full compaction recipe **and** the
 acceptance all-MET · evidence disposition · lingering-issue reconciliation) live in
 **`compaction.md`** in this skill directory. Copy the template from there — it is
 kept in one home so the recipe and its slots never drift.
+
+---
+
+## `REVIEW.md` — the review ledger (append-only; written by the reviewer, not by hand)
+
+Bootstrapped on the first review round and appended to thereafter by
+**`superpowers:reviewing-workspace`** (command `/review-workspace`). It is the audit
+trail of every review round — findings, their status, and the action taken. The full
+template lives in **`../reviewing-workspace/templates/REVIEW.md`** (one home, so the
+ledger format and the reviewer that writes it never drift). Copy it from there. Never
+rewrite a past finding — supersede its `Status` in place with a dated note.
