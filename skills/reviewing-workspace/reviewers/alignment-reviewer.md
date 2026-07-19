@@ -30,7 +30,14 @@ METHOD
    - Setup to end up with (the deliverables promise).
    - Standing constraints / rules, including the stated design philosophy.
 
-2. For EACH acceptance criterion, locate its proof in
+2. Read the REGISTERS and hold them for the deviation cross-check in step 5:
+   - [INSTANT_PATH]/DECISIONS.md — every decision + its Status. The LATEST ACTIVE
+     entry is the tie-breaker when docs disagree.
+   - [INSTANT_PATH]/ISSUES.md — every issue + its Status (OPEN|FIXED|DEFERRED|DOCUMENTED).
+   - [INSTANT_PATH]/ASSUMPTIONS.md — every belief + its Status
+     (OPEN|VERIFIED|REFUTED|SANCTIONED|DEFERRED).
+
+3. For EACH acceptance criterion, locate its proof in
    [INSTANT_PATH]/evidence/INDEX.md and the [INSTANT_PATH]/evidence/ artifacts,
    then assign EXACTLY ONE verdict:
    - VERIFIED — the cited artifact is present, is sufficient for the NL
@@ -41,7 +48,7 @@ METHOD
    - MISALIGNED — the approach taken violates a charter Standing constraint or
      the stated design philosophy. Cite WHICH constraint and HOW it is violated.
 
-3. Verify that EVERY deliverable promised in "Setup to end up with" is actually
+4. Verify that EVERY deliverable promised in "Setup to end up with" is actually
    present in the workspace. Then narrate the chain end to end:
    Setup-to-begin -> deliverables -> evidence -> Goal. State whether the Goal
    is demonstrably achieved, or name the exact link that is broken.
@@ -52,7 +59,26 @@ METHOD
    asserted in prose but not backed by evidence. (Stage-1 checked the section
    EXISTS with the right fields; you check the narrative is TRUE.)
 
-4. OPTIONAL cheap spot-check ONLY: if RUNBOOK.md gives a one-command
+5. DEVIATION & REGISTER CROSS-CHECK — poke the registers (step 2) for deviations
+   the per-AC pass would miss. The registers are where an effort quietly drifts:
+   a. DECISIONS: is any ACTIVE decision inconsistent with the charter Goal / scope /
+      standing constraints? Did the delivered work deviate from an ACTIVE decision
+      with no superseding one? Do two ACTIVE decisions conflict (neither marked
+      SUPERSEDED)? Does a living doc (HANDOFF/RUNBOOK) contradict the latest ACTIVE
+      decision (the tie-breaker)?
+   b. ASSUMPTIONS: does any VERIFIED acceptance criterion actually REST on an
+      assumption still OPEN or REFUTED? Was a REFUTED assumption's consequence
+      propagated, or does a "done" claim still stand on a belief that was refuted?
+   c. ISSUES: does any OPEN issue contradict or block an acceptance criterion the
+      charter/HANDOFF claims MET? Conversely — and this is the important direction —
+      did YOUR evidence-chain pass (steps 3–4) surface a deviation, weakness, or gap
+      that is NOT yet tracked in ISSUES.md? Every such surfaced gap becomes a NEW
+      issue to track (see OUTPUT) with a fix|defer recommendation.
+   Where the chain is ambiguous, or a decision/assumption needs the partner's
+   confirmation, RAISE IT AS AN OPEN REVIEW QUESTION (see OUTPUT) rather than
+   guessing a verdict — asking is not a failure, silently assuming is.
+
+6. OPTIONAL cheap spot-check ONLY: if RUNBOOK.md gives a one-command
    re-derivation for a claim, note whether that command plausibly re-derives it.
    DO NOT run heavy builds or long test suites — recommend regeneration instead.
 
@@ -81,6 +107,25 @@ Overall: <ALIGNED | GAPS>
 Gaps:
 - <each gap phrased so the orchestrator can turn it into a REVIEW.md finding:
   a title, a severity, and what to do to close it>
+
+Register deviations (from step 5 — write "none" per line if clean):
+- DECISIONS: <an ACTIVE decision inconsistent with the charter, work that deviated
+  from a decision, conflicting ACTIVE decisions, or a living doc contradicting the
+  tie-breaker — or "none">
+- ASSUMPTIONS: <a VERIFIED acceptance criterion resting on an OPEN/REFUTED belief,
+  or a refuted assumption whose consequence was not propagated — or "none">
+- ISSUES: <an OPEN issue contradicting a claimed-MET criterion, or a gap your pass
+  surfaced that is not yet tracked in ISSUES.md — or "none">
+
+Open review questions (ASK the partner — do not guess):
+- <each ambiguity, or decision/assumption that needs the partner's confirmation,
+  phrased as a direct question. Write "none" if there are none.>
+
+New issues to track (each = a proposed ISSUES.md entry; the orchestrator adds it and
+records its disposition):
+- OI-<n> <title> · Symptom: <what/where> · Root cause: <if known, else "unknown">
+  · Suggested action: <…> · Disposition: FIX (close in this review) | DEFER (track,
+  out of scope now) — <one-line why>. Write "none" if the pass surfaced no new issue.
 
 READ-ONLY RULE
 
