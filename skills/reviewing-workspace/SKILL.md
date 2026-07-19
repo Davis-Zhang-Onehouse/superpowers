@@ -48,6 +48,7 @@ digraph review {
 - Record every AC verdict + gap as `RV-<n>` findings in REVIEW.md (as before).
 - **Promote each "New issue to track" into the instant's `ISSUES.md`** as a proper `## OI-N` sub-section (Symptom/Root cause/Action taken/Status) — a genuine effort deviation belongs in the durable issue register, not only in REVIEW.md. Apply its disposition: **FIX** → close it now (make the change, set Status FIXED) and note it in REVIEW.md; **DEFER** → add it Status OPEN/DEFERRED with the reason, so it is tracked, not lost.
 - Surface every **Open review question** to the partner (they need a human decision) and record it in the round; do not silently resolve it.
+- **Fresh-evidence gate — regenerate a stale runtime proof, don't just flag it** (integrates `superpowers:verification-before-completion`: a VERIFIED/READY verdict is a completion claim, so it must rest on evidence current at the review tip). When the reviewer marks an AC `INSUFFICIENT` because its runtime proof (a test run / CI diff) is **stale** — provenance behind the tip after intervening work touched the code it exercises — and a RUNBOOK one-command re-derivation exists that you can run here: **run it fresh at the tip, read the actual output, then** record the verdict from that result (capture the new artifact + update its `evidence/INDEX.md` provenance). Never round a stale or asserted proof up to `VERIFIED` ("the suite was green", "checks say green", "should still hold"), and never write an overall `READY` while such an AC stands. If regeneration is impractical here (heavy build, no shell), the AC stays `INSUFFICIENT` and the round is `NOT-READY` until its owner regenerates. (Point-in-time proofs — a repro log, an RCA doc — are exempt; they document a fixed moment.)
 - Gate: proceed to stage 3 (a Critical misalignment may recommend deferring it).
 
 **Stage 3 — PR code review (delta).** Reuse `superpowers:requesting-code-review` — see `reviewers/README.md` for PR selection (only PRs authored on THIS instant; inherited base PRs skipped) and the incremental rule (diff from the prev-reviewed head SHA recorded in `REVIEW.md`). Dispatch `skills/requesting-code-review/code-reviewer.md` verbatim per in-scope PR; merge its Strengths/Issues/Assessment into `REVIEW.md`; update the last-reviewed head SHA. No new-work PRs → record `N/A`.
@@ -85,8 +86,10 @@ digraph review {
 | Code-reviewing the full PR stack every round | Delta only — review PRs authored on this instant, diffed from the prev-reviewed head SHA. Skip inherited base PRs. |
 | Findings left in the session transcript | Every finding + status + action-taken lives in `REVIEW.md` (append-only) so the audit trail survives the session. |
 | Marking an AC VERIFIED on a prose assertion | Acceptance needs a proof the code executes (green test / grep beacon log / CI run); assertion-only → `INSUFFICIENT`. |
+| Marking an AC VERIFIED on a green-but-STALE runtime proof | A test/CI proof whose provenance is behind the review tip (after code changed) proves an old version → `INSUFFICIENT`. Apply the Stage-2 fresh-evidence gate: regenerate at the tip, then verify from the fresh result. |
 
 ## Related Skills
 
 - **REQUIRED CONTEXT:** `superpowers:maintain-workspace` — defines the instant, its canonical files, and the invariants this skill enforces.
+- **INTEGRATED in Stage 2:** `superpowers:verification-before-completion` — the fresh-evidence gate; a VERIFIED/READY verdict must rest on evidence regenerated at the review tip, never a stale or asserted run.
 - **REUSED in Stage 3:** `superpowers:requesting-code-review` — the `code-reviewer.md` template dispatched per PR.

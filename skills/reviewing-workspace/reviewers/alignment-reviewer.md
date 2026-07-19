@@ -41,12 +41,27 @@ METHOD
    [INSTANT_PATH]/evidence/INDEX.md and the [INSTANT_PATH]/evidence/ artifacts,
    then assign EXACTLY ONE verdict:
    - VERIFIED — the cited artifact is present, is sufficient for the NL
-     statement, and is re-derivable. Cite the evidence/INDEX row and the
-     artifact path.
-   - INSUFFICIENT — proof is missing, weak, stale, or only asserted in prose.
-     State EXACTLY what evidence must be supplemented to reach VERIFIED.
+     statement, is re-derivable, AND is FRESH (see the freshness gate below).
+     Cite the evidence/INDEX row, the artifact path, and — for a runtime proof —
+     the provenance you checked (the commit/run-id it was produced at vs the tip).
+   - INSUFFICIENT — proof is missing, weak, only asserted in prose, OR STALE: a
+     runtime proof (a test run, a CI run/diff) whose provenance is behind the
+     current review tip after intervening work touched the code it exercises, so
+     it proves an earlier version, not the shipped one. State EXACTLY what must be
+     supplemented to reach VERIFIED (normally: regenerate the proof at the tip).
    - MISALIGNED — the approach taken violates a charter Standing constraint or
      the stated design philosophy. Cite WHICH constraint and HOW it is violated.
+
+   FRESHNESS GATE (applies superpowers:verification-before-completion — a
+   completion verdict needs CURRENT evidence, not a prior run). For every runtime
+   proof, compare its provenance (the commit or CI run-id recorded in
+   evidence/INDEX or the artifact) against the current review tip (the HANDOFF
+   PR/branch-stack table). A green-but-stale proof — captured before a later
+   commit that changed the code it exercises, with no stated carry-over
+   justification (byte-identical rebuild, or the proof is code-independent) — is
+   INSUFFICIENT, never VERIFIED, no matter how green it reads. Point-in-time
+   artifacts (a repro log, an RCA doc) are exempt: they document a fixed moment
+   and do not have to sit at the tip.
 
 4. Verify that EVERY deliverable promised in "Setup to end up with" is actually
    present in the workspace. Then narrate the chain end to end:
