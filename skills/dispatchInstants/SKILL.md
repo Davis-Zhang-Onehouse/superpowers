@@ -63,6 +63,41 @@ own effort's profile without touching the script.
 Exit 3 = pool full (enroll a slot or wait). On success it prints the child instant, the leased ws,
 and `tmux attach -t dt-<id>`.
 
+### MANDATORY pre-flight — READ the profile before you pick it
+The profile — not `--brief` — decides what the worker is told to deliver. Picking the
+wrong one silently hands the worker the wrong acceptance criteria (e.g. `ansi` runs a
+FIX pipeline; `ansi-expose` runs an EXPOSURE audit — opposite goals). So **never select
+a profile from its name alone.** Before every dispatch:
+
+```bash
+cat profiles/<name>/charter.md   # the ACs the worker must satisfy — are these YOUR goal?
+cat profiles/<name>/seed.txt     # the first message the session gets — right pipeline & framing?
+```
+
+Confirm out loud that the charter's acceptance criteria and the seed's pipeline match
+the *kind of work* this TODO is (fix vs. expose vs. …). Only then pass `--profile`. If
+nothing fits, copy the closest profile to `profiles/<your-effort>/` and edit it — do
+**not** force a mismatched profile with a giant `--brief`.
+
+## After dispatch — VERIFY it fired with the right context (MANDATORY)
+A dispatch is not "done" when the command exits 0. The seed and charter are templated,
+so a wrong placeholder, empty brief, or bad evidence path produces a live session
+working the wrong problem. **Immediately after every `pdispatch todo`**, before moving
+to the next TODO, confirm both artifacts:
+
+```bash
+cat <child-instant>/CHARTER.md          # (the "instant :" line from the output)
+#   → TITLE, brief, and {{EVIDENCE}} pointers rendered correctly; ACs are the intended ones;
+#     no leftover {{PLACEHOLDER}} tokens; the brief didn't duplicate/contradict the ACs.
+tmux capture-pane -pt dt-<id>           # the claude session's FIRST message (the seed)
+#   → the session opened in the right {{WS}}, was handed the right instant, and is starting
+#     the intended pipeline (e.g. LOCAL REPRO → RCA for `ansi`) — not idling or erroring.
+```
+
+If either is wrong: kill the session (`tmux kill-session -t dt-<id>`), `pdispatch pool
+release <slot>`, fix the profile / brief / evidence, and re-dispatch. Do not let a
+mis-seeded worker keep running — it burns a slot and produces confidently-wrong output.
+
 Each launched session is seeded to: read its HANDOFF/CHARTER, run `superpowers:systematic-debugging`
 to produce an **RCA** (framed **Spark-Java = gold** vs **Gluten-Velox = actual**) BEFORE any fix, then
 branch on scope — small → `test-driven-development`; large → `brainstorming` → `writing-plans` →

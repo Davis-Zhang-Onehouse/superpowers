@@ -14,6 +14,10 @@ the worker the wrong ACs.**
 `--profile <name>` (a bare name resolves under this `profiles/` dir; a path with a slash is used verbatim).
 Resolution order if `--profile` is omitted: `$DISPATCH_PROFILE`, then `~/.claude-ws-pool/profile`.
 
+> 🛑 **Do not pick a profile from this table alone.** Before you pass `--profile`, `cat profiles/<name>/charter.md`
+> and `cat profiles/<name>/seed.txt` and confirm the acceptance criteria and the seed's pipeline are what you
+> expect for *this* TODO. The name is a label; the files are the contract. (See SKILL.md → "MANDATORY pre-flight".)
+
 > ⚠️ **Footgun:** the machine default (`~/.claude-ws-pool/profile`) is `ansi` (fix) because fixing is the common
 > MR case. An **exposure/audit** dispatch MUST pass `--profile ansi-expose` explicitly, or the worker will be
 > handed the fix-a-gap pipeline (LOCAL REPRO → FIX → red→green) — which directly contradicts an exposure goal.
