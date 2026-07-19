@@ -34,9 +34,9 @@ compact is one reviewable stack, not N parallel branches off a shared base.
 - Rebase each input's branch onto the previous link, in a deliberate order;
   resolve conflicts as fix-up commits, and **note each fix-up** (it is a real
   change the inputs never saw together).
-- The compacted `STATE.md` PR-stack table reflects the **chain** — each row's
+- The compacted HANDOFF PR-stack table (current-state part) reflects the **chain** — each row's
   branch tips onto the row above it. Record every PR as a full-URL link.
-- Different repos → one chain per repo; say how the chains relate in STATE.
+- Different repos → one chain per repo; say how the chains relate in HANDOFF's current-state part.
 - **Inputs need not share a `base_instant`.** What §1 requires is a common
   **restack base branch** for the chain, not a common lineage in the folder names.
   Inputs forked from different parents whose fix branches already sit on the same
@@ -104,8 +104,8 @@ compact's own `ISSUES.md` (append-only, with its origin noted) so a resumer sees
 - **RUNBOOK.md is self-contained.** The compact's RUNBOOK holds **one** build +
   **one** validation run that re-derives ALL evidence for the merged criteria —
   a few commands + grep, at most. A reviewer never needs an input's RUNBOOK.
-- **STATE.md** carries the single reviewer guide (how each artifact was built &
-  tested) for the stacked chain, and the chain's PR table.
+- **HANDOFF.md's current-state part** carries the single reviewer guide (how each
+  artifact was built & tested) for the stacked chain, and the chain's PR table.
 - **evidence/INDEX.md** has a row per merged criterion → artifact → source →
   regenerate, tagged REGENERATED or CARRIED-OVER(+why) per §3.
 - **Consumed instants stay on disk untouched** as history.
@@ -132,7 +132,7 @@ Restack base: <main@<sha> | shared-base tip>
 | 1 | <repo> | <feature1-branch> | <restack base> | [#<n>](…) | <none / what changed> |
 | 2 | <repo> | <feature2-branch> | <feature1-branch> | [#<n>](…) | <none / what changed> |
 | 3 | <repo> | <feature3-branch> | <feature2-branch> | [#<n>](…) | <none / what changed> |
-Full PR/branch/CI table → STATE.md.
+Full PR/branch/CI table → HANDOFF.md (current-state part).
 
 ## Merged acceptance criteria (§2 — union of inputs'; ALL must be MET on the stack)
 Each is proven against the COMPACTED stack, not the input in isolation.
