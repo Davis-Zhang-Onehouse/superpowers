@@ -29,7 +29,10 @@
 #     SRC->DST so an incremental rebuild in the target does NOT reach back
 #     into the source tree (and native libs like libhudi.so aren't sourced
 #     from the source's HUDI_RS_DIR). Same-length workspace paths (e.g.
-#     ws2->ws3) are rewritten byte-safe across ALL files, binaries included.
+#     ws2->ws3) are rewritten byte-safe across ALL files, binaries included;
+#     different-length paths rewrite TEXT files, then Phase 3b normalizes each
+#     copied .so's DT_RUNPATH to $ORIGIN so the copy is self-contained (no
+#     dependency on the source/golden absolute path) regardless of name length.
 #
 set -euo pipefail
 
@@ -218,6 +221,9 @@ if [ "$DRY_RUN" -eq 1 ]; then
     else
       info "  rewrite $SRC -> $DST in copied trees (TEXT files only; lengths differ ${#SRC} vs ${#DST})"
     fi
+    echo
+    step "Phase 3b (dry-run): normalize .so runpaths"
+    info "  rewrite each copied final .so's DT_RUNPATH to \$ORIGIN (self-contained; byte-safe, no patchelf needed)"
   fi
   echo
   info "dry-run complete; nothing changed."
@@ -351,8 +357,107 @@ repath_artifacts() {
     [ "$left" = "0" ] || warn "$left file(s) still reference $SRC after rewrite"
   else
     warn "SRC/DST path lengths differ (${#SRC} vs ${#DST}); rewrote $n TEXT file(s) only"
-    warn "binaries keep embedded source paths; mostly debug-info, EXCEPT a final .so's DT_RUNPATH (locates libhudi.so) — it stays valid only via \$ORIGIN. Use same-length names or 'patchelf --set-rpath' for a clean runpath."
-    [ "$left" = "0" ] || info "  $left binary file(s) still reference $SRC (expected — see above)"
+    info "  binaries keep embedded source paths (debug-info, cosmetic). The one FUNCTIONAL"
+    info "  binary reference — each final .so's DT_RUNPATH — is normalized to \$ORIGIN in Phase 3b,"
+    info "  so the copy is self-contained regardless of name length."
+    [ "$left" = "0" ] || info "  $left binary file(s) still reference $SRC (debug-info; harmless)"
+  fi
+}
+
+# ---- Phase 3b: normalize .so runpaths to $ORIGIN -----------------------------
+# The repath step (Phase 3) can only byte-rewrite TEXT files when SRC/DST differ
+# in length, so a copied .so keeps its baked-in absolute DT_RUNPATH. That runpath
+# is the ONE functional binary reference: it points at the ABSOLUTE build dir the
+# .so was linked in (often a THIRD workspace — e.g. the golden the source was
+# itself duplicated from) — so the copy silently depends on that path still
+# existing and breaks if it is deleted/re-leased.
+#
+# This phase makes every copied final .so self-contained by rewriting its runpath
+# relative to $ORIGIN: the .so's own build dir -> $ORIGIN, and any source-tree
+# cross-reference -> $ORIGIN/<rel>. Needs no patchelf/chrpath — it shortens the
+# runpath string in place, NUL-padded (offsets/sizes unchanged, exactly like
+# chrpath); uses patchelf instead when available (handles the rare grow case).
+# Runs for BOTH same- and different-length roots (the runpath may point at neither
+# SRC nor DST, so Phase 3's SRC->DST rewrite would not catch it).
+normalize_runpaths() {
+  [ "${#COPIED_TREES[@]}" -gt 0 ] || return 0
+  command -v readelf >/dev/null 2>&1 || { warn "readelf not found; skipping runpath normalization"; return 0; }
+  command -v python3 >/dev/null 2>&1 || { warn "python3 not found; skipping runpath normalization"; return 0; }
+  local have_patchelf=0; command -v patchelf >/dev/null 2>&1 && have_patchelf=1
+
+  local helper; helper="$(mktemp)"
+  cat > "$helper" <<'PY'
+import os, re, subprocess, sys
+def runpath_of(so):
+    out = subprocess.run(["readelf","-d",so],capture_output=True,text=True).stdout
+    m = re.search(r"\((?:RUNPATH|RPATH)\).*\[(.*)\]", out)
+    return m.group(1) if m else None
+def compute(so, repos, dst_root):
+    old = runpath_of(so)
+    if not old: return None, None
+    so_dir   = os.path.realpath(os.path.dirname(so))
+    dst_root = os.path.realpath(dst_root)
+    out=[]; changed=False
+    for e in old.split(":"):
+        if e.startswith("$ORIGIN") or not e.startswith("/"): out.append(e); continue
+        mapped=None
+        # Anchor an absolute build-tree runpath at a KNOWN repo dir, then re-point it
+        # at the SAME location under THIS workspace, relative to $ORIGIN. Handles the
+        # .so's own dir (-> $ORIGIN) and any cross-tree / third-workspace reference
+        # (e.g. a packaged .so whose runpath points at another workspace's cpp/build).
+        for R in repos:
+            k="/"+R+"/"; idx=e.find(k)
+            if idx!=-1:
+                tgt=os.path.join(dst_root, e[idx+1:])         # <dst>/<repo>/<subpath>
+                if os.path.isdir(tgt):
+                    rp=os.path.relpath(tgt, so_dir)
+                    mapped="$ORIGIN" if rp=="." else os.path.join("$ORIGIN", rp)
+                break
+        if mapped is not None: out.append(mapped); changed=True
+        else: out.append(e)                                   # system path (/usr/local/lib, ...) -> keep
+    return (old, ":".join(out) if changed else None)
+def main():
+    mode, so, repos_csv, dst = sys.argv[1], sys.argv[2], sys.argv[3], sys.argv[4]
+    old, new = compute(so, [r for r in repos_csv.split(",") if r], dst)
+    if not new: print("keep"); return
+    if mode=="plan": print("plan\t%s\t%s"%(old,new)); return
+    if len(new) > len(old): print("defer\t%s"%new); return           # grow -> needs patchelf/section resize
+    ob,nb=old.encode(),new.encode(); data=bytearray(open(so,"rb").read())
+    i=data.find(ob)
+    while i!=-1:
+        data[i:i+len(nb)]=nb; data[i+len(nb)]=0; i=data.find(ob,i+len(ob))  # shorten in place, NUL-pad
+    open(so,"wb").write(data); print("fixed\t%s\t%s"%(old,new))
+main()
+PY
+
+  local repos_csv; repos_csv="$(IFS=,; echo "${REPOS[*]}")"           # known repo names anchor the mapping
+  local so fixed=0 kept=0 deferred=0 res newrp line
+  while IFS= read -r so; do
+    [ -n "$so" ] || continue
+    if [ "$DRY_RUN" -eq 1 ]; then
+      line="$(python3 "$helper" plan "$so" "$repos_csv" "$DST" 2>/dev/null)"
+      case "$line" in plan*) info "  would set runpath \$ORIGIN on ${so#$DST/}"; fixed=$((fixed+1)) ;; esac
+      continue
+    fi
+    res="$(python3 "$helper" fix "$so" "$repos_csv" "$DST" 2>/dev/null)"
+    case "$res" in
+      fixed*) fixed=$((fixed+1)) ;;
+      defer*) newrp="${res#defer$'\t'}"                               # new runpath longer than old
+        if [ "$have_patchelf" -eq 1 ] && patchelf --set-rpath "$newrp" "$so" 2>/dev/null; then
+          fixed=$((fixed+1))
+        else
+          deferred=$((deferred+1))
+          warn "runpath grew for ${so#$DST/}; install patchelf and run: patchelf --set-rpath '$newrp' '$so'"
+        fi ;;
+      *) kept=$((kept+1)) ;;
+    esac
+  done < <(find "${COPIED_TREES[@]}" -type f -name '*.so' 2>/dev/null)
+
+  rm -f "$helper"
+  if [ "$DRY_RUN" -eq 1 ]; then
+    info "  $fixed .so runpath(s) would be normalized to \$ORIGIN"
+  else
+    ok "normalized $fixed .so runpath(s) to \$ORIGIN (self-contained)$([ "$deferred" -gt 0 ] && echo "; $deferred deferred (need patchelf)")"
   fi
 }
 
@@ -367,6 +472,13 @@ if [ "$NO_ARTIFACTS" -eq 0 ]; then
   if [ "${#COPIED_TREES[@]}" -gt 0 ]; then
     step "Phase 3: repath baked-in source paths ($SRC -> $DST)"
     repath_artifacts
+    echo
+  fi
+
+  # ---- Phase 3b: normalize .so runpaths to $ORIGIN -------------------------
+  if [ "${#COPIED_TREES[@]}" -gt 0 ]; then
+    step "Phase 3b: normalize .so runpaths to \$ORIGIN (self-contained copy)"
+    normalize_runpaths
     echo
   fi
 

@@ -73,14 +73,23 @@ Repos handled (skipped if absent on either side): `gluten-internal`,
      (ELF/rlib debug paths, the binary `.ninja_deps`, cargo fingerprints) — no
      corruption possible.
    - **Different-length roots**: only **text** files are rewritten (all
-     build-*decision* files are text). Binaries keep their embedded source paths.
-     Those are debug-info **except** the final `.so`'s `DT_RUNPATH` (e.g.
-     `libvelox.so`'s runpath that locates `libhudi.so`), which is *functional* —
-     it survives only because `$ORIGIN` leads the runpath and `libhudi.so` is
-     copied alongside it. For a guaranteed-clean runpath, prefer same-length
-     names (or run `patchelf --set-rpath` afterward). The script warns in this
-     case.
-5. **Freshen mtimes** — touches copied+repathed artifacts so cmake/cargo/maven
+     build-*decision* files are text). Binaries keep their embedded source paths —
+     these are **debug-info only** (cosmetic). The one *functional* binary
+     reference, each final `.so`'s `DT_RUNPATH`, is handled by step 5 below, so
+     name length no longer matters for a self-contained copy.
+5. **Normalize `.so` runpaths (`$ORIGIN`)** — rewrites every copied final `.so`'s
+   `DT_RUNPATH` so it is self-contained: the `.so`'s own build dir → `$ORIGIN`,
+   and any source-tree cross-reference → `$ORIGIN/<rel>`. This removes the baked-in
+   **absolute** runpath — which points at the build dir the `.so` was *linked* in
+   (often a **third** workspace, e.g. the golden the source was itself duplicated
+   from), so without this the copy silently depends on that path still existing and
+   breaks if it is deleted/re-leased. Runs for **both** same- and different-length
+   roots (the runpath may point at neither source nor target). Needs no
+   `patchelf`/`chrpath` — it shortens the runpath string in place, NUL-padded
+   (offsets/sizes unchanged, exactly like `chrpath`); uses `patchelf` when present
+   for the rare case where the new runpath is longer, and otherwise prints the exact
+   `patchelf` command to run.
+6. **Freshen mtimes** — touches copied+repathed artifacts so cmake/cargo/maven
    treat them as up-to-date and incremental builds are no-ops.
 
 ## Notes / constraints
@@ -92,5 +101,8 @@ Repos handled (skipped if absent on either side): `gluten-internal`,
 - Only **release** builds are copied; debug trees (huge) are intentionally skipped.
 - The repath step (4) is what makes the copied cmake cache / cargo / ninja
   metadata and the native `libhudi.so` toolchain point at the **target**, not the
-  source. Prefer same-length workspace names (`ws1`/`ws2`/`ws3`) so the byte-safe
-  rewrite covers binaries too.
+  source. Same-length workspace names (`ws1`/`ws2`/`ws3`) let that byte-safe rewrite
+  also clean binary **debug-info** paths — cosmetic. It is **not** required for
+  correctness: the one functional binary reference (each `.so`'s `DT_RUNPATH`) is
+  normalized to `$ORIGIN` in step 5 regardless of name length, so a different-length
+  duplicate (e.g. `wsgold` → `ws5`) is still a self-contained, load-correct copy.
