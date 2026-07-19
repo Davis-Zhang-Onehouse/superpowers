@@ -45,6 +45,12 @@ METHOD
    present in the workspace. Then narrate the chain end to end:
    Setup-to-begin -> deliverables -> evidence -> Goal. State whether the Goal
    is demonstrably achieved, or name the exact link that is broken.
+   For each BUILT artifact, cross-check HANDOFF's "How each artifact was built &
+   tested" reviewer-guide entry against reality: its Provenance (run/commit)
+   resolves to a real run/commit, and its Tested-by maps to a real evidence/INDEX
+   row. Flag as INSUFFICIENT any entry whose Built-by/Provenance/Tested-by is
+   asserted in prose but not backed by evidence. (Stage-1 checked the section
+   EXISTS with the right fields; you check the narrative is TRUE.)
 
 4. OPTIONAL cheap spot-check ONLY: if RUNBOOK.md gives a one-command
    re-derivation for a claim, note whether that command plausibly re-derives it.
