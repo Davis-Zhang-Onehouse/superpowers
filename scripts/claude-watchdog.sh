@@ -1,56 +1,56 @@
 #!/usr/bin/env bash
 # claude-watchdog.sh — arm/disarm auto-resume for Claude CLI sessions under a root dir.
 #
-# Why: the Claude CLI has no built-in auto-resume; when a session hits its usage/token
-# limit it halts until manual input. This wraps `claude-auto-retry` (tmux pane-scraping,
-# zero token cost while waiting) so limited sessions resume automatically once the limit
-# resets. A systemd --user timer re-runs a scoped reconcile every 5 min so coverage
-# self-heals and newly-started sessions get picked up.
+# Fully self-contained under $DAVIS (/home/ubuntu/davis_root): local Node, a local
+# claude-auto-retry install, all state/config/logs, and the scheduler (a setsid daemon
+# loop, NOT systemd/cron) live under $DAVIS. Nothing is written outside it.
+#
+# Why: the Claude CLI has no built-in auto-resume; a session that hits its usage/token
+# limit halts until manual input. claude-auto-retry watches the session's tmux pane
+# (zero token cost while waiting) and, once the limit resets, sends-keys a "continue".
+# The daemon re-runs a scoped reconcile every $INTERVAL so new sessions get picked up
+# and coverage self-heals.
 #
 # Scope: this box is a single shared unix account (ubuntu, HOME=/home/ubuntu), so there
 # is no per-OS-user isolation. Scoping is BEHAVIORAL, by working directory: only claude
-# sessions whose cwd is under $ROOT are ever monitored. Everyone else's sessions are
-# excluded and any stray monitor on them is reaped. Change the scope with
-# CLAUDE_WATCHDOG_ROOT=/some/path (default: /home/ubuntu/davis_root).
+# sessions whose cwd is under $ROOT are ever monitored; everyone else's sessions are
+# excluded and any stray monitor on them is reaped. Override with CLAUDE_WATCHDOG_ROOT.
 #
 # Only sessions running inside tmux can be covered (the tool needs a pane to scrape and
-# to send-keys the resume into).
+# to send-keys the resume into) — see scripts/claude-tmux.sh to launch one.
 #
 # Usage:
-#   scripts/claude-watchdog.sh arm       Turn ON:  install+enable the timer, arm in-scope sessions now
-#   scripts/claude-watchdog.sh disarm    Turn OFF: disable the timer, kill in-scope monitors
-#   scripts/claude-watchdog.sh status    Show timer state + per-session coverage (default)
+#   scripts/claude-watchdog.sh arm       Turn ON:  start the daemon + arm in-scope sessions now
+#   scripts/claude-watchdog.sh disarm    Turn OFF: stop the daemon + kill in-scope monitors
+#   scripts/claude-watchdog.sh status    Show daemon state + per-session coverage (default)
 #
 # Idempotent: arm and disarm each converge to the same end state no matter how often run.
 set -u
 
-ROOT="${CLAUDE_WATCHDOG_ROOT:-/home/ubuntu/davis_root}"
-CAR="$(command -v claude-auto-retry 2>/dev/null || echo /usr/bin/claude-auto-retry)"
-CAR_DIR="${HOME}/.claude-auto-retry"
-EXCLUDE_FILE="${CAR_DIR}/reconcile-exclude"
-UNIT_DIR="${HOME}/.config/systemd/user"
-SERVICE="claude-auto-retry-davis.service"
-TIMER="claude-auto-retry-davis.timer"
+DAVIS="/home/ubuntu/davis_root"
+ROOT="${CLAUDE_WATCHDOG_ROOT:-$DAVIS}"
+NODE_BIN="$DAVIS/opt/node/bin"
+CAR="$DAVIS/opt/car/node_modules/.bin/claude-auto-retry"
+CAR_HOME="$DAVIS"                       # HOME for the tool -> its state/config land under $DAVIS
+CAR_DIR="$CAR_HOME/.claude-auto-retry"
+EXCLUDE_FILE="$CAR_DIR/reconcile-exclude"
+PIDFILE="$CAR_DIR/watchdog-daemon.pid"
+LOGFILE="$CAR_DIR/watchdog-daemon.log"
+INTERVAL="${CLAUDE_WATCHDOG_INTERVAL:-300}"
 SELF="$(readlink -f "$0")"
 
-: "${XDG_RUNTIME_DIR:=/run/user/$(id -u)}"
-export XDG_RUNTIME_DIR
+# Run the local claude-auto-retry with local Node on PATH and HOME pinned to $DAVIS so
+# all of its state/config/exclude/logs live under $DAVIS. Children (monitors) inherit this.
+run_car() { PATH="$NODE_BIN:$PATH" HOME="$CAR_HOME" "$CAR" "$@"; }
 
 # --- helpers ---------------------------------------------------------------
 
-# Is a path under $ROOT? Trailing slash on both sides avoids /foo matching /foobar.
 in_scope() { case "${1%/}/" in "${ROOT%/}"/*) return 0 ;; *) return 1 ;; esac; }
-
-# Live claude CLI PIDs. The native build sets its process title to "claude".
 claude_pids() { pgrep -x claude 2>/dev/null; }
-
 cwd_of() { readlink -f "/proc/$1/cwd" 2>/dev/null; }
-
-# Extract the target claude PID from a monitor's cmdline: "... monitor.js %<pane> <pid> ...".
 monitor_target_pid() { printf '%s\n' "$1" | grep -oE 'monitor\.js +%[0-9]+ +[0-9]+' | grep -oE '[0-9]+$'; }
 
-# Rebuild the claude-auto-retry exclude list = every live claude PID whose cwd is NOT
-# under $ROOT. reconcile honors this file and will refuse to arm those sessions.
+# Rebuild the exclude list = every live claude PID whose cwd is NOT under $ROOT.
 rebuild_exclude() {
   mkdir -p "$CAR_DIR"
   local tmp pid cwd
@@ -79,65 +79,74 @@ reap_monitors() {
   done
 }
 
-# (Re)write the systemd --user unit files pointing the service at THIS script.
-write_units() {
-  mkdir -p "$UNIT_DIR"
-  cat > "${UNIT_DIR}/${SERVICE}" <<EOF
-[Unit]
-Description=claude-auto-retry reconcile, scoped to ${ROOT} sessions only
+# --- daemon (self-contained scheduler; replaces systemd/cron) --------------
 
-[Service]
-Type=oneshot
-Environment=PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
-ExecStart=${SELF} _reconcile
-EOF
-  cat > "${UNIT_DIR}/${TIMER}" <<EOF
-[Unit]
-Description=Run ${ROOT}-scoped claude-auto-retry reconcile every 5 min
+daemon_pid() { [ -f "$PIDFILE" ] && cat "$PIDFILE" 2>/dev/null; }
+daemon_running() { local p; p="$(daemon_pid)"; [ -n "$p" ] && kill -0 "$p" 2>/dev/null; }
 
-[Timer]
-OnStartupSec=30
-OnUnitActiveSec=5min
-Persistent=true
+start_daemon() {
+  daemon_running && return 0
+  mkdir -p "$CAR_DIR"
+  setsid "$SELF" _daemon >>"$LOGFILE" 2>&1 </dev/null &
+  disown 2>/dev/null || true
+  # Wait (briefly) for the setsid child to write its pidfile so callers see it running.
+  local waited=0
+  while [ "$waited" -lt 10 ]; do
+    daemon_running && return 0
+    sleep 0.2
+    waited=$((waited + 1))
+  done
+}
 
-[Install]
-WantedBy=timers.target
-EOF
-  systemctl --user daemon-reload
+stop_daemon() {
+  local p; p="$(daemon_pid)"
+  [ -n "$p" ] && kill "$p" 2>/dev/null || true
+  rm -f "$PIDFILE"
+}
+
+cmd_daemon() {  # internal: the loop. Single-instance guarded.
+  local existing; existing="$(daemon_pid)"
+  if [ -n "$existing" ] && [ "$existing" != "$$" ] && kill -0 "$existing" 2>/dev/null; then
+    exit 0
+  fi
+  mkdir -p "$CAR_DIR"
+  echo $$ > "$PIDFILE"
+  trap 'rm -f "$PIDFILE"' EXIT INT TERM
+  while true; do
+    cmd_reconcile >/dev/null 2>&1 || true
+    sleep "$INTERVAL"
+  done
 }
 
 # --- subcommands -----------------------------------------------------------
 
-# Internal: one scoped reconcile pass. Run by the timer; touches no timer state.
+# Internal: one scoped reconcile pass (used by the daemon and by arm).
 cmd_reconcile() {
   [ -x "$CAR" ] || { echo "claude-auto-retry not found at $CAR" >&2; exit 1; }
+  [ -x "$NODE_BIN/node" ] || { echo "local node not found at $NODE_BIN/node" >&2; exit 1; }
   rebuild_exclude
   reap_monitors out
-  "$CAR" reconcile
+  run_car reconcile
 }
 
 cmd_arm() {
-  [ -x "$CAR" ] || { echo "claude-auto-retry not found at $CAR (install it first)" >&2; exit 1; }
-  write_units
-  systemctl --user enable --now "$TIMER" >/dev/null 2>&1 || systemctl --user enable "$TIMER" 2>/dev/null || true
-  systemctl --user start "$TIMER" 2>/dev/null || true
   cmd_reconcile
+  start_daemon
   echo
   cmd_status
 }
 
 cmd_disarm() {
-  systemctl --user disable --now "$TIMER" 2>/dev/null || true
+  stop_daemon
   reap_monitors in
-  echo "Disarmed: timer stopped/disabled, in-scope monitors killed."
+  echo "Disarmed: daemon stopped, in-scope monitors killed."
   echo "(sessions themselves are untouched — they just won't auto-resume on a limit hit)"
 }
 
 cmd_status() {
-  local active pid cwd armed_pids any=0 st
-  active="$(systemctl --user is-active "$TIMER" 2>/dev/null)"
-  [ -n "$active" ] || active=inactive
-  echo "Timer ($TIMER): $active     scope: $ROOT"
+  local pid cwd armed_pids any=0 st dstate
+  if daemon_running; then dstate="running (pid $(daemon_pid), every ${INTERVAL}s)"; else dstate="stopped"; fi
+  echo "Watchdog daemon: $dstate     scope: $ROOT"
   armed_pids="$(pgrep -af 'monitor\.js' 2>/dev/null | while read -r _ rest; do monitor_target_pid "$rest"; done | sort -u)"
   echo "In-scope claude sessions:"
   for pid in $(claude_pids); do
@@ -153,12 +162,13 @@ cmd_status() {
 }
 
 case "${1:-status}" in
-  arm)         cmd_arm ;;
-  disarm)      cmd_disarm ;;
-  status)      cmd_status ;;
-  _reconcile)  cmd_reconcile ;;
+  arm)        cmd_arm ;;
+  disarm)     cmd_disarm ;;
+  status)     cmd_status ;;
+  _reconcile) cmd_reconcile ;;
+  _daemon)    cmd_daemon ;;
   -h|--help|help)
-    sed -n '2,40p' "$SELF" | sed 's/^# \{0,1\}//; s/^#//' ;;
+    sed -n '2,44p' "$SELF" | sed 's/^# \{0,1\}//; s/^#//' ;;
   *)
     echo "Unknown command: ${1}" >&2
     echo "Usage: claude-watchdog.sh {arm|disarm|status}" >&2
