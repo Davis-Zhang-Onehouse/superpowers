@@ -78,6 +78,15 @@ push to any shared branch. The coordinator restacks at the compaction.
       it is a REGRESSION you must fix. Zero unresolved flips to finish.
 - [ ] Caveat FC-15: `precise_diff` does NOT surface newly-ADDED red tests. Assert any suite you add or
       modify GREEN directly from its surefire XML, not only via the diff.
+- [ ] **The bv40 dim has NO lineage-base surefire — use the PROXY and say so.** The lineage base's run
+      29742621077 uploaded nothing for `spark-test-backends-velox-ansi-spark40` (that job died at "Prepare
+      Spark Resources"), so diff (b) is structurally impossible for that dim. Use run **29738878247** (run 2 of
+      the final compaction) as the bv40 lineage-base proxy, and **state the substitution wherever you rely on
+      it**. A silent substitution becomes a false claim later.
+- [ ] **A newly-ADDED suite that ships RED is invisible to `regress`** — it is absent from the M1 baseline, so
+      no diff can ever flag it (FC-15's trap, in reverse: `AnsiErrorTranslatorValidateSuite` fails 5/5 on bv40
+      and every diff calls the dim CLEAN). For any suite added or modified since the baseline, read its
+      surefire XML DIRECTLY and assert pass/fail by name. **A clean `regress` output is not evidence for it.**
 - [ ] **ABSENCE OF A RESULT IS NOT A PASS.** A suite that never ran produces no red, and a diff of red-vs-green
       cannot see it — that is how a whole class of missing coverage stayed invisible (FC-21's hazard class; a
       census found 548 `enableSuite` entries against 193 suites with a surefire XML). For every gap/row you
