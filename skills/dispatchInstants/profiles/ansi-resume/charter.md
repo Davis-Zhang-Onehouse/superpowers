@@ -84,6 +84,14 @@ raise — it breaks queries that work today.** So, whenever your change makes so
 - [ ] One effective GitHub CI run (Velox Backend ANSI Mode) on your pushed tip. **Truth = the downloaded
       surefire XMLs** — jobs run `--fail-never` and ALWAYS look green. Never cite the checkmark.
 - [ ] `get-velox.sh` must point at YOUR velox branch if you changed velox; otherwise leave the `-final` pin.
+- [ ] **SHARED TOOLING CHANGES UNDER YOU MID-FLIGHT — read the changelog before interpreting any non-zero
+      exit.** `pdispatch` tools are invoked from the repo, so a change reaches you immediately. Newest-first,
+      with the exit-code impact per change:
+      `/home/ubuntu/davis_root/operations/tasks/metaOpt/main-07270637-inflight-append-systemMetaOptimizationLoop/TOOLING-CHANGES.md`
+      Re-read it if a tool behaves differently from what this charter describes — the charter is a snapshot,
+      the changelog is live. **The one that bites hardest: `RED-NO-BASELINE` is FATAL BY DEFAULT in `regress`.
+      A non-zero exit there is NOT evidence you broke something** — the tool cannot distinguish "added by this
+      stack" from "existed but was never measured", and only the source history decides the owner.
 - [ ] **Do NOT hand-roll a surefire parser.** Use **`pdispatch surefire <report-dirs> --dim <label>`** to
       produce `regress`'s input, one invocation per CI dimension with a distinct `--dim`. It parses XML as XML,
       drops skipped tests, makes FAIL beat PASS within a dim, and dim-qualifies every name so dimensions cannot
