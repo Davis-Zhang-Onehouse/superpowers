@@ -14,14 +14,17 @@
 #
 # Usage:  dispatch-health.sh [--json] [--id <todo-id>] [--base <base-instant>]
 # Exit:   0 = nothing needs attention   1 = something does   2 = bad input
-# Env:    BOARD_DIR (default ~/.claude-dispatch-board), TMUX_BIN (default tmux), IDLE_MIN (default 30)
+# Env:    BOARD_DIR, TMUX_BIN, IDLE_MIN (default 30), HEALTH_TAG (idle-baseline namespace per caller)
 set -uo pipefail
 
 BOARD_DIR="${BOARD_DIR:-$HOME/.claude-dispatch-board}"
 RECORDS="$BOARD_DIR/records"
 TMUX_BIN="${TMUX_BIN:-tmux}"
 IDLE_MIN="${IDLE_MIN:-30}"
-HEALTH="$BOARD_DIR/health"
+# The idle baseline is mutable state on disk. Namespace it per caller ($HEALTH_TAG): a monitor
+# sampling every 60s and a coordinator sampling on its own tick otherwise overwrite each other's
+# baseline, so IDLE — and every state derived from it — flaps. Two watchers must not share one view.
+HEALTH="$BOARD_DIR/health/${HEALTH_TAG:-shared}"
 
 JSON=0; ONLY=""; ONLY_BASE=""
 while [ $# -gt 0 ]; do
