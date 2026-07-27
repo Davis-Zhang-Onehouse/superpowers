@@ -21,7 +21,8 @@
 #                                              atomically grab a free slot; prints its
 #                                              path on stdout. exit 0 ok / 3 pool-full.
 #   wspool.sh release <slot|path>              free a slot (idempotent)
-#   wspool.sh reap                             free every STALE lease (dead tmux)
+#   wspool.sh reap [--base <instant>] [--all]  free STALE leases: yours (+untagged legacy);
+#                                              --all overrides and frees other efforts' too
 #
 # Env:
 #   POOL_DIR   pool root (default ~/.claude-ws-pool). Override for hermetic tests.
@@ -81,10 +82,28 @@ lease_state() {  # echo FREE|LEASED|STALE for an enrolled slot name
   if lease_alive "$ld"; then echo LEASED; else echo STALE; fi
 }
 
-reap_one() {  # free the slot if its lease is stale; echo freed name or nothing
-  local name="$1" ld="$LEASE_DIR/$name"
+lease_owner() { sed -n 's/^BASE_INSTANT=//p' "$1/meta" 2>/dev/null | head -1; }
+
+same_owner() { # $1 = lease owner, $2 = scope
+  [ "$1" = "$2" ] && return 0
+  [ -n "$1" ] && [ -n "$2" ] || return 1
+  [ "$(realpath -m -- "$1" 2>/dev/null)" = "$(realpath -m -- "$2" 2>/dev/null)" ]
+}
+
+# reap_one <name> [scope] — free the slot IF its lease is stale AND it is ours to free.
+#   scope "--all"  reap any stale lease (explicit global override)
+#   scope <base>   reap only leases owned by <base>, plus untagged legacy leases
+#   scope ""       owner unknown: reap ONLY untagged legacy leases
+# The pool is machine-global: reaping another effort's stale lease hands its slot away. (D-6/D-7)
+# rc: 0 freed · 1 not stale/absent · 2 skipped (owned by another effort)
+reap_one() {
+  local name="$1" scope="${2-}" ld="$LEASE_DIR/$name" owner
   [ -d "$ld" ] || return 1
   if lease_alive "$ld"; then return 1; fi
+  owner="$(lease_owner "$ld")"
+  if [ "$scope" != "--all" ] && [ -n "$owner" ] && ! same_owner "$owner" "$scope"; then
+    return 2
+  fi
   rm -rf "$ld"
   printf '%s\n' "$name"
 }
@@ -221,7 +240,7 @@ cmd_claim() {
     if [ "$attempt" -eq 1 ]; then
       local reaped=0
       for name in "${cands[@]}"; do
-        if reap_one "$name" >/dev/null 2>&1; then reaped=1; fi
+        if reap_one "$name" "$base" >/dev/null 2>&1; then reaped=1; fi
       done
       [ "$reaped" -eq 1 ] && continue
     fi
@@ -244,15 +263,28 @@ cmd_release() {
 
 cmd_reap() {
   ensure_pool
-  local ld name freed=0
+  local scope="" all=0
+  while [ "$#" -gt 0 ]; do
+    case "$1" in
+      --all)  all=1; shift;;
+      --base) scope="${2:-}"; shift 2;;
+      *) err "reap: unknown arg: $1 (usage: reap [--base <instant>] [--all])"; exit 2;;
+    esac
+  done
+  [ "$all" -eq 1 ] && scope="--all"
+  # Ergonomics: a coordinator can export DISPATCH_BASE once and keep using bare `reap`.
+  [ -n "$scope" ] || scope="${DISPATCH_BASE:-}"
+  local ld name freed=0 skipped=0 rc
   for ld in "$LEASE_DIR"/*/; do
     [ -d "$ld" ] || continue
     name="$(basename -- "$ld")"
-    if reap_one "$name" >/dev/null 2>&1; then
-      info "reaped (dead tmux): $name"; freed=1
-    fi
+    rc=0; reap_one "$name" "$scope" >/dev/null 2>&1 || rc=$?   # set -e safe: rc=2 is "skipped", not fatal
+    case "$rc" in
+      0) info "reaped (dead tmux): $name"; freed=1;;
+      2) warn "skipped $name — stale but leased by ANOTHER effort ($(lease_owner "$LEASE_DIR/$name")); pass --all to override"; skipped=1;;
+    esac
   done
-  [ "$freed" -eq 1 ] || info "no stale leases."
+  [ "$freed" -eq 1 ] || [ "$skipped" -eq 1 ] || info "no stale leases."
 }
 
 main() {
