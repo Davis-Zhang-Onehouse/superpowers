@@ -256,6 +256,19 @@ PYX
 out=$(STUB_ALIVE=0 bash "$S/dispatch-health.sh" 2>&1)
 echo "$out" | grep -qi "dead" && ok "a launched-but-gone session is still DEAD" || bad "lost the real DEAD signal"
 
+# Nobody should hand-derive a session name. The tmux session is `dt-<todo-id>`; a watcher that built
+# it from the todo-id alone reported a healthy coordinator GONE and terminated itself. The record
+# already holds the real name, so liveness must be answered from the record, never reconstructed.
+STUB_ALIVE=1 bash "$S/dispatch-alive.sh" alpha >/dev/null 2>&1
+chk "alive: a live worker exits 0" 0 $?
+STUB_ALIVE=0 bash "$S/dispatch-alive.sh" alpha >/dev/null 2>&1
+chk "alive: a dead worker exits 1" 1 $?
+bash "$S/dispatch-alive.sh" nosuch >/dev/null 2>&1
+chk "alive: unknown todo-id exits 2 (not mistaken for dead)" 2 $?
+out=$(STUB_ALIVE=1 bash "$S/dispatch-alive.sh" alpha 2>&1)
+echo "$out" | grep -q "dt-alpha" && ok "alive: reports the session name it actually checked" \
+  || bad "alive: does not say which session it checked"
+
 echo "== dispatch-send =="
 : > "$STUB_LOG"; printf 'ready\n' > "$STUB_PANE"
 STUB_ALIVE=1 STUB_ECHO=1 bash "$S/dispatch-send.sh" alpha "hello worker" >/dev/null 2>&1
