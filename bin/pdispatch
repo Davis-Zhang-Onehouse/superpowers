@@ -56,6 +56,8 @@ ${b}THE TOOLKIT${r}  ${d}(all on PATH via this repo's bin/)${r}
   ${g}pdispatch gate${r} <instant> [--harvest]                  mechanical review gate: pass/fail from
                                                         REVIEW.md. Precondition for harvesting.
   ${g}pdispatch drift${r} --handoff <f> --instants-dir <d>      registry-vs-reality drift check.
+  ${g}pdispatch endgame${r} <coordinator-instant>                 leave-no-orphans check before you STOP,
+                                                        plus the manual steps it cannot verify.
   ${g}pdispatch lint${r} <instant>                              canonical file SET present? (a format
                                                         review checks content of files that EXIST.)
   ${g}pdispatch surefire${r} <dir>... [--dim <label>]            flatten surefire/JUnit XML to the
@@ -110,6 +112,7 @@ case "$cmd" in
   gate)    exec "$REPO/skills/coordinating-instants/tools/workspace-gate.py" "$@";;
   drift)   exec "$REPO/skills/coordinating-instants/tools/coord-check.py" "$@";;
   lint)    exec "$REPO/skills/coordinating-instants/tools/workspace-lint.py" "$@";;
+  endgame) exec "$REPO/skills/coordinating-instants/tools/endgame-check.py" "$@";;
   regress) exec "$REPO/skills/coordinating-instants/tools/regression-check.py" "$@";;
   surefire) exec "$REPO/skills/coordinating-instants/tools/surefire-to-tsv.py" "$@";;
   doc|docs|design)

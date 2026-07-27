@@ -435,6 +435,42 @@ out=$(python3 "$T/regression-check.py" --baseline "$tmp/base_2dim.tsv" --current
 echo "$out" | grep -qi "entire dimension" && bad "called one missing test a lost dimension" \
   || ok "one missing test is not reported as a lost dimension"
 
+echo "== endgame-check (leave no orphans) =="
+eg="$tmp/eginst"; mkdir -p "$eg"
+cat > "$eg/ISSUES.md" <<'EOI'
+# ISSUES
+## OI-1 — a fixed thing
+### Status
+FIXED
+## OI-2 — an operator decision
+### Status
+OPEN — operator-only, parked
+## OI-3 — nobody owns this
+### Status
+OPEN
+EOI
+printf '# H\n\n## Parked decision\nOI-2 merge is yours.\n\n## Next\n' > "$eg/HANDOFF.md"
+out=$(python3 "$T/endgame-check.py" "$eg" 2>&1); rc=$?
+chk "an un-owned open issue is an orphan" 1 $rc
+echo "$out" | grep -q "OI-3" && ok "names the orphan" || bad "did not name it"
+echo "$out" | grep -q "OI-2" && bad "flagged a parked operator item as an orphan" || ok "parked items are not orphans"
+echo "$out" | grep -q "OI-1" && bad "flagged a FIXED issue" || ok "fixed issues are ignored"
+echo "$out" | grep -qi "strict-coverage" && ok "prints the manual steps it cannot check" || bad "no manual steps"
+cat > "$eg/ISSUES.md" <<'EOI2'
+# ISSUES
+## OI-1 — a fixed thing
+### Status
+FIXED
+## OI-2 — an operator decision
+### Status
+OPEN — operator-only, parked
+## OI-3 — now owned
+### Status
+OPEN — carried as an open AC on the final compaction
+EOI2
+python3 "$T/endgame-check.py" "$eg" >/dev/null 2>&1
+chk "carried-forward issues satisfy the contract" 0 $?
+
 echo "== coord-check =="
 inst="$tmp/instants"; mkdir -p "$inst/07180102-07190000-complete-append-mrA" "$inst/07180102-07190001-inflight-append-mrB"
 mkh(){ printf '# H\n\n## Live milestone registry\n| MR | Task | Disposition | Depends-on | Instant | Slot | Status | Proof |\n|---|---|---|---|---|---|---|---|\n%s\n' "$1" > "$tmp/HANDOFF.md"; }
