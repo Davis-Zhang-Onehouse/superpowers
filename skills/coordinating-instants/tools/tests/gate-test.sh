@@ -240,6 +240,11 @@ chk "a missing STATE.md is NOT a violation" 0 $?
 python3 "$T/workspace-lint.py" "$w" 2>&1 | grep -qi "STATE.md" && ok "still mentions it as info" || bad "silent about it"
 python3 "$T/workspace-lint.py" "$w" --require-state >/dev/null 2>&1
 chk "--require-state makes it a violation when an effort wants it" 1 $?
+# the STATE.md parenthetical must only appear when STATE.md is the absent file, not whenever anything is
+w=$(mkw inst-hasstate); printf '# S\nUpdated: 2026-01-01 | Status: LIVE\n' > "$w/STATE.md"
+out=$(python3 "$T/workspace-lint.py" "$w" 2>&1)
+echo "$out" | grep -q "STATE.md may legitimately" && bad "mentions STATE.md while STATE.md is present" \
+  || ok "the STATE.md note only appears when STATE.md is absent"
 w=$(mkw inst-nodir); rmdir "$w/plans"
 python3 "$T/workspace-lint.py" "$w" >/dev/null 2>&1; chk "a missing canonical dir is a violation" 1 $?
 w=$(mkw inst-noidx); rm "$w/evidence/INDEX.md"

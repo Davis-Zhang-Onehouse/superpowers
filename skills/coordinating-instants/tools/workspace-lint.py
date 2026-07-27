@@ -74,8 +74,8 @@ def main(argv=None):
         for f in headerless:
             print(f"  NO HEADER in {f} — a canonical file needs an 'Updated:'/'Status:' header")
         if info:
-            print(f"  info: absent optional file(s): {', '.join(info)} "
-                  "(STATE.md may legitimately be folded into HANDOFF)")
+            note = " (STATE.md may legitimately be folded into HANDOFF)" if "STATE.md" in info else ""
+            print(f"  info: absent optional file(s): {', '.join(info)}{note}")
     return 1 if viol else 0
 
 
