@@ -1,0 +1,44 @@
+#!/usr/bin/env bash
+#
+# superpowers-selftest — discover and run every hermetic suite in this repo, print one verdict.
+#
+# Written because "all N suites green" had been a claim I made after running a for-loop by hand,
+# which is not re-derivable by anyone else — the exact "no artifact behind the assertion" failure
+# these skills tell workers not to commit. Now it is a command, and its output is an artifact.
+#
+# Usage:  superpowers-selftest [--quiet]
+# Exit:   0 = every suite passed · 1 = at least one failed · 2 = no suites discovered
+set -uo pipefail
+SELF="$(readlink -f "$0" 2>/dev/null || echo "$0")"
+REPO="$(cd "$(dirname "$SELF")/.." && pwd)"
+QUIET=0; [ "${1:-}" = "--quiet" ] && QUIET=1
+
+# Hermetic suites live in skills/*/tests/*.sh and skills/*/tools/tests/*.sh
+mapfile -t SUITES < <(find "$REPO/skills" -type f -path '*/tests/*.sh' | sort)
+[ "${#SUITES[@]}" -gt 0 ] || { echo "no suites discovered under $REPO/skills" >&2; exit 2; }
+
+pass=0; fail=0; failed=()
+echo "superpowers-selftest — $(date -u +%Y-%m-%dT%H:%M:%SZ) — repo $(git -C "$REPO" rev-parse --short HEAD 2>/dev/null)"
+echo "discovered ${#SUITES[@]} suite(s)"
+for s in "${SUITES[@]}"; do
+  rel="${s#$REPO/}"
+  # SEND_WAIT/LAUNCH_WAIT keep the tmux-stub suites from sleeping; harmless elsewhere.
+  out="$(SEND_WAIT=0 LAUNCH_WAIT=0 timeout 600 bash "$s" 2>&1)"
+  # Suites end either with a bare "PASS" or "PASS: <description>" — accept both, anchored, so this
+  # matches neither a substring in a failure line nor only the one shape I happened to look at first.
+  if printf '%s' "$out" | tail -1 | grep -qE '^PASS(:|[[:space:]]|$)'; then
+    pass=$((pass+1)); printf '  PASS  %s\n' "$rel"
+  else
+    fail=$((fail+1)); failed+=("$rel"); printf '  FAIL  %s\n' "$rel"
+    [ "$QUIET" = 1 ] || printf '%s\n' "$out" | sed 's/^/          /' | tail -12
+  fi
+done
+
+echo "-----"
+echo "$pass passed, $fail failed, of ${#SUITES[@]} discovered"
+if [ "$fail" -ne 0 ]; then
+  printf 'FAILED: %s\n' "${failed[@]}"
+  echo "VERDICT: RED"
+  exit 1
+fi
+echo "VERDICT: GREEN — every discovered suite passed"
