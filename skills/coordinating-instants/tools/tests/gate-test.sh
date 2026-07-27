@@ -223,6 +223,27 @@ out=$(python3 "$T/regression-check.py" --baseline "$tmp/base.tsv" --lineage-base
 echo "$out" | grep -qiE "not comparable: 0|coverage: complete" && ok "says coverage is complete when it is" \
   || bad "no positive statement of full coverage"
 
+# A suite ADDED after the baseline that ships RED has no prior green to lose, so no diff can see it:
+# a dim reports CLEAN while the suite fails completely. This is how a 5/5-failing validate suite
+# reached ship-readiness (coordinator RI-15, found by R3). Absent + failing is NOT "unproven" — it is red.
+mk cur_newred.tsv "a	PASS" "b	PASS" "c	PASS" "d	FAIL" "brandNewSuite.t1	FAIL" "brandNewSuite.t2	FAIL"
+out=$(python3 "$T/regression-check.py" --baseline "$tmp/base.tsv" --lineage-base "$tmp/lineage.tsv" \
+        --current "$tmp/cur_newred.tsv" 2>&1); rc=$?
+chk "a newly-added suite shipping RED fails the check" 1 $rc
+echo "$out" | grep -qi "new" && echo "$out" | grep -q "brandNewSuite.t1" \
+  && ok "names the new red tests" || bad "did not surface the new reds"
+echo "$out" | grep -qi "^CLEAN" && bad "still headlined CLEAN with a new suite failing" || ok "verdict is not CLEAN"
+# a newly-added suite that is GREEN is merely new, not a failure
+mk cur_newgreen.tsv "a	PASS" "b	PASS" "c	PASS" "d	FAIL" "brandNewSuite.t1	PASS"
+python3 "$T/regression-check.py" --baseline "$tmp/base.tsv" --lineage-base "$tmp/lineage.tsv" \
+  --current "$tmp/cur_newgreen.tsv" >/dev/null 2>&1
+chk "a newly-added GREEN suite is not a failure" 0 $?
+# documented red-red residuals need an escape hatch, but it must still be visible
+out=$(python3 "$T/regression-check.py" --baseline "$tmp/base.tsv" --lineage-base "$tmp/lineage.tsv" \
+        --current "$tmp/cur_newred.tsv" --allow-new-red 2>&1); rc=$?
+chk "--allow-new-red downgrades it to a warning" 0 $rc
+echo "$out" | grep -q "brandNewSuite.t1" && ok "still names them under --allow-new-red" || bad "went silent"
+
 echo "== coord-check =="
 inst="$tmp/instants"; mkdir -p "$inst/07180102-07190000-complete-append-mrA" "$inst/07180102-07190001-inflight-append-mrB"
 mkh(){ printf '# H\n\n## Live milestone registry\n| MR | Task | Disposition | Depends-on | Instant | Slot | Status | Proof |\n|---|---|---|---|---|---|---|---|\n%s\n' "$1" > "$tmp/HANDOFF.md"; }
