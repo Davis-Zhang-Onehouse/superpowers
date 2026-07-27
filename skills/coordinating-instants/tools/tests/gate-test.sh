@@ -139,6 +139,25 @@ grep -q harvested_at "$BOARD_DIR/records/mrbad.json" && bad "marked harvested de
   || ok "failed gate records nothing"
 unset BOARD_DIR
 
+# Prose must never front-run the ledger: an instant whose HANDOFF claims a review round that
+# REVIEW.md does not contain is a narrative ahead of its evidence (worker R7 OI-8). But "R1" is also
+# a MILESTONE name in efforts like this one, so only round-shaped phrasings may count.
+d="$tmp/inst-claim"; mkdir -p "$d"
+{ echo "# X — REVIEW"; echo; echo "## Round R1 — 2026-01-01 · trigger: pre-complete · scope: all"; echo
+  echo "## Round summary — overall verdict: READY"
+  echo "- Open findings: Critical 0 · Important 0 · Minor 0"; } > "$d/REVIEW.md"
+printf '# H\n\nreview round R2 found three things.\n' > "$d/HANDOFF.md"
+out=$(python3 "$T/workspace-gate.py" "$d" 2>&1)
+echo "$out" | grep -qiE "claims .*R2|R2.*not in REVIEW|unbacked" && ok "flags a round claimed in prose but absent from the ledger" \
+  || bad "silent about a claimed round with no ledger entry"
+# a milestone called R2 must NOT be mistaken for a review round
+printf '# H\n\nR2 delivered the velox raise batch; depends-on R1.\n' > "$d/HANDOFF.md"
+out=$(python3 "$T/workspace-gate.py" "$d" 2>&1)
+echo "$out" | grep -qiE "claims|unbacked" && bad "mistook a milestone name for a review round" \
+  || ok "milestone names are not read as review rounds"
+python3 "$T/workspace-gate.py" "$d" >/dev/null 2>&1
+chk "the claim check is advisory, never changes the verdict" 0 $?
+
 echo "== regression-check =="
 res(){ printf '%s\n' "$@"; }   # helper
 mk(){ printf '%s\n' "${@:2}" > "$tmp/$1"; }
