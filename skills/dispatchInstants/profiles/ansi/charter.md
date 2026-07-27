@@ -58,6 +58,11 @@ Dispatched by parallelDispatch from base instant: {{BASE_NAME}}
 - **CI TRUTH = SUREFIRE:** CI runs --fail-never and always shows green — download & parse the surefire report.
 - **Local parity:** everything CI can run, you must be able to run locally doing the same thing.
 - **get_velox.sh:** ensure gluten checks out the proper velox counterpart (matching branch/commit) for the fix.
+- **GOLD spark path is SHARED + READ-ONLY:** `/home/ubuntu/davis_root/spark` @branch-4.1 is the GOLD Spark-Java
+  reference — READ it to cite expected behavior (file:line). It is shared across ALL instants. For ANY write op
+  under it (build there, `git checkout` a different ref, apply a patch, run a test that writes), create a **git
+  worktree** — `git -C /home/ubuntu/davis_root/spark worktree add <your-ws>/spark-wt <ref>` — and work in the
+  worktree; NEVER mutate the shared checkout other instants depend on. Record it in your workspace (ASSUMPTIONS/RUNBOOK).
 - **Long-term fix, not bandaid:** maintainable, extensible, reliable. No adhoc hacks.
 - **ANSI DESIGN PHILOSOPHY (north star — preserve Velox acceleration):** avoid a big-hammer fallback that
   loses Velox acceleration of other cases. Fallback is acceptable ONLY when there is no acceleration cost.

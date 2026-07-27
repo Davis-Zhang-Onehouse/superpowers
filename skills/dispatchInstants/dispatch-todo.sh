@@ -271,6 +271,31 @@ info "  child instant bootstrapped with RCA-first seeded CHARTER"
 step "recording dispatch (global board store)"
 mkdir -p "$RECORDS_DIR"
 DISPATCHED_AT="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+# ---- 4b. hygiene: persist the seed, snapshot the profile, isolate the build cache ----------
+# The rendered SEED is stored so a launch line never has to be hand-built (`dispatch-launch`
+# replays it, correctly quoted). The PROFILE is globally mutable and gets edited mid-effort, so
+# a snapshot goes with the instant or the dispatch stops being reproducible.
+SEED="$(render_template "$PROFILE_DIR/seed.txt")"
+DISPATCH_META="$CHILD/.dispatch"
+mkdir -p "$DISPATCH_META/profile"
+printf '%s' "$SEED" > "$DISPATCH_META/seed.txt"
+cp -R "$PROFILE_DIR/." "$DISPATCH_META/profile/" 2>/dev/null || true
+info "  seed + profile snapshot -> $DISPATCH_META"
+
+# Parallel workers sharing one build cache poison each other (OI-6). Point every maven project
+# in this workspace at a cache INSIDE the workspace, so it cannot be got wrong.
+if [ "${ISOLATE_BUILD:-1}" = "1" ]; then
+  while IFS= read -r pom; do
+    [ -n "$pom" ] || continue
+    pdir="$(dirname "$pom")"
+    mkdir -p "$pdir/.mvn"
+    if ! grep -qs 'maven.repo.local' "$pdir/.mvn/maven.config" 2>/dev/null; then
+      printf -- '-Dmaven.repo.local=%s/.m2\n' "$WS" >> "$pdir/.mvn/maven.config"
+      info "  build cache isolated: $pdir/.mvn/maven.config -> $WS/.m2"
+    fi
+  done <<< "$(find "$WS" -maxdepth 2 -name pom.xml 2>/dev/null)"
+fi
+
 BRIEF_ABS="$([ "$BRIEF" = "-" ] && echo "(stdin)" || realpath -m -- "$BRIEF")"
 # JSON with evidence array
 {
@@ -284,6 +309,9 @@ BRIEF_ABS="$([ "$BRIEF" = "-" ] && echo "(stdin)" || realpath -m -- "$BRIEF")"
   printf '  "tmux": "%s",\n' "$TMUX_SESSION"
   printf '  "base_instant": "%s",\n' "$BASE"
   printf '  "brief": "%s",\n' "$BRIEF_ABS"
+  printf '  "seed_file": "%s",\n' "$DISPATCH_META/seed.txt"
+  printf '  "profile": "%s",\n' "$PROFILE_DIR"
+  printf '  "profile_archive": "%s",\n' "$DISPATCH_META/profile"
   printf '  "dispatched_at": "%s"\n' "$DISPATCHED_AT"
   printf '}\n'
 } > "$RECORD"
@@ -291,7 +319,6 @@ RECORD_MADE=1
 info "  wrote $RECORD"
 
 # ---- 5. launch the interactive session --------------------------------------
-SEED="$(render_template "$PROFILE_DIR/seed.txt")"
 
 if [ "$NO_LAUNCH" -eq 0 ]; then
   step "launching interactive tmux session $TMUX_SESSION"

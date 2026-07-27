@@ -108,10 +108,16 @@ check "wd1 LEASED while tmux alive" "$s1" "LEASED"
 rm -f "$FAKE_TMUX_MARKERS/live1"
 s1b="$("$WSPOOL" status wd1 | sed -n 's/.*STATE=\([A-Z]*\).*/\1/p')"
 check "wd1 STALE after tmux dies" "$s1b" "STALE"
-"$WSPOOL" reap >/dev/null
+# Owner-scoped reap: a bare reap must NOT free a lease tagged to an effort it cannot identify
+# (the pool is machine-global — that would hand another effort's slot away).
+"$WSPOOL" reap >/dev/null 2>&1
+check "bare reap protects an owner-tagged stale lease" \
+  "$([ -d "$POOL_DIR/leases/wd1" ] && echo yes || echo no)" "yes"
+# ...but the owning effort frees it, either via --base or by exporting DISPATCH_BASE.
+"$WSPOOL" reap --base /b >/dev/null
 d1=$([ -d "$POOL_DIR/leases/wd1" ] && echo yes || echo no)
 d2=$([ -d "$POOL_DIR/leases/wd2" ] && echo yes || echo no)
-check "reap freed the dead lease (wd1)" "$d1" "no"
+check "reap --base freed the dead lease (wd1)" "$d1" "no"
 check "reap kept the live lease (wd2)" "$d2" "yes"
 
 echo "== Test E: claim auto-reaps a stale slot instead of reporting pool-full =="
