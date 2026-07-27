@@ -80,6 +80,34 @@ chk "an unparseable verdict fails closed" 2 $rc
 echo "$out" | grep -qi "could not parse\|unparseable" && ok "says unparseable, not absent" \
   || bad "misdiagnoses an unparseable line as a missing one"
 
+# A multi-round REVIEW.md needs a per-round summary heading, and reviewers disambiguate the obvious
+# way: "## Round R2 summary — overall verdict:". That must NOT be eaten as the start of a new round
+# (coordinator RI-13). Both the plain and the numbered summary headings must parse.
+d="$tmp/inst-multiround"; mkdir -p "$d"
+{ echo "# X — REVIEW"; echo
+  echo "## Round R2 — 2026-01-02 · trigger: pre-complete · scope: all"
+  echo "### Stage 1 — Format (verdict: PASS)"; echo
+  echo "## Round R2 summary — overall verdict: **READY**"
+  echo "- Open findings: Critical 0 · Important 0 · Minor 0"; echo
+  echo "## Round R1 — 2026-01-01 · trigger: on-demand · scope: all"; echo
+  echo "## Round summary — overall verdict: NOT-READY"
+  echo "- Open findings: Critical 1 · Important 0 · Minor 0"; } > "$d/REVIEW.md"
+python3 "$T/workspace-gate.py" "$d" >/dev/null 2>&1
+chk "numbered per-round summary heading parses (multi-round file)" 0 $?
+out=$(python3 "$T/workspace-gate.py" "$d" 2>&1)
+echo "$out" | grep -q "R2" && ok "picks the newest round (R2), not R1" || bad "picked the wrong round"
+# and the newest round must still be able to FAIL
+d="$tmp/inst-multiround-bad"; mkdir -p "$d"
+{ echo "# X"; echo
+  echo "## Round R2 — 2026-01-02 · trigger: pre-complete · scope: all"; echo
+  echo "## Round R2 summary — overall verdict: NOT-READY"
+  echo "- Open findings: Critical 1 · Important 0 · Minor 0"; echo
+  echo "## Round R1 — 2026-01-01 · trigger: on-demand · scope: all"; echo
+  echo "## Round summary — overall verdict: READY"
+  echo "- Open findings: Critical 0 · Important 0 · Minor 0"; } > "$d/REVIEW.md"
+python3 "$T/workspace-gate.py" "$d" >/dev/null 2>&1
+chk "a newest-round NOT-READY still fails even if an older round was READY" 1 $?
+
 # Harvest must be RECORDED where a tool can see it, or every finished instant screams forever
 # and a successor coordinator cannot tell owed work from history (coordinator RI-1 / RI-5).
 export BOARD_DIR="$tmp/board"; mkdir -p "$BOARD_DIR/records"
