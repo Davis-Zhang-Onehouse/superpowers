@@ -358,6 +358,31 @@ python3 "$T/surefire-to-tsv.py" "$sd" --dim bv40 2>/dev/null | grep -q "bv40::or
 python3 "$T/surefire-to-tsv.py" "$tmp/nothing-here" >/dev/null 2>&1
 chk "an empty extraction is an error, not an empty diff" 2 $?
 
+# A discovery filter that skips files without saying so is the same silent drop as a bad regex
+# (worker R3 OI-11 lost 43 rows per slow-dim extraction to a hand-rolled parser).
+# NOT under a path containing "surefire" — otherwise the path heuristic matches and nothing is skipped
+odd="$tmp/reports-slowdim"; mkdir -p "$odd"
+cat > "$odd/results-slowdim.xml" <<'EOX'
+<?xml version="1.0"?>
+<testsuite hostname="h" name="org.example.SlowSuite" tests="1">
+  <testcase classname="org.example.SlowSuite" name="slowtest"/>
+</testsuite>
+EOX
+out=$(python3 "$T/surefire-to-tsv.py" "$odd" 2>&1)
+echo "$out" | grep -qi "skipped\|not matched\|--all-xml" && ok "reports XML files it did not read" \
+  || bad "silently skipped a non-TEST- prefixed XML"
+python3 "$T/surefire-to-tsv.py" "$odd" --all-xml 2>/dev/null | grep -q "SlowSuite::slowtest" \
+  && ok "--all-xml picks up differently-named reports" || bad "--all-xml did not include it"
+
+echo "== regress semantics version (results must be self-describing) =="
+python3 "$T/regression-check.py" --version 2>&1 | grep -qE "semantics|v[0-9]" \
+  && ok "--version reports the semantics version" || bad "no version to cite"
+out=$(python3 "$T/regression-check.py" --baseline "$tmp/base.tsv" --current "$tmp/cur_clean.tsv" 2>&1)
+echo "$out" | grep -qE "semantics" && ok "every run stamps its semantics version" || bad "output is not self-describing"
+python3 "$T/regression-check.py" --baseline "$tmp/base.tsv" --current "$tmp/cur_clean.tsv" --json 2>/dev/null \
+  | python3 -c 'import json,sys; d=json.load(sys.stdin); assert d.get("semantics_version"), "missing"; print("ok")' >/dev/null 2>&1 \
+  && ok "json carries semantics_version" || bad "json lacks semantics_version"
+
 echo "== regress input sanity =="
 # A broken extractor makes the two files share NO names. That must not read as "coverage: complete".
 mk lhs.tsv "hostA::t1	PASS" "hostA::t2	PASS"

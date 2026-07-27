@@ -21,6 +21,12 @@ import os
 import re
 import sys
 
+# Bump when a change alters what this tool CONSIDERS a failure. A worker compared run 1 against run 2
+# after the semantics changed mid-milestone and the exit codes were not comparable; a result that does
+# not say which rules produced it cannot be compared to one that does.
+SEMANTICS_VERSION = "3 (2026-07-27): red-no-baseline fatal by default · bidirectional coverage incl. " \
+                    "vanished/lost-dimension · zero-overlap input mismatch fatal"
+
 PASSY = {"PASS", "PASSED", "OK", "GREEN", "SUCCESS", "1", "TRUE"}
 FAILY = {"FAIL", "FAILED", "ERROR", "RED", "FAILURE", "0", "FALSE"}
 
@@ -64,8 +70,8 @@ def closed_from_md(path, marker):
 
 def main(argv=None):
     ap = argparse.ArgumentParser(description="Two-diff non-regression check.")
-    ap.add_argument("--baseline", required=True, help="the fixed original baseline results")
-    ap.add_argument("--current", required=True, help="this run's results")
+    ap.add_argument("--baseline", required=False, help="the fixed original baseline results")
+    ap.add_argument("--current", required=False, help="this run's results")
     ap.add_argument("--lineage-base", help="results of the end-state this instant inherited (the second diff)")
     ap.add_argument("--closed-list", help="file of identifiers the registry marks CLOSED (one per line)")
     ap.add_argument("--closed-from-md", help="registry markdown to extract CLOSED rows from")
@@ -78,8 +84,15 @@ def main(argv=None):
                     help="fail if a baseline did not cover tests present in the current run, i.e. the "
                          "diff for those tests could not run at all (a CI dim that uploaded no results)")
     ap.add_argument("--json", action="store_true")
+    ap.add_argument("--version", action="store_true", help="print the semantics version and exit")
     a = ap.parse_args(argv)
+    if a.version:
+        print(f"regression-check semantics v{SEMANTICS_VERSION}")
+        return 0
 
+    if not a.baseline or not a.current:
+        print("error: --baseline and --current are required", file=sys.stderr)
+        return 2
     base, cur = load(a.baseline), load(a.current)
     lin = load(a.lineage_base) if a.lineage_base else None
 
@@ -114,6 +127,7 @@ def main(argv=None):
         "closed_absent_from_results": missing,
         "counts": {"baseline": len(base), "current": len(cur), "lineage_base": len(lin or {}), "closed": len(closed)},
         "lineage_diff_run": lin is not None,
+        "semantics_version": SEMANTICS_VERSION,
     }
     # A broken adapter makes the files share NO names (the hostname-as-suite-name bug did exactly
     # that), and every downstream number is then confidently wrong. Overlap is the cheap invariant
@@ -162,6 +176,7 @@ def main(argv=None):
     if a.json:
         print(json.dumps(res, indent=2, ensure_ascii=False))
     else:
+        print(f"[semantics v{SEMANTICS_VERSION.split(':')[0]}] cite this when comparing runs")
         print(f"{res['result']} — regressions={len(regressions)} rebreaks={len(rebreaks)} "
               f"red-no-baseline={len(new_red)} closed-not-green={len(closed_not_green)}")
         for n in new_red:
