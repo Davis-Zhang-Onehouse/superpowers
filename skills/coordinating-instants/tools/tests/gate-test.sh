@@ -282,6 +282,28 @@ echo "$out" | grep -qi "coverage: complete" && bad "claimed complete coverage wi
 echo "$out" | grep -qiE "overlap|shared|extraction" && ok "reports the name overlap" || bad "overlap not reported"
 chk "zero overlap between baseline and current fails" 1 $rc
 
+# A whole CI dimension can VANISH from the current run. With dim-qualified names the surviving dim
+# still overlaps the baseline perfectly, so overlap looks fine and every current test is comparable —
+# while 1001 baseline results simply stopped existing (coordinator RI-17). Coverage was only ever
+# checked in one direction: current -> baseline. Absence in the OTHER direction is the FC-21 class.
+mk base_2dim.tsv "bv40::s::t1	PASS" "bv40::s::t2	PASS" "bv41::s::t1	PASS" "bv41::s::t2	PASS"
+mk cur_1dim.tsv "bv41::s::t1	PASS" "bv41::s::t2	PASS"
+out=$(python3 "$T/regression-check.py" --baseline "$tmp/base_2dim.tsv" --current "$tmp/cur_1dim.tsv" 2>&1); rc=$?
+echo "$out" | grep -qi "coverage: complete" && bad "claimed complete coverage while a whole dim vanished" \
+  || ok "does not claim complete coverage when baseline results vanished"
+echo "$out" | grep -qiE "vanish|missing|absent from the current" && ok "reports the vanished results" \
+  || bad "silent about results that disappeared"
+echo "$out" | grep -q "bv40" && ok "names the dimension that went missing" || bad "does not name the lost dim"
+chk "a vanished dimension is visible but not fatal by default" 0 $rc
+python3 "$T/regression-check.py" --baseline "$tmp/base_2dim.tsv" --current "$tmp/cur_1dim.tsv" \
+  --strict-coverage >/dev/null 2>&1
+chk "--strict-coverage makes a vanished dimension fatal" 1 $?
+# a few individually-deleted tests are not a lost dimension
+mk cur_minus1.tsv "bv40::s::t1	PASS" "bv41::s::t1	PASS" "bv41::s::t2	PASS"
+out=$(python3 "$T/regression-check.py" --baseline "$tmp/base_2dim.tsv" --current "$tmp/cur_minus1.tsv" 2>&1)
+echo "$out" | grep -qi "entire dimension" && bad "called one missing test a lost dimension" \
+  || ok "one missing test is not reported as a lost dimension"
+
 echo "== coord-check =="
 inst="$tmp/instants"; mkdir -p "$inst/07180102-07190000-complete-append-mrA" "$inst/07180102-07190001-inflight-append-mrB"
 mkh(){ printf '# H\n\n## Live milestone registry\n| MR | Task | Disposition | Depends-on | Instant | Slot | Status | Proof |\n|---|---|---|---|---|---|---|---|\n%s\n' "$1" > "$tmp/HANDOFF.md"; }
