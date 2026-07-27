@@ -68,6 +68,19 @@ push to any shared branch. The coordinator restacks at the compaction.
 - [ ] One effective GitHub CI run (Velox Backend ANSI Mode) on your pushed tip. **Truth = the downloaded
       surefire XMLs** — jobs run `--fail-never` and ALWAYS look green. Never cite the checkmark.
 - [ ] `get-velox.sh` must point at YOUR velox branch if you changed velox; otherwise leave the `-final` pin.
+- [ ] **Do NOT hand-roll a surefire parser.** Use **`pdispatch surefire <report-dirs> --dim <label>`** to
+      produce `regress`'s input, one invocation per CI dimension with a distinct `--dim`. It parses XML as XML,
+      drops skipped tests, makes FAIL beat PASS within a dim, and dim-qualifies every name so dimensions cannot
+      be collapsed. (A hand-written regex captured the container `hostname` as the suite name and produced a
+      confident, wholly wrong diff; a hand-rolled "FAIL anywhere wins" collapse then manufactured 5 phantom
+      regressions from failures that existed on one dim only.)
+- [ ] **CROSS-CHECK ANY NEW EXTRACTION AGAINST A KNOWN-GOOD NUMBER BEFORE YOU BELIEVE IT.** Pick a figure
+      already recorded in the evidence chain — e.g. the lineage base's `new red=43` in `COMPACTED.md` — and
+      confirm your extraction reproduces it. Plausible-looking totals prove nothing, and a tool can print
+      `coverage: complete` over a comparison in which nothing matched at all.
+- [ ] Read `regress`'s **overlap** line and quote it. Zero overlap is a fatal input mismatch (your adapter, not
+      your code); low overlap means the two runs are not comparing what you think. And do **not** read
+      `coverage: complete` as proof every dim was compared — verify the dim list yourself (RI-17).
 - [ ] **Two diffs, not one** (`pdispatch regress`):
       (a) vs the fixed **M1 baseline** (runs 29618938212 non-slow + 29622614234 slow) — catches green→red;
       (b) vs the **lineage base** CI run **29742621077** — catches an already-CLOSED gap re-breaking, which

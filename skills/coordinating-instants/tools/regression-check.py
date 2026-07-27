@@ -126,6 +126,26 @@ def main(argv=None):
         mismatch = mismatch or (ov_lin == 0)
     res["input_mismatch_suspected"] = mismatch
 
+    # Coverage was only ever checked one way: current -> baseline. A result that EXISTED in a
+    # baseline and is simply gone from the current run is absence in the other direction — the same
+    # FC-21 class — and with dim-qualified names a whole lost CI dimension hides behind a perfect
+    # overlap on the surviving dimension.
+    vanished = sorted(n for n in base if n not in cur)
+    if lin:
+        vanished = sorted(set(vanished) | {n for n in lin if n not in cur})
+    # If every name a dimension prefix ever had is gone, say so once instead of listing 1001 tests.
+    def dim_of(n):
+        return n.split("::", 1)[0] if "::" in n else None
+    base_dims = {}
+    for n in list(base) + list(lin or {}):
+        d = dim_of(n)
+        if d:
+            base_dims.setdefault(d, set()).add(n)
+    cur_dims = {dim_of(n) for n in cur}
+    lost_dims = {d: len(ns) for d, ns in base_dims.items() if d not in cur_dims and len(ns) > 1}
+    res["vanished_from_current"] = vanished
+    res["lost_dimensions"] = lost_dims
+
     res["not_comparable_vs_lineage_base"] = uncomparable_lineage
     res["not_comparable_vs_baseline"] = uncomparable_baseline
     res["red_no_baseline"] = new_red
@@ -135,7 +155,7 @@ def main(argv=None):
         rc = 1
     if new_red and not a.allow_new_red:
         rc = 1
-    if a.strict_coverage and (uncomparable_lineage or uncomparable_baseline):
+    if a.strict_coverage and (uncomparable_lineage or uncomparable_baseline or vanished):
         rc = 1
     res["result"] = "FAIL" if rc else "CLEAN"
 
@@ -168,7 +188,15 @@ def main(argv=None):
         elif pct < 50:
             print(f"  WARNING: only {pct}% of current names appear in the baseline — verify the extraction")
             print("    and that you are comparing the same CI dimension (never collapse dimensions).")
-        gaps = len(uncomparable_lineage) + len(uncomparable_baseline)
+        if lost_dims:
+            for d, n in sorted(lost_dims.items()):
+                print(f"  ENTIRE DIMENSION MISSING: '{d}' had {n} result(s) in a baseline and none in the "
+                      f"current run — that dimension was not measured, so nothing about it is proven.")
+        elif vanished:
+            print(f"  VANISHED: {len(vanished)} result(s) existed in a baseline and are absent now, e.g. "
+                  f"{', '.join(vanished[:3])}")
+            print("    a result that stopped existing is UNPROVEN, not passing.")
+        gaps = len(uncomparable_lineage) + len(uncomparable_baseline) + len(vanished)
         if gaps:
             print(f"  coverage: NOT COMPARABLE for {gaps} test(s) — a baseline never covered them, so "
                   f"their diff could not run:")
