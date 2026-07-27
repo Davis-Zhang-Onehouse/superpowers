@@ -187,6 +187,15 @@ chk "an absent base is a hard failure" 1 $?
 # a short sha prefix should still match
 bash "$S/base-check.sh" --ws "$bc" --expect "repoX=${new:0:9}" >/dev/null 2>&1
 chk "accepts an abbreviated sha" 0 $?
+# OI-8: a DIRTY working tree means the code on disk is not the tip any CI proved. basecheck must say so.
+(cd "$bc/repoX" && echo dirty >> f) >/dev/null 2>&1
+out=$(bash "$S/base-check.sh" --ws "$bc" --expect "repoX=$(cd "$bc/repoX" && git rev-parse HEAD)" 2>&1)
+echo "$out" | grep -q "uncommitted-changes" && ok "reports an uncommitted working tree" \
+  || bad "silent about a dirty tree — disk does not match the proven tip"
+(cd "$bc/repoX" && git checkout -q -- f) >/dev/null 2>&1
+out=$(bash "$S/base-check.sh" --ws "$bc" --expect "repoX=$(cd "$bc/repoX" && git rev-parse HEAD)" 2>&1)
+echo "$out" | grep -q "uncommitted-changes" && bad "reported dirty on a clean tree" || ok "quiet on a clean tree"
+
 # FIDELITY: repositioning SOURCE onto the lineage base leaves the golden's PREBUILT NATIVE
 # artifacts behind. Testing new source against old .so is a false-green trap (worker R3 OI-3).
 mkdir -p "$bc/repoX/cpp/build"; : > "$bc/repoX/cpp/build/libthing.so"
@@ -196,20 +205,20 @@ touch -d '-1 hour' "$bc/repoX/cpp/build/libthing.so"
 cur=$(cd "$bc/repoX" && git rev-parse HEAD)
 out=$(bash "$S/base-check.sh" --ws "$bc" --expect "repoX=$cur" --golden-base "repoX=$old" 2>&1); rc=$?
 chk "source-correct + stale native artifacts still exits 0 (not a hard failure)" 0 $rc
-echo "$out" | grep -q "WARNING" && ok "warns that prebuilt artifacts predate the source" \
+echo "$out" | grep -q "stale-native-artifacts" && ok "warns that prebuilt artifacts predate the source" \
   || bad "silent about stale native artifacts — a false-green trap"
 # ...and once the worker REBUILDS the native side — the remedy the warning asks for — the warning must
 # STOP. A stale-provenance warning that survives the fix is an alarm that can never be cleared
 # (worker R7 I-3), which is the exact pattern this warning was added to prevent.
 touch "$bc/repoX/cpp/build/libthing.so"          # rebuilt after the checkout
 out=$(bash "$S/base-check.sh" --ws "$bc" --expect "repoX=$cur" --golden-base "repoX=$old" 2>&1)
-echo "$out" | grep -q "WARNING" && bad "still warns after a rebuild — the alarm cannot be cleared" \
+echo "$out" | grep -q "stale-native-artifacts" && bad "still warns after a rebuild — the alarm cannot be cleared" \
   || ok "warning clears once the artifacts are rebuilt"
 
 # when source is still AT the golden, the artifacts match: no warning noise
 cur=$(cd "$bc/repoX" && git rev-parse HEAD)
 out=$(bash "$S/base-check.sh" --ws "$bc" --expect "repoX=$cur" --golden-base "repoX=$cur" 2>&1)
-echo "$out" | grep -q "WARNING" && bad "warned when artifacts actually match the source" \
+echo "$out" | grep -q "stale-native-artifacts" && bad "warned when artifacts actually match the source" \
   || ok "no artifact warning when source is at the golden"
 rm -rf "$bc/repoX/cpp"
 
