@@ -30,6 +30,25 @@ close-out, superpowers:rendering-task-board — an optional close-out, not part 
 Part A before your first dispatch. Every step below reads and writes those tables.
 **What you must put in each worker's brief is `brief-contract.md`** in this skill directory.
 
+## The tools — run these instead of remembering
+
+Most of what used to be "watch out for X" is now enforced. Prefer the command over the vigilance.
+
+| Command | Replaces the vigilance of |
+|---|---|
+| `pdispatch health` | hand-rolled liveness; catches DEAD / BLOCKED-on-modal / IDLE / COMPLETE-unharvested. Exit 1 = something needs you. Run it every tick. |
+| `pdispatch gate <instant> [--harvest]` | reading a REVIEW.md and talking yourself into "findings addressed". Fails closed; `--harvest` also requires the worker's own `-complete-` rename. |
+| `pdispatch drift --handoff <f> --instants-dir <d>` | eyeballing the registry for rot; finds done-but-unharvested and stale rows. |
+| `pdispatch regress --baseline B --current C --lineage-base L [--closed-from-md REG]` | the two-diff rule + re-asserting every registry-closed row by name. |
+| `pdispatch send <id> <msg>` | "I sent it" — verifies the message actually landed, retries, fails loudly. |
+| `pdispatch launch <id>` | hand-building a launch line; replays the RECORDED seed, correctly quoted. |
+| `pdispatch pool reap --base <your-instant>` | remembering not to stomp another effort's slot — foreign leases are now refused by default. |
+| `pdispatch guard <repo> <shared-branch>` | trusting workers not to push the shared base branch. |
+| `pdispatch ref protect\|worktree <ref>` | trusting workers not to write a shared reference checkout. |
+
+`dispatch-todo` now also persists the rendered seed, archives the profile into the child instant,
+and points each workspace at its own build cache — no longer your job to remember.
+
 ## Cold start (first 5 minutes — do this on every fresh/compacted session)
 
 You are long-lived and WILL restart mid-effort. Never answer "status?" from memory.
@@ -38,20 +57,21 @@ You are long-lived and WILL restart mid-effort. Never answer "status?" from memo
 2. `pdispatch board` and `pdispatch pool list` — the live truth about the fleet, across ALL efforts.
 3. Reconcile the fleet table against reality: which slots are yours, which are another effort's, which are
    FREE/STALE. Fix the table; it rots the moment you look away.
-4. Prove liveness of each of YOUR workers (see Gotchas) — leased ≠ alive.
-5. Find work already owed to you: any worker done-but-ungated, gated-but-unharvested, or parked.
-6. Then enter the tick loop. Only now are you entitled to report status.
+4. `pdispatch health` — leased ≠ alive; this also surfaces work already owed to you
+   (done-but-ungated, blocked, idle). Then `pdispatch drift` on your registry.
+5. Then enter the tick loop. Only now are you entitled to report status.
 
 ## Every tick (~10 min while work is live)
 
-1. **Liveness** — check each of your workers; a lease is not a heartbeat. Spot-check any instant running
-   >~2h every ~30 min (alive-but-blocked and idle both look "running").
+1. **`pdispatch health`** — one command; exit 1 means something needs you. It classifies DEAD /
+   BLOCKED (permission modal) / IDLE / COMPLETE-unharvested, so a lease is never mistaken for a heartbeat.
 2. **Parked forks** — read every live worker's HANDOFF `## Parked decision`. Decide the ones that are yours
    (see Autonomy); escalate only genuine operator-only forks.
-3. **Done → gate** (Phase C). **Gated → harvest** (Phase D), then free the slot.
+3. **Done → gate** (`pdispatch gate <instant> --harvest`, Phase C). **Gated → harvest** (Phase D), then
+   free the slot with `pdispatch pool release <slot>`.
 4. **Eligible free slot → dispatch** the next READY milestone (Phase B).
 5. **≥3 completed-and-harvested since the last compaction, and a slot free → compact** (Phase E).
-6. **Registry** — reconcile the tables; write down anything durable that arrived this tick.
+6. **Registry** — `pdispatch drift` to reconcile the tables; write down anything durable that arrived.
 7. If nothing above is actionable, say so explicitly — don't manufacture work, and don't go quiet.
 
 **READY** = disposition assigned, ACs written, and its dependencies have **LANDED** (their end-state exists,
@@ -76,9 +96,8 @@ ACs in CHARTER, at milestone+task+AC level, not execution detail. Three moves th
 
 ## Phase B — Dispatch (per milestone)
 
-Script-first: `pdispatch todo --no-launch`, then launch by running **the exact command the `--no-launch`
-output printed** (it escapes correctly). Never hand-BUILD a launch line or seed; if you must compose a seed,
-put it in a shell variable free of `| ; & < > ( )`.
+Script-first: `pdispatch todo --no-launch` → review (below) → **`pdispatch launch <todo-id>`**, which
+replays the recorded seed correctly quoted. Never hand-build a launch line.
 
 Author the brief per `brief-contract.md`. Then, **before launching, review the rendered child `CHARTER.md`
 and seed — all seven, per worker** (S3's baseline failure is omitting items here):
@@ -148,7 +167,7 @@ STOP. Park every operator-only item; do not drift past the endgame.
 - **CI truth = the downloaded artifact, not the checkmark.** If jobs run non-failing (e.g. `--fail-never`)
   the summary is always green — trust the test report on the exact pushed SHA. Beware acceptance signals
   masked by an optimization/cache layer — disable the mask when probing.
-- **Two diffs, not one.** Diff each run against (a) the fixed original baseline — catches classic green→red;
+- **Two diffs, not one** (`pdispatch regress`). Diff each run against (a) the fixed original baseline — catches classic green→red;
   AND (b) the **lineage base** (the end-state this instant inherited) — catches an already-CLOSED item
   re-breaking, which is red→red versus the original baseline and therefore invisible there. Every row your
   registry marks closed must be re-asserted green by name. "Zero green→red vs baseline" is NOT sufficient.
@@ -181,13 +200,12 @@ STOP. Park every operator-only item; do not drift past the endgame.
 
 | Trap | Guard |
 |---|---|
-| The slot pool + board are **global**, shared with other efforts | Confirm ownership before you touch a slot: `pdispatch pool status <slot>` + `pdispatch board`. **Never run bare `pdispatch pool reap`** — it frees EVERY stale lease machine-wide, including other efforts'. Release only your own: `pdispatch pool release <slot>`. Dispatch with `--slot <ws>` you verified — an unslotted claim auto-reaps stale slots it finds. `pdispatch pool remove <your-own-slot>` so your coordinator workspace can never be claimed. |
-| Background-shell liveness gives false "worker gone" | `pgrep -f "<session>"` + bash arrays + a startup grace window; not `tmux has-session`/unquoted `$vars`. |
-| Monitors catch crash/done but not **alive-but-blocked** (permission modal) or idle | Pane-grep for modal signatures + the >2h/30-min spot-check. On a block, see Autonomy posture. |
-| `send-keys` doesn't reliably submit to a busy worker | Verify delivery by pane capture; re-send. A message you didn't confirm landed was not delivered. |
-| Two workers pushing ONE shared branch collide (non-fast-forward) | Each worker gets its OWN branch + draft PR off the common base; defer linear stacking to the compaction restack. |
-| Parallel builds poison a shared cache / skew source-vs-binary provenance | Give each worker an isolated local build repo; the final restack must carry all pieces together. |
-| Shared reference checkouts | READ-ONLY; any write needs an isolated worktree (superpowers:using-git-worktrees). |
+| The slot pool + board are **global**, shared with other efforts | `pdispatch pool reap --base <your-instant>` (bare `reap` now refuses foreign leases; `--all` overrides). Claim with `--slot <ws>` you verified via `pdispatch pool status`. Remove your own coordinator slot from the pool at charter time. |
+| Liveness / blocked / idle detection | `pdispatch health` — one correct implementation. Never hand-roll it. On a BLOCKED worker see Autonomy posture. |
+| A message to a busy worker silently not submitting | `pdispatch send <id> <msg>` — verifies, retries, fails loudly. |
+| Two workers pushing ONE shared branch collide | `pdispatch guard <repo> <shared-branch>` makes it impossible. Each worker owns its branch + draft PR; linear stacking happens at the compaction restack. |
+| Parallel builds poisoning a shared cache; source-vs-binary skew | `dispatch-todo` isolates each workspace's build cache automatically. The final restack must still carry all pieces together. |
+| Shared reference checkouts written to | `pdispatch ref protect <ref>` once, then `pdispatch ref worktree <ref> <dest>` for writes. |
 | Usage/budget limits are account-wide across all your sessions | Stop new dispatch; send each inflight worker a **convergence nudge** (stop refinement cycles, finalize on current green evidence); make the final compaction lean by reusing the last one; economize polling; ensure every completed instant is independently pushed + green so a post-reset resumer can finish. **A budget plan never lowers the evidence bar** — a failed or stale run is not evidence; re-spend and record the overrun, and record any carried-over evidence as an explicit ASSUMPTION with a flagged optional re-run. |
 
 ## Autonomy posture
