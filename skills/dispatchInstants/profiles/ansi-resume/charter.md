@@ -102,6 +102,21 @@ raise — it breaks queries that work today.** So, whenever your change makes so
       already recorded in the evidence chain — e.g. the lineage base's `new red=43` in `COMPACTED.md` — and
       confirm your extraction reproduces it. Plausible-looking totals prove nothing, and a tool can print
       `coverage: complete` over a comparison in which nothing matched at all.
+- [ ] **CITE THE SEMANTICS VERSION next to every recorded diff, and treat cross-version results as
+      INCOMPARABLE.** `pdispatch regress` stamps its version into text and JSON and answers `--version`
+      (current: `semantics v3 (2026-07-27)` — red-no-baseline fatal by default, bidirectional coverage,
+      zero-overlap input mismatch fatal). Shared tools change under a running fleet, so a diff recorded this
+      morning and one recorded this afternoon may not mean the same thing. **Do not reconcile results from
+      different semantics versions** — record which version produced each and treat the older as SUPERSEDED by
+      a re-run under the current one. A changelog cannot repair a number already written down.
+- [ ] **Read the adapter's SKIPPED line.** `pdispatch surefire` now counts and NAMES the files it did not read
+      (`--all-xml` takes everything). If it names anything, every number derived from that extraction is
+      provisional until re-derived. Both a bespoke parser and the shared adapter have silently dropped rows in
+      this effort — the difference is that the adapter now tells you.
+- [ ] **If you need a shape the shared adapter does not produce, route it to the coordinator as a TOOL GAP —
+      do NOT hand-roll a parser.** Two bespoke parsers were written in this effort in one day and both lost
+      data silently (a `hostname` attribute captured as a suite name; a substring filter dropping 43 rows per
+      dim). A parser is exactly the code where a plausible output is indistinguishable from a correct one.
 - [ ] Read `regress`'s **overlap** line and quote it. Zero overlap is a fatal input mismatch (your adapter, not
       your code); low overlap means the two runs are not comparing what you think. And do **not** read
       `coverage: complete` as proof every dim was compared — verify the dim list yourself (RI-17).

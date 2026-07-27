@@ -189,6 +189,18 @@ STUB_ALIVE=1 bash "$S/dispatch-health.sh" >/dev/null 2>"$tmp/health.err"
 grep -q '=>' "$tmp/health.err" \
   && ok "the attention summary still appears (on stderr)" || bad "lost the summary entirely"
 
+# The idle baseline is a FILE. Two callers (a monitor at 60s and a coordinator on its own tick)
+# overwrite each other's sample, so IDLE flaps and any state derived from it flaps with it. Namespace
+# it per caller so independent watchers cannot corrupt each other's view.
+rm -rf "$BOARD_DIR/health"
+printf 'same pane\n' > "$STUB_PANE"
+HEALTH_TAG=watcherA STUB_ALIVE=1 bash "$S/dispatch-health.sh" >/dev/null 2>&1
+HEALTH_TAG=watcherB STUB_ALIVE=1 bash "$S/dispatch-health.sh" >/dev/null 2>&1
+a=$(ls "$BOARD_DIR/health" 2>/dev/null | grep -c watcherA)
+b=$(ls "$BOARD_DIR/health" 2>/dev/null | grep -c watcherB)
+[ "$a" -ge 1 ] && [ "$b" -ge 1 ] && ok "each caller keeps its own idle baseline" \
+  || bad "callers share one baseline and will corrupt each other (a=$a b=$b)"
+
 # json mode is machine-readable
 out=$(STUB_ALIVE=1 bash "$S/dispatch-health.sh" --json 2>/dev/null)
 echo "$out" | python3 -c 'import json,sys; d=json.load(sys.stdin); assert isinstance(d,(list,dict))' 2>/dev/null \
