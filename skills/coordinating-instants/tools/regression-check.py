@@ -70,6 +70,9 @@ def main(argv=None):
     ap.add_argument("--closed-list", help="file of identifiers the registry marks CLOSED (one per line)")
     ap.add_argument("--closed-from-md", help="registry markdown to extract CLOSED rows from")
     ap.add_argument("--closed-marker", default="🟩", help="marker denoting a closed row (default 🟩)")
+    ap.add_argument("--strict-coverage", action="store_true",
+                    help="fail if a baseline did not cover tests present in the current run, i.e. the "
+                         "diff for those tests could not run at all (a CI dim that uploaded no results)")
     ap.add_argument("--json", action="store_true")
     a = ap.parse_args(argv)
 
@@ -85,6 +88,12 @@ def main(argv=None):
         closed = [l.strip() for l in open(a.closed_list, encoding="utf-8") if l.strip() and not l.startswith("#")]
     elif a.closed_from_md:
         closed = closed_from_md(a.closed_from_md, a.closed_marker)
+    # A test present NOW but absent from a baseline cannot be diffed against it. Skipping those
+    # silently is the "absence read as absence of failure" error this tool exists to catch, so the
+    # gap is always reported — and can be made fatal.
+    uncomparable_lineage = sorted(n for n in cur if lin is not None and n not in lin)
+    uncomparable_baseline = sorted(n for n in cur if n not in base)
+
     closed_not_green = sorted(n for n in closed if cur.get(n) is not True)
     missing = sorted(n for n in closed if n not in cur)
 
@@ -96,7 +105,11 @@ def main(argv=None):
         "counts": {"baseline": len(base), "current": len(cur), "lineage_base": len(lin or {}), "closed": len(closed)},
         "lineage_diff_run": lin is not None,
     }
+    res["not_comparable_vs_lineage_base"] = uncomparable_lineage
+    res["not_comparable_vs_baseline"] = uncomparable_baseline
     rc = 1 if (regressions or rebreaks or closed_not_green) else 0
+    if a.strict_coverage and (uncomparable_lineage or uncomparable_baseline):
+        rc = 1
     res["result"] = "FAIL" if rc else "CLEAN"
 
     if a.json:
@@ -108,6 +121,16 @@ def main(argv=None):
             print(f"  REGRESSION (green->red vs baseline): {n}")
         for n in rebreaks:
             print(f"  RE-BREAK (green in lineage base, red now — invisible vs baseline): {n}")
+        gaps = len(uncomparable_lineage) + len(uncomparable_baseline)
+        if gaps:
+            print(f"  coverage: NOT COMPARABLE for {gaps} test(s) — a baseline never covered them, so "
+                  f"their diff could not run:")
+            for n in (uncomparable_lineage or uncomparable_baseline)[:8]:
+                which = "lineage base" if n in uncomparable_lineage else "baseline"
+                print(f"    not in {which}: {n}")
+            print("  treat these as UNPROVEN, not unbroken (use --strict-coverage to fail on them).")
+        else:
+            print("  coverage: complete — every current test was comparable against each baseline.")
         for n in closed_not_green:
             tag = "absent from results" if n in missing else "red"
             print(f"  CLOSED-NOT-GREEN (registry says closed, run says {tag}): {n}")
