@@ -27,6 +27,12 @@ case "$1" in
      if [ "$n" -le "$d" ]; then exit 0; fi
      cat "${STUB_PANE:-/dev/null}"; exit 0 ;;
   send-keys)
+     # STUB_PASTE=1: claude turns long input into "[Pasted text #N +M lines]" and never echoes
+     # the message text, so verifying by looking for the text is doomed.
+     if [ "${STUB_PASTE:-0}" = "1" ]; then
+       case " $* " in *" Enter "*) : ;; *) echo "[Pasted text #1 +3 lines]" >> "${STUB_PANE:-/dev/null}";; esac
+       exit 0
+     fi
      if [ "${STUB_ECHO:-1}" = "1" ]; then
        for a in "$@"; do :; done
        echo "${*:3}" >> "${STUB_PANE:-/dev/null}"
@@ -149,6 +155,17 @@ grep -q "send-keys" "$STUB_LOG" && ok "actually called send-keys" || bad "never 
 STUB_ALIVE=1 STUB_ECHO=0 bash "$S/dispatch-send.sh" alpha "hello worker" >/dev/null 2>&1
 chk "unverified delivery fails (rc=1)" 1 $?
 n=$(grep -c "send-keys" "$STUB_LOG"); [ "$n" -ge 2 ] && ok "retried before failing ($n sends)" || bad "did not retry (n=$n)"
+
+# A long message becomes a paste placeholder; the text never appears, but it WAS received.
+: > "$STUB_LOG"; printf 'ready\n' > "$STUB_PANE"
+STUB_ALIVE=1 STUB_PASTE=1 bash "$S/dispatch-send.sh" alpha "a very long coordination message that claude will turn into a pasted-text placeholder" >/dev/null 2>&1
+chk "pasted-text placeholder counts as delivered" 0 $?
+# Enter must be a SEPARATE keystroke, or the paste swallows it and nothing is submitted.
+grep -qE 'send-keys .* Enter$' "$STUB_LOG" && ok "sends Enter as its own keystroke" || bad "Enter not sent separately"
+# The busy-worker queue indicator is also proof of receipt.
+: > "$STUB_LOG"; printf 'Press up to edit queued messages\n' > "$STUB_PANE"
+STUB_ALIVE=1 STUB_ECHO=0 bash "$S/dispatch-send.sh" alpha "short msg" >/dev/null 2>&1
+chk "queued-message indicator counts as delivered" 0 $?
 
 STUB_ALIVE=0 bash "$S/dispatch-send.sh" alpha "x" >/dev/null 2>&1; chk "send to dead session fails" 1 $?
 bash "$S/dispatch-send.sh" nosuch "x" >/dev/null 2>&1; chk "unknown id fails (rc=2)" 2 $?
