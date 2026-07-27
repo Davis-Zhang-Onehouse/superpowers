@@ -54,6 +54,37 @@ python3 "$T/workspace-gate.py" "$d" --harvest >/dev/null 2>&1; chk "--harvest re
 d=$(mkinstant 07180102-07190000-complete-append-mrX READY 0 0)
 python3 "$T/workspace-gate.py" "$d" --harvest >/dev/null 2>&1; chk "--harvest accepts a -complete- folder" 0 $?
 
+# Harvest must be RECORDED where a tool can see it, or every finished instant screams forever
+# and a successor coordinator cannot tell owed work from history (coordinator RI-1 / RI-5).
+export BOARD_DIR="$tmp/board"; mkdir -p "$BOARD_DIR/records"
+d=$(mkinstant 07180102-07190000-complete-append-mrH READY 0 0)
+cat > "$BOARD_DIR/records/mrh.json" <<EOF
+{ "todo_id": "mrh", "child_instant": "$tmp/07180102-07190000-inflight-append-mrH",
+  "base_instant": "/base/one", "tmux": "dt-mrh", "ws": "/ws", "slot": "ws9" }
+EOF
+python3 "$T/workspace-gate.py" "$d" --harvest --record >/dev/null 2>&1
+chk "gate --harvest --record succeeds on a passing instant" 0 $?
+grep -q harvested_at "$BOARD_DIR/records/mrh.json" && ok "harvest recorded into the board record" \
+  || bad "harvest NOT recorded (successor coordinator still has to trust prose)"
+grep -q '"gate_verdict": *"READY"' "$BOARD_DIR/records/mrh.json" && ok "gate verdict recorded" || bad "verdict not recorded"
+
+# a FAILING gate must never mark something harvested
+python3 - "$BOARD_DIR/records/mrh.json" <<'PYX'
+import json,sys
+p=sys.argv[1]; d=json.load(open(p))
+d.pop("harvested_at",None); d.pop("gate_verdict",None); json.dump(d,open(p,"w"))
+PYX
+d2=$(mkinstant 07180102-07190001-complete-append-mrBad NOT-READY 0 0)
+cat > "$BOARD_DIR/records/mrbad.json" <<EOF
+{ "todo_id": "mrbad", "child_instant": "$tmp/07180102-07190001-inflight-append-mrBad",
+  "base_instant": "/base/one", "tmux": "dt-mrbad", "ws": "/ws", "slot": "ws9" }
+EOF
+python3 "$T/workspace-gate.py" "$d2" --harvest --record >/dev/null 2>&1
+chk "failing gate still fails with --record" 1 $?
+grep -q harvested_at "$BOARD_DIR/records/mrbad.json" && bad "marked harvested despite a failed gate" \
+  || ok "failed gate records nothing"
+unset BOARD_DIR
+
 echo "== regression-check =="
 res(){ printf '%s\n' "$@"; }   # helper
 mk(){ printf '%s\n' "${@:2}" > "$tmp/$1"; }

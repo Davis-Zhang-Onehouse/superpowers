@@ -8,9 +8,10 @@
 #   IDLE       pane unchanged for $IDLE_MIN minutes (alive, doing nothing)
 #   PARKED     parked decision AND not progressing (a parked note while still working is just a note)
 #   COMPLETE   its instant folder is renamed -complete- => awaiting YOUR gate + harvest
+#   HARVESTED  gated + harvested (recorded by `pdispatch gate --harvest --record`) — terminal history
 #   RUNNING    working
 #
-# Usage:  dispatch-health.sh [--json] [--id <todo-id>]
+# Usage:  dispatch-health.sh [--json] [--id <todo-id>] [--base <base-instant>]
 # Exit:   0 = nothing needs attention   1 = something does   2 = bad input
 # Env:    BOARD_DIR (default ~/.claude-dispatch-board), TMUX_BIN (default tmux), IDLE_MIN (default 30)
 set -uo pipefail
@@ -21,11 +22,12 @@ TMUX_BIN="${TMUX_BIN:-tmux}"
 IDLE_MIN="${IDLE_MIN:-30}"
 HEALTH="$BOARD_DIR/health"
 
-JSON=0; ONLY=""
+JSON=0; ONLY=""; ONLY_BASE=""
 while [ $# -gt 0 ]; do
   case "$1" in
     --json) JSON=1; shift;;
     --id)   ONLY="${2:-}"; shift 2;;
+    --base) ONLY_BASE="${2:-}"; shift 2;;
     -h|--help) sed -n '2,20p' "$0"; exit 0;;
     *) echo "unknown arg: $1" >&2; exit 2;;
   esac
@@ -73,6 +75,13 @@ for f in "$RECORDS"/*.json; do
   child="$(field "$f" child_instant)"
   slot="$(field "$f" slot)"
   cname="$(resolve_instant "$child")"
+  rbase="$(field "$f" base_instant)"
+  harvested="$(field "$f" harvested_at)"
+  # The board is machine-global: scope to one effort's records when asked.
+  if [ -n "$ONLY_BASE" ] && [ "$rbase" != "$ONLY_BASE" ] \
+     && [ "$(realpath -m -- "$rbase" 2>/dev/null)" != "$(realpath -m -- "$ONLY_BASE" 2>/dev/null)" ]; then
+    continue
+  fi
 
   state="RUNNING"; note=""
   if ! alive "$sess"; then
@@ -114,7 +123,11 @@ for f in "$RECORDS"/*.json; do
   fi
 
   # A renamed folder is the worker's completion signal — surface it regardless of session state.
-  if [ -n "$cname" ] && [[ "$cname" == *-complete-* ]]; then
+  # But once the coordinator has GATED + HARVESTED it, the record says so and it becomes terminal
+  # history: a finished effort must stop demanding attention forever (coordinator RI-1 / RI-5).
+  if [ -n "$harvested" ]; then
+    state="HARVESTED"; note="gated ($(field "$f" gate_verdict)) + harvested $harvested — history, nothing owed"
+  elif [ -n "$cname" ] && [[ "$cname" == *-complete-* ]]; then
     state="COMPLETE"; note="folder renamed -complete- — UNHARVESTED: run the gate, then harvest"
   fi
 

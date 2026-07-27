@@ -44,6 +44,9 @@ Most of what used to be "watch out for X" is now enforced. Prefer the command ov
 | `pdispatch launch <id>` | hand-building a launch line; replays the RECORDED seed, correctly quoted. |
 | `pdispatch pool reap --base <your-instant>` | remembering not to stomp another effort's slot — foreign leases are now refused by default. |
 | `pdispatch guard <repo> <shared-branch>` | trusting workers not to push the shared base branch. |
+| `pdispatch profile <profile-dir>` | trusting a dispatch profile; lints it against the contract (single-writer, gate, report-back, rename) by profile KIND. Run before selecting one, and after editing one — a defect patched only in a brief leaves the profile armed for the next effort. |
+| `pdispatch gate <instant> --harvest --record` | harvest state living only in prose; records the verdict + `harvested_at` in the board so a successor coordinator inherits it (and finished work stops asking for attention). |
+| `pdispatch health --base <your-instant>` | a shared board showing every effort's records as if they were yours. |
 | `pdispatch ref protect\|worktree <ref>` | trusting workers not to write a shared reference checkout. |
 
 `dispatch-todo` now also persists the rendered seed, archives the profile into the child instant,
@@ -162,6 +165,16 @@ dispatch on an ungated or in-flight compaction. Don't stall the pipeline to comp
 Stop new dispatch → let inflight finish → ONE final comprehensive compaction on the rolling base → gate it →
 STOP. Park every operator-only item; do not drift past the endgame.
 
+**Leave no orphans.** At wind-down every open issue must end in exactly one of three states: **fixed**,
+**parked for the operator** (named, in the parked block), or **reassigned to a NAMED successor instant**.
+"Owned by the coordinator, later" is an orphan — you are the coordinator and you are stopping, so nobody
+will ever run it. This is how a validate-suite failure on a secondary CI dimension survived a whole effort
+and would have shipped with the merge.
+
+**A carry-over needs an expiry, not a paragraph.** Evidence carried over from an earlier or infra-flaked
+run is an ASSUMPTION with a stated re-prove condition — never a proof. A dimension that flaked was not
+verified; either re-run it at the tip or record it as an explicit open AC.
+
 ## Non-regression & evidence discipline
 
 - **CI truth = the downloaded artifact, not the checkmark.** If jobs run non-failing (e.g. `--fail-never`)
@@ -194,6 +207,8 @@ STOP. Park every operator-only item; do not drift past the endgame.
 | "I'll let the worker update the shared registry to save a step." | Single-writer only. Worker proposes; you apply. |
 | "I'll fire the workers fast and check the charters later." | A mis-seeded worker burns a slot producing confidently-wrong output. All seven checks, per worker, before launch. |
 | "I'm heads-down; I'll check the fleet when the operator asks." | Stale status and idle eligible slots are your failure. Run the tick. |
+| "I'll note it as open and owned by the coordinator, and wind down." | You ARE the coordinator. At wind-down that is an orphan nobody will run. Fix it, park it for the operator by name, or hand it to a named successor. |
+| "That dimension flaked, but it's behaviourally identical — carry it over." | A flaked run is not evidence. Carry-over is an ASSUMPTION with a re-prove condition, or an open AC. |
 | "This is feature dev but there's a do-not-commit reflex." | It's feature dev — cut branches, open PRs freely. Only *merging* is operator-only. |
 
 ## Gotchas to watch (from real coordination runs)

@@ -111,6 +111,33 @@ out=$(STUB_ALIVE=1 bash "$S/dispatch-health.sh" --json 2>/dev/null)
 echo "$out" | python3 -c 'import json,sys; d=json.load(sys.stdin); assert isinstance(d,(list,dict))' 2>/dev/null \
   && ok "--json parses" || bad "--json did not parse"
 
+# A harvested record is terminal history, not owed work (coordinator RI-1).
+python3 - "$BOARD_DIR/records/alpha.json" <<'PYX'
+import json,sys
+p=sys.argv[1]; d=json.load(open(p)); d["harvested_at"]="2026-01-02T00:00:00Z"; d["gate_verdict"]="READY"
+json.dump(d,open(p,"w"))
+PYX
+mv "$tmp/child/07180102-07190000-inflight-append-alpha" "$tmp/child/07180102-07190000-complete-append-alpha"
+printf 'idle\n' > "$STUB_PANE"
+out=$(STUB_ALIVE=0 bash "$S/dispatch-health.sh" 2>&1); rc=$?
+chk "a harvested instant no longer demands attention" 0 $rc
+echo "$out" | grep -qi "harvested" && ok "shows it as harvested history" || bad "harvested state not shown"
+mv "$tmp/child/07180102-07190000-complete-append-alpha" "$tmp/child/07180102-07190000-inflight-append-alpha"
+python3 - "$BOARD_DIR/records/alpha.json" <<'PYX'
+import json,sys
+p=sys.argv[1]; d=json.load(open(p)); d.pop("harvested_at"); d.pop("gate_verdict"); json.dump(d,open(p,"w"))
+PYX
+
+# --base scopes health to ONE effort's records (a shared board shows every effort)
+rec other "$tmp/child/07180102-07190001-complete-append-beta" dt-other
+python3 - "$BOARD_DIR/records/other.json" <<'PYX'
+import json,sys
+p=sys.argv[1]; d=json.load(open(p)); d["base_instant"]="/some/other/effort"; json.dump(d,open(p,"w"))
+PYX
+out=$(STUB_ALIVE=1 bash "$S/dispatch-health.sh" --base "$tmp/base" 2>&1)
+echo "$out" | grep -q "other" && bad "--base leaked another effort's record" || ok "--base scopes to my effort"
+rm -f "$BOARD_DIR/records/other.json"
+
 echo "== dispatch-send =="
 : > "$STUB_LOG"; printf 'ready\n' > "$STUB_PANE"
 STUB_ALIVE=1 STUB_ECHO=1 bash "$S/dispatch-send.sh" alpha "hello worker" >/dev/null 2>&1
