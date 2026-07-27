@@ -19,7 +19,13 @@ cat > "$tmp/bin/tmux" <<'STUB'
 log="${STUB_LOG:-/dev/null}"; echo "tmux $*" >> "$log"
 case "$1" in
   has-session) [ "${STUB_ALIVE:-1}" = "1" ] && exit 0 || exit 1 ;;
-  capture-pane) cat "${STUB_PANE:-/dev/null}"; exit 0 ;;
+  capture-pane)
+     # STUB_PANE_DELAY: return an empty pane for the first N samples (claude clears the screen
+     # while starting up, so an early single sample legitimately matches nothing).
+     d="${STUB_PANE_DELAY:-0}"; c="${STUB_COUNTER:-/dev/null}"
+     n=$(cat "$c" 2>/dev/null || echo 0); n=$((n+1)); echo "$n" > "$c" 2>/dev/null
+     if [ "$n" -le "$d" ]; then exit 0; fi
+     cat "${STUB_PANE:-/dev/null}"; exit 0 ;;
   send-keys)
      if [ "${STUB_ECHO:-1}" = "1" ]; then
        for a in "$@"; do :; done
@@ -100,6 +106,18 @@ STUB_ALIVE=0 STUB_ECHO=1 bash "$S/dispatch-launch.sh" alpha >/dev/null 2>&1
 chk "launches a not-yet-running worker" 0 $?
 grep -q "new-session" "$STUB_LOG" && ok "created the session" || bad "did not create session"
 grep -q "remote-control" "$STUB_LOG" && ok "sent the claude invocation" || bad "did not send claude invocation"
+
+# a pane that is blank while claude boots must still verify (poll, do not sample once)
+: > "$STUB_LOG"; printf 'auto mode on (shift+tab to cycle)\n' > "$STUB_PANE"
+export STUB_COUNTER="$tmp/cnt"; : > "$STUB_COUNTER"
+STUB_ALIVE=0 STUB_ECHO=0 STUB_PANE_DELAY=2 bash "$S/dispatch-launch.sh" alpha >/dev/null 2>&1
+chk "verifies a slow-starting session by polling" 0 $?
+: > "$STUB_COUNTER"
+# and a session that never starts must still fail
+: > "$STUB_PANE"
+STUB_ALIVE=0 STUB_ECHO=0 bash "$S/dispatch-launch.sh" alpha >/dev/null 2>&1
+chk "still fails when the pane never shows claude" 1 $?
+unset STUB_COUNTER
 
 # refuses to double-launch a live session
 : > "$STUB_LOG"
