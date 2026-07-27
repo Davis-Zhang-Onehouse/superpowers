@@ -12,7 +12,7 @@
 #   HARVESTED  gated + harvested (recorded by `pdispatch gate --harvest --record`) — terminal history
 #   RUNNING    working
 #
-# Usage:  dispatch-health.sh [--json] [--id <todo-id>] [--base <base-instant>]
+# Usage:  dispatch-health.sh [--json] [--id <todo-id>] [--base <base-instant>] [--orphans]
 # Exit:   0 = nothing needs attention   1 = something does   2 = bad input
 # Env:    BOARD_DIR, TMUX_BIN, IDLE_MIN (default 30), HEALTH_TAG (idle-baseline namespace per caller)
 set -uo pipefail
@@ -26,12 +26,13 @@ IDLE_MIN="${IDLE_MIN:-30}"
 # baseline, so IDLE — and every state derived from it — flaps. Two watchers must not share one view.
 HEALTH="$BOARD_DIR/health/${HEALTH_TAG:-shared}"
 
-JSON=0; ONLY=""; ONLY_BASE=""
+JSON=0; ONLY=""; ONLY_BASE=""; ORPHANS=0
 while [ $# -gt 0 ]; do
   case "$1" in
     --json) JSON=1; shift;;
     --id)   ONLY="${2:-}"; shift 2;;
     --base) ONLY_BASE="${2:-}"; shift 2;;
+    --orphans) ORPHANS=1; shift;;
     -h|--help) sed -n '2,20p' "$0"; exit 0;;
     *) echo "unknown arg: $1" >&2; exit 2;;
   esac
@@ -73,7 +74,7 @@ resolve_instant() { # $1 = recorded child path -> echoes the CURRENT basename
 }
 
 need_attention=0
-rows=()
+rows=(); orphans=()
 
 for f in "$RECORDS"/*.json; do
   [ -e "$f" ] || continue
@@ -174,13 +175,40 @@ PYS
   # history: a finished effort must stop demanding attention forever (coordinator RI-1 / RI-5).
   if [ -n "$harvested" ]; then
     state="HARVESTED"; note="gated ($(field "$f" gate_verdict)) + harvested $harvested — history, nothing owed"
+    # A harvested worker still holding a live session is an ORPHAN: it consumes account-wide budget
+    # for no work. Informational on the row, never "needs attention" — a permanently-red harvested
+    # fleet would be the alarm-that-never-clears trap this tool exists to avoid.
+    if alive "$sess"; then
+      note="$note  [session still alive — teardown pending]"
+      orphans+=("$id|$slot|$sess")
+    fi
+
   elif [ -n "$cname" ] && [[ "$cname" == *-complete-* ]]; then
     state="COMPLETE"; note="folder renamed -complete- — UNHARVESTED: run the gate, then harvest"
+    # Also an orphan if its session lives, but COMPLETE still governs the state: the completion
+    # signal must survive — noting the orphan must never cost the reason the row matters.
+    if alive "$sess"; then
+      orphans+=("$id|$slot|$sess (no harvest marker — pre-dates it)")
+    fi
   fi
 
   case "$state" in DEAD|BLOCKED|IDLE|COMPLETE|PARKED) need_attention=1;; esac
   rows+=("$id|$state|$slot|$sess|$cname|$note")
 done
+
+if [ "$ORPHANS" = 1 ]; then
+  if [ "${#orphans[@]}" = 0 ]; then
+    echo "no orphaned sessions: every harvested worker has been torn down"
+  else
+    echo "${#orphans[@]} harvested worker(s) still holding a live session (teardown pending):"
+    for o in "${orphans[@]}"; do
+      IFS='|' read -r oid oslot osess <<<"$o"
+      printf '  %-46s slot %-5s %s\n' "$oid" "$oslot" "$osess"
+    done
+    echo "  each is an idle claude session competing for the same account-wide budget as live work."
+  fi
+  exit 0
+fi
 
 if [ "$JSON" = 1 ]; then
   printf '%s\n' "${rows[@]:-}" | python3 -c '
