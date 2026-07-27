@@ -22,23 +22,38 @@ import sys
 import xml.etree.ElementTree as ET
 
 
-def xml_files(paths):
+def xml_files(paths, all_xml=False):
+    """Yield report XMLs. Anything skipped is COUNTED and reported — a discovery filter that drops
+    files without saying so is the same silent loss as a bad parser regex (a hand-rolled parser lost
+    43 rows per slow-dim extraction exactly this way)."""
+    skipped = []
     for p in paths:
         if os.path.isfile(p):
             yield p
         elif os.path.isdir(p):
             for root, _, names in os.walk(p):
                 for n in sorted(names):
-                    if n.endswith(".xml") and (n.startswith("TEST-") or "surefire" in root.lower()
-                                               or n.startswith("TESTS-")):
+                    if not n.endswith(".xml"):
+                        continue
+                    looks_like_report = (n.startswith("TEST-") or n.startswith("TESTS-")
+                                         or "surefire" in root.lower())
+                    if all_xml or looks_like_report:
                         yield os.path.join(root, n)
+                    else:
+                        skipped.append(os.path.join(root, n))
         else:
             print(f"warning: no such path: {p}", file=sys.stderr)
+    if skipped:
+        print(f"# SKIPPED {len(skipped)} .xml file(s) not matching TEST-/TESTS-/surefire, e.g. "
+              f"{os.path.basename(skipped[0])} — pass --all-xml to include them", file=sys.stderr)
 
 
 def main(argv=None):
     ap = argparse.ArgumentParser(description="Flatten surefire/JUnit XML to name<TAB>PASS|FAIL.")
     ap.add_argument("paths", nargs="+", help="surefire directories and/or XML files")
+    ap.add_argument("--all-xml", action="store_true",
+                    help="treat every .xml under the paths as a report, not only TEST-*/TESTS-*/surefire "
+                         "ones (some CI layouts name them differently)")
     ap.add_argument("--dim", help="CI dimension label; qualifies every name so dimensions are never collapsed")
     ap.add_argument("--include-skipped", action="store_true",
                     help="emit skipped tests as SKIP (default: omit them — a skipped test is not a result)")
@@ -46,7 +61,7 @@ def main(argv=None):
 
     results = {}
     files = suites = 0
-    for f in xml_files(a.paths):
+    for f in xml_files(a.paths, a.all_xml):
         try:
             root = ET.parse(f).getroot()
         except ET.ParseError as e:
