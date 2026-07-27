@@ -97,6 +97,8 @@ case "$cmd" in
   guard)   exec "$SKILL/install-branch-guard.sh" "$@";;
   ref)     exec "$SKILL/ref-guard.sh" "$@";;
   profile) exec "$SKILL/profile-check.sh" "$@";;
+  basecheck) exec "$SKILL/base-check.sh" "$@";;
+  issues)  exec "$REPO/skills/coordinating-instants/tools/new-issues.py" "$@";;
   gate)    exec "$REPO/skills/coordinating-instants/tools/workspace-gate.py" "$@";;
   drift)   exec "$REPO/skills/coordinating-instants/tools/coord-check.py" "$@";;
   regress) exec "$REPO/skills/coordinating-instants/tools/regression-check.py" "$@";;

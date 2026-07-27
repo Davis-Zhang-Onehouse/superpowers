@@ -24,6 +24,8 @@ printf 'seed for {{TITLE}} in {{WS}} -- run a | b ; c\n' > "$tmp/prof/seed.txt"
 printf 'do the thing\n' > "$tmp/brief.md"
 # use --no-duplicate (no golden clone needed): pre-populate the slot with a maven project
 mkdir -p "$tmp/ws1/repoA"; : > "$tmp/ws1/repoA/pom.xml"
+# this slot already has a POPULATED repo under a non-default name (as real slots do)
+mkdir -p "$tmp/ws1/.m2-compact1/org/x"; : > "$tmp/ws1/.m2-compact1/org/x/x.jar"
 bash "$S/wspool.sh" add "$tmp/ws1" >/dev/null 2>&1
 
 out=$(bash "$S/dispatch-todo.sh" --base "$tmp/base" --profile "$tmp/prof" --title "Hygiene Probe" \
@@ -46,6 +48,11 @@ if [ -n "$child" ]; then
     || bad "no build isolation written (shared cache can be poisoned)"
   grep -q "$tmp/ws1" "$tmp/ws1/repoA/.mvn/maven.config" 2>/dev/null \
     && ok "cache points inside this workspace" || bad "cache path not workspace-local"
+  mrepo=$(sed -n 's/.*-Dmaven.repo.local=//p' "$tmp/ws1/repoA/.mvn/maven.config" | head -1)
+  [ -d "$mrepo" ] && ok "the configured repo directory actually exists" \
+    || bad "configured a cache directory that does not exist (cold/broken build)"
+  [ "$mrepo" = "$tmp/ws1/.m2-compact1" ] && ok "reuses the slot's already-populated repo" \
+    || bad "ignored the populated repo ($mrepo) — cold cache"
 else
   bad "no child instant created — skipping hygiene assertions"
 fi
@@ -112,6 +119,36 @@ out2=$(bash "$S/dispatch-todo.sh" --base "$tmp/base" --profile "$tmp/prof" --tit
         --brief "$tmp/brief.md" --no-launch --no-duplicate 2>&1); rc2=$?
 chk "second dispatch inherits the golden from this effort's last dispatch" 0 $rc2
 echo "$out2" | grep -qi "golden" && ok "says where the golden came from" || bad "silent about the inherited golden"
+
+echo "== base-check (a worker must not silently build on the wrong base) =="
+# The pool duplicates from the GOLDEN (prebuilt artifacts), but a milestone's work must stack on the
+# LINEAGE base. Repositioning is a manual first step today; forgetting it is invisible and poisons
+# the stack. Verify it mechanically instead.
+bc="$tmp/bcws"; mkdir -p "$bc/repoX"
+(cd "$bc/repoX" && git init -q . && git config user.email t@t && git config user.name t \
+  && echo a > f && git add f && git commit -q -m one \
+  && echo b >> f && git commit -q -am two) >/dev/null 2>&1
+old=$(cd "$bc/repoX" && git rev-parse HEAD~1); new=$(cd "$bc/repoX" && git rev-parse HEAD)
+bash "$S/base-check.sh" --ws "$bc" --expect "repoX=$new" >/dev/null 2>&1
+chk "passes when the workspace is at the expected base" 0 $?
+bash "$S/base-check.sh" --ws "$bc" --expect "repoX=$old" >/dev/null 2>&1
+chk "FAILS when the workspace is at the wrong commit" 1 $?
+out=$(bash "$S/base-check.sh" --ws "$bc" --expect "repoX=$old" 2>&1)
+echo "$out" | grep -q "repoX" && echo "$out" | grep -qi "expect" && ok "names the repo and both shas" \
+  || bad "unclear mismatch report"
+bash "$S/base-check.sh" --ws "$bc" --expect "nosuch=$new" >/dev/null 2>&1
+chk "missing repo in the workspace is a failure" 1 $?
+# a short sha prefix should still match
+bash "$S/base-check.sh" --ws "$bc" --expect "repoX=${new:0:9}" >/dev/null 2>&1
+chk "accepts an abbreviated sha" 0 $?
+# and it should read the expectation straight from a dispatch record
+mkdir -p "$BOARD_DIR/records"
+cat > "$BOARD_DIR/records/bcprobe.json" <<EOF
+{ "todo_id": "bcprobe", "ws": "$bc", "child_instant": "$tmp/x", "tmux": "dt-bcprobe",
+  "base_instant": "$tmp/base", "lineage_base": "repoX=$new" }
+EOF
+bash "$S/base-check.sh" bcprobe >/dev/null 2>&1
+chk "reads the expected base from the dispatch record" 0 $?
 
 echo "== install-branch-guard =="
 r="$tmp/repo"; mkdir -p "$r"; (cd "$r" && git init -q . && git config user.email t@t && git config user.name t \

@@ -64,7 +64,7 @@ PY
 }
 
 # ---- args -------------------------------------------------------------------
-BASE="" TITLE="" BRIEF="" GOLDEN="" SLOT="" PROFILE="" NO_LAUNCH=0 NO_DUP=0
+BASE="" TITLE="" BRIEF="" GOLDEN="" SLOT="" PROFILE="" NO_LAUNCH=0 NO_DUP=0 LINEAGE_BASE=""
 declare -a EVIDENCE=()
 while [ "$#" -gt 0 ]; do
   case "$1" in
@@ -76,6 +76,7 @@ while [ "$#" -gt 0 ]; do
     --profile)     PROFILE="$2"; shift 2;;
     --evidence)    EVIDENCE+=("$2"); shift 2;;
     --no-launch)   NO_LAUNCH=1; shift;;
+    --lineage-base) LINEAGE_BASE="$2"; shift 2;;
     --no-duplicate) NO_DUP=1; shift;;
     -h|--help)     sed -n '2,32p' "$0" | sed 's/^# \{0,1\}//'; exit 0;;
     *) err "unknown arg: $1"; exit 2;;
@@ -310,13 +311,23 @@ info "  seed + profile snapshot -> $DISPATCH_META"
 # Parallel workers sharing one build cache poison each other (OI-6). Point every maven project
 # in this workspace at a cache INSIDE the workspace, so it cannot be got wrong.
 if [ "${ISOLATE_BUILD:-1}" = "1" ]; then
+  # Reuse the slot's ALREADY-POPULATED local repo if one exists under any name (previous efforts
+  # used e.g. .m2-compact1). Assuming ".m2" pointed a live workspace at a directory that did not
+  # exist — isolated, but with a cold cache, which is its own failure. Never point at a missing dir.
+  MREPO=""
+  for cand in "$WS"/.m2 "$WS"/.m2-*; do
+    [ -d "$cand" ] || continue
+    if [ -n "$(find "$cand" -maxdepth 3 -name '*.jar' -print -quit 2>/dev/null)" ]; then MREPO="$cand"; break; fi
+  done
+  [ -n "$MREPO" ] || MREPO="$WS/.m2"
+  mkdir -p "$MREPO"
   while IFS= read -r pom; do
     [ -n "$pom" ] || continue
     pdir="$(dirname "$pom")"
     mkdir -p "$pdir/.mvn"
     if ! grep -qs 'maven.repo.local' "$pdir/.mvn/maven.config" 2>/dev/null; then
-      printf -- '-Dmaven.repo.local=%s/.m2\n' "$WS" >> "$pdir/.mvn/maven.config"
-      info "  build cache isolated: $pdir/.mvn/maven.config -> $WS/.m2"
+      printf -- '-Dmaven.repo.local=%s\n' "$MREPO" >> "$pdir/.mvn/maven.config"
+      info "  build cache isolated: $pdir/.mvn/maven.config -> $MREPO"
     fi
   done <<< "$(find "$WS" -maxdepth 2 -name pom.xml 2>/dev/null)"
 fi
@@ -334,6 +345,7 @@ BRIEF_ABS="$([ "$BRIEF" = "-" ] && echo "(stdin)" || realpath -m -- "$BRIEF")"
   printf '  "tmux": "%s",\n' "$TMUX_SESSION"
   printf '  "base_instant": "%s",\n' "$BASE"
   printf '  "brief": "%s",\n' "$BRIEF_ABS"
+  printf '  "lineage_base": "%s",\n' "$LINEAGE_BASE"
   printf '  "seed_file": "%s",\n' "$DISPATCH_META/seed.txt"
   printf '  "profile": "%s",\n' "$PROFILE_DIR"
   printf '  "profile_archive": "%s",\n' "$DISPATCH_META/profile"
