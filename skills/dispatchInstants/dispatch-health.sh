@@ -86,6 +86,20 @@ for f in "$RECORDS"/*.json; do
   fi
 
   state="RUNNING"; note=""
+  # Self-heal: a record with no launched_at whose session is ALIVE was obviously launched — stamp it,
+  # so records predating the launched_at field stop misreporting (they cannot be re-launched to fix).
+  if [ -z "$launched" ] && alive "$sess"; then
+    python3 - "$f" <<'PYS' 2>/dev/null || true
+import json, sys, datetime
+p = sys.argv[1]
+d = json.load(open(p))
+d["launched_at"] = datetime.datetime.now(datetime.timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+d["launched_at_inferred"] = True
+json.dump(d, open(p, "w"), indent=2, ensure_ascii=False)
+PYS
+    launched="inferred"
+  fi
+
   if ! alive "$sess" && [ -z "$launched" ]; then
     # `--no-launch` writes the record immediately; the session only exists after `dispatch-launch`.
     # The charter review the skill MANDATES therefore opens a window where a healthy dispatch looks
@@ -94,7 +108,11 @@ for f in "$RECORDS"/*.json; do
     state="PENDING-LAUNCH"
     note="dispatched but not launched yet (${age}m) — review the charter, then: pdispatch launch $id"
     if [ "$age" -ge "${PENDING_MAX_MIN:-60}" ]; then
-      need_attention=1; note="$note  [pending ${age}m — forgotten?]"
+      # Old, unstamped, no session: this predates launched_at or was forgotten — we genuinely
+      # cannot tell pending from dead. Say so and demand attention; never quietly excuse it.
+      need_attention=1
+      state="UNKNOWN"
+      note="no launched_at and no session after ${age}m — legacy record or forgotten dispatch; cannot tell PENDING from DEAD. Check the pane, then launch or reap."
     fi
   elif ! alive "$sess"; then
     state="DEAD"; note="session gone — reap its slot (yours only) and decide: succeed it or re-dispatch"
@@ -119,8 +137,14 @@ for f in "$RECORDS"/*.json; do
   # CONTENT, not its heading: every instant is born with an empty "## Parked decision" block.
   hoff="$(dirname "$child")/$cname/HANDOFF.md"
   if [ -f "$hoff" ]; then
-    parked="$(awk '/^## +Parked decision/{f=1;next} /^## /{f=0} f' "$hoff" 2>/dev/null \
-              | grep -vE '^\s*$|^<none>$|^-+$|^_+$' | head -3)"
+    block="$(awk '/^## +Parked decision/{f=1;next} /^## /{f=0} f' "$hoff" 2>/dev/null)"
+    # A "<none>" marker means empty even when the author adds an explanatory sentence after it —
+    # filtering only the marker line leaves the prose and fires a false PARKED.
+    if printf '%s' "$block" | grep -qiE '^\s*[(<]?none[)>]?\.?\s*$'; then
+      parked=""
+    else
+      parked="$(printf '%s' "$block" | grep -vE '^\s*$|^-+$|^_+$' | head -3)"
+    fi
     if [ -n "$parked" ]; then
       first="$(printf '%s' "$parked" | head -1 | cut -c1-80)"
       # An actionable blocker (a modal you can answer now, a dead session) must NOT be masked by a
