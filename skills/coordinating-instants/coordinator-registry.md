@@ -16,8 +16,10 @@ A row goes ✅ ONLY after `workspace review --all` passed and you harvested its 
 | Slot | State | Holder instant | tmux | Note |
 |------|-------|----------------|------|------|
 | ws1 | LEASED \| FREE \| STALE | `<instant>` | `dt-<id>` | this coordinator lives in its own slot — never dispatch there |
+| ws5 | LEASED (OTHER effort) | `<other-coordinator's instant>` | — | shared pool — NOT yours; never claim/reap until confirmed done + session dead |
 
-Rule: each tick, reap STALE, and fill every FREE slot with the next ready milestone (or record why it's held).
+Rule: the pool + board are GLOBAL across efforts. Each tick, reap STALE **that are yours** and fill every FREE slot
+with the next ready milestone (or record why held) — but always confirm a slot isn't another effort's lease first.
 
 ## 3. Lineage tracker (instant dependency — what each new instant was built on)
 | Instant | Base it inherited | Delivered end-state (branches @sha) |
@@ -33,3 +35,7 @@ The canonical status catalog is `catalog/CATALOG.md` (or your registry). **You a
 worker delivers a *proposed delta + CI evidence* in its own instant; you verify and apply it here. Pair it with
 an append-only `sanctioned-flips` allowlist — one GOLD-justified entry per previously-green test that now flips
 red for an intended reason. Never let a worker write this file.
+
+The canonical baseline ITSELF can be superseded: if a better-grounded authoritative version is delivered mid-effort
+(e.g. by a parallel exposure effort), re-seed from it and RECONCILE your existing fix-statuses onto the new body —
+don't blindly overwrite it and don't blindly keep the old one.
