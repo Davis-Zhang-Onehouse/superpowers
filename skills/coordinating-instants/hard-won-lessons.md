@@ -37,6 +37,9 @@ or alarms that could never turn off — in both the coordinator's watcher and th
   comes and goes; announcing every flip produces a stream of events about a fleet that is fine. Require a
   non-terminal change to hold for N consecutive samples before reporting it; let terminal states
   (complete/harvested/dead) fire at once, since those never flap back.
+- **Prime every channel you diff, not just the one that bit you.** A state map, a seen-set, a baseline —
+  each needs its startup value taken from reality and announced once as a baseline. Fixing one channel and
+  leaving its neighbour is the most common way these bugs recur.
 - **Two watchers must never share one piece of mutable state.** An idle baseline kept in a single file was
   overwritten by whichever watcher sampled last, so both saw phantom transitions. Namespace it per caller.
 - **Absence is never success.** A missing test result, an uncovered dimension, a suite that produced no
@@ -46,3 +49,10 @@ or alarms that could never turn off — in both the coordinator's watcher and th
 Apply the same evidence discipline to alarm plumbing as to the work. When your watcher and a tool disagree,
 find out which is lying before acting on either — and when two independent authors improvise the same
 missing convention, the bug is the missing convention.
+
+## Close every fix with one question
+**"Where else does this exact shape live?"** Four defects in a single effort were the same fix applied in one
+place and not the adjacent one: dim-qualified names hid a lost dimension from a coverage check that only
+looked one way; an identifier rename broke the liveness checks consuming it; an adapter's silent parse was
+fixed while its silent file-discovery was not; a priming fix landed on the issue channel and not the state
+channel beside it. Asking the question costs a minute and would have caught all four.
