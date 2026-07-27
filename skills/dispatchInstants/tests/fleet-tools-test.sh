@@ -160,6 +160,24 @@ echo "$out" | grep -qi "parked" && bad "reported a parked note for an EMPTY bloc
   || ok "no parked note reported for an empty block"
 rm -f "$tmp/child/07180102-07190000-inflight-append-alpha/HANDOFF.md"
 
+# Two instants dispatched in the SAME MINUTE share the <base>-<curr> prefix (real: r2 and r3 both
+# 07270639-07270656). Resolving a renamed folder by that prefix alone can attribute one worker's
+# state to another. The stable key is the whole name with only the STATE token varying.
+mkdir -p "$tmp/child/07180102-07190009-abort-append-twinA"
+mkdir -p "$tmp/child/07180102-07190009-complete-append-twinB"
+# the record still holds twinB's DISPATCH-time (inflight) path, which no longer exists
+rec twinB "$tmp/child/07180102-07190009-inflight-append-twinB" dt-twinB
+python3 - "$BOARD_DIR/records/twinB.json" <<'PYX'
+import json,sys
+p=sys.argv[1]; d=json.load(open(p)); d["launched_at"]="2026-01-01T00:01:00Z"; json.dump(d,open(p,"w"))
+PYX
+printf 'working\n' > "$STUB_PANE"
+out=$(STUB_ALIVE=1 bash "$S/dispatch-health.sh" --id twinB 2>&1)
+echo "$out" | grep -qi "COMPLETE" \
+  && ok "resolves the renamed twin correctly despite the shared prefix" \
+  || bad "prefix collision: read the OTHER same-minute instant's state, missing a real completion"
+rm -rf "$tmp/child/07180102-07190009-abort-append-twinA" "$tmp/child/07180102-07190009-complete-append-twinB" "$BOARD_DIR/records/twinB.json"
+
 # json mode is machine-readable
 out=$(STUB_ALIVE=1 bash "$S/dispatch-health.sh" --json 2>/dev/null)
 echo "$out" | python3 -c 'import json,sys; d=json.load(sys.stdin); assert isinstance(d,(list,dict))' 2>/dev/null \

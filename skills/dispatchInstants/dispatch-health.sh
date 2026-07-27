@@ -57,9 +57,13 @@ resolve_instant() { # $1 = recorded child path -> echoes the CURRENT basename
   b="$(basename "$p")"
   if [ -d "$p" ]; then echo "$b"; return; fi
   d="$(dirname "$p")"
+  # Match on <base>-<curr>-<ANY state>-<rest>: same-minute instants share the timestamps but
+  # differ in <rest>, so keying on the timestamps alone can read a SIBLING's state (observed:
+  # r2 and r3 were both 07270639-07270656).
   pre="$(printf '%s' "$b" | grep -oE '^[0-9]{8}-[0-9]{8}' || true)"
-  if [ -n "$pre" ] && [ -d "$d" ]; then
-    m="$(ls -1 "$d" 2>/dev/null | grep -E "^${pre}-" | head -1)"
+  rest="$(printf '%s' "$b" | sed -E 's/^[0-9]{8}-[0-9]{8}-(inflight|complete|abort)-//')"
+  if [ -n "$pre" ] && [ -n "$rest" ] && [ -d "$d" ]; then
+    m="$(ls -1 "$d" 2>/dev/null | grep -E "^${pre}-(inflight|complete|abort)-${rest}$" | head -1)"
     [ -n "$m" ] && { echo "$m"; return; }
   fi
   echo "$b"
