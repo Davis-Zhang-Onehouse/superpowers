@@ -43,10 +43,13 @@ to any shared branch. The coordinator restacks at the compaction.
       lineage base.** Nothing moves it forward for you, and forgetting is INVISIBLE: the build succeeds, the
       tests pass, and your whole milestone silently stacks on the pre-fix baseline. Two workers in the
       previous wave hit exactly this.
-- [ ] Prove it mechanically: **`pdispatch basecheck <your-FULL-todo-id>`** — the id is the full slug in your
-      `.dispatch/` record (also shown by `pdispatch board`), e.g. `lift01InvertVeloxCastAnsiGateBounded-07271113`,
-      **not** the short registry label the coordinator uses for you (`lift-01`), which will not resolve (or
-      `pdispatch basecheck --ws <your-ws> --expect "gluten-internal=<sha>,velox-internal=<sha>"`).
+- [ ] Prove it mechanically: **`pdispatch basecheck <your-todo-id>`**. A **short id now resolves**
+      (`pdispatch basecheck lift01`) and an **ambiguous prefix is refused rather than guessed**, so you can use
+      the short form or the full slug from your `.dispatch/` record. The registry label your coordinator uses
+      may differ from the record key — if a short form is rejected, take the exact id from `.dispatch/` or
+      `pdispatch board`. (Or `pdispatch basecheck --ws <your-ws> --expect "repo=<sha>,repo=<sha>"`.)
+      It also reports whether the **native artifacts were rebuilt after the last checkout**, so a stale-artifact
+      warning clears itself once you rebuild instead of nagging forever.
 - [ ] Then either **reposition** (`git fetch --all && git checkout --detach <tip>`, then cut your branch) —
       noting that moving off the golden commit can invalidate the prebuilt native artifacts, so plan the
       rebuild — **or**, if you are an ANALYSIS-ONLY milestone, deliberately stay on golden and read
@@ -70,6 +73,13 @@ to any shared branch. The coordinator restacks at the compaction.
 - [ ] Small/localized/clear → `superpowers:test-driven-development` (RED = the failing test → GREEN).
       Large/multi-file/ambiguous → `superpowers:brainstorming` → `writing-plans` → `subagent-driven-development`.
 - [ ] Local validation GREEN proven via **surefire** (target passes; no regression in the touched suites).
+- [ ] ⚠️ **A ZERO-TEST RUN EXITS GREEN — always read `Total number of tests run`.**
+      `-Dsuites='<Class> -z "<substring>"'` prints `Expected test count is: 0`, `No tests were executed.`, and
+      then **`BUILD SUCCESS`**: the scalatest-maven-plugin never applies the Spark-docs-style `-z` filter, so
+      nothing matches and the empty run passes. Correct form is space-separated with no `-z`:
+      `-Dsuites='org.apache.spark.sql.GlutenSQLQueryTestSuite typeCoercion/native/concat.sql'`.
+      **A targeted local run is the easiest place in the entire evidence chain to prove nothing while looking
+      green** — cite the executed count, never just the build result.
 - [ ] The fix is **maintainable, extensible, reliable, long-term — NOT an adhoc bandaid.** *(Amended
       2026-07-27 after R5's RV-20 correctly showed the original wording was an opinion criterion that could be
       neither passed nor failed on evidence. The intent stays; here is what a reviewer can actually check —
