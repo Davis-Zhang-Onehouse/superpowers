@@ -15,10 +15,10 @@ Base instant (your bulletin board and the source of truth you inherit): **{{BASE
 Read, in order: its `HANDOFF.md`, `catalog/CATALOG.md`, `DECISIONS.md` (D-1..D-13), `ISSUES.md`
 (OI-1..OI-17), and the FINAL compaction instant's `COMPACTED.md`.
 
-**Lineage base for ALL new work** (the effort was parked here — never restart from scratch):
-- gluten `davis/glutenmain-ansirework-final` @ **e1e04c5f5** — PR onehouseinc/gluten-internal#441
-- velox  `davis/glutenmain-velox-ansirework-final` @ **efd7800c1** — PR onehouseinc/velox-internal#156
-- Proven: all 8 non-slow ANSI gaps closed red→green WHILE OFFLOADED, green→red REAL = 0.
+**Lineage base for ALL new work:** named in the **Brief** below and recorded as `lineage_base` on your
+dispatch record — treat those as authoritative and verify with `pdispatch basecheck <todo-id>`. This
+template deliberately does NOT name branch tips: a static charter that hardcodes them goes stale and then
+contradicts the brief, which is how a worker ends up with two different answers about what to build on.
 
 Every milestone you dispatch stacks on that end-state and records its lineage.
 

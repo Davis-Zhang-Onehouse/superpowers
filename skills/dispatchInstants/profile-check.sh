@@ -56,14 +56,20 @@ fi
 # 4) A static SEED must not restate a PER-MILESTONE fact. The seed ships with the profile; the charter
 # and brief are written per dispatch. A seed naming a commit sha goes stale and hands the worker two
 # different answers about what to build on — which is exactly what happened to lift-01.
-seedtxt="$(cat "$d/seed.txt" 2>/dev/null)"
-if printf '%s' "$seedtxt" | grep -qE '\b[0-9a-f]{9,40}\b' \
-   && ! printf '%s' "$seedtxt" | grep -qiE 'charter (is )?authoritative|named in your CHARTER|treat those as authoritative'; then
-  say "VIOLATION stale-seed: the seed hardcodes a commit sha. Per-milestone facts (lineage base, branch"
-  say "  tips) belong in the CHARTER/brief; a static seed must defer to them — say the CHARTER is"
-  say "  authoritative instead of naming a sha that will go stale."
+# Both seed.txt and charter.md are STATIC profile text; the per-dispatch brief is not. Checking only
+# the seed leaves the same staleness in the file the worker treats as authoritative.
+for st in seed.txt charter.md; do
+  [ -f "$d/$st" ] || continue
+  txt="$(cat "$d/$st")"
+  # A commit sha contains at least one hex LETTER; an all-digit token is a CI run id, which the brief
+  # contract REQUIRES pinning. Matching bare [0-9a-f] would flag the very thing the contract mandates.
+  printf '%s' "$txt" | grep -oE '\b[0-9a-f]{9,40}\b' | grep -qE '[a-f]' || continue
+  printf '%s' "$txt" | grep -qiE 'authoritative|named in your CHARTER|see the Brief' && continue
+  say "VIOLATION stale-template ($st): it hardcodes a commit sha. Per-milestone facts (lineage base,"
+  say "  branch tips) belong in the per-dispatch BRIEF and the dispatch record; a static template must"
+  say "  defer to them, or it will contradict the brief — say which source is authoritative instead."
   bad=1
-fi
+done
 
 # 5) leftover template tokens mean the profile was edited carelessly.
 if printf '%s' "$text" | grep -qE '\{\{[A-Z_]+\}\}'; then
