@@ -123,7 +123,11 @@ for f in "$RECORDS"/*.json; do
               | grep -vE '^\s*$|^<none>$|^-+$|^_+$' | head -3)"
     if [ -n "$parked" ]; then
       first="$(printf '%s' "$parked" | head -1 | cut -c1-80)"
-      if [ "$state" = "RUNNING" ]; then
+      # An actionable blocker (a modal you can answer now, a dead session) must NOT be masked by a
+      # standing operator note that will sit there all effort — that sends you to the wrong problem.
+      if [ "$state" = "BLOCKED" ] || [ "$state" = "DEAD" ] || [ "$state" = "PENDING-LAUNCH" ]; then
+        note="$note  [also parked: $first]"
+      elif [ "$state" = "RUNNING" ]; then
         # Recorded an operator-only item and kept working — a NOTE, not a stall. Surface it, but do
         # not demand attention every tick: a permanently-red tick trains everyone to ignore red.
         note="parked note (still progressing): $first"
