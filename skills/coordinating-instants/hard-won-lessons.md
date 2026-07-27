@@ -56,6 +56,15 @@ Apply the same evidence discipline to alarm plumbing as to the work. When your w
 find out which is lying before acting on either — and when two independent authors improvise the same
 missing convention, the bug is the missing convention.
 
+## Sequence teardown; "harvested" is not "finished with"
+Tearing down a harvested worker's session frees account-wide budget — a real, immediate gain. It also
+destroys the cheapest way to fix a defect a LATER milestone finds in that worker's code: in its own tree,
+with full context, in one edit. **"Harvested" means its claims were verified and its delta applied — not
+that no future milestone will find a defect in its work.** In a wave where later milestones audit earlier
+ones, late discovery is likely, not hypothetical. So sequence it: tear down after the auditing milestones
+report, not while they are still running. And when a report presents only one side of a tradeoff, it is
+nudging the decision — say what the action destroys, not only what it saves.
+
 ## Close every fix with one question
 **"Where else does this exact shape live?"** Four defects in a single effort were the same fix applied in one
 place and not the adjacent one: dim-qualified names hid a lost dimension from a coverage check that only

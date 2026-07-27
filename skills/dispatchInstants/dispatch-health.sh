@@ -74,7 +74,7 @@ resolve_instant() { # $1 = recorded child path -> echoes the CURRENT basename
 }
 
 need_attention=0
-rows=(); orphans=()
+rows=(); orphans=(); running_n=0
 
 for f in "$RECORDS"/*.json; do
   [ -e "$f" ] || continue
@@ -179,7 +179,7 @@ PYS
     # for no work. Informational on the row, never "needs attention" — a permanently-red harvested
     # fleet would be the alarm-that-never-clears trap this tool exists to avoid.
     if alive "$sess"; then
-      note="$note  [session still alive — teardown pending]"
+      note="$note  [session still alive]"
       orphans+=("$id|$slot|$sess")
     fi
 
@@ -192,6 +192,7 @@ PYS
     fi
   fi
 
+  [ "$state" = "RUNNING" ] && running_n=$((running_n+1))
   case "$state" in DEAD|BLOCKED|IDLE|COMPLETE|PARKED) need_attention=1;; esac
   rows+=("$id|$state|$slot|$sess|$cname|$note")
 done
@@ -205,7 +206,18 @@ if [ "$ORPHANS" = 1 ]; then
       IFS='|' read -r oid oslot osess <<<"$o"
       printf '  %-46s slot %-5s %s\n' "$oid" "$oslot" "$osess"
     done
-    echo "  each is an idle claude session competing for the same account-wide budget as live work."
+    echo
+    echo "  BOTH costs are real — this is a judgement, not a chore:"
+    echo "   · keeping them: each idle session competes for the same account-wide budget as live work."
+    echo "   · tearing down: IRREVERSIBLE. A harvested worker's session is the cheapest way to fix a defect"
+    echo "     a LATER milestone finds in its code — in its own tree, with full context, in one edit."
+    echo "     \"Harvested\" means its claims were verified, NOT that no future milestone will find a defect."
+    if [ "$running_n" -gt 0 ]; then
+      echo "   · $running_n worker(s) still RUNNING. If any of them audits earlier work (they usually do),"
+      echo "     HOLD teardown until they report — that is when a defect in a harvested worker surfaces."
+    else
+      echo "   · no workers are still running, so late-discovery risk is at its lowest."
+    fi
   fi
   exit 0
 fi

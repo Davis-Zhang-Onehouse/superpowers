@@ -217,6 +217,13 @@ echo "$out" | grep -qi "session still alive\|orphan" && ok "flags the live sessi
   || bad "silent about an orphaned session"
 out=$(STUB_ALIVE=1 bash "$S/dispatch-health.sh" --orphans 2>&1)
 echo "$out" | grep -q "alpha" && ok "--orphans lists it" || bad "--orphans missed it"
+# A one-sided report NUDGES a decision. Teardown is irreversible and a harvested worker's live session
+# is the cheapest way to fix a defect a LATER milestone finds in its code, in its own tree, with full
+# context. So while any worker is still running, the report must say HOLD rather than imply teardown.
+echo "$out" | grep -qiE "irreversible|context|cheapest" && ok "states the cost of teardown, not just its benefit" \
+  || bad "one-sided: pushes teardown without naming what it destroys"
+echo "$out" | grep -qi "still running" && ok "advises sequencing while work is in flight" \
+  || bad "no sequencing advice while a worker is running"
 # An instant that is -complete- with a live session is equally an orphan even with NO harvest marker —
 # records predating the marker (a finished effort's) would otherwise be invisible forever.
 python3 - "$BOARD_DIR/records/alpha.json" <<'PYX'
