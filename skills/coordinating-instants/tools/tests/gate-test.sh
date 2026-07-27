@@ -230,8 +230,12 @@ mk cur_newred.tsv "a	PASS" "b	PASS" "c	PASS" "d	FAIL" "brandNewSuite.t1	FAIL" "b
 out=$(python3 "$T/regression-check.py" --baseline "$tmp/base.tsv" --lineage-base "$tmp/lineage.tsv" \
         --current "$tmp/cur_newred.tsv" 2>&1); rc=$?
 chk "a newly-added suite shipping RED fails the check" 1 $rc
-echo "$out" | grep -qi "new" && echo "$out" | grep -q "brandNewSuite.t1" \
-  && ok "names the new red tests" || bad "did not surface the new reds"
+echo "$out" | grep -q "brandNewSuite.t1" && ok "names the unbaselined red tests" || bad "did not surface them"
+# The tool CANNOT tell "added by this stack" from "existed but was never measured" (a dim that
+# uploaded no surefire). Claiming NEW sends the reader after the wrong worker — say what is known.
+echo "$out" | grep -qiE "no baseline covered|never measured|cannot tell" \
+  && ok "states that it cannot tell newly-added from never-measured" \
+  || bad "asserts the reds are NEW when it cannot know that"
 echo "$out" | grep -qi "^CLEAN" && bad "still headlined CLEAN with a new suite failing" || ok "verdict is not CLEAN"
 # a newly-added suite that is GREEN is merely new, not a failure
 mk cur_newgreen.tsv "a	PASS" "b	PASS" "c	PASS" "d	FAIL" "brandNewSuite.t1	PASS"

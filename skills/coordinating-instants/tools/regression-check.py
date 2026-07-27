@@ -71,7 +71,7 @@ def main(argv=None):
     ap.add_argument("--closed-from-md", help="registry markdown to extract CLOSED rows from")
     ap.add_argument("--closed-marker", default="🟩", help="marker denoting a closed row (default 🟩)")
     ap.add_argument("--allow-new-red", action="store_true",
-                    help="downgrade NEW-RED (a test absent from every baseline that fails now) to a "
+                    help="downgrade RED-NO-BASELINE (a test failing now that no baseline covered) to a "
                          "warning. Use only for residuals documented as intentionally red — they are "
                          "still listed.")
     ap.add_argument("--strict-coverage", action="store_true",
@@ -117,7 +117,7 @@ def main(argv=None):
     }
     res["not_comparable_vs_lineage_base"] = uncomparable_lineage
     res["not_comparable_vs_baseline"] = uncomparable_baseline
-    res["new_red"] = new_red
+    res["red_no_baseline"] = new_red
     res["new_green"] = new_green
     rc = 1 if (regressions or rebreaks or closed_not_green) else 0
     if new_red and not a.allow_new_red:
@@ -130,10 +130,14 @@ def main(argv=None):
         print(json.dumps(res, indent=2, ensure_ascii=False))
     else:
         print(f"{res['result']} — regressions={len(regressions)} rebreaks={len(rebreaks)} "
-              f"new-red={len(new_red)} closed-not-green={len(closed_not_green)}")
+              f"red-no-baseline={len(new_red)} closed-not-green={len(closed_not_green)}")
         for n in new_red:
             tag = "warning, allowed" if a.allow_new_red else "FAIL"
-            print(f"  NEW-RED ({tag}): {n} — added since the baselines and failing; no diff can see this")
+            print(f"  RED-NO-BASELINE ({tag}): {n}")
+        if new_red:
+            print("    ^ failing now, and NO baseline covered them — so no diff can see it. This tool")
+            print("      cannot tell 'added by this stack' from 'existed but was never measured' (a dim")
+            print("      that uploaded no results): check the source history to find the owner.")
         if new_green:
             print(f"  new since the baselines and green: {len(new_green)} test(s) (informational)")
         for n in regressions:
