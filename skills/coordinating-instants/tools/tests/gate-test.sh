@@ -54,6 +54,32 @@ python3 "$T/workspace-gate.py" "$d" --harvest >/dev/null 2>&1; chk "--harvest re
 d=$(mkinstant 07180102-07190000-complete-append-mrX READY 0 0)
 python3 "$T/workspace-gate.py" "$d" --harvest >/dev/null 2>&1; chk "--harvest accepts a -complete- folder" 0 $?
 
+# Markdown emphasis is idiomatic and the template does not enforce bare text. A gate that cannot
+# read a BOLD verdict fails a genuinely-READY worker (coordinator RI-11) — the worst direction for
+# a gate to be wrong in, because it blocks correct work.
+d="$tmp/inst-bold"; mkdir -p "$d"
+{ echo "# X — REVIEW"; echo
+  echo "## Round R1 — 2026-01-01 · trigger: pre-complete · scope: all"; echo
+  echo "## Round summary — overall verdict: **READY**"
+  echo "- **Open Critical: 0 · Open Important: 0 · Open Minor: 0**"; } > "$d/REVIEW.md"
+python3 "$T/workspace-gate.py" "$d" >/dev/null 2>&1
+chk "a BOLD verdict parses" 0 $?
+d="$tmp/inst-bold-open"; mkdir -p "$d"
+{ echo "# X"; echo; echo "## Round R1 — 2026-01-01 · trigger: pre-complete · scope: all"; echo
+  echo "## Round summary — overall verdict: **READY-WITH-FIXES**"
+  echo "- **Open Critical: 0 · Open Important: 2 · Open Minor: 1**"; } > "$d/REVIEW.md"
+python3 "$T/workspace-gate.py" "$d" >/dev/null 2>&1
+chk "bold open-counts are still counted (2 Important fails)" 1 $?
+# A summary line that exists but cannot be parsed must SAY so — reporting it as absent sends the
+# coordinator hunting for the wrong problem.
+d="$tmp/inst-garbled"; mkdir -p "$d"
+{ echo "# X"; echo; echo "## Round R1 — 2026-01-01 · trigger: pre-complete · scope: all"; echo
+  echo "## Round summary — overall verdict: mostly fine I think"; } > "$d/REVIEW.md"
+out=$(python3 "$T/workspace-gate.py" "$d" 2>&1); rc=$?
+chk "an unparseable verdict fails closed" 2 $rc
+echo "$out" | grep -qi "could not parse\|unparseable" && ok "says unparseable, not absent" \
+  || bad "misdiagnoses an unparseable line as a missing one"
+
 # Harvest must be RECORDED where a tool can see it, or every finished instant screams forever
 # and a successor coordinator cannot tell owed work from history (coordinator RI-1 / RI-5).
 export BOARD_DIR="$tmp/board"; mkdir -p "$BOARD_DIR/records"
