@@ -285,7 +285,10 @@ EOF
 fi
 
 # minimal canonical stubs (maintain-workspace invariants; the session fleshes them out)
-printf '# %s — STATE\nUpdated: %s\n\n| Repo | Branch | Tip | PR | CI | Notes |\n|---|---|---|---|---|---|\n| (fill as work lands) | | | | | |\n' "$TITLE" "$TODAY" > "$CHILD/STATE.md"
+# STATE.md is a CONVENIENCE, not a maintain-workspace invariant: its canonical set does not include
+# it, and folding this table into HANDOFF is a legitimate choice (several instants have). Say so in the
+# file, so nobody infers invariant status from the fact that we seed it.
+printf '# %s — STATE\nUpdated: %s | Status: LIVE (optional — NOT a maintain-workspace canonical file;\nfolding this table into HANDOFF is legitimate. Presence is not an invariant.)\n\n| Repo | Branch | Tip | PR | CI | Notes |\n|---|---|---|---|---|---|\n| (fill as work lands) | | | | | |\n' "$TITLE" "$TODAY" > "$CHILD/STATE.md"
 printf '# %s — RUNBOOK\nUpdated: %s\n\n## Build / run / repro\n- Workspace: %s (pre-built; see duplicateWorkSpace).\n- (add exact repro commands as you find them during the RCA)\n' "$TITLE" "$TODAY" "$WS" > "$CHILD/RUNBOOK.md"
 printf '# DECISIONS   (durable; append-only; dated)\nUpdated: %s\n' "$TODAY" > "$CHILD/DECISIONS.md"
 printf '# ISSUES   (durable; append-only; one sub-section per issue)\nUpdated: %s\n' "$TODAY" > "$CHILD/ISSUES.md"
