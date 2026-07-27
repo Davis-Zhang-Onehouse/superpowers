@@ -121,6 +121,21 @@ printf '| Test | Status |\n|---|---|\n| `c` | 🟩 CLOSED |\n| `d` | ⬛ OPEN |\
 python3 "$T/regression-check.py" --baseline "$tmp/base.tsv" --current "$tmp/cur_rebreak.tsv" --closed-from-md "$tmp/cat.md" >/dev/null 2>&1
 chk "closed rows parsed from markdown registry" 1 $?
 
+echo "== new-issues (diff by ID, not by count) =="
+ni="$tmp/ISSUES.md"; st="$tmp/seen.txt"
+printf '# ISSUES\n\n## RI-1 — first\nbody\n\n## RI-2 — second\nbody\n' > "$ni"
+out=$(python3 "$T/new-issues.py" "$ni" --state "$st" 2>&1); rc=$?
+chk "first run reports everything as new" 1 $rc
+echo "$out" | grep -q "RI-1" && echo "$out" | grep -q "RI-2" && ok "names both" || bad "missed one"
+python3 "$T/new-issues.py" "$ni" --state "$st" >/dev/null 2>&1
+chk "second run reports nothing new" 0 $?
+# THE REAL BUG: a new entry inserted BEFORE the last one. Count grows, last heading unchanged.
+printf '# ISSUES\n\n## RI-1 — first\nbody\n\n## RI-3 — third\nbody\n\n## RI-2 — second\nbody\n' > "$ni"
+out=$(python3 "$T/new-issues.py" "$ni" --state "$st" 2>&1); rc=$?
+chk "detects an entry inserted mid-file" 1 $rc
+echo "$out" | grep -q "RI-3" && ok "names the actually-new issue" || bad "named the wrong issue"
+echo "$out" | grep -q "RI-2" && bad "re-reported an old issue" || ok "does not re-report old issues"
+
 echo "== coord-check =="
 inst="$tmp/instants"; mkdir -p "$inst/07180102-07190000-complete-append-mrA" "$inst/07180102-07190001-inflight-append-mrB"
 mkh(){ printf '# H\n\n## Live milestone registry\n| MR | Task | Disposition | Depends-on | Instant | Slot | Status | Proof |\n|---|---|---|---|---|---|---|---|\n%s\n' "$1" > "$tmp/HANDOFF.md"; }

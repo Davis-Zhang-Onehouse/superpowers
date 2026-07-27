@@ -124,6 +124,42 @@ echo "$out" | grep -qi "BLOCKED" && ok "modal wins over a standing parked note" 
   || bad "parked note masked the real blocker: $(echo "$out" | tail -1)"
 rm -f "$tmp/child/07180102-07190000-inflight-append-alpha/HANDOFF.md"
 
+# RI-8: records written BEFORE launched_at existed must not be mislabelled. If the session is
+# ALIVE, the record clearly was launched — self-heal by stamping it. If it is old and gone, we
+# cannot tell pending from dead, so say so and DEMAND attention rather than quietly excusing it.
+python3 - "$BOARD_DIR/records/alpha.json" <<'PYX'
+import json,sys
+p=sys.argv[1]; d=json.load(open(p)); d.pop("launched_at",None); json.dump(d,open(p,"w"))
+PYX
+printf 'working\n' > "$STUB_PANE"
+STUB_ALIVE=1 bash "$S/dispatch-health.sh" >/dev/null 2>&1
+grep -q launched_at "$BOARD_DIR/records/alpha.json" \
+  && ok "legacy record self-heals launched_at when the session is alive" \
+  || bad "legacy record left unstamped — it will misreport forever"
+python3 - "$BOARD_DIR/records/alpha.json" <<'PYX'
+import json,sys
+p=sys.argv[1]; d=json.load(open(p)); d.pop("launched_at",None); json.dump(d,open(p,"w"))
+PYX
+touch -d '-3 hours' "$BOARD_DIR/records/alpha.json"
+out=$(STUB_ALIVE=0 bash "$S/dispatch-health.sh" 2>&1); rc=$?
+chk "an OLD unstamped record with no session demands attention" 1 $rc
+echo "$out" | grep -qiE "unknown|legacy|dead" && ok "says it cannot tell pending from dead" \
+  || bad "quietly excused a possibly-dead worker as pending"
+python3 - "$BOARD_DIR/records/alpha.json" <<'PYX'
+import json,sys
+p=sys.argv[1]; d=json.load(open(p)); d["launched_at"]="2026-01-01T00:01:00Z"; json.dump(d,open(p,"w"))
+PYX
+
+# RI-9: "<none>" followed by an explanatory sentence is still an EMPTY parked block.
+printf '# H\n\n## Parked decision (for the operator)\n<none>\n(I will fill this in only if I need you.)\n\n## Next\n' \
+  > "$tmp/child/07180102-07190000-inflight-append-alpha/HANDOFF.md"
+printf 'working\n' > "$STUB_PANE"
+out=$(STUB_ALIVE=1 bash "$S/dispatch-health.sh" 2>&1); rc=$?
+chk "<none> plus explanatory prose is still empty" 0 $rc
+echo "$out" | grep -qi "parked" && bad "reported a parked note for an EMPTY block" \
+  || ok "no parked note reported for an empty block"
+rm -f "$tmp/child/07180102-07190000-inflight-append-alpha/HANDOFF.md"
+
 # json mode is machine-readable
 out=$(STUB_ALIVE=1 bash "$S/dispatch-health.sh" --json 2>/dev/null)
 echo "$out" | python3 -c 'import json,sys; d=json.load(sys.stdin); assert isinstance(d,(list,dict))' 2>/dev/null \
