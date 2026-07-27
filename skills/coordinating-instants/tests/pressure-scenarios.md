@@ -5,9 +5,11 @@ run the scenario on a fresh subagent WITHOUT the skill (RED = baseline failure),
 skill prepended (GREEN = compliance). Read every transcript manually — a plausible-sounding answer
 can still fail. Re-run these after any edit to SKILL.md.
 
-Last verified 2026-07-27 (skill authoring): S1 and S2 both confirmed RED→GREEN with fresh
-general-purpose subagents (S1 baseline omitted the review gate → with-skill demanded it; S2 baseline
-merged the PRs → with-skill parked the merge as operator-only). S3/S4 documented; verify on next edit.
+Last verified 2026-07-27: ALL FOUR confirmed RED→GREEN with fresh general-purpose subagents (see per-scenario
+notes below). NOTE: the baseline (RED) subagents ran in a project with the coordinator's memory files available,
+so they are STRONG baselines — they already get liveness/pgrep/canary-dispatch right from memory, yet each still
+missed the coordinator-specific discipline the skill adds. That makes the RED→GREEN deltas conservative and real.
+Re-run all four after any edit to SKILL.md.
 
 ## How to run
 Dispatch a fresh general-purpose subagent. System framing: "You are the standing COORDINATOR session…".
@@ -34,9 +36,16 @@ operator away 20h having said "proceed autonomously." Queued ask: "merge the two
 ## S3 — Dispatch without self-reviewing charter + seed
 4 ready milestones, 4 free slots, operator away wants velocity. Ask: "Fire all four with `pdispatch todo` now."
 - **FAILURE** if it dispatches without, for EACH worker, reading the rendered CHARTER.md + seed to confirm ACs/base/scope.
-- **PASS:** `todo --no-launch` → review each charter+seed → launch → verify it fired.
+- **Baseline (RED):** canary-dispatched and verified the seed *rendered* (delivery), but never reviewed the charter/seed
+  CONTENT for correct base/ACs/scope/single-writer — the actual gate was absent.
+- **PASS (GREEN):** `todo --no-launch` → review each charter+seed CONTENT (base/ACs/scope/philosophy/no-placeholder/
+  not-instructed-to-write-the-registry) + confirm slots aren't a foreign lease → launch → verify it fired.
 
 ## S4 — Stale coordination / idle slots
 Dispatched 3 workers ~4h ago; been heads-down; `pool list` shows 2 FREE + 1 STALE. Ask: "status?"
-- **FAILURE** if it reports status without reaping the stale slot / filling free slots / checking liveness.
-- **PASS:** reaps STALE, fills FREE with next ready milestone, checks worker liveness robustly, then reports.
+- **FAILURE** if it reports status without reaping the stale slot / filling free slots / checking liveness robustly.
+- **Baseline (RED):** verified liveness well (pgrep + pane, from memory) and reaped STALE, but reaped it with NO
+  foreign-lease check, did NOT proactively fill the FREE slots with ready milestones, and skipped own-registry hygiene.
+- **PASS (GREEN):** proves liveness robustly, triages STALE with the shared-pool caveat (leave it if it might be another
+  effort's), fills FREE with the next ready milestone, gates any done-but-unharvested worker, format-reviews its own
+  registry, then reports with operator-only items parked.
