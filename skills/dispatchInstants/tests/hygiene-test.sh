@@ -113,6 +113,19 @@ for pr in ansi ansi-expose compact-ansi coord-ansi; do
   chk "shipped profile '$pr' is clean" 0 $?
 done
 
+# OI-1: the dispatch SEED is static profile text; the CHARTER/brief is per-milestone. A seed that
+# hardcodes a lineage sha goes stale and hands the worker two different answers about what to build on.
+mkdir -p "$tmp/seedsha"
+printf 'Kind: **WORKER**\nDeliver the fix. Report back and rename to -complete-. Propose a delta; never edit the canonical registry. Run superpowers:review-workspace before renaming.\n' > "$tmp/seedsha/charter.md"
+printf 'Your lineage base is gluten branch davis/x at e1e04c5f5 - build on it.\n' > "$tmp/seedsha/seed.txt"
+out=$(bash "$S/profile-check.sh" "$tmp/seedsha" 2>&1); rc=$?
+chk "a seed hardcoding a commit sha is a violation" 1 $rc
+echo "$out" | grep -qi "sha\|charter is authoritative" && ok "explains that per-milestone facts belong in the charter" \
+  || bad "unclear message"
+printf 'Your lineage base is named in your CHARTER and in the dispatch record - treat those as authoritative.\n' > "$tmp/seedsha/seed.txt"
+bash "$S/profile-check.sh" "$tmp/seedsha" >/dev/null 2>&1
+chk "a seed deferring to the charter passes" 0 $?
+
 echo "== golden inheritance (RI-3) =="
 # a second dispatch for the SAME base must not fail merely because --golden was omitted
 out2=$(bash "$S/dispatch-todo.sh" --base "$tmp/base" --profile "$tmp/prof" --title "Second Probe" \
@@ -196,6 +209,19 @@ cat > "$BOARD_DIR/records/bcprobe.json" <<EOF
 EOF
 bash "$S/base-check.sh" bcprobe >/dev/null 2>&1
 chk "reads the expected base from the dispatch record" 0 $?
+
+# OI-3: a partial id must resolve. Requiring the full 60-char todo-id makes the tool unusable by hand.
+bash "$S/base-check.sh" bcprobe >/dev/null 2>&1; chk "full id resolves" 0 $?
+bash "$S/base-check.sh" bcpro >/dev/null 2>&1; chk "unique PREFIX resolves" 0 $?
+cat > "$BOARD_DIR/records/bcprobe2.json" <<EOF
+{ "todo_id": "bcprobe2", "ws": "$bc", "child_instant": "$tmp/x", "tmux": "dt-bcprobe2",
+  "base_instant": "$tmp/base", "lineage_base": "repoX=$cur" }
+EOF
+out=$(bash "$S/base-check.sh" bcpro 2>&1); rc=$?
+chk "an AMBIGUOUS prefix fails rather than guessing" 2 $rc
+echo "$out" | grep -qi "ambiguous\|matches 2" && ok "names the candidates" || bad "unclear ambiguity message"
+rm -f "$BOARD_DIR/records/bcprobe2.json"
+
 
 echo "== install-branch-guard =="
 r="$tmp/repo"; mkdir -p "$r"; (cd "$r" && git init -q . && git config user.email t@t && git config user.name t \

@@ -13,15 +13,23 @@ Kind: **WORKER** — one milestone of the RESUMED Gluten+Velox ANSI effort. You 
 - Your maven cache is already isolated to `{{WS}}/.m2` via `.mvn/maven.config` (OI-6/FC-12). Do not install
   into the shared `~/.m2`.
 
-## LINEAGE BASE — what you inherit (never restart from the original baseline)
-The bounded 8-gap ANSI rework is **DONE** and parked as ONE merge-ready stack per repo. Your milestone
-stacks on that end-state:
+## LINEAGE BASE — read your BRIEF for YOUR base; this section is only the effort-wide default
+⚠️ **YOUR base is whatever the "Base + lineage" section of the brief below names — that is per-milestone and it
+WINS.** Some milestones deliberately stack on a **sibling's delivered tips** rather than on the effort's
+terminal base, because a sibling's work is a hard prerequisite (e.g. lift-01 stacks on R2's tips: R2's
+parameterised-target-type translator work must exist before more casts are made to raise). This section, the
+seed, and the brief are three renderings of the same thing and the first two are effort-wide boilerplate — **if
+any of them disagree with the brief, the BRIEF is authoritative and you tell the coordinator** (lift-01's OI-1:
+it hit exactly this and adjudicated it correctly, but should not have had to).
+
+**Effort-wide default, used only when the brief names nothing more specific** — the bounded 8-gap ANSI rework
+is DONE and parked as ONE merge-ready stack per repo:
 - gluten `davis/glutenmain-ansirework-final` @ **e1e04c5f5** — PR onehouseinc/gluten-internal#441
 - velox  `davis/glutenmain-velox-ansirework-final` @ **efd7800c1** — PR onehouseinc/velox-internal#156
 
 All 8 non-slow ANSI gaps are closed there red→green **while offloaded**, green→red REAL = 0
-(CI run 29742621077). Cut YOUR branch off those tips (naming in the brief); never push to them, and never
-push to any shared branch. The coordinator restacks at the compaction.
+(CI run 29742621077). Cut YOUR branch off whichever tips your brief names; never push to them, and never push
+to any shared branch. The coordinator restacks at the compaction.
 
 ## First raw prompt / brief (the dispatch — authoritative for scope)
 {{BRIEF}}
@@ -35,7 +43,9 @@ push to any shared branch. The coordinator restacks at the compaction.
       lineage base.** Nothing moves it forward for you, and forgetting is INVISIBLE: the build succeeds, the
       tests pass, and your whole milestone silently stacks on the pre-fix baseline. Two workers in the
       previous wave hit exactly this.
-- [ ] Prove it mechanically: **`pdispatch basecheck <your-todo-id>`** (or
+- [ ] Prove it mechanically: **`pdispatch basecheck <your-FULL-todo-id>`** — the id is the full slug in your
+      `.dispatch/` record (also shown by `pdispatch board`), e.g. `lift01InvertVeloxCastAnsiGateBounded-07271113`,
+      **not** the short registry label the coordinator uses for you (`lift-01`), which will not resolve (or
       `pdispatch basecheck --ws <your-ws> --expect "gluten-internal=<sha>,velox-internal=<sha>"`).
 - [ ] Then either **reposition** (`git fetch --all && git checkout --detach <tip>`, then cut your branch) —
       noting that moving off the golden commit can invalidate the prebuilt native artifacts, so plan the
