@@ -165,15 +165,26 @@ chk "accepts an abbreviated sha" 0 $?
 # FIDELITY: repositioning SOURCE onto the lineage base leaves the golden's PREBUILT NATIVE
 # artifacts behind. Testing new source against old .so is a false-green trap (worker R3 OI-3).
 mkdir -p "$bc/repoX/cpp/build"; : > "$bc/repoX/cpp/build/libthing.so"
+# Mirror reality: the golden's artifacts are copied in FIRST, then the worker repositions the source,
+# so the .so predates the checkout. (A freshly-created file would look like a rebuild.)
+touch -d '-1 hour' "$bc/repoX/cpp/build/libthing.so"
 cur=$(cd "$bc/repoX" && git rev-parse HEAD)
 out=$(bash "$S/base-check.sh" --ws "$bc" --expect "repoX=$cur" --golden-base "repoX=$old" 2>&1); rc=$?
 chk "source-correct + stale native artifacts still exits 0 (not a hard failure)" 0 $rc
-echo "$out" | grep -qiE "native|artifact|rebuild" && ok "warns that prebuilt artifacts predate the source" \
+echo "$out" | grep -q "WARNING" && ok "warns that prebuilt artifacts predate the source" \
   || bad "silent about stale native artifacts — a false-green trap"
+# ...and once the worker REBUILDS the native side — the remedy the warning asks for — the warning must
+# STOP. A stale-provenance warning that survives the fix is an alarm that can never be cleared
+# (worker R7 I-3), which is the exact pattern this warning was added to prevent.
+touch "$bc/repoX/cpp/build/libthing.so"          # rebuilt after the checkout
+out=$(bash "$S/base-check.sh" --ws "$bc" --expect "repoX=$cur" --golden-base "repoX=$old" 2>&1)
+echo "$out" | grep -q "WARNING" && bad "still warns after a rebuild — the alarm cannot be cleared" \
+  || ok "warning clears once the artifacts are rebuilt"
+
 # when source is still AT the golden, the artifacts match: no warning noise
 cur=$(cd "$bc/repoX" && git rev-parse HEAD)
 out=$(bash "$S/base-check.sh" --ws "$bc" --expect "repoX=$cur" --golden-base "repoX=$cur" 2>&1)
-echo "$out" | grep -qiE "native|rebuild" && bad "warned when artifacts actually match the source" \
+echo "$out" | grep -q "WARNING" && bad "warned when artifacts actually match the source" \
   || ok "no artifact warning when source is at the golden"
 rm -rf "$bc/repoX/cpp"
 
