@@ -64,6 +64,22 @@ push to any shared branch. The coordinator restacks at the compaction.
 - [ ] **NEGATIVE RESULTS ARE A VALID DELIVERABLE.** If the target does not close, say so EXPLICITLY with
       evidence and an RCA of why. Quietly redefining success is worse than a red run.
 
+### AC-3b IF YOU ADD OR CHANGE AN ERROR/RAISE PATH — the degenerate-input and happy-path ACs are MANDATORY
+Two instances across two efforts, both caught by review and neither by the implementer, make this a pattern
+rather than a nit: **a guard that fires when there is nothing to guard.** MR4's aggregate over-raised at
+`count==0`; R3's eager `In` path over-raised on a **zero-row** input. **An over-raise is worse than a missing
+raise — it breaks queries that work today.** So, whenever your change makes something raise:
+- [ ] **Name and test the degenerate inputs as explicit ACs: EMPTY input · ZERO rows · ALL-NULL input.**
+      State what Spark does for each (cite GOLD) and prove you match it. "No rows were projected, so nothing
+      should raise" is a *test*, not an assumption.
+- [ ] **Pin the HAPPY path as still taking the accelerated route.** Proving the error is not the job; proving
+      the error *without losing offload* is. An errorClass-only assertion proves the raise and leaves the fast
+      path unproven — the same vacuous shape as an AC that would pass by evaluating on vanilla Spark.
+      Assert the offloaded operator in the plan, **with AQE disabled** (`withSQLConf(adaptive.enabled=false)`),
+      because `WholeStageTransformerSuite.sparkConf` does NOT disable it and Spark 4.x defaults it ON.
+- [ ] If you deliberately leave a degenerate-input divergence unfixed, that is allowed — but it must be
+      **named, bounded (which configs / which inputs), and recorded in your catalog delta**, never left silent.
+
 ### AC-4 CI + the TWO-DIFF non-regression rule
 - [ ] One effective GitHub CI run (Velox Backend ANSI Mode) on your pushed tip. **Truth = the downloaded
       surefire XMLs** — jobs run `--fail-never` and ALWAYS look green. Never cite the checkmark.

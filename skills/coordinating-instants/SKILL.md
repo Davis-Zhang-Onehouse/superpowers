@@ -175,6 +175,25 @@ and would have shipped with the merge.
 run is an ASSUMPTION with a stated re-prove condition — never a proof. A dimension that flaked was not
 verified; either re-run it at the tip or record it as an explicit open AC.
 
+## When a standard changes mid-effort
+
+A long effort improves its own rules while running — a review finds a bug class, a tool gains a check, a
+brief gains a clause. That is healthy, and it creates **retroactive debt**: work already gated under the
+older, weaker standard.
+
+**A new standard never retroactively invalidates a passed gate** — the gate was honestly met at the time,
+and re-opening every harvested instant on each tightening would stop the effort. But the debt is real and
+must be *dispositioned*, never silently grandfathered. For each item already harvested under the old rule,
+pick one and write it down:
+
+- **re-prove** — cheap enough to just do (add the missing test, re-run the one dim), or
+- **carry as an explicit open AC** on the next compaction, which is where the union is re-proven anyway, or
+- **accept**, with a written justification of why the gap is tolerable for this item specifically.
+
+Record which, with the reason, next to the item in the registry. "It passed the gate we had" is a fact, not
+a disposition. The failure mode to avoid is a standard that only ever applies to work done after it, so the
+earliest and least-reviewed work permanently carries the weakest guarantees.
+
 ## Non-regression & evidence discipline
 
 - **CI truth = the downloaded artifact, not the checkmark.** If jobs run non-failing (e.g. `--fail-never`)
