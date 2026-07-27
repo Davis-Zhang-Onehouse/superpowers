@@ -123,6 +123,12 @@ def decide(path, require_scope=None, harvest=False):
                                 "not a completion signal; the worker renames its own folder after passing")
         r["harvest_ready"] = (rc == 0)
 
+    # A verdict with no recorded stage verdicts, findings or scope has no visible basis. Advisory: the
+    # ledger stays the arbiter, but an empty round must not read identically to an evidenced one.
+    if not re.search(r"^###\s*Stage\s+\d", body, re.M) and not re.search(r"^####?\s*RV-\d", body, re.M):
+        r["reasons"].append(f"advisory: round {r['round']} records a verdict but no stage verdicts and no "
+                            f"RV- findings — thin ledger, nothing shows what was actually reviewed")
+
     # Advisory only: prose that claims a round the ledger does not contain is a narrative ahead of
     # its evidence. It never changes the verdict — the ledger is the arbiter either way.
     have = {m.group(1) for m in ROUND_RE.finditer(text)}

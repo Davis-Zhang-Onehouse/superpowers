@@ -55,6 +55,16 @@ done
 [ -n "$WS" ] && [ -d "$WS" ] || { echo "usage: base-check.sh <todo-id> | --ws <dir> --expect 'repo=sha,...'" >&2; exit 2; }
 [ -n "$EXPECT" ] || { echo "no --expect given" >&2; exit 2; }
 
+# A dirty tree means the code on disk is not the tip any CI proved — a green run elsewhere says
+# nothing about what is here.
+dirty_check() {
+  local d="$1" repo="$2"
+  if [ -n "$(git -C "$d" status --porcelain 2>/dev/null)" ]; then
+    echo "  WARNING (uncommitted-changes): $repo has UNCOMMITTED changes — the working tree is not the tip CI proved."
+    echo "    commit or stash before citing a CI result for this tree."
+  fi
+}
+
 bad=0
 IFS=',;' read -ra PAIRS <<< "$EXPECT"
 for pair in "${PAIRS[@]}"; do
@@ -74,8 +84,10 @@ for pair in "${PAIRS[@]}"; do
   # Only (d) "the workspace does not even have this commit" is unambiguously broken.
   if [ "${have#"$want"}" != "$have" ] || [ "$have" = "$want" ]; then
     echo "ok: $repo at ${have:0:12} (at the base)"
+    dirty_check "$d" "$repo"
   elif git -C "$d" merge-base --is-ancestor "$want" HEAD 2>/dev/null; then
     echo "ok: $repo at ${have:0:12} — a descendant of ${want:0:12} (work committed on top)"
+    dirty_check "$d" "$repo"
   elif git -C "$d" cat-file -e "${want}^{commit}" 2>/dev/null; then
     if [ "$MODE" = "code" ]; then
       echo "MISMATCH: $repo has ${want:0:12} but is not on it (HEAD ${have:0:12}); --mode code requires it"
@@ -113,7 +125,7 @@ if [ -n "$GOLDEN_BASE" ]; then
       echo "ok: $repo native artifacts rebuilt after the last checkout ($(basename "$so"))"
       continue
     fi
-    echo "WARNING: $repo has prebuilt native artifacts from the GOLDEN commit ${gsha:0:12},"
+    echo "WARNING (stale-native-artifacts): $repo has prebuilt native artifacts from the GOLDEN commit ${gsha:0:12},"
     echo "  but the source is now at ${have:0:12} (e.g. $(basename "$so"))."
     echo "  A test run here exercises NEW source against OLD native code — rebuild the native side,"
     echo "  or confirm this milestone touches no native code before trusting a green result."

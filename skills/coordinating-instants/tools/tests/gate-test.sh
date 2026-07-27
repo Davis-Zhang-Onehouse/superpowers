@@ -334,6 +334,21 @@ out=$(python3 "$T/regression-check.py" --baseline "$tmp/base.tsv" --lineage-base
 chk "--allow-new-red downgrades it to a warning" 0 $rc
 echo "$out" | grep -q "brandNewSuite.t1" && ok "still names them under --allow-new-red" || bad "went silent"
 
+# OI-9: a round recording a VERDICT but no stage verdicts, findings or scope is a claim with no visible
+# basis. Third instance (r2's unparseable scope, lift-01's empty round). Default pass/fail is unchanged —
+# the ledger is still the arbiter — but silence about it would let an empty round look identical to a
+# fully-evidenced one.
+d="$tmp/inst-emptyround"; mkdir -p "$d"
+{ echo "# X — REVIEW"; echo; echo "## Round R1 — 2026-01-01 · trigger: pre-complete"; echo
+  echo "## Round summary — overall verdict: READY"; } > "$d/REVIEW.md"
+out=$(python3 "$T/workspace-gate.py" "$d" 2>&1)
+echo "$out" | grep -qiE "no stage|no findings|thin" && ok "flags a round with a verdict but no recorded stages" \
+  || bad "an empty round reads the same as an evidenced one"
+d=$(mkinstant inst-fullround READY 0 0 all)
+out=$(python3 "$T/workspace-gate.py" "$d" 2>&1)
+echo "$out" | grep -qiE "no stage|thin" && bad "warned about a round that DOES record a stage" \
+  || ok "no warning when stages are recorded"
+
 echo "== surefire-to-tsv (the adapter nobody should hand-roll) =="
 sd="$tmp/surefire"; mkdir -p "$sd"
 # the exact trap: hostname="..." precedes name="...", and 'hostname="' ENDS WITH 'name="'
