@@ -44,9 +44,37 @@ d=$(mkinstant inst-multi READY 0 0)
   echo "- Open findings: Critical 1 · Important 0 · Minor 0"; } >> "$d/REVIEW.md"
 python3 "$T/workspace-gate.py" "$d" >/dev/null 2>&1; chk "latest round wins (R2 NOT-READY)" 1 $?
 
-# scope enforcement
+# scope enforcement: a single narrow round does not satisfy "all stages"
 d=$(mkinstant inst-fmt READY 0 0 format)
 python3 "$T/workspace-gate.py" "$d" --require-scope all >/dev/null 2>&1; chk "format-only round rejected by --require-scope all" 1 $?
+# ...but stages covered ACROSS rounds do, with the newest round's verdict governing. R1=all followed
+# by a narrow R2 follow-up is the normal shape of a re-review (live: r6 was R1=all, R2=alignment).
+d=$(mkinstant inst-union READY 0 0 all)
+{ echo; echo "## Round R2 — 2026-01-02 · trigger: pre-complete · scope: alignment"
+  echo "## Round R2 summary — overall verdict: READY"
+  echo "- Open findings: Critical 0 · Important 0 · Minor 0"; } >> "$d/REVIEW.md"
+python3 "$T/workspace-gate.py" "$d" --require-scope all >/dev/null 2>&1
+chk "a narrow follow-up round after a full round still satisfies --require-scope all" 0 $?
+# three narrow rounds that together cover every stage also satisfy it
+d=$(mkinstant inst-union3 READY 0 0 format)
+for r in 2:alignment 3:code; do
+  n=${r%%:*}; sc=${r##*:}
+  { echo; echo "## Round R$n — 2026-01-0$n · trigger: pre-complete · scope: $sc"
+    echo "## Round R$n summary — overall verdict: READY"
+    echo "- Open findings: Critical 0 · Important 0 · Minor 0"; } >> "$d/REVIEW.md"
+done
+python3 "$T/workspace-gate.py" "$d" --require-scope all >/dev/null 2>&1
+chk "format+alignment+code across rounds satisfies --require-scope all" 0 $?
+# an unparseable scope should be visible rather than silently treated as satisfied
+d=$(mkinstant inst-noscope READY 0 0)
+python3 - "$d/REVIEW.md" <<'PYX'
+import sys,re
+p=sys.argv[1]; t=open(p).read()
+open(p,"w").write(re.sub(r" · scope: \w+", "", t))
+PYX
+out=$(python3 "$T/workspace-gate.py" "$d" 2>&1)
+echo "$out" | grep -qi "scope=unknown" && ok "reports an unparseable scope rather than assuming one" \
+  || bad "silently assumed a scope"
 
 # harvest precondition: gate ok but folder not renamed complete
 d=$(mkinstant 07180102-07190000-inflight-append-mrX READY 0 0)
