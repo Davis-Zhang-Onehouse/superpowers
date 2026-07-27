@@ -203,6 +203,26 @@ out=$(python3 "$T/new-issues.py" "$ni" --state "$st" 2>&1); rc=$?
 chk "a genuinely new issue after priming still fires" 1 $rc
 echo "$out" | grep -q "RI-3" && ok "names it" || bad "missed the new issue"
 
+# If a baseline uploaded no results for some tests (a CI dim that produced no surefire — worker R3
+# OI-7), the diff for those tests CANNOT run. Silently skipping them is the exact "absence read as
+# absence of failure" error this tool exists to catch, so it must say what it could not compare.
+mk lin_partial.tsv "a	PASS" "b	PASS"
+out=$(python3 "$T/regression-check.py" --baseline "$tmp/base.tsv" --lineage-base "$tmp/lin_partial.tsv" \
+        --current "$tmp/cur_clean.tsv" 2>&1); rc=$?
+echo "$out" | grep -qiE "not comparable|uncomparable|coverage" \
+  && ok "reports what it could NOT compare against the lineage base" \
+  || bad "silently skipped tests the lineage base never covered"
+echo "$out" | grep -qE "\bc\b|\bd\b" && ok "names the uncomparable tests" || bad "does not name them"
+chk "a coverage gap alone is visible but not fatal by default" 0 $rc
+python3 "$T/regression-check.py" --baseline "$tmp/base.tsv" --lineage-base "$tmp/lin_partial.tsv" \
+  --current "$tmp/cur_clean.tsv" --strict-coverage >/dev/null 2>&1
+chk "--strict-coverage makes an incomparable baseline fatal" 1 $?
+# and a fully-covering lineage base reports no gap
+out=$(python3 "$T/regression-check.py" --baseline "$tmp/base.tsv" --lineage-base "$tmp/lineage.tsv" \
+        --current "$tmp/cur_clean.tsv" 2>&1)
+echo "$out" | grep -qiE "not comparable: 0|coverage: complete" && ok "says coverage is complete when it is" \
+  || bad "no positive statement of full coverage"
+
 echo "== coord-check =="
 inst="$tmp/instants"; mkdir -p "$inst/07180102-07190000-complete-append-mrA" "$inst/07180102-07190001-inflight-append-mrB"
 mkh(){ printf '# H\n\n## Live milestone registry\n| MR | Task | Disposition | Depends-on | Instant | Slot | Status | Proof |\n|---|---|---|---|---|---|---|---|\n%s\n' "$1" > "$tmp/HANDOFF.md"; }
