@@ -303,6 +303,23 @@ out=$(STUB_ALIVE=1 bash "$S/dispatch-alive.sh" alpha 2>&1)
 echo "$out" | grep -q "dt-alpha" && ok "alive: reports the session name it actually checked" \
   || bad "alive: does not say which session it checked"
 
+# A liveness PATTERN is wrong in both directions: `dt-r[0-9]` silently excluded later milestones
+# (dt-lift01…), a bare `dt-` over-counts other efforts and the coordinator itself. Enumerate from the
+# RECORDS for a base instead, so new milestone names are covered automatically and nothing foreign is.
+rec other2 "$tmp/child/07180102-07190001-complete-append-beta" dt-other2
+python3 - "$BOARD_DIR/records/other2.json" <<'PYX'
+import json,sys
+p=sys.argv[1]; d=json.load(open(p)); d["base_instant"]="/some/other/effort"; json.dump(d,open(p,"w"))
+PYX
+out=$(STUB_ALIVE=1 bash "$S/dispatch-alive.sh" --base "$tmp/base" 2>&1); rc=$?
+chk "alive --base exits 0 when every worker of that base is alive" 0 $rc
+echo "$out" | grep -q "alpha" && ok "alive --base enumerates from the records" || bad "did not enumerate"
+echo "$out" | grep -q "other2" && bad "alive --base leaked another effort's worker" || ok "scoped to the base"
+echo "$out" | grep -qE "1/1|ALIVE 1" && ok "reports a count, not a pattern match" || bad "no count reported"
+STUB_ALIVE=0 bash "$S/dispatch-alive.sh" --base "$tmp/base" >/dev/null 2>&1
+chk "alive --base exits 1 when a worker of that base is not alive" 1 $?
+rm -f "$BOARD_DIR/records/other2.json"
+
 echo "== dispatch-send =="
 : > "$STUB_LOG"; printf 'ready\n' > "$STUB_PANE"
 STUB_ALIVE=1 STUB_ECHO=1 bash "$S/dispatch-send.sh" alpha "hello worker" >/dev/null 2>&1
