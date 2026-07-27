@@ -201,6 +201,40 @@ b=$(ls "$BOARD_DIR/health" 2>/dev/null | grep -c watcherB)
 [ "$a" -ge 1 ] && [ "$b" -ge 1 ] && ok "each caller keeps its own idle baseline" \
   || bad "callers share one baseline and will corrupt each other (a=$a b=$b)"
 
+# A harvested worker whose session is STILL ALIVE is an orphan holding account-wide budget. Report
+# it on the row and list it on demand — but do NOT make it demand attention, or every harvested
+# worker is permanently red until someone kills it (the alarm-that-never-clears trap).
+python3 - "$BOARD_DIR/records/alpha.json" <<'PYX'
+import json,sys
+p=sys.argv[1]; d=json.load(open(p)); d["harvested_at"]="2026-01-02T00:00:00Z"; d["gate_verdict"]="READY"
+json.dump(d,open(p,"w"))
+PYX
+mv "$tmp/child/07180102-07190000-inflight-append-alpha" "$tmp/child/07180102-07190000-complete-append-alpha"
+printf 'idle\n' > "$STUB_PANE"
+out=$(STUB_ALIVE=1 bash "$S/dispatch-health.sh" 2>&1); rc=$?
+chk "a harvested worker with a live session does NOT demand attention" 0 $rc
+echo "$out" | grep -qi "session still alive\|orphan" && ok "flags the live session on the harvested row" \
+  || bad "silent about an orphaned session"
+out=$(STUB_ALIVE=1 bash "$S/dispatch-health.sh" --orphans 2>&1)
+echo "$out" | grep -q "alpha" && ok "--orphans lists it" || bad "--orphans missed it"
+# An instant that is -complete- with a live session is equally an orphan even with NO harvest marker —
+# records predating the marker (a finished effort's) would otherwise be invisible forever.
+python3 - "$BOARD_DIR/records/alpha.json" <<'PYX'
+import json,sys
+p=sys.argv[1]; d=json.load(open(p)); d.pop("harvested_at",None); d.pop("gate_verdict",None)
+json.dump(d,open(p,"w"))
+PYX
+STUB_ALIVE=1 bash "$S/dispatch-health.sh" --orphans 2>&1 | grep -q "alpha" \
+  && ok "--orphans catches a pre-marker complete instant too" \
+  || bad "an old finished effort's live session stays invisible"
+STUB_ALIVE=0 bash "$S/dispatch-health.sh" --orphans 2>&1 | grep -q "alpha" \
+  && bad "listed a harvested worker whose session is already gone" || ok "--orphans ignores dead sessions"
+mv "$tmp/child/07180102-07190000-complete-append-alpha" "$tmp/child/07180102-07190000-inflight-append-alpha"
+python3 - "$BOARD_DIR/records/alpha.json" <<'PYX'
+import json,sys
+p=sys.argv[1]; d=json.load(open(p)); d.pop("harvested_at"); d.pop("gate_verdict"); json.dump(d,open(p,"w"))
+PYX
+
 # json mode is machine-readable
 out=$(STUB_ALIVE=1 bash "$S/dispatch-health.sh" --json 2>/dev/null)
 echo "$out" | python3 -c 'import json,sys; d=json.load(sys.stdin); assert isinstance(d,(list,dict))' 2>/dev/null \
