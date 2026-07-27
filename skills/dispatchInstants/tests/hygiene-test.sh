@@ -131,16 +131,52 @@ bc="$tmp/bcws"; mkdir -p "$bc/repoX"
 old=$(cd "$bc/repoX" && git rev-parse HEAD~1); new=$(cd "$bc/repoX" && git rev-parse HEAD)
 bash "$S/base-check.sh" --ws "$bc" --expect "repoX=$new" >/dev/null 2>&1
 chk "passes when the workspace is at the expected base" 0 $?
+# Being AHEAD of the expected base is the intended end-state, not a mismatch (see RI-10 below).
 bash "$S/base-check.sh" --ws "$bc" --expect "repoX=$old" >/dev/null 2>&1
-chk "FAILS when the workspace is at the wrong commit" 1 $?
+chk "being ahead of the expected base is NOT a failure" 0 $?
 out=$(bash "$S/base-check.sh" --ws "$bc" --expect "repoX=$old" 2>&1)
-echo "$out" | grep -q "repoX" && echo "$out" | grep -qi "expect" && ok "names the repo and both shas" \
-  || bad "unclear mismatch report"
+echo "$out" | grep -q "repoX" && ok "names the repo and where it sits" || bad "unclear report"
 bash "$S/base-check.sh" --ws "$bc" --expect "nosuch=$new" >/dev/null 2>&1
 chk "missing repo in the workspace is a failure" 1 $?
+# A working code milestone ADVANCES past the base: branch cut off it, commits on top. Exact-SHA
+# calls the intended end-state a mismatch (coordinator RI-10).
+(cd "$bc/repoX" && echo c >> f && git commit -q -am three) >/dev/null 2>&1
+desc=$(cd "$bc/repoX" && git rev-parse HEAD)
+bash "$S/base-check.sh" --ws "$bc" --expect "repoX=$new" >/dev/null 2>&1
+chk "a descendant of the base PASSES (work committed on top)" 0 $?
+# An analysis milestone deliberately stays on the golden and reads the base via refs — the object is
+# present, just not checked out. Advisory, not a failure; --mode code makes it strict.
+bash "$S/base-check.sh" --ws "$bc" --expect "repoX=$desc" --ws-head "$old" >/dev/null 2>&1 || true
+(cd "$bc/repoX" && git checkout -q --detach "$old") >/dev/null 2>&1
+out=$(bash "$S/base-check.sh" --ws "$bc" --expect "repoX=$desc" 2>&1); rc=$?
+chk "base present but not checked out is advisory, not a failure" 0 $rc
+echo "$out" | grep -qiE "not checked out|via refs|analysis" && ok "explains the analysis-milestone shape" \
+  || bad "unclear advisory message"
+bash "$S/base-check.sh" --ws "$bc" --expect "repoX=$desc" --mode code >/dev/null 2>&1
+chk "--mode code makes not-checked-out a hard failure" 1 $?
+# A base the workspace does not even have is a real error: it can neither build on it nor read it.
+bash "$S/base-check.sh" --ws "$bc" --expect "repoX=deadbeefdeadbeefdeadbeefdeadbeefdeadbeef" >/dev/null 2>&1
+chk "an absent base is a hard failure" 1 $?
+(cd "$bc/repoX" && git checkout -q --detach "$desc") >/dev/null 2>&1
+
 # a short sha prefix should still match
 bash "$S/base-check.sh" --ws "$bc" --expect "repoX=${new:0:9}" >/dev/null 2>&1
 chk "accepts an abbreviated sha" 0 $?
+# FIDELITY: repositioning SOURCE onto the lineage base leaves the golden's PREBUILT NATIVE
+# artifacts behind. Testing new source against old .so is a false-green trap (worker R3 OI-3).
+mkdir -p "$bc/repoX/cpp/build"; : > "$bc/repoX/cpp/build/libthing.so"
+cur=$(cd "$bc/repoX" && git rev-parse HEAD)
+out=$(bash "$S/base-check.sh" --ws "$bc" --expect "repoX=$cur" --golden-base "repoX=$old" 2>&1); rc=$?
+chk "source-correct + stale native artifacts still exits 0 (not a hard failure)" 0 $rc
+echo "$out" | grep -qiE "native|artifact|rebuild" && ok "warns that prebuilt artifacts predate the source" \
+  || bad "silent about stale native artifacts — a false-green trap"
+# when source is still AT the golden, the artifacts match: no warning noise
+cur=$(cd "$bc/repoX" && git rev-parse HEAD)
+out=$(bash "$S/base-check.sh" --ws "$bc" --expect "repoX=$cur" --golden-base "repoX=$cur" 2>&1)
+echo "$out" | grep -qiE "native|rebuild" && bad "warned when artifacts actually match the source" \
+  || ok "no artifact warning when source is at the golden"
+rm -rf "$bc/repoX/cpp"
+
 # and it should read the expectation straight from a dispatch record
 mkdir -p "$BOARD_DIR/records"
 cat > "$BOARD_DIR/records/bcprobe.json" <<EOF
