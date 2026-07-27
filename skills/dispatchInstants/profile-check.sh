@@ -22,10 +22,14 @@ say(){ echo "  $1"; }
 # Rules depend on WHAT KIND of instant the profile dispatches. Applying worker rules to a
 # coordinator profile produces confident false alarms (the coordinator IS the catalog writer,
 # and it does not report back to itself).
-kind=worker
-printf '%s' "$text" | grep -qiE '^Kind:.*COORDINATOR|Kind: \*\*COORDINATOR' && kind=coordinator
-printf '%s' "$text" | grep -qiE '^Kind:.*COMPACTION|Kind: \*\*COMPACTION' && kind=compaction
-echo "profile kind: $kind"
+# Anchor to the token IMMEDIATELY after "Kind:", never "the line mentions coordinator" — a worker
+# charter reading "Kind: **WORKER** ... The coordinator does no dev" was silently linted as a
+# coordinator and passed. A kind-aware linter that picks the wrong kind is worse than no linter:
+# it converts "unchecked" into "checked and fine". Undeclared => worker (the strictest rules).
+kind="$(printf '%s' "$text" | grep -oiE '^Kind:[^A-Za-z]*(WORKER|COORDINATOR|COMPACTION)' | head -1 \
+        | grep -oiE '(WORKER|COORDINATOR|COMPACTION)' | tr '[:upper:]' '[:lower:]')"
+[ -n "$kind" ] || kind=worker
+echo "profile kind: $kind   (rule-set applied — check this is the kind you meant)"
 
 if [ "$kind" = coordinator ]; then
   # A coordinator OWNS the registry; the rule it must carry is that it GATES its workers.

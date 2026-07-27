@@ -50,7 +50,8 @@ rec(){ # rec <id> <child> [tmux]
   cat > "$BOARD_DIR/records/$1.json" <<EOF
 { "todo_id": "$1", "title": "T $1", "child_instant": "$2", "ws": "$tmp/ws",
   "slot": "ws9", "tmux": "${3:-dt-$1}", "base_instant": "$tmp/base",
-  "seed_file": "$tmp/seed.txt", "dispatched_at": "2026-01-01T00:00:00Z" }
+  "seed_file": "$tmp/seed.txt", "dispatched_at": "2026-01-01T00:00:00Z",
+  "launched_at": "2026-01-01T00:01:00Z" }
 EOF
 }
 mkdir -p "$tmp/child/07180102-07190000-inflight-append-alpha"
@@ -143,6 +144,29 @@ PYX
 out=$(STUB_ALIVE=1 bash "$S/dispatch-health.sh" --base "$tmp/base" 2>&1)
 echo "$out" | grep -q "other" && bad "--base leaked another effort's record" || ok "--base scopes to my effort"
 rm -f "$BOARD_DIR/records/other.json"
+
+# RI-6: --no-launch writes the record immediately, but the session only exists after launch.
+# The charter-review window the skill MANDATES therefore makes every correct dispatch look DEAD —
+# and acting on that phantom (reap / re-dispatch) destroys a healthy worker.
+python3 - "$BOARD_DIR/records/alpha.json" <<'PYX'
+import json,sys
+p=sys.argv[1]; d=json.load(open(p)); d.pop("launched_at",None); json.dump(d,open(p,"w"))
+PYX
+printf 'x\n' > "$STUB_PANE"
+out=$(STUB_ALIVE=0 bash "$S/dispatch-health.sh" 2>&1); rc=$?
+echo "$out" | grep -qi "PENDING" && ok "un-launched dispatch reads PENDING-LAUNCH, not DEAD" \
+  || bad "phantom DEAD during the mandated review window"
+chk "a pending-launch dispatch does not demand attention" 0 $rc
+# ...but one left pending too long IS worth surfacing
+out=$(STUB_ALIVE=0 PENDING_MAX_MIN=0 bash "$S/dispatch-health.sh" 2>&1); rc=$?
+chk "a long-forgotten pending dispatch does demand attention" 1 $rc
+# once launched, a missing session really is DEAD
+python3 - "$BOARD_DIR/records/alpha.json" <<'PYX'
+import json,sys
+p=sys.argv[1]; d=json.load(open(p)); d["launched_at"]="2026-01-01T00:00:00Z"; json.dump(d,open(p,"w"))
+PYX
+out=$(STUB_ALIVE=0 bash "$S/dispatch-health.sh" 2>&1)
+echo "$out" | grep -qi "dead" && ok "a launched-but-gone session is still DEAD" || bad "lost the real DEAD signal"
 
 echo "== dispatch-send =="
 : > "$STUB_LOG"; printf 'ready\n' > "$STUB_PANE"
