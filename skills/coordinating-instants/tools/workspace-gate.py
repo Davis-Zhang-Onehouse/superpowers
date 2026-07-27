@@ -25,7 +25,16 @@ import sys
 ROUND_RE = re.compile(r"^##\s+Round\s+R(\d+)\b(.*)$", re.M)
 VERDICT_RE = re.compile(r"^##\s*Round summary.*?overall verdict:\s*(READY-WITH-FIXES|NOT-READY|READY)\b",
                         re.M | re.I)
-OPEN_RE = re.compile(r"^-\s*Open findings:.*?Critical[:\s]+(\d+).*?Important[:\s]+(\d+)", re.M | re.I)
+# Tolerate both the template's "- Open findings: Critical n · Important n" and the equally common
+# "- Open Critical: n · Open Important: n". Reviewers write markdown, not a grammar.
+OPEN_RE = re.compile(r"^-\s*.*?Open.*?Critical[:\s]+(\d+).*?Important[:\s]+(\d+)", re.M | re.I)
+SUMMARY_LINE_RE = re.compile(r"^##\s*Round summary.*$", re.M | re.I)
+
+
+def strip_emphasis(text):
+    """Markdown emphasis is idiomatic and nothing enforces bare text; a gate that cannot read a
+    BOLD verdict fails a genuinely-READY worker — the worst direction for a gate to be wrong in."""
+    return text.replace("**", "").replace("__", "").replace("`", "")
 SCOPE_RE = re.compile(r"scope:\s*([A-Za-z-]+)")
 
 
@@ -46,12 +55,20 @@ def decide(path, require_scope=None, harvest=False):
     idx = max(range(len(rounds)), key=lambda i: int(rounds[i].group(1)))
     start = rounds[idx].start()
     end = rounds[idx + 1].start() if idx + 1 < len(rounds) else len(text)
-    body, header = text[start:end], rounds[idx].group(2)
+    body, header = strip_emphasis(text[start:end]), strip_emphasis(rounds[idx].group(2))
     r["round"] = f"R{rounds[idx].group(1)}"
 
     vm = VERDICT_RE.search(body)
     if not vm:
-        r["reasons"].append(f"round {r['round']} has no '## Round summary — overall verdict:' line")
+        # Distinguish "the line is missing" from "the line is there but I cannot read it" — saying
+        # ABSENT when it is merely unparseable sends the reader hunting for the wrong problem.
+        sm_line = SUMMARY_LINE_RE.search(body)
+        if sm_line:
+            r["reasons"].append(
+                f"round {r['round']}: could not parse a verdict from this line — "
+                f"{sm_line.group(0).strip()!r}; expected READY | READY-WITH-FIXES | NOT-READY")
+        else:
+            r["reasons"].append(f"round {r['round']} has no '## Round summary — overall verdict:' line")
         return 2, r
     verdict = vm.group(1).upper()
     r["verdict"] = verdict
