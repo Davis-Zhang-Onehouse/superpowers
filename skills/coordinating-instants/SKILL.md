@@ -74,7 +74,10 @@ You are long-lived and WILL restart mid-effort. Never answer "status?" from memo
    free the slot with `pdispatch pool release <slot>`.
 4. **Eligible free slot → dispatch** the next READY milestone (Phase B).
 5. **≥3 completed-and-harvested since the last compaction, and a slot free → compact** (Phase E).
-6. **Registry** — `pdispatch drift` to reconcile the tables; write down anything durable that arrived.
+6. **Registry, including YOUR OWN** — `pdispatch drift` to reconcile the tables, and
+   **`pdispatch lint <your-own-instant>`**. You lint every worker as part of the gate; the instant doing the
+   gating is the one nobody else checks. Two coordinators in one effort gated nine workspaces all day and
+   each found a format violation in their own the first time they looked. Make it a step, not a virtue.
 7. If nothing above is actionable, say so explicitly — don't manufacture work, and don't go quiet.
 
 **READY** = disposition assigned, ACs written, and its dependencies have **LANDED** (their end-state exists,
