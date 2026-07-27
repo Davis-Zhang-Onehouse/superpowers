@@ -6,7 +6,7 @@
 #   DEAD       session gone (robust check: pgrep on the remote-control name, then tmux)
 #   BLOCKED    alive but sitting on a permission modal — invisible to a plain liveness probe
 #   IDLE       pane unchanged for $IDLE_MIN minutes (alive, doing nothing)
-#   PARKED     a NON-EMPTY "## Parked decision" block in its HANDOFF (the empty template never fires)
+#   PARKED     parked decision AND not progressing (a parked note while still working is just a note)
 #   COMPLETE   its instant folder is renamed -complete- => awaiting YOUR gate + harvest
 #   RUNNING    working
 #
@@ -101,8 +101,15 @@ for f in "$RECORDS"/*.json; do
     parked="$(awk '/^## +Parked decision/{f=1;next} /^## /{f=0} f' "$hoff" 2>/dev/null \
               | grep -vE '^\s*$|^<none>$|^-+$|^_+$' | head -3)"
     if [ -n "$parked" ]; then
-      state="PARKED"
-      note="blocked on a decision: $(printf '%s' "$parked" | head -1 | cut -c1-80) — decide it if it is yours"
+      first="$(printf '%s' "$parked" | head -1 | cut -c1-80)"
+      if [ "$state" = "RUNNING" ]; then
+        # Recorded an operator-only item and kept working — a NOTE, not a stall. Surface it, but do
+        # not demand attention every tick: a permanently-red tick trains everyone to ignore red.
+        note="parked note (still progressing): $first"
+      else
+        state="PARKED"
+        note="STALLED on a parked decision: $first — decide it if it is yours"
+      fi
     fi
   fi
 

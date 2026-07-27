@@ -88,9 +88,22 @@ STUB_ALIVE=1 bash "$S/dispatch-health.sh" >/dev/null 2>&1
 chk "empty parked-decision template does NOT fire" 0 $?
 printf '# H\n\n## Parked decision\nShould I use approach A or B? Both meet the AC.\n\n## Next\n' \
   > "$tmp/child/07180102-07190000-inflight-append-alpha/HANDOFF.md"
+# A parked OPERATOR-ONLY note while the worker keeps working is NOT a stall: it must not demand
+# attention every tick (a permanently-red tick is the same false alarm as OBS-2, one layer up).
+rm -f "$BOARD_DIR/health/alpha.hash"
+printf 'still working, step 1\n' > "$STUB_PANE"
+STUB_ALIVE=1 bash "$S/dispatch-health.sh" >/dev/null 2>&1
+printf 'still working, step 2 — progress\n' > "$STUB_PANE"
 out=$(STUB_ALIVE=1 bash "$S/dispatch-health.sh" 2>&1); rc=$?
-chk "a real parked decision needs attention" 1 $rc
-echo "$out" | grep -qi "parked" && ok "reports PARKED" || bad "did not report PARKED"
+chk "parked note + still progressing does NOT demand attention" 0 $rc
+echo "$out" | grep -qi "parked" && ok "still surfaces the parked note" || bad "parked note not mentioned"
+# ...but parked AND idle (no progress) is a genuine stall.
+printf 'stuck here\n' > "$STUB_PANE"
+STUB_ALIVE=1 IDLE_MIN=0 bash "$S/dispatch-health.sh" >/dev/null 2>&1
+touch -d '-2 hours' "$BOARD_DIR/health/alpha.hash" 2>/dev/null
+out=$(STUB_ALIVE=1 IDLE_MIN=0 bash "$S/dispatch-health.sh" 2>&1); rc=$?
+chk "parked AND idle needs attention" 1 $rc
+echo "$out" | grep -qi "PARKED" && ok "reports PARKED when genuinely stalled" || bad "did not report PARKED"
 rm -f "$tmp/child/07180102-07190000-inflight-append-alpha/HANDOFF.md"
 
 # json mode is machine-readable
