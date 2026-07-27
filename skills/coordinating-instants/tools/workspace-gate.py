@@ -101,17 +101,20 @@ def mark_harvested(instant, res):
     """
     board = os.environ.get("BOARD_DIR") or os.path.join(os.path.expanduser("~"), ".claude-dispatch-board")
     name = os.path.basename(os.path.abspath(instant.rstrip("/")))
-    m = re.match(r"^(\d{8}-\d{8})-", name)
+    # <base>-<curr> is NOT unique — two instants dispatched in the same minute share it. The stable
+    # identity is the whole name with only the <state> token varying.
+    m = re.match(r"^(\d{8}-\d{8})-(?:inflight|complete|abort)-(.+)$", name)
     if not m:
         return None
-    pref = m.group(1)
+    pref, rest = m.group(1), m.group(2)
     for f in sorted(glob.glob(os.path.join(board, "records", "*.json"))):
         try:
             d = json.load(open(f, encoding="utf-8"))
         except Exception:
             continue
         child = os.path.basename(str(d.get("child_instant", "")).rstrip("/"))
-        if not child.startswith(pref + "-"):
+        cm = re.match(r"^(\d{8}-\d{8})-(?:inflight|complete|abort)-(.+)$", child)
+        if not cm or cm.group(1) != pref or cm.group(2) != rest:
             continue
         d["gate_verdict"] = res.get("verdict")
         d["gate_round"] = res.get("round")
