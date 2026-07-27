@@ -60,7 +60,20 @@ push to any shared branch. The coordinator restacks at the compaction.
 - [ ] Small/localized/clear → `superpowers:test-driven-development` (RED = the failing test → GREEN).
       Large/multi-file/ambiguous → `superpowers:brainstorming` → `writing-plans` → `subagent-driven-development`.
 - [ ] Local validation GREEN proven via **surefire** (target passes; no regression in the touched suites).
-- [ ] The fix is **maintainable, extensible, reliable, long-term — NOT an adhoc bandaid.**
+- [ ] The fix is **maintainable, extensible, reliable, long-term — NOT an adhoc bandaid.** *(Amended
+      2026-07-27 after R5's RV-20 correctly showed the original wording was an opinion criterion that could be
+      neither passed nor failed on evidence. The intent stays; here is what a reviewer can actually check —
+      answer each in the report:)*
+      · **Layer:** is the change at the layer where the defect ORIGINATES, or is it a downstream patch that
+        leaves the cause in place? Name the layer and why.
+      · **Generality:** does it cover the whole family, or only the observed input? List the sibling cases it
+        also fixes — and for any it does not, say why the boundary is principled rather than incidental.
+      · **No per-shape special-casing:** count the branches you added that key on a specific literal, type or
+        query shape. More than zero needs a justification.
+      · **No new escape hatch:** you did not add a config flag, scoped-off test, or `try_`-style bypass that
+        makes the symptom disappear without fixing it.
+      · **Withdrawal is evidence of rigour, not failure:** if you proposed a fix and then withdrew it on
+        evidence, say so — that is a stronger signal of non-bandaid work than any adjective.
 - [ ] **NEGATIVE RESULTS ARE A VALID DELIVERABLE.** If the target does not close, say so EXPLICITLY with
       evidence and an RCA of why. Quietly redefining success is worse than a red run.
 
