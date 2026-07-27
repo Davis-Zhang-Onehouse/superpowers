@@ -18,26 +18,32 @@ demanded them — so they are mandatory clauses, not niceties. Walk this list fo
    each AC: *if the feature under test were absent entirely, could this still go green?* If yes, the AC is
    decoration — require a positive artifact that the intended engine/path ran (a plan probe, a config
    forced off its default, a named row in the result set), not the absence of a failure.
-4. **Pipeline order + evidence location.** The non-negotiable sequence (e.g. local repro → RCA → fix → CI)
+4. **If the milestone adds or changes an error/raise path, its ACs must name the EMPTY case.** A guard
+   that fires when there is nothing to guard is where over-raising hides, and the author is the last
+   person to see it. Seen twice in one effort, both caught by review rather than by the implementer: an
+   aggregate that raised at count==0, and an eager membership path that raised on zero input rows. Require
+   the empty / zero-row / all-null inputs as explicit ACs, and require the happy path to be pinned as
+   still taking the accelerated route — proving the error is raised is not proving the fast path survived.
+5. **Pipeline order + evidence location.** The non-negotiable sequence (e.g. local repro → RCA → fix → CI)
    and that all artifacts land under the instant's `evidence/`, never `/tmp`.
-5. **The pinned baseline + analysis tool.** The exact baseline artifacts every worker diffs against, and the
+6. **The pinned baseline + analysis tool.** The exact baseline artifacts every worker diffs against, and the
    exact tool/variant to use — this is what makes deltas comparable ACROSS workers. Pin the lineage base too
    (the two-diff rule).
-6. **Propose-only.** The worker delivers a *proposed* registry delta; it must never edit the canonical
+7. **Propose-only.** The worker delivers a *proposed* registry delta; it must never edit the canonical
    registry. (Check the rendered charter for a profile AC that contradicts this.)
-7. **The gate.** Before renaming its folder it MUST run `superpowers:review-workspace` (all stages) on its
+8. **The gate.** Before renaming its folder it MUST run `superpowers:review-workspace` (all stages) on its
    own instant and PASS: READY, or READY-WITH-FIXES with no open Critical/Important, every AC verified on
    fresh evidence, recorded in `REVIEW.md`. No passing round = not complete.
-8. **Report-back path + rename.** "Write `<your-instant>/dispatch/<MR>-REPORT.md`: AC results with evidence
+9. **Report-back path + rename.** "Write `<your-instant>/dispatch/<MR>-REPORT.md`: AC results with evidence
    paths, branch tips, the proposed registry delta, the REVIEW verdict, and any operator forks. Then
    transition your folder `-inflight-` → `-complete-`." **These two are how you detect completion** — omit
    them and you are reduced to guessing.
-9. **Autonomy horizon + parking rule.** How long the operator is away; park ONLY a genuine operator-only
+10. **Autonomy horizon + parking rule.** How long the operator is away; park ONLY a genuine operator-only
    fork, and keep working every other unblocked step meanwhile. Tell it you will answer the forks that are
    yours to call.
-10. **Resource + build isolation.** Private per-workspace build cache/local repo; which reference checkouts
+11. **Resource + build isolation.** Private per-workspace build cache/local repo; which reference checkouts
     are shared READ-ONLY (write ⇒ worktree); anything else it must not touch.
-11. **Budget ceiling.** Expensive-run allowance (e.g. "ONE CI run") — and that a failed or stale run does not
+12. **Budget ceiling.** Expensive-run allowance (e.g. "ONE CI run") — and that a failed or stale run does not
     count as evidence: it re-spends and reports the overrun rather than lowering the bar.
 
 ## After rendering, before launching
