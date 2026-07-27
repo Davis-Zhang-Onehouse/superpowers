@@ -22,13 +22,17 @@ import os
 import re
 import sys
 
-ROUND_RE = re.compile(r"^##\s+Round\s+R(\d+)\b(.*)$", re.M)
-VERDICT_RE = re.compile(r"^##\s*Round summary.*?overall verdict:\s*(READY-WITH-FIXES|NOT-READY|READY)\b",
-                        re.M | re.I)
+# "## Round R2 summary — overall verdict: …" is a SUMMARY, not the start of round R2. Without the
+# negative lookahead the summary line is consumed as a round header and the round it opens contains
+# no summary — so the gate reports "no verdict line" for a file that plainly has one.
+ROUND_RE = re.compile(r"^##\s+Round\s+R(\d+)(?!\s+summary)\b(.*)$", re.M | re.I)
+# Accept both the single-round "## Round summary" and the per-round "## Round R2 summary" headings.
+VERDICT_RE = re.compile(r"^##\s*Round(?:\s+R\d+)?\s+summary.*?overall verdict:\s*"
+                        r"(READY-WITH-FIXES|NOT-READY|READY)\b", re.M | re.I)
 # Tolerate both the template's "- Open findings: Critical n · Important n" and the equally common
 # "- Open Critical: n · Open Important: n". Reviewers write markdown, not a grammar.
 OPEN_RE = re.compile(r"^-\s*.*?Open.*?Critical[:\s]+(\d+).*?Important[:\s]+(\d+)", re.M | re.I)
-SUMMARY_LINE_RE = re.compile(r"^##\s*Round summary.*$", re.M | re.I)
+SUMMARY_LINE_RE = re.compile(r"^##\s*Round(?:\s+R\d+)?\s+summary.*$", re.M | re.I)
 
 
 def strip_emphasis(text):

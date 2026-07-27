@@ -46,6 +46,13 @@ Skipped (inherited from base instant, reviewed upstream): <PR list or "none">
 - Location: <file:line in PR #N>
 - Finding / Why it matters / Action taken (<date>) / Verified-by: <…>
 
+<!-- HEADING SHAPE — the gate parses these, so keep them literal:
+     single round      : "## Round summary — overall verdict: <VERDICT>"
+     multiple rounds   : "## Round R<n> summary — overall verdict: <VERDICT>"   (one per round)
+     The verdict token must be one of READY | READY-WITH-FIXES | NOT-READY. Bold is fine.
+     The counts line must name Critical and Important with numbers; either
+     "- Open findings: Critical <n> · Important <n> · Minor <n>" or
+     "- Open Critical: <n> · Open Important: <n> · Open Minor: <n>" parses. -->
 ## Round summary — overall verdict: READY | READY-WITH-FIXES | NOT-READY
 - Stage verdicts: format=<…> · alignment=<…> · code=<…>
 - Open findings: Critical <n> · Important <n> · Minor <n>
