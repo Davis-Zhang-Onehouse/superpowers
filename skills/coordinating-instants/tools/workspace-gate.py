@@ -99,9 +99,21 @@ def decide(path, require_scope=None, harvest=False):
             rc = 1
             r["reasons"].append(f"READY-WITH-FIXES with open findings: Critical {crit} · Important {imp} "
                                 "(bar is zero of each)")
-    if require_scope and r["scope"] != require_scope.lower():
-        rc = max(rc, 1)
-        r["reasons"].append(f"latest round scope is '{r['scope']}', required '{require_scope}'")
+    # Stages accumulate ACROSS rounds: R1=all followed by a narrow R2 re-review is the normal shape,
+    # and judging only the latest round would reject it. The newest round still governs the VERDICT.
+    scopes = set()
+    for m in rounds:
+        sm2 = SCOPE_RE.search(m.group(2))
+        if sm2:
+            scopes.add(sm2.group(1).lower())
+    r["scopes_across_rounds"] = sorted(scopes)
+    if require_scope:
+        want = require_scope.lower()
+        satisfied = (want in scopes) or (want == "all" and {"format", "alignment", "code"} <= scopes)
+        if not satisfied:
+            rc = max(rc, 1)
+            r["reasons"].append(f"scopes across rounds are {sorted(scopes) or ['unknown']}, "
+                                f"which do not cover '{require_scope}'")
 
     if harvest:
         name = r["instant"]
