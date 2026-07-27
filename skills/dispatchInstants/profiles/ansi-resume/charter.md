@@ -2,7 +2,7 @@
 Instant: {{CHILD_NAME}}
 Updated: {{TODAY}} | Status: DURABLE
 Dispatched by parallelDispatch from base instant: {{BASE_NAME}}
-Kind: **WORKER** (one milestone of the RESUMED Gluten+Velox ANSI effort). The coordinator does no dev; you do.
+Kind: **WORKER** — one milestone of the RESUMED Gluten+Velox ANSI effort. You do the dev.
 
 ## Goal (e2e)
 {{TITLE}}
