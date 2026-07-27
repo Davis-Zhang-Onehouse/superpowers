@@ -134,3 +134,9 @@ that is a *provably-exhaustive* base for downstream ANSI-offload fix work.
 ## Environment
 - Box: aarch64 EC2. Spark 4.x → java-17 + scala-2.13. CI runner `arc-16-cores-ondemand-staging`.
 - Golden: {{GOLDEN}}. JDK 17 = `/usr/lib/jvm/java-17-openjdk-amd64`.
+
+### Completion gate (mandatory)
+Before renaming this instant, run `superpowers:review-workspace` (ALL stages) on it and PASS: a recorded
+REVIEW.md round of READY, or READY-WITH-FIXES with no open Critical/Important. No passing round = not
+complete. Then write your report to the base instant's `dispatch/` and transition your folder
+`-inflight-` → `-complete-` — those two are how the coordinator detects you.
