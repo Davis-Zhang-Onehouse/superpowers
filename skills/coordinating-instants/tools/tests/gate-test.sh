@@ -248,6 +248,40 @@ out=$(python3 "$T/regression-check.py" --baseline "$tmp/base.tsv" --lineage-base
 chk "--allow-new-red downgrades it to a warning" 0 $rc
 echo "$out" | grep -q "brandNewSuite.t1" && ok "still names them under --allow-new-red" || bad "went silent"
 
+echo "== surefire-to-tsv (the adapter nobody should hand-roll) =="
+sd="$tmp/surefire"; mkdir -p "$sd"
+# the exact trap: hostname="..." precedes name="...", and 'hostname="' ENDS WITH 'name="'
+cat > "$sd/TEST-org.example.MySuite.xml" <<'EOX'
+<?xml version="1.0" encoding="UTF-8"?>
+<testsuite errors="0" failures="1" hostname="8c3f2b1a9d4e" name="org.example.MySuite" tests="3">
+  <testcase classname="org.example.MySuite" name="passes"/>
+  <testcase classname="org.example.MySuite" name="fails"><failure message="boom">trace</failure></testcase>
+  <testcase classname="org.example.MySuite" name="skips"><skipped/></testcase>
+</testsuite>
+EOX
+out=$(python3 "$T/surefire-to-tsv.py" "$sd" 2>/dev/null)
+echo "$out" | grep -q "org.example.MySuite::passes	PASS" && ok "suite name read from the name attribute" \
+  || bad "wrong suite name (the hostname trap): $(echo "$out" | head -1)"
+echo "$out" | grep -q "8c3f2b1a9d4e" && bad "captured the CI hostname as the suite name" || ok "hostname not captured"
+echo "$out" | grep -q "MySuite::fails	FAIL" && ok "a <failure> becomes FAIL" || bad "failure not detected"
+echo "$out" | grep -q "skips" && bad "a skipped test was emitted as a result" || ok "skipped omitted (not a result)"
+python3 "$T/surefire-to-tsv.py" "$sd" --include-skipped 2>/dev/null | grep -q "skips	SKIP" \
+  && ok "--include-skipped emits SKIP" || bad "--include-skipped did nothing"
+python3 "$T/surefire-to-tsv.py" "$sd" --dim bv40 2>/dev/null | grep -q "bv40::org.example.MySuite::passes" \
+  && ok "--dim qualifies names so dimensions are never collapsed" || bad "--dim did not qualify"
+python3 "$T/surefire-to-tsv.py" "$tmp/nothing-here" >/dev/null 2>&1
+chk "an empty extraction is an error, not an empty diff" 2 $?
+
+echo "== regress input sanity =="
+# A broken extractor makes the two files share NO names. That must not read as "coverage: complete".
+mk lhs.tsv "hostA::t1	PASS" "hostA::t2	PASS"
+mk rhs.tsv "hostB::t1	PASS" "hostB::t2	FAIL"
+out=$(python3 "$T/regression-check.py" --baseline "$tmp/lhs.tsv" --current "$tmp/rhs.tsv" 2>&1); rc=$?
+echo "$out" | grep -qi "coverage: complete" && bad "claimed complete coverage with ZERO shared names" \
+  || ok "does not claim complete coverage when nothing matches"
+echo "$out" | grep -qiE "overlap|shared|extraction" && ok "reports the name overlap" || bad "overlap not reported"
+chk "zero overlap between baseline and current fails" 1 $rc
+
 echo "== coord-check =="
 inst="$tmp/instants"; mkdir -p "$inst/07180102-07190000-complete-append-mrA" "$inst/07180102-07190001-inflight-append-mrB"
 mkh(){ printf '# H\n\n## Live milestone registry\n| MR | Task | Disposition | Depends-on | Instant | Slot | Status | Proof |\n|---|---|---|---|---|---|---|---|\n%s\n' "$1" > "$tmp/HANDOFF.md"; }
