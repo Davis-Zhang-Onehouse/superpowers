@@ -46,12 +46,17 @@ SEED="$(cat "$SEED_FILE")"
 # %q keeps the whole seed ONE argument no matter what metacharacters it holds.
 cmd="claude --permission-mode auto --remote-control $(printf '%q' "$sess") $(printf '%q' "$SEED")"
 "$TMUX_BIN" send-keys -t "$sess" "$cmd" Enter >/dev/null 2>&1
-sleep "$WAIT"
 
-if "$TMUX_BIN" capture-pane -p -t "$sess" 2>/dev/null | tail -40 | grep -q "claude\|remote-control"; then
-  echo "launched $id in $sess (ws=$ws)"
-  echo "  attach: tmux attach -t $sess"
-  exit 0
-fi
+# Claude clears and redraws the screen while booting, so ONE early sample legitimately matches
+# nothing (this produced a false "could not verify" on a session that had started fine). Poll.
+UI_RE='remote-control is active|auto mode|shift\+tab|esc to interrupt|Skill\(|claude'
+for _ in $(seq 1 "${LAUNCH_VERIFY_TRIES:-10}"); do
+  sleep "$WAIT"
+  if "$TMUX_BIN" capture-pane -p -t "$sess" 2>/dev/null | tail -60 | grep -qE "$UI_RE"; then
+    echo "launched $id in $sess (ws=$ws)"
+    echo "  attach: tmux attach -t $sess"
+    exit 0
+  fi
+done
 echo "launched but COULD NOT VERIFY the pane started claude — attach and check: tmux attach -t $sess" >&2
 exit 1
