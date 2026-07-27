@@ -332,6 +332,15 @@ if [ "${ISOLATE_BUILD:-1}" = "1" ]; then
   done <<< "$(find "$WS" -maxdepth 2 -name pom.xml 2>/dev/null)"
 fi
 
+# Capture what the golden was at, so base-check can tell when the prebuilt native artifacts in this
+# slot no longer correspond to the (repositioned) source.
+GOLDEN_BASE_SHAS=""
+for gr in "$GOLDEN"/*/; do
+  [ -d "$gr/.git" ] || continue
+  gn="$(basename "$gr")"; gs="$(git -C "$gr" rev-parse HEAD 2>/dev/null)"
+  [ -n "$gs" ] && GOLDEN_BASE_SHAS="${GOLDEN_BASE_SHAS:+$GOLDEN_BASE_SHAS,}$gn=$gs"
+done
+
 BRIEF_ABS="$([ "$BRIEF" = "-" ] && echo "(stdin)" || realpath -m -- "$BRIEF")"
 # JSON with evidence array
 {
@@ -346,6 +355,7 @@ BRIEF_ABS="$([ "$BRIEF" = "-" ] && echo "(stdin)" || realpath -m -- "$BRIEF")"
   printf '  "base_instant": "%s",\n' "$BASE"
   printf '  "brief": "%s",\n' "$BRIEF_ABS"
   printf '  "lineage_base": "%s",\n' "$LINEAGE_BASE"
+  printf '  "golden_base": "%s",\n' "$GOLDEN_BASE_SHAS"
   printf '  "seed_file": "%s",\n' "$DISPATCH_META/seed.txt"
   printf '  "profile": "%s",\n' "$PROFILE_DIR"
   printf '  "profile_archive": "%s",\n' "$DISPATCH_META/profile"

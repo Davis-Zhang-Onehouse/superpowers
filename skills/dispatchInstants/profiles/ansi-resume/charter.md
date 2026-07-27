@@ -30,6 +30,20 @@ push to any shared branch. The coordinator restacks at the compaction.
 {{EVIDENCE}}
 ## Acceptance criteria — the NON-NEGOTIABLE pipeline (do the phases IN ORDER)
 
+### AC-0 POSITION YOUR WORKSPACE ON THE LINEAGE BASE — first command, before anything
+- [ ] **Your slot is leased at the GOLDEN prebuild (gluten `4020d0715` / velox `8d62aac98`), NOT at your
+      lineage base.** Nothing moves it forward for you, and forgetting is INVISIBLE: the build succeeds, the
+      tests pass, and your whole milestone silently stacks on the pre-fix baseline. Two workers in the
+      previous wave hit exactly this.
+- [ ] Prove it mechanically: **`pdispatch basecheck <your-todo-id>`** (or
+      `pdispatch basecheck --ws <your-ws> --expect "gluten-internal=<sha>,velox-internal=<sha>"`).
+- [ ] Then either **reposition** (`git fetch --all && git checkout --detach <tip>`, then cut your branch) —
+      noting that moving off the golden commit can invalidate the prebuilt native artifacts, so plan the
+      rebuild — **or**, if you are an ANALYSIS-ONLY milestone, deliberately stay on golden and read
+      everything via `git show <tip>:<path>` / `git diff <base>..<tip>`. **If you choose the second, say so
+      explicitly in your report and in ISSUES** — otherwise a later `basecheck` reads as a real mismatch.
+- [ ] Re-run `basecheck` after repositioning. A workspace on the wrong base invalidates every AC below it.
+
 ### AC-1 LOCAL REPRO first (before RCA, before any fix)
 - [ ] Reproduce the target's failing behavior **locally** in this workspace (the exact test/suite CI runs),
       on the lineage base. Capture raw failing output into `evidence/` (NEVER /tmp) + the exact command into
@@ -64,6 +78,11 @@ push to any shared branch. The coordinator restacks at the compaction.
       it is a REGRESSION you must fix. Zero unresolved flips to finish.
 - [ ] Caveat FC-15: `precise_diff` does NOT surface newly-ADDED red tests. Assert any suite you add or
       modify GREEN directly from its surefire XML, not only via the diff.
+- [ ] **ABSENCE OF A RESULT IS NOT A PASS.** A suite that never ran produces no red, and a diff of red-vs-green
+      cannot see it — that is how a whole class of missing coverage stayed invisible (FC-21's hazard class; a
+      census found 548 `enableSuite` entries against 193 suites with a surefire XML). For every gap/row you
+      claim closed, assert its suite is **PRESENT in the results AND green** — cite the XML path, not the
+      absence of a failure. If a suite you depend on has no XML, say so; that is a finding, not a pass.
 
 ### AC-5 Catalog — PROPOSE ONLY (single-writer rule)
 - [ ] The coordinator is the ONLY writer of the canonical `catalog/CATALOG.md` + `catalog/sanctioned-flips.md`.
