@@ -53,6 +53,16 @@ UI_RE='remote-control is active|auto mode|shift\+tab|esc to interrupt|Skill\(|cl
 for _ in $(seq 1 "${LAUNCH_VERIFY_TRIES:-10}"); do
   sleep "$WAIT"
   if "$TMUX_BIN" capture-pane -p -t "$sess" 2>/dev/null | tail -60 | grep -qE "$UI_RE"; then
+    python3 - "$rec" <<'PYL'
+import json, sys, datetime
+p = sys.argv[1]
+try:
+    d = json.load(open(p))
+    d["launched_at"] = datetime.datetime.now(datetime.timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+    json.dump(d, open(p, "w"), indent=2, ensure_ascii=False)
+except Exception:
+    pass
+PYL
     echo "launched $id in $sess (ws=$ws)"
     echo "  attach: tmux attach -t $sess"
     exit 0

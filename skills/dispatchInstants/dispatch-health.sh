@@ -3,7 +3,8 @@
 # dispatch-health.sh — one correct implementation of "is each worker actually OK?"
 #
 # Replaces per-coordinator hand-rolled liveness checks. Classifies every dispatched worker:
-#   DEAD       session gone (robust check: pgrep on the remote-control name, then tmux)
+#   PENDING-LAUNCH  dispatched with --no-launch and not launched yet (the mandated review window)
+#   DEAD       LAUNCHED and the session is gone (robust check: pgrep on the remote-control name, then tmux)
 #   BLOCKED    alive but sitting on a permission modal — invisible to a plain liveness probe
 #   IDLE       pane unchanged for $IDLE_MIN minutes (alive, doing nothing)
 #   PARKED     parked decision AND not progressing (a parked note while still working is just a note)
@@ -77,6 +78,7 @@ for f in "$RECORDS"/*.json; do
   cname="$(resolve_instant "$child")"
   rbase="$(field "$f" base_instant)"
   harvested="$(field "$f" harvested_at)"
+  launched="$(field "$f" launched_at)"
   # The board is machine-global: scope to one effort's records when asked.
   if [ -n "$ONLY_BASE" ] && [ "$rbase" != "$ONLY_BASE" ] \
      && [ "$(realpath -m -- "$rbase" 2>/dev/null)" != "$(realpath -m -- "$ONLY_BASE" 2>/dev/null)" ]; then
@@ -84,7 +86,17 @@ for f in "$RECORDS"/*.json; do
   fi
 
   state="RUNNING"; note=""
-  if ! alive "$sess"; then
+  if ! alive "$sess" && [ -z "$launched" ]; then
+    # `--no-launch` writes the record immediately; the session only exists after `dispatch-launch`.
+    # The charter review the skill MANDATES therefore opens a window where a healthy dispatch looks
+    # DEAD — and reaping that phantom destroys a real worker. Only call it dead once it was launched.
+    age=$(( ( $(date +%s) - $(stat -c %Y "$f" 2>/dev/null || echo 0) ) / 60 ))
+    state="PENDING-LAUNCH"
+    note="dispatched but not launched yet (${age}m) — review the charter, then: pdispatch launch $id"
+    if [ "$age" -ge "${PENDING_MAX_MIN:-60}" ]; then
+      need_attention=1; note="$note  [pending ${age}m — forgotten?]"
+    fi
+  elif ! alive "$sess"; then
     state="DEAD"; note="session gone — reap its slot (yours only) and decide: succeed it or re-dispatch"
   else
     pane="$("$TMUX_BIN" capture-pane -p -t "$sess" 2>/dev/null | tail -60)"
