@@ -89,10 +89,18 @@ if [ -n "$GOLDEN_BASE" ]; then
     [ "${have#"$gsha"}" != "$have" ] && continue           # still at the golden: artifacts match
     so="$(find "$d" -name '*.so' -print -quit 2>/dev/null)"
     [ -n "$so" ] || continue
+    # If the artifact is NEWER than the last checkout (.git/HEAD is rewritten on checkout), it was
+    # built after repositioning — the remedy this warning asks for. Warning anyway would make it an
+    # alarm that can never be cleared, which is the failure it exists to prevent. Heuristic, stated.
+    if [ -n "$so" ] && [ "$so" -nt "$d/.git/HEAD" ]; then
+      echo "ok: $repo native artifacts rebuilt after the last checkout ($(basename "$so"))"
+      continue
+    fi
     echo "WARNING: $repo has prebuilt native artifacts from the GOLDEN commit ${gsha:0:12},"
     echo "  but the source is now at ${have:0:12} (e.g. $(basename "$so"))."
     echo "  A test run here exercises NEW source against OLD native code — rebuild the native side,"
     echo "  or confirm this milestone touches no native code before trusting a green result."
+    echo "  (Judged by mtime vs the last checkout; a rebuild clears this.)"
   done
 fi
 
