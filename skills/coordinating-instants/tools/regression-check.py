@@ -115,11 +115,24 @@ def main(argv=None):
         "counts": {"baseline": len(base), "current": len(cur), "lineage_base": len(lin or {}), "closed": len(closed)},
         "lineage_diff_run": lin is not None,
     }
+    # A broken adapter makes the files share NO names (the hostname-as-suite-name bug did exactly
+    # that), and every downstream number is then confidently wrong. Overlap is the cheap invariant
+    # that catches it regardless of the specific defect.
+    ov_base = len(set(cur) & set(base))
+    ov_lin = len(set(cur) & set(lin)) if lin is not None else None
+    res["overlap"] = {"vs_baseline": ov_base, "vs_lineage_base": ov_lin, "current": len(cur)}
+    mismatch = bool(cur) and bool(base) and ov_base == 0
+    if lin:
+        mismatch = mismatch or (ov_lin == 0)
+    res["input_mismatch_suspected"] = mismatch
+
     res["not_comparable_vs_lineage_base"] = uncomparable_lineage
     res["not_comparable_vs_baseline"] = uncomparable_baseline
     res["red_no_baseline"] = new_red
     res["new_green"] = new_green
     rc = 1 if (regressions or rebreaks or closed_not_green) else 0
+    if mismatch:
+        rc = 1
     if new_red and not a.allow_new_red:
         rc = 1
     if a.strict_coverage and (uncomparable_lineage or uncomparable_baseline):
@@ -144,6 +157,17 @@ def main(argv=None):
             print(f"  REGRESSION (green->red vs baseline): {n}")
         for n in rebreaks:
             print(f"  RE-BREAK (green in lineage base, red now — invisible vs baseline): {n}")
+        pct = (100 * ov_base // len(cur)) if cur else 0
+        print(f"  overlap: {ov_base}/{len(cur)} current names found in the baseline ({pct}%)"
+              + (f", {ov_lin} in the lineage base" if ov_lin is not None else ""))
+        if mismatch:
+            print("  INPUT MISMATCH SUSPECTED: the files share NO test names, so every number above is")
+            print("    meaningless. Almost always a broken adapter — regenerate both sides with")
+            print("    surefire-to-tsv.py and cross-check the FAIL count against a known-good figure")
+            print("    before believing any diff.")
+        elif pct < 50:
+            print(f"  WARNING: only {pct}% of current names appear in the baseline — verify the extraction")
+            print("    and that you are comparing the same CI dimension (never collapse dimensions).")
         gaps = len(uncomparable_lineage) + len(uncomparable_baseline)
         if gaps:
             print(f"  coverage: NOT COMPARABLE for {gaps} test(s) — a baseline never covered them, so "
@@ -152,7 +176,7 @@ def main(argv=None):
                 which = "lineage base" if n in uncomparable_lineage else "baseline"
                 print(f"    not in {which}: {n}")
             print("  treat these as UNPROVEN, not unbroken (use --strict-coverage to fail on them).")
-        else:
+        elif not mismatch:
             print("  coverage: complete — every current test was comparable against each baseline.")
         for n in closed_not_green:
             tag = "absent from results" if n in missing else "red"

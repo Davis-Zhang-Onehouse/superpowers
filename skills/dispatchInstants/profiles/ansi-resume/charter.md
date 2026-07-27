@@ -83,10 +83,15 @@ push to any shared branch. The coordinator restacks at the compaction.
       Spark Resources"), so diff (b) is structurally impossible for that dim. Use run **29738878247** (run 2 of
       the final compaction) as the bv40 lineage-base proxy, and **state the substitution wherever you rely on
       it**. A silent substitution becomes a false claim later.
-- [ ] **A newly-ADDED suite that ships RED is invisible to `regress`** — it is absent from the M1 baseline, so
-      no diff can ever flag it (FC-15's trap, in reverse: `AnsiErrorTranslatorValidateSuite` fails 5/5 on bv40
-      and every diff calls the dim CLEAN). For any suite added or modified since the baseline, read its
-      surefire XML DIRECTLY and assert pass/fail by name. **A clean `regress` output is not evidence for it.**
+- [ ] **A test that FAILS while no baseline covered it is invisible to every diff** — `regress` now reports it
+      as **RED-NO-BASELINE** (fatal by default; `--allow-new-red` downgrades it only for residuals you have
+      documented as intentionally red, and they stay listed). Real case: `AnsiErrorTranslatorValidateSuite`
+      fails 5/5 on bv40 while every diff called the dim CLEAN.
+      **Do NOT assume RED-NO-BASELINE means you broke it.** No results file can distinguish *"added by this
+      stack"* from *"existed but was never measured"* — only the source history can, and it decides the owner.
+      Check whether the test existed on the lineage base before you accept or route the blame.
+      For any suite added or modified since the baseline, read its surefire XML DIRECTLY and assert pass/fail
+      by name. **A clean `regress` output is not evidence for such a suite.**
 - [ ] **ABSENCE OF A RESULT IS NOT A PASS.** A suite that never ran produces no red, and a diff of red-vs-green
       cannot see it — that is how a whole class of missing coverage stayed invisible (FC-21's hazard class; a
       census found 548 `enableSuite` entries against 193 suites with a surefire XML). For every gap/row you
