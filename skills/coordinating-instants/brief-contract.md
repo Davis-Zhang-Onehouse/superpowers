@@ -8,8 +8,16 @@ demanded them — so they are mandatory clauses, not niceties. Walk this list fo
    whose work/seams this milestone INHERITS. Say which is authoritative if they disagree.
 2. **Base + lineage.** The exact base instant/branches@sha this milestone builds on, and why (what end-state
    it inherits). One line, unambiguous.
-3. **ACs — including negative results.** What "done" means, testable. Explicitly: *if the target does NOT
-   close, say so explicitly with evidence* — a worker that quietly redefines success is worse than a red run.
+3. **ACs — including negative results, and what a green actually PROVES.** What "done" means, testable.
+   Explicitly: *if the target does NOT close, say so explicitly with evidence* — a worker that quietly
+   redefines success is worse than a red run.
+   **Every AC must name the path a green result proves was exercised, and how that is verified
+   independently of the pass.** A test can go green without touching the thing you are claiming: a shared
+   test trait can route the assertion to the reference implementation, a suite can be skipped and leave no
+   result, a run can flake and be carried over. In all three the pass is real and the claim is false. Ask of
+   each AC: *if the feature under test were absent entirely, could this still go green?* If yes, the AC is
+   decoration — require a positive artifact that the intended engine/path ran (a plan probe, a config
+   forced off its default, a named row in the result set), not the absence of a failure.
 4. **Pipeline order + evidence location.** The non-negotiable sequence (e.g. local repro → RCA → fix → CI)
    and that all artifacts land under the instant's `evidence/`, never `/tmp`.
 5. **The pinned baseline + analysis tool.** The exact baseline artifacts every worker diffs against, and the

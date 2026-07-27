@@ -193,6 +193,10 @@ verified; either re-run it at the tip or record it as an explicit open AC.
 - A flip can also be a **cross-worker artifact** — caused by a sibling in-flight worker's incomplete state
   and resolved only by the final restack. Don't charge it to the worker under review; track it to its owner
   and confirm it closes on the consolidated stack.
+- **A pass is not proof that the claimed path ran.** A green test can evaluate on the reference
+  implementation via a shared trait, a suite can be skipped and produce no result at all, a dimension can
+  flake and be carried over — each yields a real pass behind a false claim. Require a positive artifact that
+  the intended engine/path executed; treat a missing result as unproven, never as unbroken.
 - Every causal claim ties to a captured artifact under the instant's `evidence/`, never `/tmp`.
 
 ## Non-negotiable rules — STOP if you catch yourself here
