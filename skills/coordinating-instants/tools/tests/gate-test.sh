@@ -190,6 +190,18 @@ chk "detects an entry inserted mid-file" 1 $rc
 echo "$out" | grep -q "RI-3" && ok "names the actually-new issue" || bad "named the wrong issue"
 echo "$out" | grep -q "RI-2" && bad "re-reported an old issue" || ok "does not re-report old issues"
 
+# A register that RENUMBERS its issues (I-1..I-7 -> OI-1..OI-7, which happened) must not re-report
+# them all: the titles are unchanged, only the prefix moved.
+printf '# ISSUES\n\n## I-1 — alpha thing\n\n## I-2 — beta thing\n' > "$ni"; rm -f "$st"
+python3 "$T/new-issues.py" "$ni" --state "$st" >/dev/null 2>&1
+printf '# ISSUES\n\n## OI-1 — alpha thing\n\n## OI-2 — beta thing\n' > "$ni"
+out=$(python3 "$T/new-issues.py" "$ni" --state "$st" 2>&1); rc=$?
+chk "renumbered issues with unchanged titles are not re-reported" 0 $rc
+printf '# ISSUES\n\n## OI-1 — alpha thing\n\n## OI-2 — beta thing\n\n## OI-3 — gamma thing\n' > "$ni"
+out=$(python3 "$T/new-issues.py" "$ni" --state "$st" 2>&1); rc=$?
+chk "a genuinely new issue after a renumber still fires" 1 $rc
+echo "$out" | grep -q "gamma" && ok "names only the new one" || bad "wrong issue named"
+
 # A restarted watcher must not re-alarm everything it already handled. Priming records current
 # reality as "already seen" WITHOUT reporting it — the honest alternative to silently swallowing.
 printf '# ISSUES\n\n## RI-1 — a\n\n## RI-2 — b\n' > "$ni"; rm -f "$st"
