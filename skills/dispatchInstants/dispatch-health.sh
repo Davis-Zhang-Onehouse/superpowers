@@ -197,7 +197,8 @@ else
       IFS='|' read -r id st slot sess cname note <<<"$r"
       printf '%-34s %-9s %-5s %s\n' "$id" "$st" "$slot" "$note"
     done
-    [ "$need_attention" = 1 ] && echo "=> items above need your attention this tick."
+    # commentary to stderr: stdout must stay parseable as pure data rows
+    [ "$need_attention" = 1 ] && echo "=> items above need your attention this tick." >&2
   fi
 fi
 exit "$need_attention"

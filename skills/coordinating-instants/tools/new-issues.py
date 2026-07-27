@@ -31,6 +31,10 @@ def main(argv=None):
     ap = argparse.ArgumentParser(description="Report new issue IDs since the last check.")
     ap.add_argument("issues", help="path to an ISSUES.md")
     ap.add_argument("--state", required=True, help="file storing the IDs already seen")
+    ap.add_argument("--prime", action="store_true",
+                    help="record what exists NOW as already-seen and report nothing. Run this when a "
+                         "watcher starts: otherwise its first tick re-alarms the entire history, and "
+                         "'first time I have seen this' gets conflated with 'this just happened'.")
     ap.add_argument("--json", action="store_true")
     a = ap.parse_args(argv)
     if not os.path.isfile(a.issues):
@@ -41,6 +45,12 @@ def main(argv=None):
     seen = set()
     if os.path.isfile(a.state):
         seen = {l.strip() for l in open(a.state, encoding="utf-8") if l.strip()}
+
+    if a.prime:
+        with open(a.state, "w", encoding="utf-8") as fh:
+            fh.write("\n".join(sorted(found)) + "\n")
+        print(f"primed: {len(found)} existing issue(s) recorded as already-seen (not re-alarmed)")
+        return 0
 
     new = {k: v for k, v in found.items() if k not in seen}
     with open(a.state, "w", encoding="utf-8") as fh:
