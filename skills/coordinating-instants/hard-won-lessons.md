@@ -1,0 +1,42 @@
+# Hard-won lessons — traps and alarm hygiene
+
+Everything here was paid for by a real failure in a real effort. The SKILL body carries the loop; this
+file carries the field notes it would otherwise bury. Read it once before your first dispatch, and again
+whenever a signal surprises you.
+
+## Gotchas to watch (from real coordination runs)
+
+| Trap | Guard |
+|---|---|
+| The slot pool + board are **global**, shared with other efforts | `pdispatch pool reap --base <your-instant>` (bare `reap` now refuses foreign leases; `--all` overrides). Claim with `--slot <ws>` you verified via `pdispatch pool status`. Remove your own coordinator slot from the pool at charter time. |
+| Liveness / blocked / idle detection | `pdispatch health` — one correct implementation. Never hand-roll it. On a BLOCKED worker see Autonomy posture. |
+| A message to a busy worker silently not submitting | `pdispatch send <id> <msg>` — verifies, retries, fails loudly. |
+| Two workers pushing ONE shared branch collide | `pdispatch guard <repo> <shared-branch>` makes it impossible. Each worker owns its branch + draft PR; linear stacking happens at the compaction restack. |
+| Parallel builds poisoning a shared cache; source-vs-binary skew | `dispatch-todo` isolates each workspace's build cache automatically. The final restack must still carry all pieces together. |
+| Shared reference checkouts written to | `pdispatch ref protect <ref>` once, then `pdispatch ref worktree <ref> <dest>` for writes. |
+| Usage/budget limits are account-wide across all your sessions | Stop new dispatch; send each inflight worker a **convergence nudge** (stop refinement cycles, finalize on current green evidence); make the final compaction lean by reusing the last one; economize polling; ensure every completed instant is independently pushed + green so a post-reset resumer can finish. **A budget plan never lowers the evidence bar** — a failed or stale run is not evidence; re-spend and record the overrun, and record any carried-over evidence as an explicit ASSUMPTION with a flagged optional re-run. |
+
+## Alarm hygiene — you will build watchers, and they will lie to you
+
+Empirically the largest defect family in this system is not the work failing; it is the machinery that
+reports on the work being wrong. Across one effort, twenty-plus defects were false passes, false failures,
+or alarms that could never turn off — in both the coordinator's watcher and the tools it depends on.
+
+- **Prime state from reality at startup.** A seen-set built only from events observed while running
+  conflates "first time I have seen this" with "this just happened", so every restart replays history.
+  (`pdispatch issues --prime` does this; it reports how many it recorded, because a silent reset is worse.)
+- **Anchor parsing to structure, not text.** Detect a section by its content, not its heading; do not parse
+  a human-readable summary line as data (a tool's stdout is data, its commentary belongs on stderr).
+- **Never count a label as the thing.** Counting `RUNNING` rows is not counting live workers: when the
+  label transiently changes, the count goes to zero and the fleet looks empty. Count processes.
+- **Scope a heuristic to the population it was derived from.** A rule inferred from one wave of workers
+  applied to the next produces confident nonsense.
+- **An alarm that cannot be cleared is a defect, not caution.** If doing the thing the alarm asks for
+  leaves it still firing, it will be ignored — and so will the real one next to it.
+- **Absence is never success.** A missing test result, an uncovered dimension, a suite that produced no
+  output, a baseline that never covered the row: all mean UNPROVEN, never unbroken. State what you could
+  not check, positively and by name.
+
+Apply the same evidence discipline to alarm plumbing as to the work. When your watcher and a tool disagree,
+find out which is lying before acting on either — and when two independent authors improvise the same
+missing convention, the bug is the missing convention.
