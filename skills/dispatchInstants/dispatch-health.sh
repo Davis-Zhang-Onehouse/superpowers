@@ -6,6 +6,7 @@
 #   DEAD       session gone (robust check: pgrep on the remote-control name, then tmux)
 #   BLOCKED    alive but sitting on a permission modal — invisible to a plain liveness probe
 #   IDLE       pane unchanged for $IDLE_MIN minutes (alive, doing nothing)
+#   PARKED     a NON-EMPTY "## Parked decision" block in its HANDOFF (the empty template never fires)
 #   COMPLETE   its instant folder is renamed -complete- => awaiting YOUR gate + harvest
 #   RUNNING    working
 #
@@ -93,12 +94,24 @@ for f in "$RECORDS"/*.json; do
     fi
   fi
 
+  # A worker blocked on a decision is the most expensive silent stall. Detect the section's
+  # CONTENT, not its heading: every instant is born with an empty "## Parked decision" block.
+  hoff="$(dirname "$child")/$cname/HANDOFF.md"
+  if [ -f "$hoff" ]; then
+    parked="$(awk '/^## +Parked decision/{f=1;next} /^## /{f=0} f' "$hoff" 2>/dev/null \
+              | grep -vE '^\s*$|^<none>$|^-+$|^_+$' | head -3)"
+    if [ -n "$parked" ]; then
+      state="PARKED"
+      note="blocked on a decision: $(printf '%s' "$parked" | head -1 | cut -c1-80) — decide it if it is yours"
+    fi
+  fi
+
   # A renamed folder is the worker's completion signal — surface it regardless of session state.
   if [ -n "$cname" ] && [[ "$cname" == *-complete-* ]]; then
     state="COMPLETE"; note="folder renamed -complete- — UNHARVESTED: run the gate, then harvest"
   fi
 
-  case "$state" in DEAD|BLOCKED|IDLE|COMPLETE) need_attention=1;; esac
+  case "$state" in DEAD|BLOCKED|IDLE|COMPLETE|PARKED) need_attention=1;; esac
   rows+=("$id|$state|$slot|$sess|$cname|$note")
 done
 

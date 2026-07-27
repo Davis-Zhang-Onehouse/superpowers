@@ -80,6 +80,19 @@ echo "$out" | grep -qi "COMPLETE" && ok "detects completion after the folder was
   || bad "stale recorded path hid a completed worker"
 mv "$tmp/child/07180102-07190000-complete-append-alpha" "$tmp/child/07180102-07190000-inflight-append-alpha"
 
+# PARKED: a worker blocked on a decision must surface — but the EMPTY template block must not
+printf '# H\n\n## Parked decision (for the operator — empty unless I need you)\n<none>\n\n## Next\n' \
+  > "$tmp/child/07180102-07190000-inflight-append-alpha/HANDOFF.md"
+printf 'working\n' > "$STUB_PANE"
+STUB_ALIVE=1 bash "$S/dispatch-health.sh" >/dev/null 2>&1
+chk "empty parked-decision template does NOT fire" 0 $?
+printf '# H\n\n## Parked decision\nShould I use approach A or B? Both meet the AC.\n\n## Next\n' \
+  > "$tmp/child/07180102-07190000-inflight-append-alpha/HANDOFF.md"
+out=$(STUB_ALIVE=1 bash "$S/dispatch-health.sh" 2>&1); rc=$?
+chk "a real parked decision needs attention" 1 $rc
+echo "$out" | grep -qi "parked" && ok "reports PARKED" || bad "did not report PARKED"
+rm -f "$tmp/child/07180102-07190000-inflight-append-alpha/HANDOFF.md"
+
 # json mode is machine-readable
 out=$(STUB_ALIVE=1 bash "$S/dispatch-health.sh" --json 2>/dev/null)
 echo "$out" | python3 -c 'import json,sys; d=json.load(sys.stdin); assert isinstance(d,(list,dict))' 2>/dev/null \
