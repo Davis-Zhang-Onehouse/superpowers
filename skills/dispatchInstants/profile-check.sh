@@ -53,7 +53,19 @@ else
     || { say "MISSING rename: the worker is never told to transition its own folder to -complete-."; bad=1; }
 fi
 
-# 4) leftover template tokens mean the profile was edited carelessly.
+# 4) A static SEED must not restate a PER-MILESTONE fact. The seed ships with the profile; the charter
+# and brief are written per dispatch. A seed naming a commit sha goes stale and hands the worker two
+# different answers about what to build on — which is exactly what happened to lift-01.
+seedtxt="$(cat "$d/seed.txt" 2>/dev/null)"
+if printf '%s' "$seedtxt" | grep -qE '\b[0-9a-f]{9,40}\b' \
+   && ! printf '%s' "$seedtxt" | grep -qiE 'charter (is )?authoritative|named in your CHARTER|treat those as authoritative'; then
+  say "VIOLATION stale-seed: the seed hardcodes a commit sha. Per-milestone facts (lineage base, branch"
+  say "  tips) belong in the CHARTER/brief; a static seed must defer to them — say the CHARTER is"
+  say "  authoritative instead of naming a sha that will go stale."
+  bad=1
+fi
+
+# 5) leftover template tokens mean the profile was edited carelessly.
 if printf '%s' "$text" | grep -qE '\{\{[A-Z_]+\}\}'; then
   :  # placeholders are EXPECTED in a profile (they render at dispatch); not a violation.
 fi

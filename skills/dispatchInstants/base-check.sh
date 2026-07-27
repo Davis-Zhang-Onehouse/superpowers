@@ -18,7 +18,24 @@ WS=""; EXPECT=""; GOLDEN_BASE=""; MODE="auto"
 
 if [ $# -ge 1 ] && [ "${1#--}" = "$1" ]; then
   rec="$BOARD_DIR/records/$1.json"
-  [ -f "$rec" ] || { echo "no dispatch record for '$1'" >&2; exit 2; }
+  if [ ! -f "$rec" ]; then
+    # Accept a unique PREFIX or substring: the full todo-id is 60 characters and nobody types it. Never
+    # guess between candidates — an ambiguous id must fail loudly, not resolve to whichever sorts first.
+    matches=()
+    for f in "$BOARD_DIR"/records/*.json; do
+      [ -e "$f" ] || continue
+      b="$(basename "$f" .json)"
+      case "$b" in "$1"*|*"$1"*) matches+=("$b");; esac
+    done
+    if [ "${#matches[@]}" -eq 1 ]; then
+      rec="$BOARD_DIR/records/${matches[0]}.json"
+      echo "resolved '$1' -> ${matches[0]}"
+    elif [ "${#matches[@]}" -gt 1 ]; then
+      echo "ambiguous id '$1' — matches ${#matches[@]}: ${matches[*]}" >&2; exit 2
+    else
+      echo "no dispatch record matching '$1'" >&2; exit 2
+    fi
+  fi
   WS="$(python3 -c 'import json,sys;print(json.load(open(sys.argv[1])).get("ws",""))' "$rec")"
   EXPECT="$(python3 -c 'import json,sys;print(json.load(open(sys.argv[1])).get("lineage_base","") or "")' "$rec")"
   GOLDEN_BASE="$(python3 -c 'import json,sys;print(json.load(open(sys.argv[1])).get("golden_base","") or "")' "$rec")"
