@@ -224,6 +224,8 @@ echo "$out" | grep -qiE "irreversible|context|cheapest" && ok "states the cost o
   || bad "one-sided: pushes teardown without naming what it destroys"
 echo "$out" | grep -qi "still running" && ok "advises sequencing while work is in flight" \
   || bad "no sequencing advice while a worker is running"
+echo "$out" | grep -qi "teardown pending" && bad "header still prejudges the decision as a pending chore" \
+  || ok "header does not prejudge the decision"
 # An instant that is -complete- with a live session is equally an orphan even with NO harvest marker —
 # records predating the marker (a finished effort's) would otherwise be invisible forever.
 python3 - "$BOARD_DIR/records/alpha.json" <<'PYX'

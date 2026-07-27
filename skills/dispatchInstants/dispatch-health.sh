@@ -201,7 +201,7 @@ if [ "$ORPHANS" = 1 ]; then
   if [ "${#orphans[@]}" = 0 ]; then
     echo "no orphaned sessions: every harvested worker has been torn down"
   else
-    echo "${#orphans[@]} harvested worker(s) still holding a live session (teardown pending):"
+    echo "${#orphans[@]} harvested/complete worker(s) still holding a live session:"
     for o in "${orphans[@]}"; do
       IFS='|' read -r oid oslot osess <<<"$o"
       printf '  %-46s slot %-5s %s\n' "$oid" "$oslot" "$osess"
