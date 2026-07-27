@@ -222,6 +222,33 @@ printf '| Test | Status |\n|---|---|\n| `c` | 🟩 CLOSED |\n| `d` | ⬛ OPEN |\
 python3 "$T/regression-check.py" --baseline "$tmp/base.tsv" --current "$tmp/cur_rebreak.tsv" --closed-from-md "$tmp/cat.md" >/dev/null 2>&1
 chk "closed rows parsed from markdown registry" 1 $?
 
+echo "== workspace-lint (presence, which content checks cannot see) =="
+mkw(){ local d="$tmp/$1"; mkdir -p "$d"/{evidence,investigations,plans}
+  for f in HANDOFF CHARTER RUNBOOK DECISIONS ISSUES ASSUMPTIONS; do
+    printf '# %s\nUpdated: 2026-01-01 | Status: LIVE\n' "$f" > "$d/$f.md"; done
+  : > "$d/evidence/INDEX.md"; echo "$d"; }
+w=$(mkw inst-ok); python3 "$T/workspace-lint.py" "$w" >/dev/null 2>&1
+chk "a complete instant passes" 0 $?
+w=$(mkw inst-nohandoff); rm "$w/HANDOFF.md"
+out=$(python3 "$T/workspace-lint.py" "$w" 2>&1); rc=$?
+chk "a missing canonical file is a violation" 1 $rc
+echo "$out" | grep -q "HANDOFF.md" && ok "names the missing file" || bad "did not name it"
+# STATE.md is NOT canonical: dispatch-todo seeds one, but folding it into HANDOFF is legitimate and
+# 4 of 8 live instants had done exactly that. Reporting it as a violation would chase a non-problem.
+w=$(mkw inst-nostate); python3 "$T/workspace-lint.py" "$w" >/dev/null 2>&1
+chk "a missing STATE.md is NOT a violation" 0 $?
+python3 "$T/workspace-lint.py" "$w" 2>&1 | grep -qi "STATE.md" && ok "still mentions it as info" || bad "silent about it"
+python3 "$T/workspace-lint.py" "$w" --require-state >/dev/null 2>&1
+chk "--require-state makes it a violation when an effort wants it" 1 $?
+w=$(mkw inst-nodir); rmdir "$w/plans"
+python3 "$T/workspace-lint.py" "$w" >/dev/null 2>&1; chk "a missing canonical dir is a violation" 1 $?
+w=$(mkw inst-noidx); rm "$w/evidence/INDEX.md"
+python3 "$T/workspace-lint.py" "$w" >/dev/null 2>&1; chk "unindexed evidence is a violation" 1 $?
+w=$(mkw inst-nohdr); printf '# ISSUES\nno header here\n' > "$w/ISSUES.md"
+out=$(python3 "$T/workspace-lint.py" "$w" 2>&1); rc=$?
+chk "a canonical file with no Updated/Status header is a violation" 1 $rc
+echo "$out" | grep -qi "header" && ok "says which file lacks a header" || bad "unclear"
+
 echo "== new-issues (diff by ID, not by count) =="
 ni="$tmp/ISSUES.md"; st="$tmp/seen.txt"
 printf '# ISSUES\n\n## RI-1 — first\nbody\n\n## RI-2 — second\nbody\n' > "$ni"
