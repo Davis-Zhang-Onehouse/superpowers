@@ -162,6 +162,19 @@ chk "detects an entry inserted mid-file" 1 $rc
 echo "$out" | grep -q "RI-3" && ok "names the actually-new issue" || bad "named the wrong issue"
 echo "$out" | grep -q "RI-2" && bad "re-reported an old issue" || ok "does not re-report old issues"
 
+# A restarted watcher must not re-alarm everything it already handled. Priming records current
+# reality as "already seen" WITHOUT reporting it — the honest alternative to silently swallowing.
+printf '# ISSUES\n\n## RI-1 — a\n\n## RI-2 — b\n' > "$ni"; rm -f "$st"
+out=$(python3 "$T/new-issues.py" "$ni" --state "$st" --prime 2>&1); rc=$?
+chk "--prime reports nothing on a fresh state" 0 $rc
+echo "$out" | grep -qi "prim" && ok "says it primed, and how many" || bad "silent priming hides a reset"
+python3 "$T/new-issues.py" "$ni" --state "$st" >/dev/null 2>&1
+chk "after priming, existing issues are not re-reported" 0 $?
+printf '# ISSUES\n\n## RI-1 — a\n\n## RI-3 — c\n\n## RI-2 — b\n' > "$ni"
+out=$(python3 "$T/new-issues.py" "$ni" --state "$st" 2>&1); rc=$?
+chk "a genuinely new issue after priming still fires" 1 $rc
+echo "$out" | grep -q "RI-3" && ok "names it" || bad "missed the new issue"
+
 echo "== coord-check =="
 inst="$tmp/instants"; mkdir -p "$inst/07180102-07190000-complete-append-mrA" "$inst/07180102-07190001-inflight-append-mrB"
 mkh(){ printf '# H\n\n## Live milestone registry\n| MR | Task | Disposition | Depends-on | Instant | Slot | Status | Proof |\n|---|---|---|---|---|---|---|---|\n%s\n' "$1" > "$tmp/HANDOFF.md"; }

@@ -178,6 +178,17 @@ echo "$out" | grep -qi "COMPLETE" \
   || bad "prefix collision: read the OTHER same-minute instant's state, missing a real completion"
 rm -rf "$tmp/child/07180102-07190009-abort-append-twinA" "$tmp/child/07180102-07190009-complete-append-twinB" "$BOARD_DIR/records/twinB.json"
 
+# A human-readable summary line on STDOUT gets parsed as a data row by anyone scripting the tool
+# (the coordinator's watcher turned "=> items above need your attention" into a worker row).
+# stdout = data, stderr = commentary.
+printf 'Do you want to proceed?\n 1. Yes\n' > "$STUB_PANE"
+rows=$(STUB_ALIVE=1 bash "$S/dispatch-health.sh" 2>/dev/null)
+echo "$rows" | grep -q '=>' && bad "commentary leaked into stdout — scripts will parse it as a row" \
+  || ok "stdout carries only data rows"
+STUB_ALIVE=1 bash "$S/dispatch-health.sh" >/dev/null 2>"$tmp/health.err"
+grep -q '=>' "$tmp/health.err" \
+  && ok "the attention summary still appears (on stderr)" || bad "lost the summary entirely"
+
 # json mode is machine-readable
 out=$(STUB_ALIVE=1 bash "$S/dispatch-health.sh" --json 2>/dev/null)
 echo "$out" | python3 -c 'import json,sys; d=json.load(sys.stdin); assert isinstance(d,(list,dict))' 2>/dev/null \
