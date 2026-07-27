@@ -19,10 +19,12 @@ irreversible operator-only action on its own.** Violating the letter of these ru
 **REQUIRED SUB-SKILLS** (this skill orchestrates them; it does not restate them):
 - superpowers:maintain-workspace — the instant model + the coordinator's own registry; the `compact` and stop(rename) ops.
 - superpowers:dispatchInstants — the dispatch mechanism (`pdispatch` pool/todo/board) + fleet monitoring.
-- superpowers:reviewing-workspace — the completion gate (`workspace review --all`).
-- superpowers:rendering-task-board — turning the registry into a shareable status board / close-out deliverable.
+- superpowers:reviewing-workspace — the completion gate for workers (`workspace review --all`), AND a periodic
+  format-only `workspace review` on your OWN registry (the coordinator's workspace rots too — keep it well-formed).
+
 Chartering uses superpowers:brainstorming → superpowers:writing-plans; workers are seeded RCA-first
-(superpowers:systematic-debugging → superpowers:test-driven-development).
+(superpowers:systematic-debugging → superpowers:test-driven-development). For a shareable status board or
+close-out deliverable, use superpowers:rendering-task-board — an optional close-out step, not part of the core loop.
 
 ## When to use
 
@@ -36,16 +38,26 @@ Chartering uses superpowers:brainstorming → superpowers:writing-plans; workers
 Run this cycle every tick; never wait to be nudged.
 
 1. **Charter** — bound the target set explicitly (everything else is written OUT and deferred, not scope-crept);
-   give each item a disposition judged against the effort's north-star principle; record the principle + ACs in
-   CHARTER. Break down to milestone+task+AC level, not execution detail. (brainstorming → writing-plans)
+   give each item a disposition (port / rework / sanction) judged against the effort's north-star principle; record
+   the principle + ACs in CHARTER. Break down to milestone+task+AC level, not execution detail. Two foundational
+   moves: (a) if you're inheriting a prior effort's stack that MIXES aligned work with deviations, fork a CLEAN
+   baseline and re-land each item deliberately per its disposition (read the old stack reference-only) — a clean base
+   makes goal-alignment auditable; (b) closing a target INCLUDES auditing for and LIFTING any pre-existing
+   coarse/blanket workaround that already makes it "pass" while defeating the goal — don't leave it in even if a test
+   is green with it. (brainstorming → writing-plans)
 2. **Dispatch — script-only, and review-it-yourself FIRST.** Never hand-launch tmux/claude. Run
-   `pdispatch todo --no-launch`, then READ the rendered child `CHARTER.md` **and** the seed message: confirm the
-   right base/branch (lineage — see step 6), the intended ACs, dependencies, scope, and philosophy — no leftover
-   `{{PLACEHOLDER}}`. Only then launch, and verify it fired (pane capture shows the right pipeline starting).
+   `pdispatch todo --no-launch`, then READ the rendered child `CHARTER.md` **and** the seed message and confirm the
+   CONTENT (not just that it rendered): the right base/branch (lineage — see step 6), the intended ACs, dependencies,
+   scope, philosophy, no leftover `{{PLACEHOLDER}}`, and that the seed/profile does NOT tell the worker to write the
+   canonical registry (it must deliver a PROPOSED delta only — single-writer). Only then launch, and verify it fired
+   (pane capture shows the right pipeline starting — confirming delivery is necessary but is NOT the content review).
 3. **Monitor — never let status go stale.** Put a monitor on every dispatch; poll the board/pool (~10 min while
-   active). Use robust liveness (see Gotchas). On each tick: reap dead slots, and **fill every free slot with the
-   next ready milestone** (concurrency caps are a load heuristic, not a reason to leave work idle). A worker sitting
-   "done" for hours, or an idle ready slot, means you failed — not the operator's job to notice.
+   active). Use robust liveness (see Gotchas). On each tick: reap dead slots **that are yours**, and **fill every free
+   slot with the next ready milestone** — BUT the pool and board are GLOBAL, shared with other coordinators/efforts,
+   so before claiming or reaping a slot confirm via `pool list`/board it isn't leased by another effort, and never
+   reap a STALE slot that might be a parallel effort's until it's confirmed done and its session dead. (Concurrency
+   caps are a load heuristic, not a reason to leave YOUR work idle.) A worker sitting "done" for hours, or your own
+   idle ready slot, means you failed — not the operator's job to notice.
 4. **Gate — the hard rule.** NO worker instant is marked complete (folder renamed / harvested) until it has run
    `workspace review --all` and reached READY or READY-WITH-FIXES with findings addressed. A green CI is not a
    passed gate.
@@ -54,8 +66,9 @@ Run this cycle every tick; never wait to be nudged.
    self-reports (see Non-regression). Then free the slot and dispatch the next milestone.
 6. **Compact + track lineage.** Every 3–5 completed instants, dispatch ONE compaction: fold them into one
    PR-stack-per-repo, re-prove the merged ACs *together*, same CI with zero regression vs the canonical registry,
-   ISSUES due-diligence, review gate. A new instant's **base = the end-state it inherits** (normally the latest
-   compaction) — record the lineage. Don't stall the pipeline to compact; keep dispatching.
+   walk EVERY compacted instant's open issues and carry each forward classified (remains-open / addressed /
+   transformed — nothing dropped), review gate. A new instant's **base = the end-state it inherits** (normally the
+   latest compaction) — record the lineage. Don't stall the pipeline to compact; keep dispatching.
 7. **Stop — defined endgame.** Stop new dispatch → let inflight finish → one final comprehensive compaction on the
    rolling base → gate it green → STOP. Park all operator-only items; do not drift past the endgame.
 
@@ -68,7 +81,9 @@ Run this cycle every tick; never wait to be nudged.
   (now-throws / now-offloads / now-correct / irrelevant-noise) → *sanctioned* with a GOLD-cited, individually
   justified, append-only allowlist entry; otherwise REGRESSION → must fix. Zero unresolved flips to finish.
   Prefer fixing the test's expectation to correct behavior over sanctioning; **never mask real behavior by scoping
-  the feature off**, and never blanket-allowlist.
+  the feature off**, and never blanket-allowlist. A flip can also be a **cross-worker artifact** — caused by a sibling
+  in-flight worker's incomplete state and resolved only by the final restack; don't charge it as the
+  worker-under-review's regression, track it to the owning worker and confirm it closes on the consolidated stack.
 - Every causal claim ties to a captured artifact under the instant's `evidence/`, never `/tmp`.
 
 ## Non-negotiable rules — STOP if you catch yourself here
@@ -80,7 +95,7 @@ Run this cycle every tick; never wait to be nudged.
 | "I'll let the worker update the shared catalog to save a step." | Single-writer only. Two writers corrupt the cross-session source of truth. Worker proposes; you apply. |
 | "I'll fire the workers fast and check the charters later." | A mis-seeded worker burns a slot producing confidently-wrong output. Review charter + seed BEFORE each launch. |
 | "I'm heads-down; I'll check the fleet when the operator asks." | Stale status and idle slots are your failure. Monitor + fill every tick. |
-| "The operator told me that rule in chat; I'll remember it." | If it isn't written into the workspace it dies at the next compaction/handoff. Ingrain every durable rule via maintain-workspace, continuously. |
+| "The operator told me that rule in chat; I'll remember it." | If it isn't written down it dies at the next compaction/handoff. A durable rule or new shared resource that lands mid-effort must reach THREE places the same tick: your registry, the dispatch profile (so future workers inherit it), AND every currently-running worker (notify + confirm they ingrain it). |
 | "This is feature dev but there's a do-not-commit reflex." | It's feature dev — cut branches, open PRs freely. Don't block on a commit gate. Only *merging* is operator-only. |
 
 ## Gotchas to watch (from real coordination runs)
@@ -88,9 +103,10 @@ Run this cycle every tick; never wait to be nudged.
 | Trap | Guard |
 |---|---|
 | Background-shell liveness check gives false "worker gone" | Use `pgrep -f "<session>"` + bash arrays + a startup grace window; not `tmux has-session`/unquoted `$vars`. |
-| Monitor catches crash/done but not **alive-but-blocked** (permission modal) or idle | Pane-grep for modal signatures + a heartbeat for any instant running > a couple hours. |
+| Monitor catches crash/done but not **alive-but-blocked** (permission modal) or idle | Pane-grep for modal signatures + spot-check any instant running >~2h on a fixed cadence (~every 30 min). On a BLOCKED alert: investigate reversibility + whether the worker's work is committed/pushed, then answer the modal — but DENY anything irreversible or statically-unresolvable (the operator-only bar applies to modals you answer on a worker's behalf). |
 | `send-keys` doesn't reliably submit to a busy worker | Verify delivery by pane capture; re-send. A dispatch you didn't confirm landed is not running. |
 | Seeds break on shell metacharacters (`| ; & < > ( )`) | Keep seeds short and metachar-free; the CHARTER is authoritative, not the seed. |
+| Two parallel workers pushing ONE shared branch collide (non-fast-forward) | Each worker gets its OWN branch + draft PR off the common base; defer linear stacking to the compaction restack — don't force it during parallel dev. |
 | Parallel builds poison a shared cache (`~/.m2`) / skew source-vs-binary provenance | Give each worker an isolated local repo; the final restack must carry all kernels together. |
 | Shared reference checkouts | READ-ONLY; any write needs an isolated git worktree (superpowers:using-git-worktrees). |
 | Budget/usage limits are account-wide across all your sessions | Economize polling; wind down aggressively near limits. |
@@ -106,5 +122,8 @@ create) → STOP and park, even under "proceed autonomously."
 
 - Treating the coordinator as a doer — it dispatches and verifies; it does not implement.
 - Marking done on the worker's word instead of artifacts you checked yourself + the review gate.
-- Letting the registry rot: durable rules the operator gives in chat must be written into the workspace the same tick.
+- Letting the registry rot: durable rules the operator gives in chat must be written into the workspace the same
+  tick — and never format-reviewing your OWN registry (run `workspace review` format on it periodically; backfill
+  any issue you raised in chat into ISSUES in the required format).
 - Compacting too late (stack drift) or stalling dispatch to compact — keep the pipeline full.
+- Treating the slot pool as yours alone — it's shared; stomping or reaping another effort's lease is a real failure.
