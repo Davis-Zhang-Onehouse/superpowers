@@ -105,6 +105,16 @@ raise — it breaks queries that work today.** So, whenever your change makes so
 - [ ] **Name and test the degenerate inputs as explicit ACs: EMPTY input · ZERO rows · ALL-NULL input.**
       State what Spark does for each (cite GOLD) and prove you match it. "No rows were projected, so nothing
       should raise" is a *test*, not an assumption.
+- [ ] ⚠️ **ZERO ROWS IS NECESSARY BUT NOT SUFFICIENT — add a PARTIALLY-SELECTIVE FILTER case** (lift-01's OI-11,
+      which found this blind spot in the rule as originally written). A zero-row filter **cannot** detect
+      *evaluate-then-mask*, because Velox may skip the projection entirely when nothing survives the filter — so
+      an eager evaluation that raises on rows Spark never evaluates looks clean. You need a filter where **some
+      rows pass and some do not**, with the bad value among the filtered-out rows: Spark raises nothing, and an
+      eager implementation raises anyway. That topology is the only one that catches the failure mode.
+- [ ] **Cover every FAMILY you newly cause to raise, not one representative** — unless you prove the machinery is
+      shared. lift-01 found ARRAY / MAP / ROW containers do **not** share machinery (`applyMap` rebuilds its
+      sizes buffer under a condition), so "representative family + implicit generalisation" would have left two
+      containers with raise-only coverage. **Land the coverage rather than arguing the generalisation.**
 - [ ] **Pin the HAPPY path as still taking the accelerated route.** Proving the error is not the job; proving
       the error *without losing offload* is. An errorClass-only assertion proves the raise and leaves the fast
       path unproven — the same vacuous shape as an AC that would pass by evaluating on vanilla Spark.
