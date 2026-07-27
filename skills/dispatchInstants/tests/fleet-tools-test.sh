@@ -113,6 +113,17 @@ chk "parked AND idle needs attention" 1 $rc
 echo "$out" | grep -qi "PARKED" && ok "reports PARKED when genuinely stalled" || bad "did not report PARKED"
 rm -f "$tmp/child/07180102-07190000-inflight-append-alpha/HANDOFF.md"
 
+# A standing parked NOTE must never mask an actionable blocker. A worker sitting on a permission
+# modal is fixable right now; P-1-style operator notes sit there for the whole effort. Reporting
+# the note instead of the modal sends you to the wrong problem.
+printf 'Do you want to proceed?\n 1. Yes\n 2. Yes, and do not ask again\n 3. No\n' > "$STUB_PANE"
+printf '# H\n\n## Parked decision\nMerge PR 441 is the operator alone.\n\n## Next\n' \
+  > "$tmp/child/07180102-07190000-inflight-append-alpha/HANDOFF.md"
+out=$(STUB_ALIVE=1 bash "$S/dispatch-health.sh" 2>&1)
+echo "$out" | grep -qi "BLOCKED" && ok "modal wins over a standing parked note" \
+  || bad "parked note masked the real blocker: $(echo "$out" | tail -1)"
+rm -f "$tmp/child/07180102-07190000-inflight-append-alpha/HANDOFF.md"
+
 # json mode is machine-readable
 out=$(STUB_ALIVE=1 bash "$S/dispatch-health.sh" --json 2>/dev/null)
 echo "$out" | python3 -c 'import json,sys; d=json.load(sys.stdin); assert isinstance(d,(list,dict))' 2>/dev/null \
