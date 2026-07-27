@@ -27,6 +27,12 @@ def parse(path):
     return {m.group("id"): m.group("title").strip() for m in HEADING.finditer(text)}
 
 
+def norm_title(t):
+    """A register that renumbers its issues (I-1.. -> OI-1..) has not gained any: the titles are the
+    stable content. Track both, so a prefix change is not seven false alarms."""
+    return " ".join(re.sub(r"[^a-z0-9 ]", " ", t.lower()).split())[:90]
+
+
 def main(argv=None):
     ap = argparse.ArgumentParser(description="Report new issue IDs since the last check.")
     ap.add_argument("issues", help="path to an ISSUES.md")
@@ -42,19 +48,30 @@ def main(argv=None):
         return 2
 
     found = parse(a.issues)
-    seen = set()
+    seen, seen_titles = set(), set()
     if os.path.isfile(a.state):
-        seen = {l.strip() for l in open(a.state, encoding="utf-8") if l.strip()}
+        for l in open(a.state, encoding="utf-8"):
+            l = l.rstrip("\n")
+            if not l.strip():
+                continue
+            ident, _, title = l.partition("\t")
+            seen.add(ident.strip())
+            if title.strip():
+                seen_titles.add(title.strip())
+
+    def dump():
+        with open(a.state, "w", encoding="utf-8") as fh:
+            for k in sorted(found):
+                fh.write(f"{k}\t{norm_title(found[k])}\n")
 
     if a.prime:
-        with open(a.state, "w", encoding="utf-8") as fh:
-            fh.write("\n".join(sorted(found)) + "\n")
+        dump()
         print(f"primed: {len(found)} existing issue(s) recorded as already-seen (not re-alarmed)")
         return 0
 
-    new = {k: v for k, v in found.items() if k not in seen}
-    with open(a.state, "w", encoding="utf-8") as fh:
-        fh.write("\n".join(sorted(found)) + "\n")
+    new = {k: v for k, v in found.items()
+           if k not in seen and norm_title(v) not in seen_titles}
+    dump()
 
     if a.json:
         print(json.dumps({"new": new, "total": len(found)}, indent=2, ensure_ascii=False))
