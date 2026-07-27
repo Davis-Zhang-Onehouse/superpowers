@@ -5,12 +5,14 @@ maintain-workspace gives you the canonical files (HANDOFF/CHARTER/RUNBOOK/DECISI
 and adapt. Keep them a LATEST-STATE snapshot — churn belongs in git history, not the registry.
 
 ## 1. Milestone / task registry (the central state — one row per milestone)
-| MR | Task | Disposition | Instant | Slot | Status | Proof / blocker |
-|----|------|-------------|---------|------|--------|-----------------|
-| MR1 | <what> | port \| rework \| sanction | `<child-instant-folder>` | wsN | ⬜ TODO \| 🔵 running \| 🅿 parked \| ✅ done \| ⛔ superseded | <PR / CI run / gate verdict, or the blocker> |
+| MR | Task | Disposition | Depends-on | Instant | Slot | Status | Proof / blocker |
+|----|------|-------------|------------|---------|------|--------|-----------------|
+| MR1 | <what> | port \| rework \| sanction | — \| MR0 | `<child-instant-folder>` | wsN | ⬜ TODO \| 🟨 READY \| 🔵 running \| 🅿 parked \| ✅ done \| ⛔ superseded | <PR / CI run / gate verdict, or the named blocker> |
 
-Status legend: ⬜ TODO · 🔵 dispatched/running · 🅿 parked (operator) · ✅ done (AC-proven + gated) · ⛔ superseded.
-A row goes ✅ ONLY after `workspace review --all` passed and you harvested its delta into the catalog.
+Status legend: ⬜ TODO (not dispatchable yet) · 🟨 READY (dispositioned + ACs written + every `Depends-on`
+LANDED) · 🔵 dispatched/running · 🅿 parked · ✅ done (AC-proven + gated + harvested) · ⛔ superseded.
+Only 🟨 rows may fill a free slot. A row goes ✅ ONLY after a passing `superpowers:review-workspace` round,
+the worker's own folder rename to `-complete-`, and your harvest of its delta into the catalog.
 
 ## 2. Fleet / slots (reconfirm via `pdispatch pool list` / `pdispatch board`)
 | Slot | State | Holder instant | tmux | Note |
@@ -22,13 +24,17 @@ Rule: the pool + board are GLOBAL across efforts. Each tick, reap STALE **that a
 with the next ready milestone (or record why held) — but always confirm a slot isn't another effort's lease first.
 
 ## 3. Lineage tracker (instant dependency — what each new instant was built on)
-| Instant | Base it inherited | Delivered end-state (branches @sha) |
-|---------|-------------------|-------------------------------------|
-| MR1 | fresh baseline @<sha> | <repo branch @sha> |
-| Compaction #1 | MR0..MRk | <one stack/repo @sha> |
-| MR(k+1) | Compaction #1 | … |
+| Instant | Base it inherited | Delivered end-state (branches @sha) | Note |
+|---------|-------------------|-------------------------------------|------|
+| MR1 | fresh baseline @<sha> | <repo branch @sha> | |
+| Compaction #1 | MR0..MRk | <one stack/repo @sha> | gated ✓ — adoptable as a base |
+| MR(k+1) | Compaction #1 | … | |
+| MR(k+2) | MR(k+1) end-state | … | `restack-pending` — dispatched while Compaction #2 was in flight |
+| MR(k+3) → successor | (same milestone, continued) | … | succession: predecessor flushed; do NOT restart |
 
-A new instant's base = the end-state it inherits (normally the latest compaction). Record it when you dispatch.
+A new instant's base = the end-state it inherits (normally the latest **gated** compaction). Record it when
+you dispatch. Dispatches made while a compaction is in flight are marked `restack-pending` — the next
+compaction must fold them. Record a worker succession here too, so the milestone's history stays one thread.
 
 ## 4. Single-writer catalog overlay
 The canonical status catalog is `catalog/CATALOG.md` (or your registry). **You are its only writer.** Each
