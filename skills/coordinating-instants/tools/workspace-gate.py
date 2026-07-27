@@ -32,6 +32,9 @@ VERDICT_RE = re.compile(r"^##\s*Round(?:\s+R\d+)?\s+summary.*?overall verdict:\s
 # Tolerate both the template's "- Open findings: Critical n · Important n" and the equally common
 # "- Open Critical: n · Open Important: n". Reviewers write markdown, not a grammar.
 OPEN_RE = re.compile(r"^-\s*.*?Open.*?Critical[:\s]+(\d+).*?Important[:\s]+(\d+)", re.M | re.I)
+# Only round-SHAPED phrasings count: "R1" alone is a milestone name in many efforts, and reading
+# those as review rounds would fire on every instant.
+CLAIM_RE = re.compile(r"(?:review\s+round|REVIEW\.md\s+|\bround)\s+R(\d+)", re.I)
 SUMMARY_LINE_RE = re.compile(r"^##\s*Round(?:\s+R\d+)?\s+summary.*$", re.M | re.I)
 
 
@@ -107,6 +110,21 @@ def decide(path, require_scope=None, harvest=False):
             r["reasons"].append(f"instant folder is not renamed to -complete- ({name}) — a report file is "
                                 "not a completion signal; the worker renames its own folder after passing")
         r["harvest_ready"] = (rc == 0)
+
+    # Advisory only: prose that claims a round the ledger does not contain is a narrative ahead of
+    # its evidence. It never changes the verdict — the ledger is the arbiter either way.
+    have = {m.group(1) for m in ROUND_RE.finditer(text)}
+    claimed = set()
+    for fn in ("HANDOFF.md", "ISSUES.md"):
+        fp = os.path.join(path, fn)
+        if os.path.isfile(fp):
+            body = open(fp, encoding="utf-8", errors="replace").read()
+            claimed |= {m.group(1) for m in CLAIM_RE.finditer(body)}
+    unbacked = sorted(claimed - have, key=int)
+    if unbacked:
+        r["unbacked_round_claims"] = unbacked
+        r["reasons"].append("advisory: prose claims review round(s) R" + ", R".join(unbacked) +
+                            " that REVIEW.md does not contain — write the ledger before describing it")
 
     r["gate"] = {0: "PASS", 1: "FAIL", 2: "UNDECIDABLE"}[rc]
     if rc == 0 and not r["reasons"]:
