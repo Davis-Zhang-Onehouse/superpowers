@@ -95,7 +95,32 @@ if [ -z "$GOLDEN" ]; then
   gf="${POOL_DIR:-$HOME/.claude-ws-pool}/golden"
   [ -f "$gf" ] && GOLDEN="$(head -1 "$gf")"
 fi
-[ -n "$GOLDEN" ] || { err "no --golden and no ${POOL_DIR:-$HOME/.claude-ws-pool}/golden file"; exit 2; }
+# The golden is effort-scoped state that used to live only in a HANDOFF paragraph, so a dispatch
+# without --golden failed on a config file nobody knew to create. Inherit it from THIS effort's
+# most recent dispatch record before giving up, and make the error say how to fix it for good.
+if [ -z "$GOLDEN" ]; then
+  GOLDEN="$(BOARD_DIR="${BOARD_DIR:-$HOME/.claude-dispatch-board}" python3 - "$BASE" <<'PYG'
+import json, os, sys, glob
+base = os.path.realpath(sys.argv[1])
+recs = sorted(glob.glob(os.path.join(os.environ["BOARD_DIR"], "records", "*.json")),
+              key=os.path.getmtime, reverse=True)
+for f in recs:
+    try: d = json.load(open(f))
+    except Exception: continue
+    if os.path.realpath(str(d.get("base_instant", ""))) != base: continue
+    g = d.get("golden")
+    if g and os.path.isdir(g):
+        print(g); break
+PYG
+)"
+  [ -n "$GOLDEN" ] && info "golden inherited from this effort's last dispatch: $GOLDEN"
+fi
+if [ -z "$GOLDEN" ]; then
+  err "no --golden, no prior dispatch for this base to inherit from, and no ${POOL_DIR:-$HOME/.claude-ws-pool}/golden file"
+  err "  fix once for this box:  echo /path/to/prebuilt-workspace > ${POOL_DIR:-$HOME/.claude-ws-pool}/golden"
+  err "  or pass:                --golden /path/to/prebuilt-workspace"
+  exit 2
+fi
 GOLDEN="$(realpath -m -- "$GOLDEN")"
 [ -d "$GOLDEN" ] || { err "golden workspace does not exist: $GOLDEN"; exit 2; }
 

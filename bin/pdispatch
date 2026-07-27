@@ -96,6 +96,7 @@ case "$cmd" in
   launch)  exec "$SKILL/dispatch-launch.sh" "$@";;
   guard)   exec "$SKILL/install-branch-guard.sh" "$@";;
   ref)     exec "$SKILL/ref-guard.sh" "$@";;
+  profile) exec "$SKILL/profile-check.sh" "$@";;
   gate)    exec "$REPO/skills/coordinating-instants/tools/workspace-gate.py" "$@";;
   drift)   exec "$REPO/skills/coordinating-instants/tools/coord-check.py" "$@";;
   regress) exec "$REPO/skills/coordinating-instants/tools/regression-check.py" "$@";;

@@ -39,11 +39,21 @@ Dispatched by parallelDispatch from base instant: {{BASE_NAME}}
 - [ ] Effective GitHub CI run (Velox Backend ANSI Mode). **Truth = downloaded surefire report** (jobs run
       --fail-never, always green). Diff vs the M1 baseline (ansi-ci-diff-catalog skill): red→green for this
       gap + NO regression. **Ensure gluten checks out the proper velox counterpart in get_velox.sh** (the
-      branch/commit matching this fix's velox side). Update the M1 CATALOG.md for this gap (WIP→green on CI).
+      branch/commit matching this fix's velox side). Deliver a **PROPOSED catalog delta** for this gap
+      (which tests → closed / open / sanctioned-flip, with the CI evidence) — **never edit the canonical
+      CATALOG.md yourself**: the coordinator is its single writer and applies your delta on harvest.
+
+### AC-5 Completion gate + report-back (the coordinator's two signals)
+- [ ] **Before renaming this instant**, run `superpowers:review-workspace` (ALL stages) on it and PASS:
+      a recorded REVIEW.md round of READY, or READY-WITH-FIXES with **no open Critical/Important**, every
+      AC verified on fresh evidence. No passing round = not complete.
+- [ ] Write your report to the base instant's `dispatch/<MR>-REPORT.md`: AC results with evidence paths,
+      branch tips, the proposed catalog delta, the REVIEW verdict, and any operator forks. **Then**
+      transition your folder `-inflight-` → `-complete-`. Those two are how the coordinator detects you.
 
 ## Setup to end up with (the handoff)
 - Deliverables: local repro + RCA (investigations/) + fix (TDD or plan+subagent execution) + local surefire
-  green + effective CI diff + CATALOG.md update; evidence/INDEX.md rows; **dev caveats documented in the
+  green + effective CI diff + a PROPOSED catalog delta (not a catalog edit); evidence/INDEX.md rows; **dev caveats documented in the
   workspace AND saved to memory**.
 - Report-back: transition this instant's folder state (inflight→complete/abort) at session end;
   if you need the operator, park under a '## Parked decision' block in HANDOFF.md (do NOT block — the

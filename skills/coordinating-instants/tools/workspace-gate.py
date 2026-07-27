@@ -15,6 +15,8 @@ Exit codes:  0 = gate passed   1 = gate failed   2 = cannot decide (missing/unpa
 (a report file is not a completion signal), so it is the precondition for harvesting.
 """
 import argparse
+import datetime
+import glob
 import json
 import os
 import re
@@ -91,16 +93,56 @@ def decide(path, require_scope=None, harvest=False):
     return rc, r
 
 
+def mark_harvested(instant, res):
+    """Write gate_verdict + harvested_at into the instant's dispatch record, if there is one.
+
+    Instants get RENAMED (-inflight- -> -complete-), so match records on the stable
+    <base>-<curr> timestamp prefix of the folder name rather than the recorded path.
+    """
+    board = os.environ.get("BOARD_DIR") or os.path.join(os.path.expanduser("~"), ".claude-dispatch-board")
+    name = os.path.basename(os.path.abspath(instant.rstrip("/")))
+    m = re.match(r"^(\d{8}-\d{8})-", name)
+    if not m:
+        return None
+    pref = m.group(1)
+    for f in sorted(glob.glob(os.path.join(board, "records", "*.json"))):
+        try:
+            d = json.load(open(f, encoding="utf-8"))
+        except Exception:
+            continue
+        child = os.path.basename(str(d.get("child_instant", "")).rstrip("/"))
+        if not child.startswith(pref + "-"):
+            continue
+        d["gate_verdict"] = res.get("verdict")
+        d["gate_round"] = res.get("round")
+        d["harvested_at"] = datetime.datetime.now(datetime.timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+        with open(f, "w", encoding="utf-8") as fh:
+            json.dump(d, fh, indent=2, ensure_ascii=False)
+        return f
+    return None
+
+
 def main(argv=None):
     ap = argparse.ArgumentParser(description="Mechanical review gate for a worker instant.")
     ap.add_argument("instant", help="path to the dispatched worker's instant folder")
     ap.add_argument("--require-scope", help="require the latest round to have this scope (e.g. all)")
     ap.add_argument("--harvest", action="store_true",
                     help="also require the folder to be renamed -complete- (harvest precondition)")
+    ap.add_argument("--record", action="store_true",
+                    help="on a PASSING --harvest gate, persist gate_verdict + harvested_at into the "
+                         "dispatch board record, so a successor coordinator inherits harvest state "
+                         "mechanically instead of trusting prose")
     ap.add_argument("--json", action="store_true", help="machine-readable output")
     a = ap.parse_args(argv)
 
     rc, res = decide(a.instant, a.require_scope, a.harvest)
+
+    if a.record:
+        if rc == 0 and a.harvest:
+            marked = mark_harvested(a.instant, res)
+            res["recorded_in"] = marked or "(no matching board record)"
+        else:
+            res["recorded_in"] = "(not recorded — gate did not pass with --harvest)"
     if a.json:
         print(json.dumps(res, indent=2, ensure_ascii=False))
     else:

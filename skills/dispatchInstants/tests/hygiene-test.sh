@@ -50,6 +50,51 @@ else
   bad "no child instant created — skipping hygiene assertions"
 fi
 
+echo "== profile-check (a profile defect must not survive a per-brief patch) =="
+mkdir -p "$tmp/badprof" "$tmp/goodprof"
+printf 'AC-4: Update the M1 CATALOG.md for this gap when it is green.\n' > "$tmp/badprof/charter.md"
+printf 'go do the thing\n' > "$tmp/badprof/seed.txt"
+bash "$S/profile-check.sh" "$tmp/badprof" >/dev/null 2>&1
+chk "flags a profile telling the worker to write the canonical catalog" 1 $?
+out=$(bash "$S/profile-check.sh" "$tmp/badprof" 2>&1)
+echo "$out" | grep -qi "single-writer\|catalog" && ok "explains the single-writer violation" || bad "unclear message"
+cat > "$tmp/goodprof/charter.md" <<'EOP'
+AC-4: deliver a PROPOSED catalog delta; never edit the canonical catalog (single-writer).
+AC-5: before renaming, run superpowers:review-workspace on this instant and PASS it.
+AC-6: write your report to the base dispatch/ path, then rename your folder -inflight- to -complete-.
+EOP
+printf 'go do the thing\n' > "$tmp/goodprof/seed.txt"
+bash "$S/profile-check.sh" "$tmp/goodprof" >/dev/null 2>&1
+chk "a correct profile passes" 0 $?
+# Worker rules must NOT be applied to a coordinator profile: the coordinator IS the catalog's
+# writer, and it does not report-back to itself. Flagging a correct profile is the same
+# false-alarm trap the linter exists to prevent.
+mkdir -p "$tmp/coordprof"
+cat > "$tmp/coordprof/charter.md" <<'EOP'
+Kind: **COORDINATOR** (standing orchestrator). You do NO dev yourself.
+You are the single writer of the canonical catalog; workers propose deltas and you apply them.
+Gate every worker with pdispatch gate INSTANT --harvest before harvesting.
+EOP
+printf 'coordinate\n' > "$tmp/coordprof/seed.txt"
+bash "$S/profile-check.sh" "$tmp/coordprof" >/dev/null 2>&1
+chk "coordinator profile is judged by coordinator rules" 0 $?
+# ...and a coordinator profile that never gates its workers IS a violation
+printf 'Kind: COORDINATOR\nJust coordinate things.\n' > "$tmp/coordprof/charter.md"
+bash "$S/profile-check.sh" "$tmp/coordprof" >/dev/null 2>&1
+chk "coordinator profile with no gating requirement is flagged" 1 $?
+# the SHIPPED profiles must themselves be clean
+for pr in ansi ansi-expose compact-ansi coord-ansi; do
+  bash "$S/profile-check.sh" "$S/profiles/$pr" >/dev/null 2>&1
+  chk "shipped profile '$pr' is clean" 0 $?
+done
+
+echo "== golden inheritance (RI-3) =="
+# a second dispatch for the SAME base must not fail merely because --golden was omitted
+out2=$(bash "$S/dispatch-todo.sh" --base "$tmp/base" --profile "$tmp/prof" --title "Second Probe" \
+        --brief "$tmp/brief.md" --no-launch --no-duplicate 2>&1); rc2=$?
+chk "second dispatch inherits the golden from this effort's last dispatch" 0 $rc2
+echo "$out2" | grep -qi "golden" && ok "says where the golden came from" || bad "silent about the inherited golden"
+
 echo "== install-branch-guard =="
 r="$tmp/repo"; mkdir -p "$r"; (cd "$r" && git init -q . && git config user.email t@t && git config user.name t \
   && git commit -q --allow-empty -m init) >/dev/null 2>&1
