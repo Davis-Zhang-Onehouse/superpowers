@@ -70,6 +70,10 @@ def main(argv=None):
     ap.add_argument("--closed-list", help="file of identifiers the registry marks CLOSED (one per line)")
     ap.add_argument("--closed-from-md", help="registry markdown to extract CLOSED rows from")
     ap.add_argument("--closed-marker", default="🟩", help="marker denoting a closed row (default 🟩)")
+    ap.add_argument("--allow-new-red", action="store_true",
+                    help="downgrade NEW-RED (a test absent from every baseline that fails now) to a "
+                         "warning. Use only for residuals documented as intentionally red — they are "
+                         "still listed.")
     ap.add_argument("--strict-coverage", action="store_true",
                     help="fail if a baseline did not cover tests present in the current run, i.e. the "
                          "diff for those tests could not run at all (a CI dim that uploaded no results)")
@@ -91,8 +95,14 @@ def main(argv=None):
     # A test present NOW but absent from a baseline cannot be diffed against it. Skipping those
     # silently is the "absence read as absence of failure" error this tool exists to catch, so the
     # gap is always reported — and can be made fatal.
-    uncomparable_lineage = sorted(n for n in cur if lin is not None and n not in lin)
-    uncomparable_baseline = sorted(n for n in cur if n not in base)
+    # Split "absent from the baselines" by its CURRENT result. A test that no baseline covered and
+    # that FAILS now is not merely unproven — it is a red that no diff can ever surface, because
+    # there was never a green to lose. That blindness is how a fully-failing new suite ships.
+    absent = [n for n in cur if n not in base and (lin is None or n not in lin)]
+    new_red = sorted(n for n in absent if cur.get(n) is False)
+    new_green = sorted(n for n in absent if cur.get(n) is True)
+    uncomparable_lineage = sorted(n for n in cur if lin is not None and n not in lin and n not in absent)
+    uncomparable_baseline = sorted(n for n in cur if n not in base and n not in absent)
 
     closed_not_green = sorted(n for n in closed if cur.get(n) is not True)
     missing = sorted(n for n in closed if n not in cur)
@@ -107,7 +117,11 @@ def main(argv=None):
     }
     res["not_comparable_vs_lineage_base"] = uncomparable_lineage
     res["not_comparable_vs_baseline"] = uncomparable_baseline
+    res["new_red"] = new_red
+    res["new_green"] = new_green
     rc = 1 if (regressions or rebreaks or closed_not_green) else 0
+    if new_red and not a.allow_new_red:
+        rc = 1
     if a.strict_coverage and (uncomparable_lineage or uncomparable_baseline):
         rc = 1
     res["result"] = "FAIL" if rc else "CLEAN"
@@ -116,7 +130,12 @@ def main(argv=None):
         print(json.dumps(res, indent=2, ensure_ascii=False))
     else:
         print(f"{res['result']} — regressions={len(regressions)} rebreaks={len(rebreaks)} "
-              f"closed-not-green={len(closed_not_green)}")
+              f"new-red={len(new_red)} closed-not-green={len(closed_not_green)}")
+        for n in new_red:
+            tag = "warning, allowed" if a.allow_new_red else "FAIL"
+            print(f"  NEW-RED ({tag}): {n} — added since the baselines and failing; no diff can see this")
+        if new_green:
+            print(f"  new since the baselines and green: {len(new_green)} test(s) (informational)")
         for n in regressions:
             print(f"  REGRESSION (green->red vs baseline): {n}")
         for n in rebreaks:
