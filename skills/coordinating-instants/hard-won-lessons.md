@@ -33,6 +33,12 @@ or alarms that could never turn off — in both the coordinator's watcher and th
   applied to the next produces confident nonsense.
 - **An alarm that cannot be cleared is a defect, not caution.** If doing the thing the alarm asks for
   leaves it still firing, it will be ignored — and so will the real one next to it.
+- **Report SUSTAINED state, never instantaneous state.** RUNNING/IDLE/PARKED flicker as a pane's progress
+  comes and goes; announcing every flip produces a stream of events about a fleet that is fine. Require a
+  non-terminal change to hold for N consecutive samples before reporting it; let terminal states
+  (complete/harvested/dead) fire at once, since those never flap back.
+- **Two watchers must never share one piece of mutable state.** An idle baseline kept in a single file was
+  overwritten by whichever watcher sampled last, so both saw phantom transitions. Namespace it per caller.
 - **Absence is never success.** A missing test result, an uncovered dimension, a suite that produced no
   output, a baseline that never covered the row: all mean UNPROVEN, never unbroken. State what you could
   not check, positively and by name.
