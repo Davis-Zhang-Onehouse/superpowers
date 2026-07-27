@@ -125,6 +125,18 @@ echo "$out" | grep -qi "sha\|charter is authoritative" && ok "explains that per-
 printf 'Your lineage base is named in your CHARTER and in the dispatch record - treat those as authoritative.\n' > "$tmp/seedsha/seed.txt"
 bash "$S/profile-check.sh" "$tmp/seedsha" >/dev/null 2>&1
 chk "a seed deferring to the charter passes" 0 $?
+# The CHARTER template is static profile text too. Checking only the seed leaves the same staleness in
+# the file the worker treats as authoritative (the coordinator caught this one for me, RI-24).
+printf 'Kind: **WORKER**\nLineage base: gluten davis/x at e1e04c5f5. Report back, rename to -complete-, propose a delta, run superpowers:review-workspace.\n' > "$tmp/seedsha/charter.md"
+out=$(bash "$S/profile-check.sh" "$tmp/seedsha" 2>&1); rc=$?
+chk "a CHARTER template hardcoding a sha is a violation too" 1 $rc
+echo "$out" | grep -qi "charter" && ok "names the charter as the offender" || bad "does not say which file"
+# A numeric CI RUN ID is not a commit sha — and pinning baseline run ids in a template is REQUIRED by
+# the brief contract. Flagging them would force removal of the very thing the contract mandates.
+printf 'Kind: **WORKER**\nDiff vs the M1 baselines 29618938212 / 29622614234. Report back, rename to -complete-, propose a delta, run superpowers:review-workspace.\n' > "$tmp/seedsha/charter.md"
+printf 'go\n' > "$tmp/seedsha/seed.txt"
+bash "$S/profile-check.sh" "$tmp/seedsha" >/dev/null 2>&1
+chk "a pinned numeric CI run id is NOT flagged as a stale sha" 0 $?
 
 echo "== golden inheritance (RI-3) =="
 # a second dispatch for the SAME base must not fail merely because --golden was omitted
