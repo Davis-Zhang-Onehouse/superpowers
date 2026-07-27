@@ -27,6 +27,12 @@ or alarms that could never turn off — in both the coordinator's watcher and th
   (`pdispatch issues --prime` does this; it reports how many it recorded, because a silent reset is worse.)
 - **Anchor parsing to structure, not text.** Detect a section by its content, not its heading; do not parse
   a human-readable summary line as data (a tool's stdout is data, its commentary belongs on stderr).
+- **Never match a NAME PATTERN to find your workers, either.** A pattern is wrong in both directions: a
+  narrow one (`dt-r[0-9]`) silently excludes every later milestone name, a broad one (`dt-`) counts other
+  efforts and the coordinator itself. Both fail silently and in opposite directions. Enumerate from the
+  records for your base — `pdispatch alive --base <instant>` — so new names are covered automatically and
+  nothing foreign is. Cross-check it against what `health` says SHOULD be running; a mismatch named
+  out loud is a real death.
 - **Never count a label as the thing.** Counting `RUNNING` rows is not counting live workers: when the
   label transiently changes, the count goes to zero and the fleet looks empty. Count processes.
 - **Scope a heuristic to the population it was derived from.** A rule inferred from one wave of workers
