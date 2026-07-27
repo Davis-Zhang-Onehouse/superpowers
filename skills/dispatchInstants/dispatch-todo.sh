@@ -355,6 +355,13 @@ if [ "$NO_LAUNCH" -eq 0 ]; then
   # --permission-mode auto: dispatched workers must run autonomously (the config-dir
   # default is "manual", which stalls unattended sessions on the first tool prompt).
   tmux send-keys -t "$TMUX_SESSION" "claude --permission-mode auto --remote-control $(printf '%q' "$TMUX_SESSION") $(printf '%q' "$SEED")" Enter
+  python3 - "$RECORD" <<'PYL' 2>/dev/null || true
+import json, sys, datetime
+p = sys.argv[1]
+d = json.load(open(p))
+d["launched_at"] = datetime.datetime.now(datetime.timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+json.dump(d, open(p, "w"), indent=2, ensure_ascii=False)
+PYL
   info "  session live. Attach with:  tmux attach -t $TMUX_SESSION"
 else
   warn "  --no-launch: session NOT started. Start it later with:"

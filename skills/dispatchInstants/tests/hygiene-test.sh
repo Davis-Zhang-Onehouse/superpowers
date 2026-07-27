@@ -82,6 +82,24 @@ chk "coordinator profile is judged by coordinator rules" 0 $?
 printf 'Kind: COORDINATOR\nJust coordinate things.\n' > "$tmp/coordprof/charter.md"
 bash "$S/profile-check.sh" "$tmp/coordprof" >/dev/null 2>&1
 chk "coordinator profile with no gating requirement is flagged" 1 $?
+# RI-7: the word "coordinator" appearing LATER in a worker's Kind line must not flip the kind.
+# A kind-aware linter that silently picks the wrong kind is worse than no linter: it turns
+# "unchecked" into "checked and fine".
+mkdir -p "$tmp/tricky"
+cat > "$tmp/tricky/charter.md" <<'EOP'
+Kind: **WORKER** (one milestone). The coordinator does no dev; you do.
+AC-4: Update the M1 CATALOG.md for this gap when it is green.
+EOP
+printf 'go\n' > "$tmp/tricky/seed.txt"
+out=$(bash "$S/profile-check.sh" "$tmp/tricky" 2>&1); rc=$?
+echo "$out" | grep -q "profile kind: worker" && ok "kind anchored to the declared token" \
+  || bad "kind mis-detected: $(echo "$out" | head -1)"
+chk "worker rules actually ran (catches the catalog violation)" 1 $rc
+# an undeclared kind must default to the STRICTEST rule set, not the laxest
+printf 'No kind line here at all.\nJust do the work.\n' > "$tmp/tricky/charter.md"
+out=$(bash "$S/profile-check.sh" "$tmp/tricky" 2>&1)
+echo "$out" | grep -q "profile kind: worker" && ok "undeclared kind defaults to worker" || bad "undeclared kind not strict"
+
 # the SHIPPED profiles must themselves be clean
 for pr in ansi ansi-expose compact-ansi coord-ansi; do
   bash "$S/profile-check.sh" "$S/profiles/$pr" >/dev/null 2>&1
