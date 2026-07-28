@@ -217,13 +217,25 @@ echo "$out" | grep -qi "session still alive\|orphan" && ok "flags the live sessi
   || bad "silent about an orphaned session"
 out=$(STUB_ALIVE=1 bash "$S/dispatch-health.sh" --orphans 2>&1)
 echo "$out" | grep -q "alpha" && ok "--orphans lists it" || bad "--orphans missed it"
-# A one-sided report NUDGES a decision. Teardown is irreversible and a harvested worker's live session
-# is the cheapest way to fix a defect a LATER milestone finds in its code, in its own tree, with full
-# context. So while any worker is still running, the report must say HOLD rather than imply teardown.
-echo "$out" | grep -qiE "irreversible|context|cheapest" && ok "states the cost of teardown, not just its benefit" \
+# A one-sided report NUDGES a decision, so this report must name what teardown costs as well as what
+# it saves. It must also not repeat the budget claim it used to make: measured against two nine-day-old
+# sessions, an idle session issues no API calls at all, and that unmeasured claim is what pushed an
+# irreversible teardown that then cost a fix path.
+echo "$out" | grep -qiE "wrong-tree|context, not its history|re-leased" \
+  && ok "names what teardown costs, not only what it saves" \
   || bad "one-sided: pushes teardown without naming what it destroys"
-echo "$out" | grep -qi "still running" && ok "advises sequencing while work is in flight" \
-  || bad "no sequencing advice while a worker is running"
+echo "$out" | grep -qiE "competes for the same account-wide budget" \
+  && bad "still asserts the unmeasured budget claim" \
+  || ok "no longer asserts a cost it never measured"
+# This used to grep "still running", which the NO-workers-running branch ("no worker is still
+# running…") also matched — so the assertion passed on the opposite message and proved nothing.
+# Assert the branch that belongs to THIS scenario: nothing is running here.
+echo "$out" | grep -qi "late-discovery risk is at its lowest" \
+  && ok "with no worker running, says late-discovery risk is low" \
+  || bad "did not state the risk position for a quiet fleet"
+echo "$out" | grep -qiE "worker\(s\) still RUNNING" \
+  && bad "claims workers are running when none are" \
+  || ok "does not invent in-flight work"
 echo "$out" | grep -qi "teardown pending" && bad "header still prejudges the decision as a pending chore" \
   || ok "header does not prejudge the decision"
 # An instant that is -complete- with a live session is equally an orphan even with NO harvest marker —

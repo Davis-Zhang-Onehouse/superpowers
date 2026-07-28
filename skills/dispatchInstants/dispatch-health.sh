@@ -17,6 +17,8 @@
 # Exit:   0 = nothing needs attention   1 = something does   2 = bad input
 # Env:    BOARD_DIR, TMUX_BIN, IDLE_MIN (default 30), HEALTH_TAG (idle-baseline namespace per caller)
 set -uo pipefail
+# shellcheck source=lib/dispatch-lib.sh
+. "$(cd "$(dirname "$(readlink -f "$0" 2>/dev/null || echo "$0")")" && pwd)/lib/dispatch-lib.sh"
 
 BOARD_DIR="${BOARD_DIR:-$HOME/.claude-dispatch-board}"
 RECORDS="$BOARD_DIR/records"
@@ -96,7 +98,7 @@ for f in "$RECORDS"/*.json; do
     continue
   fi
 
-  state="RUNNING"; note=""
+  state="RUNNING"; note=""; queued_txt=""
   # Self-heal: a record with no launched_at whose session is ALIVE was obviously launched — stamp it,
   # so records predating the launched_at field stop misreporting (they cannot be re-launched to fix).
   if [ -z "$launched" ] && alive "$sess"; then
@@ -129,6 +131,11 @@ PYS
     state="DEAD"; note="session gone — reap its slot (yours only) and decide: succeed it or re-dispatch"
   else
     pane="$("$TMUX_BIN" capture-pane -p -t "$sess" 2>/dev/null | tail -60)"
+    # Text typed into the input box and never submitted. `send` was taught to PROVE delivery, but
+    # nothing ever checked the receiving end, so a swallowed Enter is silent: on 2026-07-28 three
+    # of four live panes were holding one, including an authorization a coordinator believed it had
+    # sent. Only reported once the pane is IDLE — a human mid-typing is not a stuck submit.
+    queued_txt="$(dl_pane_unsubmitted "$pane" || true)"
     if printf '%s' "$pane" | grep -qE "$MODAL_RE"; then
       state="BLOCKED"; note="waiting on a permission modal — answer only if reversible, else deny + park"
     else
@@ -205,6 +212,13 @@ PYS
     fi
   fi
 
+  # An idle pane holding unsubmitted text is a message that was never received. Actionable and
+  # cheap to fix, so it demands attention — and it clears the moment someone submits or clears it.
+  if [ "$state" = "IDLE" ] && [ -n "$queued_txt" ]; then
+    note="UNSUBMITTED text left in the input box: \"$queued_txt\" — submit it or clear it. $note"
+    need_attention=1
+  fi
+
   case "$state" in RUNNING|IDLE|BLOCKED|PARKED) active_dev=$((active_dev+1));; esac
   [ "$state" = "RUNNING" ] && running_n=$((running_n+1))
   case "$state" in DEAD|BLOCKED|IDLE|COMPLETE|PARKED) need_attention=1;; esac
@@ -231,17 +245,31 @@ if [ "$ORPHANS" = 1 ]; then
       printf '  %-46s slot %-5s %s\n' "$oid" "$oslot" "$osess"
     done
     echo
-    echo "  BOTH costs are real — this is a judgement, not a chore:"
-    echo "   · keeping them: each idle session competes for the same account-wide budget as live work."
-    echo "   · tearing down: IRREVERSIBLE. A harvested worker's session is the cheapest way to fix a defect"
-    echo "     a LATER milestone finds in its code — in its own tree, with full context, in one edit."
-    echo "     \"Harvested\" means its claims were verified, NOT that no future milestone will find a defect."
+    # This block used to assert that idle sessions compete for account-wide budget. Measured on
+    # 2026-07-28 against two nine-day-old ones: 28m of CPU across 9 days, blocked in ep_poll, no
+    # child processes, no conversational turn in the transcript for 8 days. An idle session makes
+    # no API calls. The claim was never measured, and it is what pushed an irreversible teardown.
+    echo "  What this actually costs, measured — not the budget claim this tool used to make:"
+    echo "   · tokens: none. An idle session is blocked on its event loop and issues no API calls."
+    echo "   · memory: ~0.5 GB RSS each."
+    echo "   · WRONG-TREE HAZARD (the real one): its cwd is a pool slot that may since have been"
+    echo "     re-leased and repositioned onto another effort's branch. Two live processes, one"
+    echo "     workspace — observed on ~/ws3."
+    echo "   · LIVE TRIGGER: claude-watchdog re-arms a claude-auto-retry monitor on it, which types"
+    echo "     'Continue where you left off.' + Enter on a rate-limit banner. With text queued in the"
+    echo "     input box that submits the concatenation, inside that possibly-foreign tree."
+    echo "  Teardown is RECOVERABLE: transcripts persist under ~/.claude/projects/, so closing a pane"
+    echo "  costs its loaded context, not its history (claude --resume <session-id> brings it back)."
     if [ "$running_n" -gt 0 ]; then
-      echo "   · $running_n worker(s) still RUNNING. If any of them audits earlier work (they usually do),"
-      echo "     HOLD teardown until they report — that is when a defect in a harvested worker surfaces."
+      echo "   · $running_n worker(s) still RUNNING. If any audits earlier work (they usually do), a"
+      echo "     defect in a harvested worker surfaces then — teardown is cheap to defer, so prefer"
+      echo "     sequencing it AFTER the auditing milestones report."
     else
-      echo "   · no workers are still running, so late-discovery risk is at its lowest."
+      echo "   · no worker is still running, so late-discovery risk is at its lowest right now."
     fi
+    echo
+    echo "  close one:  pdispatch close <todo-id>          (refuses a busy pane or unsubmitted input)"
+    echo "  sweep all:  pdispatch sessions --reap          (also finds sessions with NO board record)"
   fi
   exit 0
 fi
