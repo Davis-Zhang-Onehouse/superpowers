@@ -53,6 +53,14 @@ ${b}THE TOOLKIT${r}  ${d}(all on PATH via this repo's bin/)${r}
   ${g}pdispatch send${r} <todo-id> <msg>                        message a worker and VERIFY it landed.
   ${g}pdispatch launch${r} <todo-id>                            launch from the RECORDED seed (never
                                                         hand-build a launch line).
+  ${g}pdispatch close${r} <todo-id> [--force]                   the counterpart to launch: tear the
+                                                        session down, stamp closed_at, free the slot,
+                                                        disarm its auto-retry monitor. Refuses a busy
+                                                        pane or unsubmitted input in the box.
+  ${g}pdispatch sessions${r} [--reap]                           every LIVE claude session, then who the
+                                                        board says owns it: ACTIVE / FINISHED /
+                                                        UNCLAIMED. Finds strays no record mentions.
+                                                        exit 1 = a FINISHED session is past its TTL.
   ${g}pdispatch gate${r} <instant> [--harvest]                  mechanical review gate: pass/fail from
                                                         REVIEW.md. Precondition for harvesting.
   ${g}pdispatch drift${r} --handoff <f> --instants-dir <d>      registry-vs-reality drift check.
@@ -104,6 +112,8 @@ case "$cmd" in
   alive)   exec "$SKILL/dispatch-alive.sh" "$@";;
   send)    exec "$SKILL/dispatch-send.sh" "$@";;
   launch)  exec "$SKILL/dispatch-launch.sh" "$@";;
+  close)   exec "$SKILL/dispatch-close.sh" "$@";;
+  sessions) exec "$SKILL/dispatch-sessions.sh" "$@";;
   guard)   exec "$SKILL/install-branch-guard.sh" "$@";;
   ref)     exec "$SKILL/ref-guard.sh" "$@";;
   profile) exec "$SKILL/profile-check.sh" "$@";;
