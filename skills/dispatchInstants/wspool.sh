@@ -37,6 +37,18 @@ POOL_DIR="${POOL_DIR:-$HOME/.claude-ws-pool}"
 POOL_FILE="$POOL_DIR/pool"
 LEASE_DIR="$POOL_DIR/leases"
 
+# shellcheck source=lib/dispatch-lib.sh
+. "$(cd "$(dirname "$(readlink -f "$0" 2>/dev/null || echo "$0")")" && pwd)/lib/dispatch-lib.sh"
+
+# A slot is only really free if nothing is STANDING IN IT. Lease bookkeeping alone is not enough:
+# a session outlives the work it was dispatched for, so a slot can read FREE while a live process
+# still holds it as cwd. Observed 2026-07-28: ~/ws3 was re-leased and repositioned onto another
+# effort's branch while a nine-day-old worker still sat in it — two live processes, one workspace.
+# Occupancy is a physical fact; a lease file is only a claim about one.
+occupants() { # <ws path> -> pids holding it as cwd (empty if none)
+  dl_cwd_holders "$1" 2>/dev/null | tr '\n' ' ' | sed 's/ *$//'
+}
+
 c_red=$'\033[31m'; c_grn=$'\033[32m'; c_yel=$'\033[33m'; c_bold=$'\033[1m'; c_rst=$'\033[0m'
 err()  { printf '%sERROR:%s %s\n' "$c_red" "$c_rst" "$*" >&2; }
 warn() { printf '%sWARN:%s %s\n'  "$c_yel" "$c_rst" "$*" >&2; }
@@ -217,10 +229,21 @@ cmd_claim() {
 
   # Try to win a slot: attempt mkdir (the atomic gate). If it exists, it's held —
   # unless STALE, in which case reap it and retry that same slot once.
-  local ld attempt
+  local ld attempt who
   for attempt in 1 2; do
     for name in "${cands[@]}"; do
       ld="$LEASE_DIR/$name"
+      # Unleased but occupied is not free. Handing this slot out would let the claimer reposition
+      # a checkout that a live process is sitting in.
+      who="$(occupants "$(slot_path "$name")")"
+      if [ -n "$who" ]; then
+        if [ -n "$want_slot" ]; then
+          err "claim: $name is OCCUPIED — pid(s) $who hold it as cwd. Close that session first."
+          exit 3
+        fi
+        warn "skipping $name — occupied by pid(s) $who"
+        continue
+      fi
       if mkdir "$ld" 2>/dev/null; then
         # We won it. Write meta atomically-ish (single small file).
         {
@@ -252,10 +275,23 @@ cmd_claim() {
 
 cmd_release() {
   ensure_pool
-  [ "$#" -ge 1 ] || { err "release: need a slot name or path"; exit 2; }
-  local a name
-  for a in "$@"; do
+  local force=0; local -a targets=()
+  local a
+  for a in "$@"; do case "$a" in --force) force=1;; *) targets+=("$a");; esac; done
+  [ "${#targets[@]}" -ge 1 ] || { err "release: need a slot name or path"; exit 2; }
+  local name path who
+  for a in "${targets[@]}"; do
     name="$(slot_name "$a")"
+    path="$(slot_path "$name" || true)"
+    if [ -n "$path" ] && [ "$force" -eq 0 ]; then
+      who="$(occupants "$path")"
+      if [ -n "$who" ]; then
+        err "release: $name is still OCCUPIED — pid(s) $who hold $path as their cwd."
+        err "  Freeing it now lets the next claim reposition a tree somebody is standing in."
+        err "  Close the session first (pdispatch close <todo-id>), or override with --force."
+        exit 1
+      fi
+    fi
     rm -rf "${LEASE_DIR:?}/$name"
     info "released: $name"
   done

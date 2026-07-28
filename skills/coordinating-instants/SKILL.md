@@ -70,8 +70,11 @@ You are long-lived and WILL restart mid-effort. Never answer "status?" from memo
    BLOCKED (permission modal) / IDLE / COMPLETE-unharvested, so a lease is never mistaken for a heartbeat.
 2. **Parked forks** — read every live worker's HANDOFF `## Parked decision`. Decide the ones that are yours
    (see Autonomy); escalate only genuine operator-only forks.
-3. **Done → gate** (`pdispatch gate <instant> --harvest`, Phase C). **Gated → harvest** (Phase D), then
-   free the slot with `pdispatch pool release <slot>`.
+3. **Done → gate** (`pdispatch gate <instant> --harvest --record`, Phase C). **Gated → harvest** (Phase D).
+   `--record` now **closes the worker's session** as part of the same transaction and frees its slot —
+   teardown used to be a separate decision that simply never got made, and finished sessions outlived
+   their effort by nine days while holding a pool slot another worker had since been given. If you have a
+   reason to keep one alive, `--keep-session "<reason>"` records it: keeping is what needs justifying now.
 4. **Under the WIP cap → dispatch** the next READY milestone (Phase B). Check with
    **`pdispatch health --base <your-instant> --active-dev`**; at or over the cap, do not dispatch.
 5. **≥3 completed-and-harvested since the last compaction, and a slot free → compact** (Phase E).
@@ -79,6 +82,10 @@ You are long-lived and WILL restart mid-effort. Never answer "status?" from memo
    **`pdispatch lint <your-own-instant>`**. You lint every worker as part of the gate; the instant doing the
    gating is the one nobody else checks. Two coordinators in one effort gated nine workspaces all day and
    each found a format violation in their own the first time they looked. Make it a step, not a virtue.
+   Then **`pdispatch sessions --reap`** — the backstop for anything step 3 missed. It enumerates live
+   claude SESSIONS and asks the board who claims them, so it also surfaces strays no record mentions
+   (one such session sat idle for eight days, invisible to every records-first check). It never reaps a
+   session the board cannot account for.
 7. If nothing above is actionable, say so explicitly — don't manufacture work, and don't go quiet.
 
 **READY** = disposition assigned, ACs written, and its dependencies have **LANDED** (their end-state exists,
