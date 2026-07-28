@@ -244,6 +244,24 @@ import json,sys
 p=sys.argv[1]; d=json.load(open(p)); d.pop("harvested_at"); d.pop("gate_verdict"); json.dump(d,open(p,"w"))
 PYX
 
+# The WIP cap counts workers in ACTIVE DEV. A worker that has finished local validation and is only
+# waiting on GitHub CI is not consuming dev attention and must not hold a slot against the cap — but
+# it can only be excluded if it DECLARES the transition, so the declaration is a structural slot.
+printf '# H\n\nPhase: AWAITING-CI\n\n## Next\nwaiting on run 123\n' \
+  > "$tmp/child/07180102-07190000-inflight-append-alpha/HANDOFF.md"
+printf 'working\n' > "$STUB_PANE"
+out=$(STUB_ALIVE=1 bash "$S/dispatch-health.sh" 2>&1)
+echo "$out" | grep -qi "AWAITING-CI" && ok "a worker that declared AWAITING-CI reads as such" \
+  || bad "no AWAITING-CI state"
+out=$(STUB_ALIVE=1 bash "$S/dispatch-health.sh" --active-dev 2>&1)
+echo "$out" | grep -qE "0 (worker|instant)" && ok "--active-dev excludes the CI-waiter" \
+  || bad "counted a CI-waiter as active dev: $out"
+printf '# H\n\n## Next\nstill coding\n' > "$tmp/child/07180102-07190000-inflight-append-alpha/HANDOFF.md"
+out=$(STUB_ALIVE=1 bash "$S/dispatch-health.sh" --active-dev 2>&1)
+echo "$out" | grep -qE "1 (worker|instant)" && ok "--active-dev counts a working worker" || bad "count wrong: $out"
+echo "$out" | grep -qi "cap" && ok "states the cap so the number is actionable" || bad "no cap stated"
+rm -f "$tmp/child/07180102-07190000-inflight-append-alpha/HANDOFF.md"
+
 # json mode is machine-readable
 out=$(STUB_ALIVE=1 bash "$S/dispatch-health.sh" --json 2>/dev/null)
 echo "$out" | python3 -c 'import json,sys; d=json.load(sys.stdin); assert isinstance(d,(list,dict))' 2>/dev/null \
