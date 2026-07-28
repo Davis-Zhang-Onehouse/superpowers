@@ -20,6 +20,7 @@ import glob
 import json
 import os
 import re
+import subprocess
 import sys
 
 # "## Round R2 summary — overall verdict: …" is a SUMMARY, not the start of round R2. Without the
@@ -182,6 +183,44 @@ def mark_harvested(instant, res):
     return None
 
 
+def close_session(record_path, keep_reason):
+    """Close the worker's session as part of the harvest, or record why it was kept.
+
+    Harvest and teardown used to be two unrelated decisions, and the second one was simply never
+    made: sessions outlived their efforts by days. Making them one transaction inverts the default
+    so that KEEPING a finished session is the thing requiring a justification.
+
+    This never affects the gate's verdict. The gate is about the worker's ledger; a busy pane or a
+    queued message is a reason not to tear down, not a reason to fail a review that passed.
+    """
+    try:
+        d = json.load(open(record_path, encoding="utf-8"))
+    except Exception:
+        return "(unreadable record)"
+    todo = d.get("todo_id") or os.path.basename(record_path)[:-5]
+
+    if keep_reason:
+        d["keep_session_reason"] = keep_reason
+        with open(record_path, "w", encoding="utf-8") as fh:
+            json.dump(d, fh, indent=2, ensure_ascii=False)
+        return f"kept: {keep_reason}"
+
+    closer = os.path.join(os.path.dirname(os.path.abspath(__file__)),
+                          "..", "..", "dispatchInstants", "dispatch-close.sh")
+    if not os.path.exists(closer):
+        return "(dispatch-close.sh not found — session left alone)"
+    try:
+        p = subprocess.run(["bash", closer, todo, "--by", "harvest", "--quiet"],
+                           capture_output=True, text=True, timeout=60)
+    except Exception as e:
+        return f"(close failed to run: {e})"
+    if p.returncode == 0:
+        return "closed"
+    # A refusal is information, not a failure of the harvest. Say what it was so it is not silent.
+    why = (p.stderr or p.stdout or "").strip().splitlines()
+    return "NOT closed — " + (why[0] if why else f"dispatch-close exited {p.returncode}")
+
+
 def main(argv=None):
     ap = argparse.ArgumentParser(description="Mechanical review gate for a worker instant.")
     ap.add_argument("instant", help="path to the dispatched worker's instant folder")
@@ -192,6 +231,10 @@ def main(argv=None):
                     help="on a PASSING --harvest gate, persist gate_verdict + harvested_at into the "
                          "dispatch board record, so a successor coordinator inherits harvest state "
                          "mechanically instead of trusting prose")
+    ap.add_argument("--keep-session", metavar="REASON",
+                    help="do NOT close the worker's tmux session after a passing harvest, and record "
+                         "REASON on the board record. Teardown is the default because a finished "
+                         "session that nobody closes leaks: two outlived their effort by nine days.")
     ap.add_argument("--json", action="store_true", help="machine-readable output")
     a = ap.parse_args(argv)
 
@@ -201,6 +244,8 @@ def main(argv=None):
         if rc == 0 and a.harvest:
             marked = mark_harvested(a.instant, res)
             res["recorded_in"] = marked or "(no matching board record)"
+            if marked:
+                res["session"] = close_session(marked, a.keep_session)
         else:
             res["recorded_in"] = "(not recorded — gate did not pass with --harvest)"
     if a.json:
@@ -210,6 +255,8 @@ def main(argv=None):
               f"scope={res.get('scope','-')}")
         for why in res["reasons"]:
             print(f"  - {why}")
+        if "session" in res:
+            print(f"  - session: {res['session']}")
         if rc:
             print("  => do NOT mark complete / harvest.", file=sys.stderr)
     return rc
