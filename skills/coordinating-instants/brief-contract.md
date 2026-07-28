@@ -24,26 +24,31 @@ demanded them — so they are mandatory clauses, not niceties. Walk this list fo
    aggregate that raised at count==0, and an eager membership path that raised on zero input rows. Require
    the empty / zero-row / all-null inputs as explicit ACs, and require the happy path to be pinned as
    still taking the accelerated route — proving the error is raised is not proving the fast path survived.
-5. **Pipeline order + evidence location.** The non-negotiable sequence (e.g. local repro → RCA → fix → CI)
+5. **Declare AWAITING-CI when local validation is done.** The moment your local proof is green and you are
+   only waiting on GitHub CI, write `Phase: AWAITING-CI` in your HANDOFF (and remove it if you resume
+   editing). The coordinator's WIP cap counts workers in ACTIVE DEV and excludes CI-waiters — so this one
+   line is what frees a slot for the next milestone. Not declaring it holds the whole effort's throughput
+   hostage to your CI queue.
+6. **Pipeline order + evidence location.** The non-negotiable sequence (e.g. local repro → RCA → fix → CI)
    and that all artifacts land under the instant's `evidence/`, never `/tmp`.
-6. **The pinned baseline + analysis tool.** The exact baseline artifacts every worker diffs against, and the
+7. **The pinned baseline + analysis tool.** The exact baseline artifacts every worker diffs against, and the
    exact tool/variant to use — this is what makes deltas comparable ACROSS workers. Pin the lineage base too
    (the two-diff rule).
-7. **Propose-only.** The worker delivers a *proposed* registry delta; it must never edit the canonical
+8. **Propose-only.** The worker delivers a *proposed* registry delta; it must never edit the canonical
    registry. (Check the rendered charter for a profile AC that contradicts this.)
-8. **The gate.** Before renaming its folder it MUST run `superpowers:review-workspace` (all stages) on its
+9. **The gate.** Before renaming its folder it MUST run `superpowers:review-workspace` (all stages) on its
    own instant and PASS: READY, or READY-WITH-FIXES with no open Critical/Important, every AC verified on
    fresh evidence, recorded in `REVIEW.md`. No passing round = not complete.
-9. **Report-back path + rename.** "Write `<your-instant>/dispatch/<MR>-REPORT.md`: AC results with evidence
+10. **Report-back path + rename.** "Write `<your-instant>/dispatch/<MR>-REPORT.md`: AC results with evidence
    paths, branch tips, the proposed registry delta, the REVIEW verdict, and any operator forks. Then
    transition your folder `-inflight-` → `-complete-`." **These two are how you detect completion** — omit
    them and you are reduced to guessing.
-10. **Autonomy horizon + parking rule.** How long the operator is away; park ONLY a genuine operator-only
+11. **Autonomy horizon + parking rule.** How long the operator is away; park ONLY a genuine operator-only
    fork, and keep working every other unblocked step meanwhile. Tell it you will answer the forks that are
    yours to call.
-11. **Resource + build isolation.** Private per-workspace build cache/local repo; which reference checkouts
+12. **Resource + build isolation.** Private per-workspace build cache/local repo; which reference checkouts
     are shared READ-ONLY (write ⇒ worktree); anything else it must not touch.
-12. **Budget ceiling.** Expensive-run allowance (e.g. "ONE CI run") — and that a failed or stale run does not
+13. **Budget ceiling.** Expensive-run allowance (e.g. "ONE CI run") — and that a failed or stale run does not
     count as evidence: it re-spends and reports the overrun rather than lowering the bar.
 
 ## After rendering, before launching

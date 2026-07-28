@@ -10,6 +10,7 @@
 #   PARKED     parked decision AND not progressing (a parked note while still working is just a note)
 #   COMPLETE   its instant folder is renamed -complete- => awaiting YOUR gate + harvest
 #   HARVESTED  gated + harvested (recorded by `pdispatch gate --harvest --record`) — terminal history
+#   AWAITING-CI  declared local validation done, waiting on CI — excluded from the WIP cap
 #   RUNNING    working
 #
 # Usage:  dispatch-health.sh [--json] [--id <todo-id>] [--base <base-instant>] [--orphans]
@@ -26,13 +27,15 @@ IDLE_MIN="${IDLE_MIN:-30}"
 # baseline, so IDLE — and every state derived from it — flaps. Two watchers must not share one view.
 HEALTH="$BOARD_DIR/health/${HEALTH_TAG:-shared}"
 
-JSON=0; ONLY=""; ONLY_BASE=""; ORPHANS=0
+JSON=0; ONLY=""; ONLY_BASE=""; ORPHANS=0; ACTIVEDEV=0
+WIP_CAP="${WIP_CAP:-3}"
 while [ $# -gt 0 ]; do
   case "$1" in
     --json) JSON=1; shift;;
     --id)   ONLY="${2:-}"; shift 2;;
     --base) ONLY_BASE="${2:-}"; shift 2;;
     --orphans) ORPHANS=1; shift;;
+    --active-dev) ACTIVEDEV=1; shift;;
     -h|--help) sed -n '2,20p' "$0"; exit 0;;
     *) echo "unknown arg: $1" >&2; exit 2;;
   esac
@@ -74,7 +77,7 @@ resolve_instant() { # $1 = recorded child path -> echoes the CURRENT basename
 }
 
 need_attention=0
-rows=(); orphans=(); running_n=0
+rows=(); orphans=(); running_n=0; active_dev=0
 
 for f in "$RECORDS"/*.json; do
   [ -e "$f" ] || continue
@@ -141,9 +144,19 @@ PYS
     fi
   fi
 
+  # A worker that finished local validation and is only waiting on GitHub CI is not consuming dev
+  # attention, so it must not hold a slot against the WIP cap. It can only be excluded if it DECLARES
+  # the transition — hence a structural slot in its HANDOFF rather than a guess from the pane.
+  hoff="$(dirname "$child")/$cname/HANDOFF.md"
+  if [ "$state" = "RUNNING" ] || [ "$state" = "IDLE" ]; then
+    if [ -f "$hoff" ] && grep -qiE '^\**(phase|state|status)\**:?[[:space:]]*AWAITING[-[:space:]]?CI' "$hoff" 2>/dev/null; then
+      state="AWAITING-CI"
+      note="local validation done; waiting on CI — does NOT count against the WIP cap"
+    fi
+  fi
+
   # A worker blocked on a decision is the most expensive silent stall. Detect the section's
   # CONTENT, not its heading: every instant is born with an empty "## Parked decision" block.
-  hoff="$(dirname "$child")/$cname/HANDOFF.md"
   if [ -f "$hoff" ]; then
     block="$(awk '/^## +Parked decision/{f=1;next} /^## /{f=0} f' "$hoff" 2>/dev/null)"
     # A "<none>" marker means empty even when the author adds an explanatory sentence after it —
@@ -192,10 +205,21 @@ PYS
     fi
   fi
 
+  case "$state" in RUNNING|IDLE|BLOCKED|PARKED) active_dev=$((active_dev+1));; esac
   [ "$state" = "RUNNING" ] && running_n=$((running_n+1))
   case "$state" in DEAD|BLOCKED|IDLE|COMPLETE|PARKED) need_attention=1;; esac
   rows+=("$id|$state|$slot|$sess|$cname|$note")
 done
+
+if [ "$ACTIVEDEV" = 1 ]; then
+  echo "$active_dev worker(s) in ACTIVE DEV (cap $WIP_CAP) — AWAITING-CI and harvested/complete excluded"
+  if [ "$active_dev" -ge "$WIP_CAP" ]; then
+    echo "  at or over the cap: do NOT dispatch another milestone until one drains or declares AWAITING-CI"
+  else
+    echo "  room for $(( WIP_CAP - active_dev )) more"
+  fi
+  exit 0
+fi
 
 if [ "$ORPHANS" = 1 ]; then
   if [ "${#orphans[@]}" = 0 ]; then
