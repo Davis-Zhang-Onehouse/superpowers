@@ -86,6 +86,82 @@ dl_alive() { # <tmux session name>
   "$TMUX_BIN" has-session -t "$1" >/dev/null 2>&1
 }
 
+# --- rule: a COMPACTION instant is exclusive ---------------------------------
+# A compaction folds several finished branches into ONE stacked chain, and its end state becomes the
+# base every later instant builds on. Anything dispatched ALONGSIDE it is based on the pre-compaction
+# tree, so the compaction cannot fold it and it lands as the NEXT compaction's debt. Therefore: while
+# a compaction is inflight, nothing else dispatches at all.
+#
+# This is a SEPARATE rule from the WIP cap, and it deliberately does NOT live in the cap counter. A
+# compaction that has declared `Phase: AWAITING-CI` counts ZERO against the cap — it consumes no dev
+# attention — and must still block everything, because its cost is unfoldable rebase debt, not
+# attention. Folding rule 2 into rule 1 gets exactly one of those two cases wrong, whichever way you
+# fold it (see tests/wip-cap-and-compaction-exclusive.sh § independence).
+#
+# Detection needs no new metadata. The instant grammar already encodes it:
+#   <base_instant>-<curr_instant>-<state>-<opType>-<instantName>
+# so a live compaction is a sibling with <state>=inflight and <opType>=compact. The effort is scoped
+# the way every other tool here scopes it — the instants dir is `dirname <base-instant>` — rather
+# than by a second convention that would drift away from the first.
+
+# Reserved so a caller can tell this refusal from bad input (2) or a full pool (3).
+DL_RC_COMPACTION_INFLIGHT=4
+
+dl_inflight_compactions() { # <instants-dir> [<self-instant-basename>] -> names one per line; rc 0 if any
+  local dir="$1" self="${2:-}" p n rc=1
+  [ -n "$dir" ] && [ -d "$dir" ] || return 1
+  for p in "$dir"/*-inflight-compact-*; do
+    [ -d "$p" ] || continue
+    n="$(basename -- "$p")"
+    # Launching the compaction ITSELF must never be blocked by its own folder.
+    if [ -n "$self" ] && [ "$n" = "$self" ]; then continue; fi
+    printf '%s\n' "$n"
+    rc=0
+  done
+  return "$rc"
+}
+
+# The refusal, shared by EVERY dispatch entry point. `todo` and `launch` are two doors into the same
+# act, so guarding one leaves `todo --no-launch` + `launch` as a complete bypass.
+dl_compaction_guard() { # <instants-dir> <self-basename|""> <override-reason|"">  rc 0 = proceed
+  local dir="$1" self="${2:-}" reason="${3:-}" blockers
+  blockers="$(dl_inflight_compactions "$dir" "$self")" || return 0
+  if [ -n "$reason" ]; then
+    {
+      printf 'WARN: a COMPACTION instant is inflight and this dispatch was OVERRIDDEN.\n'
+      printf '%s\n' "$blockers" | while IFS= read -r n; do
+        [ -n "$n" ] && printf '  blocking compaction: %s\n' "$n"
+      done
+      printf '  reason given: %s\n' "$reason"
+      printf '  RECORD this reason in your DECISIONS register: an unrecorded override is silent rebase\n'
+      printf '  debt for whoever runs the next compaction.\n'
+    } >&2
+    return 0
+  fi
+  {
+    printf 'ERROR: refusing to dispatch — a COMPACTION instant is inflight in %s\n' "$dir"
+    printf '%s\n' "$blockers" | while IFS= read -r n; do
+      [ -n "$n" ] && printf '  blocking compaction: %s\n' "$n"
+    done
+    printf '  A compaction folds the finished branches into one stacked chain, and its end state becomes\n'
+    printf '  the base everything later builds on. Anything dispatched now is based on the PRE-compaction\n'
+    printf '  tree, so that compaction cannot fold it and it becomes the next one'\''s debt.\n'
+    printf '  Wait for the rename to -complete-compact- (the rename IS the state transition), or override:\n'
+    printf '    --allow-during-compaction "<reason>"   or   ALLOW_DISPATCH_DURING_COMPACTION="<reason>"\n'
+    printf '  and record that reason in DECISIONS.\n'
+  } >&2
+  return "$DL_RC_COMPACTION_INFLIGHT"
+}
+
+# Resolve the override reason from flag-then-env, and refuse an override with no reason at all — the
+# reason IS the mechanism (mirrors how WIP_CAP is documented as needing a reason in DECISIONS).
+dl_override_reason() { # <flag-was-passed 0|1> <flag-value> -> reason on stdout; rc 2 = passed but empty
+  local given="$1" val="${2:-}"
+  if [ "$given" = 1 ] && [ -z "$val" ]; then return 2; fi
+  [ -n "$val" ] || val="${ALLOW_DISPATCH_DURING_COMPACTION:-}"
+  printf '%s' "$val"
+}
+
 # --- pane predicates --------------------------------------------------------
 # Both are deliberately anchored to the LAST few lines. A `❯` earlier in the buffer is scrollback,
 # and treating history as current state is how a watcher re-alarms its whole past on every restart.

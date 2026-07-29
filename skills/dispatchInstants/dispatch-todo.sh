@@ -14,17 +14,23 @@
 # Usage:
 #   dispatch-todo.sh --base <base-instant> --title "<short title>" --brief <file|-> \
 #       [--golden <ws-path>] [--slot <ws>] [--evidence <ptr>]... \
-#       [--no-launch] [--no-duplicate]
+#       [--no-launch] [--no-duplicate] [--allow-during-compaction "<reason>"]
+#
+# Exit: 0 ok · 2 bad input · 3 pool full · 4 REFUSED, a compaction instant is inflight
 #
 # Env (for hermetic tests / overrides):
 #   POOL_DIR          passed through to wspool.sh
 #   WSPOOL_SH         path to wspool.sh          (default: alongside this script)
 #   DUPLICATE_WS_SH   path to duplicate-workspace.sh
 #                     (default: ../duplicateWorkSpace/duplicate-workspace.sh)
+#   ALLOW_DISPATCH_DURING_COMPACTION="<reason>"
+#                     same override as --allow-during-compaction; a reason is mandatory
 #
 set -euo pipefail
 
 SELF="$(readlink -f "$0" 2>/dev/null || echo "$0")"; HERE="$(cd "$(dirname "$SELF")" && pwd)"
+# shellcheck source=lib/dispatch-lib.sh
+. "$HERE/lib/dispatch-lib.sh"
 WSPOOL_SH="${WSPOOL_SH:-$HERE/wspool.sh}"
 # Resolve duplicate-workspace.sh (repo-self-contained): env override → repo sibling skill
 # → on PATH. No machine-specific paths, so a fresh checkout works anywhere.
@@ -65,6 +71,7 @@ PY
 
 # ---- args -------------------------------------------------------------------
 BASE="" TITLE="" BRIEF="" GOLDEN="" SLOT="" PROFILE="" NO_LAUNCH=0 NO_DUP=0 LINEAGE_BASE=""
+ALLOW_COMPACT=0 ALLOW_COMPACT_REASON=""
 declare -a EVIDENCE=()
 while [ "$#" -gt 0 ]; do
   case "$1" in
@@ -78,7 +85,8 @@ while [ "$#" -gt 0 ]; do
     --no-launch)   NO_LAUNCH=1; shift;;
     --lineage-base) LINEAGE_BASE="$2"; shift 2;;
     --no-duplicate) NO_DUP=1; shift;;
-    -h|--help)     sed -n '2,32p' "$0" | sed 's/^# \{0,1\}//'; exit 0;;
+    --allow-during-compaction) ALLOW_COMPACT=1; ALLOW_COMPACT_REASON="${2:-}"; shift 2;;
+    -h|--help)     sed -n '2,29p' "$0" | sed 's/^# \{0,1\}//'; exit 0;;
     *) err "unknown arg: $1"; exit 2;;
   esac
 done
@@ -90,6 +98,16 @@ BASE="$(realpath -m -- "$BASE")"
 [ -f "$BASE/HANDOFF.md" ] && [ -f "$BASE/CHARTER.md" ] \
   || { err "--base does not look like a maintain-workspace instant (needs HANDOFF.md + CHARTER.md): $BASE"; exit 2; }
 [ -x "$WSPOOL_SH" ] || { err "wspool.sh not found/executable at $WSPOOL_SH"; exit 2; }
+
+# ---- a compaction instant is EXCLUSIVE (see dl_compaction_guard) ------------
+# Fired here, the earliest point at which the effort is known and BEFORE any side effect: no lease
+# claimed, no golden duplicated, no child instant forked, no record written, no rollback needed.
+if ! ALLOW_COMPACT_REASON="$(dl_override_reason "$ALLOW_COMPACT" "$ALLOW_COMPACT_REASON")"; then
+  err "--allow-during-compaction requires a REASON: --allow-during-compaction \"<why this cannot wait>\""
+  err "  the reason is the mechanism — record it in your DECISIONS register too"
+  exit 2
+fi
+dl_compaction_guard "$(dirname -- "$BASE")" "" "$ALLOW_COMPACT_REASON" || exit $?
 
 # golden: explicit, else pool default file, else error
 if [ -z "$GOLDEN" ]; then

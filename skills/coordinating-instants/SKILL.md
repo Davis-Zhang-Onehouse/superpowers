@@ -75,8 +75,10 @@ You are long-lived and WILL restart mid-effort. Never answer "status?" from memo
    teardown used to be a separate decision that simply never got made, and finished sessions outlived
    their effort by nine days while holding a pool slot another worker had since been given. If you have a
    reason to keep one alive, `--keep-session "<reason>"` records it: keeping is what needs justifying now.
-4. **Under the WIP cap → dispatch** the next READY milestone (Phase B). Check with
-   **`pdispatch health --base <your-instant> --active-dev`**; at or over the cap, do not dispatch.
+4. **Under the WIP cap AND no compaction inflight → dispatch** the next READY milestone (Phase B). Check the
+   cap with **`pdispatch health --base <your-instant> --active-dev`**; at or over it, do not dispatch. The
+   compaction gate is separate and enforced for you — `pdispatch todo`/`launch` exit 4 while a
+   `*-inflight-compact-*` sibling exists, even when the cap says you have room.
 5. **≥3 completed-and-harvested since the last compaction, and a slot free → compact** (Phase E).
 6. **Registry, including YOUR OWN** — `pdispatch drift` to reconcile the tables, and
    **`pdispatch lint <your-own-instant>`**. You lint every worker as part of the gate; the instant doing the
@@ -118,6 +120,24 @@ YOU; if none does, the honest move is to derive your own number and add a row, n
 | "fill every eligible free slot; concurrency caps are a load heuristic" | before 2026-07-28 | an effort where an **idle slot was the failure mode** — throughput was the scarce thing |
 | at most **3** in active dev | 2026-07-28 ([`18d10e5`](https://github.com/Davis-Zhang-Onehouse/superpowers/commit/18d10e5)) | operator: capacity is not the constraint, **attention** is |
 | at most **1** in active dev | 2026-07-29 | operator directive — the same reasoning taken to its end: one gate, one harvest, one parked fork at a time |
+
+## A compaction instant is EXCLUSIVE — while one is inflight, nothing dispatches
+
+This is a **second, independent rule**, not a tightening of the WIP cap. A compaction folds several finished
+branches into one stacked chain, and its end state becomes the base every later instant builds on. Anything
+dispatched *alongside* it is based on the pre-compaction tree, so that compaction cannot fold it and it
+becomes the **next** compaction's debt. So while a compaction is inflight, **nothing else dispatches at all.**
+
+Keep the two rules apart in your head, because they come apart in practice: a compaction that has declared
+`Phase: AWAITING-CI` counts **zero** against the WIP cap — it consumes no dev attention — and still blocks
+every dispatch, because its cost is unfoldable rebase debt rather than attention. "The cap says I have room"
+is therefore not an answer to "may I dispatch?".
+
+`pdispatch todo` and `pdispatch launch` both **refuse with exit 4** while a sibling `*-inflight-compact-*`
+instant exists in the effort's instants directory, and the refusal names it. The rename to
+`*-complete-compact-*` is what clears it — the rename IS the state transition. To dispatch anyway:
+`--allow-during-compaction "<reason>"` (or `ALLOW_DISPATCH_DURING_COMPACTION="<reason>"`); a reason is
+mandatory and belongs in DECISIONS, exactly like a `WIP_CAP` override.
 
 ## Phase A — Charter & sequence (once)
 
@@ -195,9 +215,16 @@ folded in, from which instants, merged AC proof, reconciled evidence index) — 
 next instant inherits delivered progress by reading ONE document.
 
 A new instant's **base = the end-state it inherits** (normally the latest gated compaction) — record it in
-the lineage tracker. **While a compaction is in flight**, new dispatches base on the pre-compaction latest
-completed end-state and are marked `restack-pending`; the next compaction must fold them. Never base a
-dispatch on an ungated or in-flight compaction. Don't stall the pipeline to compact.
+the lineage tracker. **While a compaction is in flight, you dispatch NOTHING** (see "A compaction instant is
+EXCLUSIVE"); `pdispatch todo` and `pdispatch launch` enforce it with exit 4. Never base a dispatch on an
+ungated or in-flight compaction. Compact promptly so the pipeline is not stalled for long — but a stalled
+pipeline is the cheaper of the two failures.
+
+> **HISTORICAL (superseded 2026-07-29, operator directive):** this paragraph used to read *"while a
+> compaction is in flight, new dispatches base on the pre-compaction latest completed end-state and are
+> marked `restack-pending`; the next compaction must fold them. Don't stall the pipeline to compact."*
+> That is the debt-accepting policy the exclusivity rule replaced: `restack-pending` work is precisely
+> what the compaction cannot fold, so it survives as the next compaction's debt.
 
 ## Phase F — Stop (defined endgame)
 
@@ -270,6 +297,7 @@ earliest and least-reviewed work permanently carries the weakest guarantees.
 | "I'll fire the workers fast and check the charters later." | A mis-seeded worker burns a slot producing confidently-wrong output. All seven checks, per worker, before launch. |
 | "I'm heads-down; I'll check the fleet when the operator asks." | Stale status and unharvested work are your failure. Run the tick. |
 | "A slot is free, so I should fill it." | Free capacity is not the trigger — the WIP cap is. At 1 in active dev you dispatch nothing, however many slots are idle. |
+| "The cap says I have room, so I may dispatch." | The cap is one of two gates. A compaction inflight blocks everything, even at zero active dev — `pdispatch todo` exits 4. Two rules, not one. |
 | "I'll note it as open and owned by the coordinator, and wind down." | You ARE the coordinator. At wind-down that is an orphan nobody will run. Fix it, park it for the operator by name, or hand it to a named successor. |
 | "That dimension flaked, but it's behaviourally identical — carry it over." | A flaked run is not evidence. Carry-over is an ASSUMPTION with a re-prove condition, or an open AC. |
 | "This is feature dev but there's a do-not-commit reflex." | It's feature dev — cut branches, open PRs freely. Only *merging* is operator-only. |
