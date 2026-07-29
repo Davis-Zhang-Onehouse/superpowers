@@ -249,6 +249,29 @@ w=$(mkw inst-nodir); rmdir "$w/plans"
 python3 "$T/workspace-lint.py" "$w" >/dev/null 2>&1; chk "a missing canonical dir is a violation" 1 $?
 w=$(mkw inst-noidx); rm "$w/evidence/INDEX.md"
 python3 "$T/workspace-lint.py" "$w" >/dev/null 2>&1; chk "unindexed evidence is a violation" 1 $?
+# L-8: the grammar's <opType> field had a PRODUCER that never populated it and, until the compaction
+# guard, no consumer at all — so nothing ever checked that a `-compact-` instant carries the
+# `COMPACTED.md` that maintain-workspace calls compact-ONLY. The lint listed COMPACTED.md as
+# universally optional and never looked at the folder name, so both halves of the pairing were
+# unenforced in both directions.
+w=$(mkw main-07290100-inflight-compact-foldTheStack)
+python3 "$T/workspace-lint.py" "$w" >/dev/null 2>&1
+chk "a -compact- instant with NO COMPACTED.md is a violation" 1 $?
+out=$(python3 "$T/workspace-lint.py" "$w" 2>&1)
+echo "$out" | grep -q "COMPACTED.md" && ok "names COMPACTED.md as the missing file" || bad "did not name it: $out"
+printf '# COMPACTED\nUpdated: 2026-01-01 | Status: DURABLE\n' > "$w/COMPACTED.md"
+python3 "$T/workspace-lint.py" "$w" >/dev/null 2>&1
+chk "…and passes once COMPACTED.md is present" 0 $?
+# The other direction must stay quiet: COMPACTED.md is compact-only, so an -append- instant that
+# lacks it is correct, not deficient. Making it a violation everywhere would fail every instant.
+w=$(mkw 07290000-07290200-inflight-append-ordinaryMilestone)
+python3 "$T/workspace-lint.py" "$w" >/dev/null 2>&1
+chk "an -append- instant with no COMPACTED.md is still clean" 0 $?
+# A directory whose name is not the 5-field grammar at all must not be judged as either.
+w=$(mkw someHandMadeFolder)
+python3 "$T/workspace-lint.py" "$w" >/dev/null 2>&1
+chk "a non-grammar folder name is not treated as a compact" 0 $?
+
 w=$(mkw inst-nohdr); printf '# ISSUES\nno header here\n' > "$w/ISSUES.md"
 out=$(python3 "$T/workspace-lint.py" "$w" 2>&1); rc=$?
 chk "a canonical file with no Updated/Status header is a violation" 1 $rc

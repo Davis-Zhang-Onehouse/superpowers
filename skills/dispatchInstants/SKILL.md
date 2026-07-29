@@ -60,7 +60,7 @@ Select one with `--profile <name|path>`; a profile is **REQUIRED** (no silent de
 `~/.claude-ws-pool/profile`. The shipped `ansi` profile carries the Gluten-Velox
 ANSI-gap pipeline; copy it to `profiles/<your-effort>/` (or anywhere) to make your
 own effort's profile without touching the script.
-Exit 3 = pool full (enroll a slot or wait). **Exit 4 = REFUSED: a compaction instant is inflight in this effort** — while a `*-inflight-compact-*` sibling exists, `todo` and `launch` both refuse and name it (see coordinating-instants § *A compaction instant is EXCLUSIVE*, including its KNOWN GAP). Override with `--allow-during-compaction "<reason>"`; the reason is mandatory and belongs in DECISIONS. On success it prints the child instant, the leased ws,
+Exit 3 = pool full (enroll a slot or wait). **Exit 4 = REFUSED: a compaction instant is inflight in this effort** — while a `*-inflight-compact-*` sibling exists, `todo` and `launch` both refuse and name it (see coordinating-instants § *A compaction instant is EXCLUSIVE*). Dispatch a compaction with **`--optype compact`** so the guard can see it — the `<opType>` field is what it reads. Override with `--allow-during-compaction "<reason>"`; the reason is mandatory and belongs in DECISIONS. On success it prints the child instant, the leased ws,
 and `tmux attach -t dt-<id>`.
 
 ### MANDATORY pre-flight — READ the profile before you pick it
