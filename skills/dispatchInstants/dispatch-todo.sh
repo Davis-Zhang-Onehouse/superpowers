@@ -95,9 +95,10 @@ while [ "$#" -gt 0 ]; do
     --allow-during-compaction) dl_need_arg "$1" $# || exit 2
                                ALLOW_COMPACT=1; ALLOW_COMPACT_REASON="$2"; shift 2;;
     --optype)      dl_need_arg "$1" $# || exit 2; OPTYPE="$2"; shift 2;;
-    # Print the header COMMENT BLOCK, however long it is. A hardcoded line range was wrong twice
-    # (it spilled `set -euo pipefail` and the code below it, then drifted again when the header
-    # grew) — so stop at the first non-comment line instead of counting.
+    # Print the header comment block, stopping at the FIRST NON-COMMENT LINE — so do not put a
+    # blank separator line inside the header, or help truncates there silently. A hardcoded line
+    # range was wrong twice (it spilled `set -euo pipefail` and the code below it, then drifted
+    # again when the header grew), which is why this counts nothing.
     -h|--help)     awk 'NR==1{next} /^#/{sub(/^# ?/,""); print; next} {exit}' "$0"; exit 0;;
     *) err "unknown arg: $1"; exit 2;;
   esac

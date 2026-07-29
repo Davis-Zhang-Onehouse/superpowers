@@ -280,6 +280,19 @@ chk "an empty ALLOW_DISPATCH_DURING_COMPACTION is bad input (rc=2)" 2 $rc
 echo "$out" | grep -qiE "requires a reason" && ok "and says a reason is required" \
   || bad "empty env var fell through to the generic refusal: $out"
 
+echo "== --help prints usage, not source code =="
+# Twice now a hardcoded `sed` line range has spilled `set -euo pipefail` and the code after it into
+# --help (OI-7, then again when the header grew). Nothing in this repo ever asserted otherwise:
+# `grep -rn -- "--help" skills/*/tests/` returned nothing. An untested fix to a twice-broken line is
+# the pattern this effort exists to stop, so the third fix gets an assertion.
+for tool in dispatch-todo dispatch-health; do
+  h="$(bash "$S/$tool.sh" --help 2>&1)"
+  printf '%s' "$h" | grep -qE '^\s*(set -[eu]|SELF=|BOARD_DIR=|WSPOOL_SH=)' \
+    && bad "$tool --help spills source code" || ok "$tool --help prints no source code"
+  printf '%s' "$h" | grep -q "$tool.sh" && ok "$tool --help still describes the tool" \
+    || bad "$tool --help lost its usage text"
+done
+
 echo "== --optype: dispatch-todo can finally WRITE the field the guard READS (OI-1) =="
 # The whole point of OI-1: the grammar has an <opType> field, the guard reads it, and the only tool
 # that creates instants could not write it — so the guard was inert against every compaction the
@@ -310,6 +323,11 @@ mv "$COMPACT_DONE" "$COMPACT_IN"
 echo "== --optype: the default is unchanged, and a bad value is refused =="
 # Default must stay `append`: every existing caller passes no --optype, and a silent change of the
 # opType for ordinary milestones would make each of them look like a compaction to the guard.
+# Assert the fixture this section needs, rather than inheriting it silently from the section above:
+# dispatch-todo refuses a duplicate child name and NOW has minute granularity, so a reordering that
+# let two same-titled dispatches land in one minute would surface as a baffling rc=2.
+[ -d "$COMPACT_IN" ] && ok "(precondition) the compaction blocker is inflight for this section" \
+  || bad "(precondition) fixture wrong: $COMPACT_IN is not present"
 # A compaction is inflight again at this point, so the override is needed just to reach the code
 # under test — the assertion below is about the child's NAME, not about the guard.
 out=$(ALLOW_DISPATCH_DURING_COMPACTION="checking the default opType" todo "Ordinary Milestone"); rc=$?

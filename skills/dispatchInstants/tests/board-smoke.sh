@@ -39,8 +39,8 @@ printf '# H\n' > "$BASE/HANDOFF.md"; printf '# C\n' > "$BASE/CHARTER.md"
 BASE2="$ROOT/tasks/effB/main-07160000-inflight-append-otherBase"; mkdir -p "$BASE2"
 printf '# H\n' > "$BASE2/HANDOFF.md"; printf '# C\n' > "$BASE2/CHARTER.md"
 G="$ROOT/wsG"; mkdir -p "$G"
-A="$ROOT/wsA"; B="$ROOT/wsB"; C="$ROOT/wsC"; mkdir -p "$A" "$B" "$C"
-"$SKILL"/wspool.sh add "$A" "$B" "$C" >/dev/null
+A="$ROOT/wsA"; B="$ROOT/wsB"; C="$ROOT/wsC"; D="$ROOT/wsD"; mkdir -p "$A" "$B" "$C" "$D"
+"$SKILL"/wspool.sh add "$A" "$B" "$C" "$D" >/dev/null
 
 echo "== dispatch two TODOs on BASE + one on BASE2 (--no-launch) =="
 c1out="$("$SKILL"/dispatch-todo.sh --base "$BASE"  --title "gap alpha" --brief - --profile ansi --golden "$G" --no-launch <<<"brief alpha")"
@@ -114,6 +114,29 @@ has "summary calls out parked" "need you" "$BRD"
 park_ct=$(grep -c '🅿 PARKED' "$BRD"); check "exactly one parked row" "$park_ct" "1"
 has "summary: 1 complete" "✅ 1 complete" "$BRD"
 has "summary: 1 parked" "🅿 1 parked" "$BRD"
+
+echo "== a COMPACTION child (--optype compact) must be locatable, not reported (missing) =="
+# current_child() reconstructs the child path by globbing <f1>-<f2>-*-<opType>-<f5>. The opType was
+# hardcoded `-append-`, which was harmless only while dispatch-todo could not produce anything else.
+# `--optype compact` makes it reachable, and Phase E MANDATES that flow — so the board would report
+# every properly-dispatched compaction as gone/(missing) from the moment it was dispatched, and the
+# coordinator's tick reconciles against exactly this board. Found by the R2 code review after the
+# L-8 sweep missed it: the sweep asked which FIELD each parser reads, never which parsers hardcode
+# a VALUE of that field.
+"$SKILL"/dispatch-todo.sh --base "$BASE" --title "Fold The Stack" --brief - --profile ansi \
+   --golden "$G" --optype compact --no-launch <<<"fold the finished branches" >/dev/null 2>&1
+CC="$(ls -d "$(dirname "$BASE")"/*-inflight-compact-foldTheStack 2>/dev/null | head -1)"
+if [ -n "$CC" ]; then
+  "$SKILL"/dispatch-board.sh >/dev/null
+  has "the compact child's real path is on the board" "$CC" "$BRD"
+  hasnt "the compact child is NOT reported missing" "(missing)" "$BRD"
+  # and it must still follow a state rename, exactly as an -append- child does
+  CCc="${CC/-inflight-/-complete-}"; mv "$CC" "$CCc"
+  "$SKILL"/dispatch-board.sh >/dev/null
+  has "compact child located after its state rename" "$CCc" "$BRD"
+else
+  echo "  XX: --optype compact produced no child — cannot test board resolution"; FAILED=1
+fi
 
 echo
 if [ "$FAILED" -eq 0 ]; then echo "PASS: dispatch-board AC-3 (global, grouped, deprecation + fallback-dedup, rename-tracking)"; exit 0
