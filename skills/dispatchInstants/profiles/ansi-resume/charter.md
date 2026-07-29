@@ -124,6 +124,11 @@ raise — it breaks queries that work today.** So, whenever your change makes so
       **named, bounded (which configs / which inputs), and recorded in your catalog delta**, never left silent.
 
 ### AC-4 CI + the TWO-DIFF non-regression rule
+- [ ] **DECLARE `Phase: AWAITING-CI` IN YOUR HANDOFF the moment local validation is done and you are only
+      waiting on GitHub CI** — and clear it when the run lands. This is not bookkeeping: the coordinator holds a
+      **WIP cap of 1 worker in ACTIVE DEV**, and `pdispatch health --active-dev` **excludes** AWAITING-CI. If
+      you sit on a finished local tree without declaring it, you occupy a dev slot nobody can use while you do
+      nothing but poll a URL. Declare it, then keep polling.
 - [ ] One effective GitHub CI run (Velox Backend ANSI Mode) on your pushed tip. **Truth = the downloaded
       surefire XMLs** — jobs run `--fail-never` and ALWAYS look green. Never cite the checkmark.
 - [ ] `get-velox.sh` must point at YOUR velox branch if you changed velox; otherwise leave the `-final` pin.
