@@ -42,7 +42,8 @@ while [ $# -gt 0 ]; do
     --base) ONLY_BASE="${2:-}"; shift 2;;
     --orphans) ORPHANS=1; shift;;
     --active-dev) ACTIVEDEV=1; shift;;
-    -h|--help) sed -n '2,20p' "$0"; exit 0;;
+    # Stop at the last header COMMENT line (19); 20 is `set -uo pipefail`.
+    -h|--help) sed -n '2,19p' "$0"; exit 0;;
     *) echo "unknown arg: $1" >&2; exit 2;;
   esac
 done

@@ -123,6 +123,8 @@ dl_inflight_compactions() { # <instants-dir> [<self-instant-basename>] -> names 
 
 # The refusal, shared by EVERY dispatch entry point. `todo` and `launch` are two doors into the same
 # act, so guarding one leaves `todo --no-launch` + `launch` as a complete bypass.
+# Returns non-zero by design, so every caller must suspend errexit at the call site
+# (`dl_compaction_guard ... || exit $?`), never call it bare under `set -e`.
 dl_compaction_guard() { # <instants-dir> <self-basename|""> <override-reason|"">  rc 0 = proceed
   local dir="$1" self="${2:-}" reason="${3:-}" blockers
   blockers="$(dl_inflight_compactions "$dir" "$self")" || return 0
@@ -130,7 +132,7 @@ dl_compaction_guard() { # <instants-dir> <self-basename|""> <override-reason|"">
     {
       printf 'WARN: a COMPACTION instant is inflight and this dispatch was OVERRIDDEN.\n'
       printf '%s\n' "$blockers" | while IFS= read -r n; do
-        [ -n "$n" ] && printf '  blocking compaction: %s\n' "$n"
+        if [ -n "$n" ]; then printf '  blocking compaction: %s\n' "$n"; fi
       done
       printf '  reason given: %s\n' "$reason"
       printf '  RECORD this reason in your DECISIONS register: an unrecorded override is silent rebase\n'
@@ -141,7 +143,7 @@ dl_compaction_guard() { # <instants-dir> <self-basename|""> <override-reason|"">
   {
     printf 'ERROR: refusing to dispatch — a COMPACTION instant is inflight in %s\n' "$dir"
     printf '%s\n' "$blockers" | while IFS= read -r n; do
-      [ -n "$n" ] && printf '  blocking compaction: %s\n' "$n"
+      if [ -n "$n" ]; then printf '  blocking compaction: %s\n' "$n"; fi
     done
     printf '  A compaction folds the finished branches into one stacked chain, and its end state becomes\n'
     printf '  the base everything later builds on. Anything dispatched now is based on the PRE-compaction\n'
@@ -155,11 +157,32 @@ dl_compaction_guard() { # <instants-dir> <self-basename|""> <override-reason|"">
 
 # Resolve the override reason from flag-then-env, and refuse an override with no reason at all — the
 # reason IS the mechanism (mirrors how WIP_CAP is documented as needing a reason in DECISIONS).
-dl_override_reason() { # <flag-was-passed 0|1> <flag-value> -> reason on stdout; rc 2 = passed but empty
+dl_override_reason() { # <flag-was-passed 0|1> <flag-value> -> reason on stdout; rc 2 = given but empty
   local given="$1" val="${2:-}"
-  if [ "$given" = 1 ] && [ -z "$val" ]; then return 2; fi
-  [ -n "$val" ] || val="${ALLOW_DISPATCH_DURING_COMPACTION:-}"
-  printf '%s' "$val"
+  if [ "$given" = 1 ]; then
+    [ -n "$val" ] || return 2
+    printf '%s' "$val"; return 0
+  fi
+  # A SET-BUT-EMPTY env var is an operator error too, and must not fall through to the ordinary
+  # refusal — that refusal's remedy is "set ALLOW_DISPATCH_DURING_COMPACTION", which they just did.
+  # Telling someone to do the thing they already did sends them in a circle. `+set` distinguishes
+  # set-to-empty from unset; `:-` cannot.
+  if [ -n "${ALLOW_DISPATCH_DURING_COMPACTION+set}" ] && [ -z "$ALLOW_DISPATCH_DURING_COMPACTION" ]; then
+    return 2
+  fi
+  printf '%s' "${ALLOW_DISPATCH_DURING_COMPACTION:-}"
+}
+
+# A flag passed as the LAST argument has no value, and `shift 2` then shifts nothing and returns 1:
+# under `set -uo pipefail` the arg loop spins forever, under `set -euo pipefail` the script dies with
+# a bare rc=1. "Operator forgot the reason" is the most likely way an override is mistyped, so it
+# must produce a message, not a hang.
+dl_need_arg() { # <flag-name> <remaining $#>  rc 2 if there is no value after the flag
+  if [ "${2:-0}" -lt 2 ]; then
+    printf '%s requires a value, but it was the last argument with nothing after it\n' "$1" >&2
+    return 2
+  fi
+  return 0
 }
 
 # --- pane predicates --------------------------------------------------------

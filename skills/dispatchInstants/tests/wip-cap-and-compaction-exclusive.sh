@@ -61,7 +61,7 @@ mkdir -p "$tmp/golden" "$tmp/prof"
 printf 'CHARTER for {{TITLE}}\n{{BRIEF}}\n' > "$tmp/prof/charter.md"
 printf 'seed for {{TITLE}}\n'               > "$tmp/prof/seed.txt"
 printf 'do the thing\n'                     > "$tmp/brief.md"
-for n in 1 2 3 4 5; do mkdir -p "$tmp/ws$n"; bash "$S/wspool.sh" add "$tmp/ws$n" >/dev/null 2>&1; done
+for n in 1 2 3 4 5 6 7 8; do mkdir -p "$tmp/ws$n"; bash "$S/wspool.sh" add "$tmp/ws$n" >/dev/null 2>&1; done
 
 todo(){ # todo <title> [extra args...] -> runs a dispatch that needs no golden clone
   local title="$1"; shift
@@ -190,6 +190,45 @@ echo "$out" | grep -q "main-07290100-inflight-compact-foldTheStack" \
   && ok "(b) and still names it" || bad "(b) blocked without naming the blocker: $out"
 
 # =============================================================================
+echo "== W2-2: detection is the opTYPE FIELD, not the word \"compact\" in a name =="
+# D-3 rejected substring matching as the label-instead-of-the-thing error, and OI-1's open remedy
+# list contains exactly that temptation: broadening the glob to *ompact* would close the gap and
+# keep every other assertion green. This case is the only thing that makes that rejection durable.
+# It is not hypothetical — a real live instant is named `…-inflight-append-ansiFinalCompactionAndCloseout`.
+# The REAL compaction must be out of the way, or a rc=4 here would come from it and this case would
+# prove nothing. Complete it for the duration, then put it back for the override cases.
+mv "$COMPACT_IN" "$COMPACT_DONE"
+decoy="$EFFORT/07290000-07290400-inflight-append-ansiFinalCompactionAndCloseout"
+mkdir -p "$decoy"
+out=$(todo "Not Blocked By A Mere Name"); rc=$?
+chk "an -append- instant with 'Compaction' in its NAME does not block (rc=0)" 0 $rc
+echo "$out" | grep -q "ansiFinalCompactionAndCloseout" \
+  && bad "matched a compaction by NAME — that is the label, not the thing (D-3)" \
+  || ok "never mentions the decoy: detection reads <opType>, not the name"
+rm -rf "$decoy"
+mv "$COMPACT_DONE" "$COMPACT_IN"
+
+# The independence section wiped the board (only_record), so re-create the launch fixture.
+rec pending "$WORKER" dt-pending
+
+echo "== both entry points reject a flag passed with no value at all =="
+# `shift 2` on a trailing flag shifts nothing and returns 1. Under `set -uo pipefail` (launch) the
+# arg loop then spins FOREVER; under `set -euo pipefail` (todo) the script dies with a bare rc=1 and
+# no message. "The operator forgot the reason" is the likeliest way an override is ever mistyped,
+# so it has to produce a diagnostic, not a hang. Guarded with `timeout` so a regression fails the
+# suite in 5s instead of wedging CI.
+out=$(timeout 5 bash "$S/dispatch-todo.sh" --base "$BASEI" --profile "$tmp/prof" --title T \
+        --brief "$tmp/brief.md" --golden "$tmp/golden" --no-launch --no-duplicate \
+        --allow-during-compaction 2>&1); rc=$?
+chk "todo: trailing --allow-during-compaction exits 2 (not a silent rc=1)" 2 $rc
+echo "$out" | grep -qi "requires a value" && ok "todo: says the flag was left without a value" \
+  || bad "todo: no diagnostic for the trailing flag: $out"
+out=$(timeout 5 bash "$S/dispatch-launch.sh" pending --allow-during-compaction 2>&1); rc=$?
+chk "launch: trailing --allow-during-compaction exits 2 (124 would mean it hung)" 2 $rc
+out=$(timeout 5 bash "$S/dispatch-launch.sh" pending --seed-file 2>&1); rc=$?
+chk "launch: trailing --seed-file exits 2 too (same shape, one line away)" 2 $rc
+
+# =============================================================================
 echo "== W2-2: the override exists, and costs you a stated reason =="
 # Mirrors how WIP_CAP is documented: overridable, but only with a reason recorded in DECISIONS.
 # NOTE: the env assignment is confined to this command substitution's subshell, so it cannot leak
@@ -214,6 +253,39 @@ out=$(todo "Override With No Reason" --allow-during-compaction ""); rc=$?
 chk "an override with an EMPTY reason is rejected as bad input (rc=2), not treated as 'no override'" 2 $rc
 echo "$out" | grep -qiE "requires a reason" && ok "says, in those words, that a reason is required" \
   || bad "refusal does not state that the flag needs a reason: $out"
+
+echo "== the override works through dispatch-launch too, not just dispatch-todo =="
+# D-1's whole rationale is that a previous effort shipped four defects that were "the same fix
+# applied in one place and not the adjacent one". Testing the override only through `todo` leaves
+# the adjacent copy — the one where the trailing-flag hang lived — completely uncovered.
+: > "$STUB_LOG"
+out=$(ALLOW_DISPATCH_DURING_COMPACTION="env override on the launch side" \
+        STUB_ALIVE=0 bash "$S/dispatch-launch.sh" pending 2>&1); rc=$?
+chk "launch: the env override lets a justified launch through (rc=0)" 0 $rc
+echo "$out" | grep -q "env override on the launch side" && ok "launch: echoes the reason" \
+  || bad "launch: override reason lost: $out"
+: > "$STUB_LOG"
+out=$(STUB_ALIVE=0 bash "$S/dispatch-launch.sh" pending --allow-during-compaction "flag override on the launch side" 2>&1); rc=$?
+chk "launch: the --allow-during-compaction flag works (rc=0)" 0 $rc
+out=$(STUB_ALIVE=0 bash "$S/dispatch-launch.sh" pending --allow-during-compaction "" 2>&1); rc=$?
+chk "launch: an override with an EMPTY reason is bad input (rc=2), not a policy refusal (4)" 2 $rc
+echo "$out" | grep -qiE "requires a reason" && ok "launch: says a reason is required" \
+  || bad "launch: unclear refusal: $out"
+
+echo "== a SET-BUT-EMPTY env override is diagnosed, not silently ignored =="
+# Falling through to the ordinary refusal would answer "set ALLOW_DISPATCH_DURING_COMPACTION" to
+# someone who just set it — a remedy that sends them in a circle.
+out=$(ALLOW_DISPATCH_DURING_COMPACTION="" todo "Empty Env Override"); rc=$?
+chk "an empty ALLOW_DISPATCH_DURING_COMPACTION is bad input (rc=2)" 2 $rc
+echo "$out" | grep -qiE "requires a reason" && ok "and says a reason is required" \
+  || bad "empty env var fell through to the generic refusal: $out"
+
+echo "== the guard is STILL ARMED at the end of the run =="
+# Every override case above expects success, so a future refactor that hoisted the env assignment
+# out of its command substitution would disable the guard for the whole tail of the suite and
+# nothing would notice. This re-asserts the default from the same fixture, last.
+out=$(todo "Guard Still Armed"); rc=$?
+chk "with no override in the environment, the compaction still refuses (rc=4)" 4 $rc
 
 if [ $fail = 0 ]; then echo "PASS"; else echo "FAIL"; fi
 exit $fail
