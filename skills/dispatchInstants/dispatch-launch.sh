@@ -7,22 +7,26 @@
 # starts on a mangled prompt. This replays the recorded seed with proper quoting instead, so
 # no launch line is ever hand-built.
 #
-# Usage:  dispatch-launch.sh <todo-id> [--force] [--seed-file <f>]
+# Usage:  dispatch-launch.sh <todo-id> [--force] [--seed-file <f>] [--allow-during-compaction "<reason>"]
 # Exit:   0 = launched + verified   1 = already running / could not verify   2 = bad input
-# Env:    BOARD_DIR, TMUX_BIN, LAUNCH_WAIT (default 3)
+#         4 = REFUSED, a compaction instant is inflight
+# Env:    BOARD_DIR, TMUX_BIN, LAUNCH_WAIT (default 3), ALLOW_DISPATCH_DURING_COMPACTION="<reason>"
 set -uo pipefail
+# shellcheck source=lib/dispatch-lib.sh
+. "$(cd "$(dirname "$(readlink -f "$0" 2>/dev/null || echo "$0")")" && pwd)/lib/dispatch-lib.sh"
 
 BOARD_DIR="${BOARD_DIR:-$HOME/.claude-dispatch-board}"
 TMUX_BIN="${TMUX_BIN:-tmux}"
 WAIT="${LAUNCH_WAIT:-3}"
-FORCE=0; SEED_FILE=""
+FORCE=0; SEED_FILE=""; ALLOW_COMPACT=0; ALLOW_COMPACT_REASON=""
 
-[ $# -ge 1 ] || { echo "usage: dispatch-launch.sh <todo-id> [--force] [--seed-file <f>]" >&2; exit 2; }
+[ $# -ge 1 ] || { echo "usage: dispatch-launch.sh <todo-id> [--force] [--seed-file <f>] [--allow-during-compaction \"<reason>\"]" >&2; exit 2; }
 id="$1"; shift
 while [ $# -gt 0 ]; do
   case "$1" in
     --force) FORCE=1; shift;;
     --seed-file) SEED_FILE="${2:-}"; shift 2;;
+    --allow-during-compaction) ALLOW_COMPACT=1; ALLOW_COMPACT_REASON="${2:-}"; shift 2;;
     *) echo "unknown arg: $1" >&2; exit 2;;
   esac
 done
@@ -34,6 +38,22 @@ sess="$(get tmux)"; ws="$(get ws)"
 [ -n "$SEED_FILE" ] || SEED_FILE="$(get seed_file)"
 [ -n "$sess" ] && [ -n "$ws" ] || { echo "record missing tmux/ws" >&2; exit 2; }
 [ -n "$SEED_FILE" ] && [ -f "$SEED_FILE" ] || { echo "no seed file (record has no seed_file; pass --seed-file)" >&2; exit 2; }
+
+# ---- a compaction instant is EXCLUSIVE (see dl_compaction_guard) ------------
+# `todo` guards the same rule, but `todo --no-launch` + `launch` is a second door into the same act:
+# guarding only one of them is not a guard. Fired before tmux is touched, so a refusal leaves no
+# half-started session behind. The record's own instant is excluded, or a compaction dispatched
+# with --no-launch could never be launched at all.
+if ! ALLOW_COMPACT_REASON="$(dl_override_reason "$ALLOW_COMPACT" "$ALLOW_COMPACT_REASON")"; then
+  echo "--allow-during-compaction requires a REASON: --allow-during-compaction \"<why this cannot wait>\"" >&2
+  echo "  the reason is the mechanism — record it in your DECISIONS register too" >&2
+  exit 2
+fi
+base_i="$(get base_instant)"
+if [ -n "$base_i" ]; then
+  self_i="$(dl_resolve_instant "$(get child_instant)")"
+  dl_compaction_guard "$(dirname -- "$base_i")" "$self_i" "$ALLOW_COMPACT_REASON" || exit $?
+fi
 
 alive() { pgrep -f "remote-control $1" >/dev/null 2>&1 || "$TMUX_BIN" has-session -t "$1" >/dev/null 2>&1; }
 if alive "$sess" && [ "$FORCE" != 1 ]; then
