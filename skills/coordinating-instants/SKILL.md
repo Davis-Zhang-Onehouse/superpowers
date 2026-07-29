@@ -92,9 +92,9 @@ You are long-lived and WILL restart mid-effort. Never answer "status?" from memo
 gated, recorded in the lineage tracker). Anything else is BLOCKED with the blocker named. A worker sitting
 "done" for hours is YOUR failure — not the operator's job to notice.
 
-## The WIP cap — at most THREE in active dev
+## The WIP cap — at most ONE in active dev
 
-**Open with at most 3 dispatched instants, and hold at most 3 in ACTIVE DEV thereafter.** Free slots are not
+**Open with at most 1 dispatched instant, and hold at most 1 in ACTIVE DEV thereafter.** Free slots are not
 a reason to dispatch: capacity is not the constraint, your attention is. Every extra concurrent worker costs
 a gate, a harvest, a parked fork to decide, and a share of an account-wide budget — and the coordinator is
 the single writer of the registry they all feed.
@@ -108,6 +108,17 @@ validation it writes `Phase: AWAITING-CI` in its HANDOFF. Then `pdispatch health
 answers "may I dispatch?" mechanically instead of by eyeball. Override the default with `WIP_CAP=<n>` only
 with a reason recorded in DECISIONS.
 
+**Where this number came from — check before you obey it.** This rule has had three different *correct*
+values in three contexts, and each revision silently overwrote its predecessor, so the skill kept confidently
+telling the next coordinator something that was true for someone else's effort. Judge which row describes
+YOU; if none does, the honest move is to derive your own number and add a row, not to inherit one.
+
+| Value | When | Derived from |
+|---|---|---|
+| "fill every eligible free slot; concurrency caps are a load heuristic" | before 2026-07-28 | an effort where an **idle slot was the failure mode** — throughput was the scarce thing |
+| at most **3** in active dev | 2026-07-28 ([`18d10e5`](https://github.com/Davis-Zhang-Onehouse/superpowers/commit/18d10e5)) | operator: capacity is not the constraint, **attention** is |
+| at most **1** in active dev | 2026-07-29 | operator directive — the same reasoning taken to its end: one gate, one harvest, one parked fork at a time |
+
 ## Phase A — Charter & sequence (once)
 
 Bound the target set explicitly; everything else is written OUT and deferred, not scope-crept. Give each item
@@ -115,8 +126,8 @@ a disposition (port / rework / sanction) judged against the effort's north-star 
 ACs in CHARTER, at milestone+task+AC level, not execution detail. Three moves that decide the whole effort:
 
 - **Sequence before you fan out, and open small.** Identify the enabling milestone(s) that gate the rest and
-  land them SERIALLY first; parallelise only the mutually independent tail — and open with **at most three**
-  dispatched instants (see The WIP cap). Batch work sharing an expensive cost (long
+  land them SERIALLY first; parallelise only the mutually independent tail — and open with **at most one**
+  dispatched instant (see The WIP cap). Batch work sharing an expensive cost (long
   rebuilds, shared caches) into as few instants as possible.
 - **Clean baseline.** If you inherit a prior stack that MIXES aligned work with deviations, fork a CLEAN
   baseline and re-land each item per its disposition (read the old stack reference-only) — a clean base is
@@ -258,7 +269,7 @@ earliest and least-reviewed work permanently carries the weakest guarantees.
 | "I'll let the worker update the shared registry to save a step." | Single-writer only. Worker proposes; you apply. |
 | "I'll fire the workers fast and check the charters later." | A mis-seeded worker burns a slot producing confidently-wrong output. All seven checks, per worker, before launch. |
 | "I'm heads-down; I'll check the fleet when the operator asks." | Stale status and unharvested work are your failure. Run the tick. |
-| "A slot is free, so I should fill it." | Free capacity is not the trigger — the WIP cap is. At 3 in active dev you dispatch nothing, however many slots are idle. |
+| "A slot is free, so I should fill it." | Free capacity is not the trigger — the WIP cap is. At 1 in active dev you dispatch nothing, however many slots are idle. |
 | "I'll note it as open and owned by the coordinator, and wind down." | You ARE the coordinator. At wind-down that is an orphan nobody will run. Fix it, park it for the operator by name, or hand it to a named successor. |
 | "That dimension flaked, but it's behaviourally identical — carry it over." | A flaked run is not evidence. Carry-over is an ASSUMPTION with a re-prove condition, or an open AC. |
 | "This is feature dev but there's a do-not-commit reflex." | It's feature dev — cut branches, open PRs freely. Only *merging* is operator-only. |

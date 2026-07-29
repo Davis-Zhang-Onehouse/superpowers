@@ -30,7 +30,11 @@ IDLE_MIN="${IDLE_MIN:-30}"
 HEALTH="$BOARD_DIR/health/${HEALTH_TAG:-shared}"
 
 JSON=0; ONLY=""; ONLY_BASE=""; ORPHANS=0; ACTIVEDEV=0
-WIP_CAP="${WIP_CAP:-3}"
+# Default ONE (operator, 2026-07-29). Capacity was never the constraint — attention is. Every extra
+# concurrent worker costs a review gate, a harvest, and a parked decision to answer. See
+# coordinating-instants/SKILL.md § "The WIP cap" for what each past value of this number was derived
+# from: it has been correct at "no cap", at 3, and now at 1, for three DIFFERENT efforts.
+WIP_CAP="${WIP_CAP:-1}"
 while [ $# -gt 0 ]; do
   case "$1" in
     --json) JSON=1; shift;;
