@@ -310,8 +310,8 @@ mv "$COMPACT_DONE" "$COMPACT_IN"
 echo "== --optype: the default is unchanged, and a bad value is refused =="
 # Default must stay `append`: every existing caller passes no --optype, and a silent change of the
 # opType for ordinary milestones would make each of them look like a compaction to the guard.
-out=$(todo "Ordinary Milestone"); rc=$?
-: # the ordinary dispatch is refused here (a compaction is inflight again) — assert on the NAME below
+# A compaction is inflight again at this point, so the override is needed just to reach the code
+# under test — the assertion below is about the child's NAME, not about the guard.
 out=$(ALLOW_DISPATCH_DURING_COMPACTION="checking the default opType" todo "Ordinary Milestone"); rc=$?
 chk "a dispatch with no --optype still succeeds (rc=0)" 0 $rc
 [ -n "$(ls -d "$EFFORT"/*-inflight-append-ordinaryMilestone 2>/dev/null)" ] \
