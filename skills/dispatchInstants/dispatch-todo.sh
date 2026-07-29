@@ -86,7 +86,9 @@ while [ "$#" -gt 0 ]; do
     --lineage-base) LINEAGE_BASE="$2"; shift 2;;
     --no-duplicate) NO_DUP=1; shift;;
     --allow-during-compaction) ALLOW_COMPACT=1; ALLOW_COMPACT_REASON="${2:-}"; shift 2;;
-    -h|--help)     sed -n '2,29p' "$0" | sed 's/^# \{0,1\}//'; exit 0;;
+    # The range must stop at the last header COMMENT line, or --help spills `set -euo pipefail`
+    # and the code after it. (It spilled 8 such lines before this change; 28 is the last comment.)
+    -h|--help)     sed -n '2,28p' "$0" | sed 's/^# \{0,1\}//'; exit 0;;
     *) err "unknown arg: $1"; exit 2;;
   esac
 done
