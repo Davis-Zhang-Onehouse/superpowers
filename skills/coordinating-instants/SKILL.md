@@ -77,10 +77,9 @@ You are long-lived and WILL restart mid-effort. Never answer "status?" from memo
    reason to keep one alive, `--keep-session "<reason>"` records it: keeping is what needs justifying now.
 4. **Under the WIP cap AND no compaction inflight → dispatch** the next READY milestone (Phase B). Check the
    cap with **`pdispatch health --base <your-instant> --active-dev`**; at or over it, do not dispatch. The
-   compaction gate is separate: `pdispatch todo`/`launch` exit 4 while a `*-inflight-compact-*` sibling
-   exists, even when the cap says you have room — but see the KNOWN GAP under "A compaction instant is
-   EXCLUSIVE": a green `pdispatch todo` does not prove no compaction is inflight, so eyeball the instants
-   dir too.
+   compaction gate is separate and enforced for you: `pdispatch todo`/`launch` exit 4 while a
+   `*-inflight-compact-*` sibling exists, even when the cap says you have room. It only sees compactions
+   dispatched with `--optype compact` (Phase E), and pre-2026-07-29 instants predate that flag.
 5. **≥3 completed-and-harvested since the last compaction, and a slot free → compact** (Phase E).
 6. **Registry, including YOUR OWN** — `pdispatch drift` to reconcile the tables, and
    **`pdispatch lint <your-own-instant>`**. You lint every worker as part of the gate; the instant doing the
@@ -141,16 +140,15 @@ instant exists in the effort's instants directory, and the refusal names it. The
 `--allow-during-compaction "<reason>"` (or `ALLOW_DISPATCH_DURING_COMPACTION="<reason>"`); a reason is
 mandatory and belongs in DECISIONS, exactly like a `WIP_CAP` override.
 
-> ⚠️ **KNOWN GAP as of 2026-07-29 — the rule is yours to hold; the tool only helps sometimes.** The guard
-> detects a compaction by the instant grammar's `<opType>` field, and **`pdispatch todo` cannot write that
-> field** — it hardcodes `-inflight-append-`. So a compaction dispatched the normal way (Phase E,
-> `pdispatch todo --profile <a compaction profile>`) is born `…-inflight-append-<name>` and **the guard does
-> not see it.** Measured 2026-07-29: every compaction this fleet has ever run is `-append-`; the only two
-> `-compact-` opType instants on the box were made by hand with `/maintain-workspace compact`.
->
-> **So a green `pdispatch todo` is NOT evidence that no compaction is inflight.** Until this is closed,
-> check it yourself — `ls <instants-dir> | grep inflight` and read the names — exactly as you did before the
-> guard existed. The guard under-triggers; it never mis-triggers, so a refusal is always real.
+> **Dispatch a compaction with `--optype compact`, or this guard cannot see it.** Detection reads the
+> instant grammar's `<opType>` field, and until 2026-07-29 `pdispatch todo` hardcoded
+> `-inflight-append-`, so every compaction the fleet had ever run was invisible to the guard. The flag
+> now exists and **Phase E requires it**; the default is still `append`, so an ordinary milestone is
+> unaffected. If you dispatch a compaction without it, the child is born `…-inflight-append-…`, the
+> next dispatch proceeds beside it, and its work becomes the following compaction's debt — silently.
+> (Instants created before this date keep their `-append-` names and are NOT retro-renamed: children
+> point at a parent's `curr_instant` and the board stores instant paths, so renaming history
+> invalidates stored references. The producer is fixed going forward; history is left alone.)
 
 ## Phase A — Charter & sequence (once)
 
@@ -219,8 +217,10 @@ free the slot (`pdispatch pool release <slot>`) and dispatch the next READY mile
 
 ## Phase E — Compact (every 3–5 completed instants)
 
-Dispatch ONE compaction — with its OWN profile (a compaction charter/seed, distinct from the fix profile;
-read it pre-flight) and its own slot. It must: fold the inputs into one PR-stack-per-repo (recording every
+Dispatch ONE compaction — **with `pdispatch todo --optype compact`** (this is what makes the exclusivity
+guard able to see it; without the flag the compaction is born `-inflight-append-` and blocks nothing) —
+with its OWN profile (a compaction charter/seed, distinct from the fix profile; read it pre-flight) and
+its own slot. It must: fold the inputs into one PR-stack-per-repo (recording every
 rebase/restack fix-up); re-prove the merged ACs **together**; run the same CI with zero regression (see
 two-diff rule); carry EVERY compacted instant's open issues forward classified (remains-open / addressed /
 transformed — nothing dropped); pass the gate; and deliver a **self-contained compaction handoff** (what was
@@ -229,8 +229,8 @@ next instant inherits delivered progress by reading ONE document.
 
 A new instant's **base = the end-state it inherits** (normally the latest gated compaction) — record it in
 the lineage tracker. **While a compaction is in flight, you dispatch NOTHING** (see "A compaction instant is
-EXCLUSIVE"); `pdispatch todo` and `pdispatch launch` exit 4 when they can see it — which today is only when
-the compaction carries the `-compact-` opType, so read that section's KNOWN GAP before relying on it. Never base a dispatch on an
+EXCLUSIVE"); `pdispatch todo` and `pdispatch launch` exit 4 while a `-compact-` instant is inflight — which is
+why the compaction must be dispatched with `--optype compact` in the first place. Never base a dispatch on an
 ungated or in-flight compaction. Compact promptly so the pipeline is not stalled for long — but a stalled
 pipeline is the cheaper of the two failures.
 
@@ -311,7 +311,7 @@ earliest and least-reviewed work permanently carries the weakest guarantees.
 | "I'll fire the workers fast and check the charters later." | A mis-seeded worker burns a slot producing confidently-wrong output. All seven checks, per worker, before launch. |
 | "I'm heads-down; I'll check the fleet when the operator asks." | Stale status and unharvested work are your failure. Run the tick. |
 | "A slot is free, so I should fill it." | Free capacity is not the trigger — the WIP cap is. At 1 in active dev you dispatch nothing, however many slots are idle. |
-| "The cap says I have room, so I may dispatch." | The cap is one of two gates. A compaction inflight blocks everything, even at zero active dev. Two rules, not one — and `pdispatch todo` only catches the compactions it can see (KNOWN GAP), so a green dispatch is not an all-clear. |
+| "The cap says I have room, so I may dispatch." | The cap is one of two gates. A compaction inflight blocks everything, even at zero active dev — `pdispatch todo` exits 4. Two rules, not one. (It sees compactions dispatched with `--optype compact`; that is why Phase E requires the flag.) |
 | "I'll note it as open and owned by the coordinator, and wind down." | You ARE the coordinator. At wind-down that is an orphan nobody will run. Fix it, park it for the operator by name, or hand it to a named successor. |
 | "That dimension flaked, but it's behaviourally identical — carry it over." | A flaked run is not evidence. Carry-over is an ASSUMPTION with a re-prove condition, or an open AC. |
 | "This is feature dev but there's a do-not-commit reflex." | It's feature dev — cut branches, open PRs freely. Only *merging* is operator-only. |

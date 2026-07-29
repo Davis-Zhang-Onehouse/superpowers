@@ -61,7 +61,7 @@ mkdir -p "$tmp/golden" "$tmp/prof"
 printf 'CHARTER for {{TITLE}}\n{{BRIEF}}\n' > "$tmp/prof/charter.md"
 printf 'seed for {{TITLE}}\n'               > "$tmp/prof/seed.txt"
 printf 'do the thing\n'                     > "$tmp/brief.md"
-for n in 1 2 3 4 5 6 7 8; do mkdir -p "$tmp/ws$n"; bash "$S/wspool.sh" add "$tmp/ws$n" >/dev/null 2>&1; done
+for n in $(seq 1 12); do mkdir -p "$tmp/ws$n"; bash "$S/wspool.sh" add "$tmp/ws$n" >/dev/null 2>&1; done
 
 todo(){ # todo <title> [extra args...] -> runs a dispatch that needs no golden clone
   local title="$1"; shift
@@ -279,6 +279,50 @@ out=$(ALLOW_DISPATCH_DURING_COMPACTION="" todo "Empty Env Override"); rc=$?
 chk "an empty ALLOW_DISPATCH_DURING_COMPACTION is bad input (rc=2)" 2 $rc
 echo "$out" | grep -qiE "requires a reason" && ok "and says a reason is required" \
   || bad "empty env var fell through to the generic refusal: $out"
+
+echo "== --optype: dispatch-todo can finally WRITE the field the guard READS (OI-1) =="
+# The whole point of OI-1: the grammar has an <opType> field, the guard reads it, and the only tool
+# that creates instants could not write it — so the guard was inert against every compaction the
+# fleet actually produces. A flag that sets it is only half the fix; the case that matters is the
+# END-TO-END one below, where a compaction dispatched through the normal path actually blocks.
+mv "$COMPACT_IN" "$COMPACT_DONE"          # clear the hand-made blocker for this section
+out=$(todo "Fold The Stack" --optype compact); rc=$?
+chk "--optype compact dispatches (rc=0)" 0 $rc
+made=$(ls -d "$EFFORT"/*-inflight-compact-foldTheStack 2>/dev/null | head -1)
+[ -n "$made" ] && ok "the child instant carries opType 'compact'" \
+  || bad "no *-inflight-compact-foldTheStack child: $(ls "$EFFORT" | tr '\n' ' ')"
+# It must still be a well-formed 5-field name, or every OTHER parser of the grammar breaks on it.
+case "$(basename "${made:-x}")" in
+  [0-9][0-9][0-9][0-9][0-9][0-9][0-9][0-9]-[0-9][0-9][0-9][0-9][0-9][0-9][0-9][0-9]-inflight-compact-foldTheStack)
+     ok "…and still matches <curr>-<now>-<state>-<opType>-<name> with numeric timestamps";;
+  *) bad "malformed instant name: $(basename "${made:-<none>}")";;
+esac
+
+# THE CASE THAT CLOSES OI-1: a compaction dispatched the NORMAL way now blocks the next dispatch.
+# Before this change the child was born -inflight-append- and the guard never saw it.
+out=$(todo "Blocked By A Normally Dispatched Compaction"); rc=$?
+chk "a compaction dispatched via --optype compact BLOCKS the next dispatch (rc=4)" 4 $rc
+echo "$out" | grep -q "inflight-compact-foldTheStack" \
+  && ok "and names the compaction that pdispatch itself created" || bad "did not name it: $out"
+rm -rf "$made"
+mv "$COMPACT_DONE" "$COMPACT_IN"
+
+echo "== --optype: the default is unchanged, and a bad value is refused =="
+# Default must stay `append`: every existing caller passes no --optype, and a silent change of the
+# opType for ordinary milestones would make each of them look like a compaction to the guard.
+out=$(todo "Ordinary Milestone"); rc=$?
+: # the ordinary dispatch is refused here (a compaction is inflight again) — assert on the NAME below
+out=$(ALLOW_DISPATCH_DURING_COMPACTION="checking the default opType" todo "Ordinary Milestone"); rc=$?
+chk "a dispatch with no --optype still succeeds (rc=0)" 0 $rc
+[ -n "$(ls -d "$EFFORT"/*-inflight-append-ordinaryMilestone 2>/dev/null)" ] \
+  && ok "…and is still born -inflight-append- (default unchanged)" \
+  || bad "the default opType changed: $(ls "$EFFORT" | tr '\n' ' ')"
+out=$(todo "Bad Optype" --optype banana); rc=$?
+chk "an unknown --optype value is refused as bad input (rc=2)" 2 $rc
+echo "$out" | grep -qiE "append|compact" && ok "names the values it accepts" || bad "unhelpful message: $out"
+out=$(timeout 5 bash "$S/dispatch-todo.sh" --base "$BASEI" --profile "$tmp/prof" --title T \
+        --brief "$tmp/brief.md" --golden "$tmp/golden" --no-launch --no-duplicate --optype 2>&1); rc=$?
+chk "trailing --optype exits 2 (the same shape that hung the override flag)" 2 $rc
 
 echo "== the guard is STILL ARMED at the end of the run =="
 # Every override case above expects success, so a future refactor that hoisted the env assignment

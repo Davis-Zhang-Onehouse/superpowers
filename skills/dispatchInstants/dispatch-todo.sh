@@ -14,7 +14,13 @@
 # Usage:
 #   dispatch-todo.sh --base <base-instant> --title "<short title>" --brief <file|-> \
 #       [--golden <ws-path>] [--slot <ws>] [--evidence <ptr>]... \
-#       [--no-launch] [--no-duplicate] [--allow-during-compaction "<reason>"]
+#       [--optype append|compact] [--no-launch] [--no-duplicate] \
+#       [--allow-during-compaction "<reason>"]
+#
+#   --optype  the <opType> field of the child instant name (default: append). Pass `compact` when
+#             dispatching a COMPACTION, so the child is born `…-inflight-compact-…` and the
+#             compaction guard (which reads that field) can actually see it. Getting this wrong is
+#             invisible until the next dispatch silently proceeds beside a live compaction.
 #
 # Exit: 0 ok · 1 internal failure (rolled back) · 2 bad input · 3 pool full
 #       4 REFUSED, a compaction instant is inflight
@@ -72,7 +78,7 @@ PY
 
 # ---- args -------------------------------------------------------------------
 BASE="" TITLE="" BRIEF="" GOLDEN="" SLOT="" PROFILE="" NO_LAUNCH=0 NO_DUP=0 LINEAGE_BASE=""
-ALLOW_COMPACT=0 ALLOW_COMPACT_REASON=""
+ALLOW_COMPACT=0 ALLOW_COMPACT_REASON="" OPTYPE="append"
 declare -a EVIDENCE=()
 while [ "$#" -gt 0 ]; do
   case "$1" in
@@ -88,9 +94,11 @@ while [ "$#" -gt 0 ]; do
     --no-duplicate) NO_DUP=1; shift;;
     --allow-during-compaction) dl_need_arg "$1" $# || exit 2
                                ALLOW_COMPACT=1; ALLOW_COMPACT_REASON="$2"; shift 2;;
-    # The range must stop at the last header COMMENT line, or --help spills `set -euo pipefail`
-    # and the code after it. Line 29 is the last comment; re-check this number if you add header lines.
-    -h|--help)     sed -n '2,29p' "$0" | sed 's/^# \{0,1\}//'; exit 0;;
+    --optype)      dl_need_arg "$1" $# || exit 2; OPTYPE="$2"; shift 2;;
+    # Print the header COMMENT BLOCK, however long it is. A hardcoded line range was wrong twice
+    # (it spilled `set -euo pipefail` and the code below it, then drifted again when the header
+    # grew) — so stop at the first non-comment line instead of counting.
+    -h|--help)     awk 'NR==1{next} /^#/{sub(/^# ?/,""); print; next} {exit}' "$0"; exit 0;;
     *) err "unknown arg: $1"; exit 2;;
   esac
 done
@@ -102,6 +110,13 @@ BASE="$(realpath -m -- "$BASE")"
 [ -f "$BASE/HANDOFF.md" ] && [ -f "$BASE/CHARTER.md" ] \
   || { err "--base does not look like a maintain-workspace instant (needs HANDOFF.md + CHARTER.md): $BASE"; exit 2; }
 [ -x "$WSPOOL_SH" ] || { err "wspool.sh not found/executable at $WSPOOL_SH"; exit 2; }
+case "$OPTYPE" in
+  append|compact) ;;
+  *) err "--optype must be 'append' or 'compact' (got: $OPTYPE)"
+     err "  append  = an ordinary milestone (the default)"
+     err "  compact = a COMPACTION; the guard reads this field to refuse dispatches beside it"
+     exit 2;;
+esac
 
 # ---- a compaction instant is EXCLUSIVE (see dl_compaction_guard) ------------
 # Fired here, the earliest point at which the effort is known and BEFORE any side effect: no lease
@@ -189,7 +204,12 @@ BASE_DIR="$(dirname "$BASE")"                          # instants are siblings h
 BASE_NAME="$(basename "$BASE")"
 BASE_CURR="$(printf '%s' "$BASE_NAME" | cut -d- -f2)"  # field 2 = curr_instant (survives renames)
 [ -n "$BASE_CURR" ] || BASE_CURR="main"
-CHILD_NAME="${BASE_CURR}-${NOW}-inflight-append-${INAME}"
+# <opType> is a REAL field, not a constant. It was hardcoded to `append` from the day this script
+# was written, so every compaction the fleet dispatched was born `…-inflight-append-…` — and the
+# compaction guard, which detects a live compaction by exactly this field, could never see one.
+# A field with a producer that never populates it is indistinguishable from a field that does not
+# exist. Default stays `append`, so every existing caller is unaffected.
+CHILD_NAME="${BASE_CURR}-${NOW}-inflight-${OPTYPE}-${INAME}"
 CHILD="$BASE_DIR/$CHILD_NAME"
 TMUX_SESSION="dt-${TODO_ID}"
 # Dispatch records live in the machine-global board store (D-11), NOT under the base.
