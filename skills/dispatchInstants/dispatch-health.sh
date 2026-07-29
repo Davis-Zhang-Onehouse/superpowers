@@ -42,7 +42,8 @@ while [ $# -gt 0 ]; do
     --base) ONLY_BASE="${2:-}"; shift 2;;
     --orphans) ORPHANS=1; shift;;
     --active-dev) ACTIVEDEV=1; shift;;
-    # Print the header comment block, however long it is — counting lines drifted twice.
+    # Print the header comment block, stopping at the first NON-COMMENT line (so no blank
+    # separator inside the header). Counting lines drifted twice; this counts nothing.
     -h|--help) awk 'NR==1{next} /^#/{print; next} {exit}' "$0"; exit 0;;
     *) echo "unknown arg: $1" >&2; exit 2;;
   esac

@@ -88,7 +88,9 @@ dispatch-todo.sh \
 
 **Sequence (each step rolls back the prior on failure — trap/cleanup):**
 1. Validate base instant (has HANDOFF.md/CHARTER.md). Derive `TODO_ID` = `<kebab-title>-<MMDDHHMM>`.
-   Derive child instant name `<baseCurr>-<now>-inflight-append-<kebabTitle>` (maintain-workspace grammar).
+   Derive child instant name `<baseCurr>-<now>-inflight-<opType>-<kebabTitle>` (maintain-workspace
+   grammar). `<opType>` comes from `--optype` and defaults to `append`; `compact` is REQUIRED when
+   dispatching a compaction, because the exclusivity guard detects a live compaction by that field.
 2. `TMUX_SESSION=dt-<TODO_ID>`. **Claim ws:** `wspool claim --todo … --tmux … --base … --child …`.
    On exit 3 → print "pool full; enroll a slot or wait", exit 2, NO other state created.
 3. **Duplicate code:** `duplicate-workspace.sh <golden> <claimed-ws> --force`. On failure → release lease, exit.

@@ -42,11 +42,18 @@ OUT="$BOARD_DIR/REGISTRY.md"
 
 # locate the CURRENT child folder for a recorded (possibly-renamed) child_instant path.
 # grammar: <base>-<curr>-<state>-<opType>-<instantName>; only <state> changes on transition.
+# BOTH middle fields are wildcards. <state> because that is what a transition rewrites; <opType>
+# because it is a real field with two legal values, and hardcoding `-append-` here made every
+# compaction dispatched with `pdispatch todo --optype compact` unresolvable — the board reported it
+# `(missing)` and counted it as gone, from the moment it was dispatched. That was invisible while
+# dispatch-todo could not produce a `-compact-` child; it became reachable the day it could, in the
+# very flow Phase E mandates. A parser that hardcodes a VALUE of a field it claims to parse is the
+# same defect class as one that never reads the field at all.
 current_child() {
   local rec="$1" dir name f1 f2 f5 g
   dir="$(dirname "$rec")"; name="$(basename "$rec")"
   f1="$(cut -d- -f1 <<<"$name")"; f2="$(cut -d- -f2 <<<"$name")"; f5="$(cut -d- -f5- <<<"$name")"
-  for g in "$dir/${f1}-${f2}-"*"-append-${f5}"; do
+  for g in "$dir/${f1}-${f2}-"*"-"*"-${f5}"; do
     [ -d "$g" ] && { printf '%s\n' "$g"; return 0; }
   done
   return 1
