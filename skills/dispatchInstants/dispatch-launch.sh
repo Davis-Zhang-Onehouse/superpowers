@@ -25,8 +25,12 @@ id="$1"; shift
 while [ $# -gt 0 ]; do
   case "$1" in
     --force) FORCE=1; shift;;
-    --seed-file) SEED_FILE="${2:-}"; shift 2;;
-    --allow-during-compaction) ALLOW_COMPACT=1; ALLOW_COMPACT_REASON="${2:-}"; shift 2;;
+    # Every value-taking flag needs the dl_need_arg check: as a trailing argument, `shift 2` shifts
+    # nothing and returns 1, and this script has no `set -e`, so the loop spun forever. --seed-file
+    # carried the same latent hang; fixed together because it is the same shape one line away.
+    --seed-file) dl_need_arg "$1" $# || exit 2; SEED_FILE="$2"; shift 2;;
+    --allow-during-compaction) dl_need_arg "$1" $# || exit 2
+                               ALLOW_COMPACT=1; ALLOW_COMPACT_REASON="$2"; shift 2;;
     *) echo "unknown arg: $1" >&2; exit 2;;
   esac
 done
@@ -53,6 +57,12 @@ base_i="$(get base_instant)"
 if [ -n "$base_i" ]; then
   self_i="$(dl_resolve_instant "$(get child_instant)")"
   dl_compaction_guard "$(dirname -- "$base_i")" "$self_i" "$ALLOW_COMPACT_REASON" || exit $?
+else
+  # Every tool that writes a record sets base_instant, so this is unreachable through the shipped
+  # path — but a hand-written/migrated/legacy record would otherwise bypass a safety gate in
+  # SILENCE, which is the one failure mode a guard must never have. Say so instead.
+  echo "WARN: record '$id' has no base_instant — the compaction gate could NOT be evaluated." >&2
+  echo "      Check by hand for a *-inflight-compact-* sibling before trusting this launch." >&2
 fi
 
 alive() { pgrep -f "remote-control $1" >/dev/null 2>&1 || "$TMUX_BIN" has-session -t "$1" >/dev/null 2>&1; }
