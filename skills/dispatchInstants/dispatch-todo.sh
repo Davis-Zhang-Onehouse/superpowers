@@ -16,7 +16,8 @@
 #       [--golden <ws-path>] [--slot <ws>] [--evidence <ptr>]... \
 #       [--no-launch] [--no-duplicate] [--allow-during-compaction "<reason>"]
 #
-# Exit: 0 ok · 2 bad input · 3 pool full · 4 REFUSED, a compaction instant is inflight
+# Exit: 0 ok · 1 internal failure (rolled back) · 2 bad input · 3 pool full
+#       4 REFUSED, a compaction instant is inflight
 #
 # Env (for hermetic tests / overrides):
 #   POOL_DIR          passed through to wspool.sh
@@ -85,10 +86,11 @@ while [ "$#" -gt 0 ]; do
     --no-launch)   NO_LAUNCH=1; shift;;
     --lineage-base) LINEAGE_BASE="$2"; shift 2;;
     --no-duplicate) NO_DUP=1; shift;;
-    --allow-during-compaction) ALLOW_COMPACT=1; ALLOW_COMPACT_REASON="${2:-}"; shift 2;;
+    --allow-during-compaction) dl_need_arg "$1" $# || exit 2
+                               ALLOW_COMPACT=1; ALLOW_COMPACT_REASON="$2"; shift 2;;
     # The range must stop at the last header COMMENT line, or --help spills `set -euo pipefail`
-    # and the code after it. (It spilled 8 such lines before this change; 28 is the last comment.)
-    -h|--help)     sed -n '2,28p' "$0" | sed 's/^# \{0,1\}//'; exit 0;;
+    # and the code after it. Line 29 is the last comment; re-check this number if you add header lines.
+    -h|--help)     sed -n '2,29p' "$0" | sed 's/^# \{0,1\}//'; exit 0;;
     *) err "unknown arg: $1"; exit 2;;
   esac
 done
