@@ -23,6 +23,13 @@ import sys
 REQUIRED_FILES = ["HANDOFF.md", "CHARTER.md", "RUNBOOK.md", "DECISIONS.md", "ISSUES.md", "ASSUMPTIONS.md"]
 REQUIRED_DIRS = ["evidence", "investigations", "plans"]
 OPTIONAL_FILES = ["STATE.md", "REVIEW.md", "COMPACTED.md"]
+# COMPACTED.md is compact-ONLY, so it cannot be judged from the file set alone — it depends on the
+# instant's <opType>, which lives in its NAME. Until 2026-07-29 nothing read that field: the only
+# producer hardcoded `append`, and the lint listed COMPACTED.md as universally optional, so a
+# compaction missing its defining document passed clean. Grammar:
+#   <base_instant>-<curr_instant>-<state>-<opType>-<instantName>
+# <base_instant> is `main` OR a timestamp, so field 1 is deliberately not constrained to digits.
+INSTANT_NAME_RE = re.compile(r"^[^-]+-\d{8}-(?P<state>inflight|complete|abort)-(?P<optype>append|compact)-(?P<name>.+)$")
 HEADER_RE = re.compile(r"^(?:Updated|Status)\s*:", re.M | re.I)
 
 
@@ -54,6 +61,15 @@ def main(argv=None):
             if not HEADER_RE.search(head):
                 headerless.append(f)
     info = [f for f in OPTIONAL_FILES if not os.path.isfile(os.path.join(d, f))]
+
+    # opType -> required-file consequence. Only a name that actually parses as the grammar is
+    # judged: a hand-made folder is not silently treated as either kind.
+    basename = os.path.basename(os.path.abspath(d.rstrip("/")))
+    m = INSTANT_NAME_RE.match(basename)
+    optype = m.group("optype") if m else None
+    if optype == "compact" and not os.path.isfile(os.path.join(d, "COMPACTED.md")):
+        missing_files.append("COMPACTED.md")
+        info = [f for f in info if f != "COMPACTED.md"]
 
     viol = bool(missing_files or missing_dirs or no_evidence_index or headerless)
     res = {"instant": os.path.basename(os.path.abspath(d.rstrip("/"))),
