@@ -46,6 +46,14 @@ the orchestrator's D-10/D-11 + RUNBOOK §4), not a gap fix.
 - [ ] Go over EVERY compacted input instant's `ISSUES.md`. Each open concern → **remains-open | addressed |
       transformed** (origin noted), carried into this instant's ISSUES.md + COMPACTED.md. No open concern is lost.
 
+### AC-5b DECLARE `Phase: AWAITING-CI` the moment local validation is done
+- [ ] The instant your local proof (AC-3) is GREEN and you are only waiting on GitHub CI (AC-4), write
+      **`Phase: AWAITING-CI`** in your HANDOFF — and REMOVE it if you resume editing. The coordinator runs a
+      **WIP cap of 1 worker in ACTIVE DEV**, and `pdispatch health --active-dev` can only exclude a CI-waiter
+      that DECLARES the phase — **nothing infers it**. At a cap of 1 an undeclared CI-waiter holds the entire
+      effort's only dev slot hostage to your CI queue. (Added 2026-07-29: `951a107` added this obligation to
+      the `ansi-resume` profile only; a compaction waits on CI at least as long, so it belongs here too.)
+
 ### AC-6 COMPACTED.md + maintain-workspace + review gate
 - [ ] Write `COMPACTED.md` (the four-part contract: ① stacked PR chain · ② merged ACs each proven · ③ evidence
       disposition REGENERATED|CARRIED-OVER-with-justification · ④ lingering-issue reconciliation). Keep
