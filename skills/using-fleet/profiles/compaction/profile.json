@@ -1,0 +1,9 @@
+{
+  "kind": "compaction",
+  "placeholders": [
+    "TITLE",
+    "BASE"
+  ],
+  "requires_clauses": [],
+  "invocation_templates": []
+}

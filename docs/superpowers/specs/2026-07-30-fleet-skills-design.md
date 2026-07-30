@@ -310,6 +310,13 @@ and the test asserts that id is `PASS` in `RESULTS.tsv`:
 | the close-out transaction commits as a whole | `J2` |
 
 An **uncited** refusal claim fails the lint — absence is never success, applied to the skill's own promises.
+
+**V2 checks that a cited case PASSED, not that it is RELEVANT to the claim beside it**, and that limit has to
+be stated because it bit immediately: the first skill written with this lint cited `M13` — which is about
+`selftest`'s dirty-tree handling — for a claim about a verb naming its store, and the lint accepted it. The
+correct case was `A1`. `lint-skill.py --show` prints each citation next to the cited case's own note so the
+pairing can be reviewed in one command rather than trusted; relevance stays a human check, and pretending
+otherwise would be the vacuity this whole section exists to prevent.
 `RESULTS.tsv` lives in a different repository, so the test takes its path by environment variable and **SKIPs
 with a stated reason** when it is unreachable, rather than passing quietly.
 

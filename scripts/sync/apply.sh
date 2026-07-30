@@ -1,8 +1,13 @@
 #!/usr/bin/env bash
 set -euo pipefail
-: "${SPSYNC_CONFIG:=$HOME/.superpowers-sync/config}"
-. "$SPSYNC_CONFIG"
 SPSYNC_SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
+# Default to the config beside this script. bootstrap.sh writes config into the
+# same control dir it copies these scripts into, so an install scoped outside
+# $HOME (e.g. under a shared-box home subdir) works when invoked by absolute
+# path with no SPSYNC_CONFIG set — which is how the paused-rebase STATUS
+# instructions tell you to run finish.sh.
+: "${SPSYNC_CONFIG:=$SPSYNC_SCRIPT_DIR/config}"
+. "$SPSYNC_CONFIG"
 . "$SPSYNC_SCRIPT_DIR/lib.sh"
 load_state
 : "${BASE_TAG:=}"

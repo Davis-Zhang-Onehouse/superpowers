@@ -1,17 +1,43 @@
 ---
-name: dispatching-parallel-agents
-description: Use when facing 2+ independent tasks that can be worked on without shared state or sequential dependencies
+name: dispatching-subagents
+description: Use when parallelising work across subagents INSIDE this session — independent research, fan-out review, or several small tasks with no shared files. Triggers include "dispatch subagents", "run these in parallel", "fan out", "one agent per file", "investigate these failures concurrently". For separate `claude` processes in leased workspaces, use coordinating-instants instead.
 ---
 
-# Dispatching Parallel Agents
+# Dispatching Subagents
 
 ## Overview
 
-You delegate tasks to specialized agents with isolated context. By precisely crafting their instructions and context, you ensure they stay focused and succeed at their task. They should never inherit your session's context or history — you construct exactly what they need. This also preserves your own context for coordination work.
+You delegate tasks to subagents with isolated context. By precisely crafting their instructions you keep them
+focused; they never inherit your session's history, so you construct exactly what they need. This also
+preserves your own context for coordination.
 
-When you have multiple unrelated failures (different test files, different subsystems, different bugs), investigating them sequentially wastes time. Each investigation is independent and can happen in parallel.
+When you have multiple unrelated problems — different test files, different subsystems, different bugs —
+investigating them sequentially wastes time. Each is independent and can happen concurrently.
 
-**Core principle:** Dispatch one agent per independent problem domain. Let them work concurrently.
+**Core principle:** one subagent per independent problem domain, dispatched concurrently.
+
+**Announce at start:** "I'm using the dispatching-subagents skill to parallelise this work."
+
+## Subagents are not instants
+
+This skill was renamed from `dispatching-parallel-agents` because that name did not say *which kind* of
+parallelism it meant, and the two have almost nothing in common:
+
+| | subagent (this skill) | dispatched instant (`coordinating-instants`) |
+|---|---|---|
+| lives in | this session | its own `claude` process |
+| workspace | yours | a leased slot from a pool |
+| own state | none | its own instant folder and `.fleet/` |
+| dispatched by | the Agent tool, in-message | `fleet dispatch` |
+| reports by | returning text to you | `fleet propose`, applied onto a roadmap |
+| review gate | your judgement | `fleet review`, which gates completion |
+| right for | fan-out reading, independent review, small parallel edits | a milestone of real work |
+
+**Use an instant, not a subagent, when** the work needs its own workspace, its own git base, a review round,
+or must survive your session ending. Reach for `superpowers:coordinating-instants` there.
+
+**Use a subagent, not an instant, when** the work is bounded reading or a self-contained edit that returns an
+answer, and paying for a workspace lease would be absurd.
 
 ## When to Use
 
