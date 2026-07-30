@@ -30,6 +30,7 @@ it_section H
 trap 'it_cleanup_tmux; tmux -L "$IT_TMUX_SOCKET" kill-server 2>/dev/null' EXIT
 OUT="$EV/out"; rm -rf "$OUT"; mkdir -p "$OUT"
 export FLEET_INSTANTS="$EV/instants"; rm -rf "$FLEET_INSTANTS"; mkdir -p "$FLEET_INSTANTS"
+it_fresh_store            # §H was measured inheriting a previous run's WIP-cap holder (H10)
 TAG="h$$"
 
 bash "$IT_ROOT/bin/source-pin.sh" before "$OUT" || exit 2
