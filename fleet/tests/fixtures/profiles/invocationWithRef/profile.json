@@ -1,0 +1,11 @@
+{
+  "kind": "worker",
+  "placeholders": [
+    "TITLE",
+    "BRANCH"
+  ],
+  "requires_clauses": [],
+  "invocation_templates": [
+    "gh workflow run velox-ci.yml --ref {{BRANCH}} -f build_type=release"
+  ]
+}
