@@ -9,6 +9,15 @@ fleet/it/RESULTS-closeout-*.tsv
 fleet/it/*.log
 # fleet: the dummy-project fixture is unpacked from it/fixtures/dummy-project.tar.gz on demand.
 fleet/it/dummy-project/
+# fleet: the dummy-project fixture is unpacked from it/fixtures/dummy-project.tar.gz on demand.
+fleet/it/dummy-project/
+
+# fleet: baselines of THIS BOX (the operator's pdispatch stores, the live tmux session set, and the dt-
+# sessions observed). Established on first run by it/lib.sh and machine-local by nature — another checkout
+# has different sessions, so committing them would fail every fresh clone on its first run.
+fleet/it/live-stores.sha256
+fleet/it/live-tmux-sessions.txt
+fleet/it/dt-sessions-seen*.txt
 
 .worktrees/
 .private-journal/
@@ -29,4 +38,3 @@ __pycache__/
 *.pyc
 *.pyo
 .pytest_cache/
-

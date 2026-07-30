@@ -1,0 +1,13 @@
+case	verdict	evidence	note
+ISOLATION-W1-enter	PASS		live stores byte-identical; live tmux session set byte-identical (3 sessions, incl. 0 dt-); section work is on socket itfleet-W1
+W1-1	PASS	evidence/04-integration/W1/out/W1-1-start.txt	the product started itfleet-W1-probe-2801222 and reports it alive, with the server taken from FLEET_TMUX_SOCKET=itfleet-W1 and no socket named in the call
+W1-2	PASS	evidence/04-integration/W1/out/W1-2-private-sessions.txt	itfleet-W1-probe-2801222 is on socket itfleet-W1
+W1-3	PASS	evidence/04-integration/W1/out/live-sessions-after.txt	the live server's session set is byte-identical across a session being created and made live on the private one (3 sessions, incl. 0 dt-)
+W1-4	SKIP		no dt- session exists on the live server right now, so this cell cannot distinguish blindness from an empty world
+W1-5	SKIP		no dt- session to be blind to
+W1-6	PASS	evidence/04-integration/W1/out/W1-6-private-after-cleanup.txt	cleanup removed itfleet-W1-probe-2801222 from the private server by exact name and left the live server's session set byte-identical
+W1-8	PASS	evidence/04-integration/W1/out/W1-8-groupA.txt	each group server shows ONLY its own session and neither shows the other's — both live, so the invisibility is measured and not vacuous. This is why the socket is per section rather than one shared 'itfleet'
+W1-7	PASS	evidence/04-integration/W1/out/W1-7-negative-control.tsv	negative control: a live session set differing by ONE non-dt- name is reported FAIL — so W1-3 and W1-6 are assertions and not decoration. The pre-SI-1 check would have passed this, because nothing dt- moved
+W1-7-restored	PASS		the real baseline is byte-identical: the negative control ran against a repointed COPY and never wrote the shared file
+W1-9	PASS	evidence/04-integration/W1/out/W1-9-attribution.tsv	SI-25's attribution is FALSIFIABLE, both directions with a real process each: a claude-named process started INSIDE the instant attributes to the section (which is what makes an added worker FAIL), and one started outside does not (which is what stopped the operator's quantonOnSpark4 session being charged to §L/§M/§N). Without this the branch that accuses had never fired — inside-attributed=yes outside-attributed=correctly-foreign
+ISOLATION-W1-leave	PASS		live stores byte-identical; live tmux session set byte-identical (3 sessions, incl. 0 dt-); section work is on socket itfleet-W1
