@@ -18,6 +18,7 @@ export PYTHONPATH="$INSTANT/src"
 # shape — concurrent writers to one register — and last-writer-wins would silently drop a section's rows.
 # The merge into the single RESULTS.tsv is then done by ONE writer, deliberately.
 RESULTS="${IT_RESULTS:-$IT_ROOT/RESULTS.tsv}"
+
 LIVE_SNAPSHOT="$IT_ROOT/live-stores.sha256"
 LIVE_TMUX_SNAPSHOT="$IT_ROOT/live-tmux-sessions.txt"
 
@@ -50,6 +51,20 @@ it_tmux() {
 }
 # shellcheck disable=SC1091
 . "$IT_ROOT/facts.env"
+# The `dummy-project` fixture: two REAL git repos with history, used by §C's base-position cases and by
+# §L's register cases. It cannot be stored as a directory inside this repository — git records a nested
+# repo as a gitlink and stores none of its content, so a fresh clone would get empty directories and the
+# sections would fail for a reason unrelated to what they test. It is therefore an ARCHIVE, unpacked on
+# demand and gitignored once unpacked.
+#
+# `DUMMY` also gains a default here. It was `export`ed by run-group5.sh and never assigned anywhere in the
+# harness, so §L only worked when the caller happened to have it in the environment — a latent dependency
+# on the operator's shell.
+if [ ! -d "$IT_ROOT/dummy-project" ] && [ -f "$IT_ROOT/fixtures/dummy-project.tar.gz" ]; then
+  tar xzf "$IT_ROOT/fixtures/dummy-project.tar.gz" -C "$IT_ROOT"
+fi
+: "${DUMMY:=$IT_ROOT/dummy-project}"
+export DUMMY
 
 it_section() {            # it_section <name> -> own FLEET_HOME, own slots, own tmux prefix, own tmux SERVER
   SECTION="$1"
