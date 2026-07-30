@@ -232,7 +232,10 @@ The Pi package loads the Superpowers skills and a small extension that injects t
 - **brainstorming** - Socratic design refinement
 - **writing-plans** - Detailed implementation plans
 - **executing-plans** - Batch execution with checkpoints
-- **dispatching-parallel-agents** - Concurrent subagent workflows
+- **dispatching-subagents** - Concurrent subagent workflows inside ONE session
+- **coordinating-instants** - Coordinate an effort across dispatched worker instants (fleet)
+- **working-as-a-dispatched-instant** - You ARE a dispatched worker instant (fleet)
+- **using-fleet** - The fleet command surface: verbs, exit codes, porcelain
 - **requesting-code-review** - Pre-review checklist
 - **receiving-code-review** - Responding to feedback
 - **using-git-worktrees** - Parallel development branches

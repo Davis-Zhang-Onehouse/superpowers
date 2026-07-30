@@ -18,7 +18,7 @@ break — see the recipe below.
 ## When to use
 
 - Closing out (or checkpointing) an orchestration effort — producing the operator's ClickUp/Jira tickets.
-- You have a `maintain-workspace` / `dispatchInstants` workspace (HANDOFF.md, ISSUES.md, catalog, evidence/,
+- You have a `maintain-workspace` / `coordinating-instants` workspace (HANDOFF.md, ISSUES.md, catalog, evidence/,
   dispatched child instants) and need a shareable board out of it.
 - NOT for the workspace's own live registry — HANDOFF.md/ISSUES.md stay the working state. The board is the
   *outward* snapshot derived from them.
