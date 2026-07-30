@@ -1,0 +1,6 @@
+# Worker charter — {{TITLE}}
+
+Base instant: {{BASE}}
+
+## Phase declarations
+When CI is dispatched and you are waiting on it, run `fleet declare phase awaiting-ci`.

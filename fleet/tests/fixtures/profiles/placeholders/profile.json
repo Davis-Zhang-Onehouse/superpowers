@@ -1,0 +1,10 @@
+{
+  "kind": "worker",
+  "placeholders": [
+    "TITLE",
+    "BASE",
+    "RUN_ID"
+  ],
+  "requires_clauses": [],
+  "invocation_templates": []
+}
