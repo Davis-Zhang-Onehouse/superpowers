@@ -1,0 +1,9 @@
+{
+  "kind": "worker",
+  "placeholders": [
+    "TITLE",
+    "BASE"
+  ],
+  "requires_clauses": [],
+  "invocation_templates": []
+}

@@ -27,7 +27,10 @@ for s in "${SUITES[@]}"; do
   # Suites end either with a bare "PASS" or "PASS: <description>" — accept both, anchored, so this
   # matches neither a substring in a failure line nor only the one shape I happened to look at first.
   if printf '%s' "$out" | tail -1 | grep -qE '^PASS(:|[[:space:]]|$)'; then
-    pass=$((pass+1)); printf '  PASS  %s\n' "$rel"
+    # Print the suite's LAST line even on success. A suite that skipped half its checks says so in its
+    # verdict line, and a runner that only shows output on failure would make that skip invisible — which is
+    # "absence is never success" broken in the tool whose job is reporting success.
+    pass=$((pass+1)); printf '  PASS  %s — %s\n' "$rel" "$(printf '%s' "$out" | tail -1)"
   else
     fail=$((fail+1)); failed+=("$rel"); printf '  FAIL  %s\n' "$rel"
     [ "$QUIET" = 1 ] || printf '%s\n' "$out" | sed 's/^/          /' | tail -12
