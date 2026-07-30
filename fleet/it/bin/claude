@@ -1,0 +1,16 @@
+#!/bin/sh
+# Integration-test stand-in for the real `claude`, used by §E and §K.
+#
+# `cli._do_dispatch` hardcodes `ctx.sessions.start(tmux, lease.path, "claude")` — there is no
+# --no-launch flag on any verb (Plan 6 §D2 assumes one). So a real dispatch WILL start a real tmux
+# session and run whatever `claude` resolves to on PATH. The isolation contract forbids launching
+# `claude` outside §P, so §E and §K put this on PATH ahead of the real one.
+#
+# It is a REAL long-lived process in a REAL tmux pane, so liveness, pane capture and cwd-holding are
+# all genuine — it simply is not claude. Plan 6 §J1 endorses exactly this substitution ("a real tmux
+# worker (a shell, not `claude`)").
+#
+# `exec sleep` matters twice over:
+#   * the process's comm becomes `sleep`, so `pgrep -x claude` is unchanged (§A6), and
+#   * it keeps the pane alive so `sessions.alive()` answers true through the tmux probe.
+exec sleep 100000

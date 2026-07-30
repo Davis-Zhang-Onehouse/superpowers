@@ -1,0 +1,12 @@
+{
+  "kind": "compaction",
+  "placeholders": [
+    "TITLE"
+  ],
+  "requires_clauses": [
+    "Read HANDOFF.md before anything else"
+  ],
+  "invocation_templates": [
+    "gh workflow run velox-ci.yml --ref refs/heads/main -f mode=release"
+  ]
+}
