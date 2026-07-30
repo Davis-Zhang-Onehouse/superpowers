@@ -1,0 +1,10 @@
+{
+  "kind": "worker",
+  "placeholders": [
+    "TITLE"
+  ],
+  "requires_clauses": [],
+  "invocation_templates": [
+    "gh workflow run velox-ci.yml -f build_type=release"
+  ]
+}

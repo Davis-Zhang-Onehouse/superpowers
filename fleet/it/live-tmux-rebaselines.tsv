@@ -1,0 +1,2 @@
+when	reason	removed	added
+2026-07-30T17:40:47Z	the operator closed dt-ansiFinalCompactionAndCloseout (FI-9 remediated, 2026-07-30). One session REMOVED, none added, verified by hand against tmux ls before re-baselining. Not an IT leak: no section can create a dt- name, and the removal is the operator action FI-9 asked for.	dt-ansiFinalCompactionAndCloseout 	none

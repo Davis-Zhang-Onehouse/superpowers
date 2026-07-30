@@ -1,0 +1,37 @@
+#!/usr/bin/env bash
+# fleet — the coordination CLI, on PATH.
+#
+# `fleet` is a python3-stdlib-only package living at `<repo>/fleet/src/fleet`. This launcher exists so a skill
+# can write `fleet roadmap --instant .` rather than `PYTHONPATH=.../src python3 -m fleet.cli roadmap …`, which
+# is what every skill instruction used to have to say. A command a reader can type is worth more than a
+# command a reader has to assemble.
+#
+# It resolves the package from ITS OWN location, never from the caller's cwd. That is `FI-34`: a control that
+# only works when you are already standing in the right place fails in exactly the handoff it exists to
+# protect, and this launcher is invoked from inside dispatched instants, leased slots and test sandboxes —
+# none of which are this repository.
+#
+# It sets NOTHING else. `FLEET_HOME`, `FLEET_INSTANTS` and `FLEET_TMUX_SOCKET` stay the caller's business,
+# because a mutating verb with no named store REFUSES rather than inventing one, and a launcher that supplied
+# a default would defeat that refusal — which exists because four verbs once wrote a real store under
+# `$HOME/.fleet` without mentioning it.
+set -uo pipefail
+
+_fleet_self="${BASH_SOURCE[0]:-$0}"
+# Follow a symlink, so `ln -s .../bin/fleet ~/bin/fleet` resolves the package and not the link's directory.
+while [ -L "$_fleet_self" ]; do
+  _fleet_link="$(readlink "$_fleet_self")"
+  case "$_fleet_link" in
+    /*) _fleet_self="$_fleet_link" ;;
+    *)  _fleet_self="$(dirname "$_fleet_self")/$_fleet_link" ;;
+  esac
+done
+_fleet_repo="$(cd "$(dirname "$_fleet_self")/.." && pwd)"
+_fleet_src="$_fleet_repo/fleet/src"
+
+if [ ! -d "$_fleet_src/fleet" ]; then
+  echo "fleet: no package at $_fleet_src/fleet — this launcher must live in <repo>/bin/ beside <repo>/fleet/src/" >&2
+  exit 2
+fi
+
+PYTHONPATH="$_fleet_src${PYTHONPATH:+:$PYTHONPATH}" exec python3 -m fleet.cli "$@"

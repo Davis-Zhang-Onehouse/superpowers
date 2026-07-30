@@ -11,3 +11,15 @@ triage/
 # development (see CLAUDE.md / README.md). It is not part of the published
 # plugin, so the whole directory is ignored here.
 evals/
+
+# fleet: generated integration-section output. The runners regenerate it; the parent effort's originals live
+# in the fleetInfraRebuild instant.
+fleet/it/*/out/
+fleet/it/*/home/
+fleet/it/*/instants/
+fleet/it/*/slot/
+fleet/it/*/slots/
+fleet/it/RESULTS-closeout-*.tsv
+fleet/it/*.log
+__pycache__/
+*.pyc
