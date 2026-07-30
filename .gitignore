@@ -7,6 +7,8 @@ fleet/it/*/slot/
 fleet/it/*/slots/
 fleet/it/RESULTS-closeout-*.tsv
 fleet/it/*.log
+# fleet: the dummy-project fixture is unpacked from it/fixtures/dummy-project.tar.gz on demand.
+fleet/it/dummy-project/
 
 .worktrees/
 .private-journal/
