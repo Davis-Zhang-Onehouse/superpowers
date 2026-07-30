@@ -81,6 +81,19 @@ it_section() {            # it_section <name> -> own FLEET_HOME, own slots, own 
   it_assert_isolation "$SECTION-enter"
 }
 
+# A VIRGIN record store for this section. `it_section` only `mkdir -p`s FLEET_HOME, so a second run inherits
+# the first run's records — and §H was measured failing exactly that way: `H10`'s dispatch was refused because
+# the previous run's worker still held the WIP cap. A section whose verdicts depend on whether it has been run
+# before is not measuring the product.
+#
+# Opt-in rather than folded into `it_section`, because a few runners accumulate state across sections on
+# purpose (`run-group5.sh` walks §L §M §N in one process) and a blanket reset would silently change what they
+# measure. Call it immediately after `it_section`, before anything writes.
+it_fresh_store() {
+  rm -rf "$FLEET_HOME"
+  mkdir -p "$FLEET_HOME"
+}
+
 fleet() { python3 -m fleet.cli "$@"; }     # never a bare `fleet` on PATH — FLEET_HOME must be explicit
 
 it_pass() { printf '%s\tPASS\t%s\t%s\n' "$1" "${2:-}" "${3:-}" >> "$RESULTS"; printf 'PASS %s %s\n' "$1" "${3:-}"; }
@@ -228,7 +241,23 @@ it_rebaseline_live_tmux() {     # it_rebaseline_live_tmux <reason>
 it_assert_isolation() {
   local tag="$1" now sessions
   now="$( { find ~/.claude-dispatch-board ~/.claude-ws-pool -type f -print0 2>/dev/null | sort -z | xargs -0 sha256sum; } )"
-  if [ "$now" != "$(cat "$LIVE_SNAPSHOT")" ]; then
+  # ESTABLISH on the first call, exactly as the tmux baseline below does. Both are snapshots of THIS BOX —
+  # the operator's pdispatch stores and the live session set — so neither can be committed: another checkout
+  # has different sessions and would fail on its first run for a reason that has nothing to do with the
+  # product. Before this branch existed the stores comparison had no establishing case at all, so a fresh
+  # checkout could never pass it; the tmux half had been given one and the stores half had not.
+  #
+  # A SKIP and not a PASS, for the reason already written one branch down: an establishing call COMPARED
+  # NOTHING, and reporting it as a pass is "absence is never success" wearing the harness's own badge.
+  #: NOT an early return. Returning here on a first run establishes the stores baseline and skips the tmux
+  #: half entirely, leaving the tmux baseline unset — after which `W1-7`'s negative control repoints a
+  #: baseline that does not exist and `W1-7-restored` fails. Measured, not reasoned about. The establishing
+  #: fact is carried into whichever row this call ends up emitting instead.
+  local stores_note=""
+  if [ ! -f "$LIVE_SNAPSHOT" ]; then
+    printf '%s\n' "$now" > "$LIVE_SNAPSHOT"
+    stores_note="live-STORES baseline ESTABLISHED on this call ($(printf '%s' "$now" | grep -c . ) file(s) hashed), so the stores half is vacuous here and binds from the next call on. "
+  elif [ "$now" != "$(cat "$LIVE_SNAPSHOT")" ]; then
     it_fail "ISOLATION-$tag" "" "THE LIVE STORES CHANGED — the ANSI coordinator runs on them. Aborting."
     return 1
   fi
@@ -243,16 +272,16 @@ it_assert_isolation() {
     # Not a PASS. This call ESTABLISHED the baseline and therefore compared nothing, and a baseline-setting
     # call reported as a pass is the "absence is never success" defect wearing the harness's own badge.
     it_skip "ISOLATION-$tag" "evidence/04-integration/live-tmux-sessions.txt" \
-            "live-session baseline ESTABLISHED on this call ($(printf '%s' "$sessions" | grep -c . ) sessions), so the tmux comparison is vacuous here; it binds from the next call on"
+            "${stores_note}live-session baseline ESTABLISHED on this call ($(printf '%s' "$sessions" | grep -c . ) sessions), so the tmux comparison is vacuous here; it binds from the next call on"
     return 0
   fi
   if [ "$sessions" != "$(cat "$LIVE_TMUX_SNAPSHOT")" ]; then
     it_fail "ISOLATION-$tag" "evidence/04-integration/live-tmux-sessions.txt" \
-            "THE LIVE TMUX SERVER'S SESSION SET CHANGED: $(diff <(cat "$LIVE_TMUX_SNAPSHOT") <(printf '%s\n' "$sessions") | grep '^[<>]' | tr '\n' ' ')"
+            "${stores_note}THE LIVE TMUX SERVER'S SESSION SET CHANGED: $(diff <(cat "$LIVE_TMUX_SNAPSHOT") <(printf '%s\n' "$sessions") | grep '^[<>]' | tr '\n' ' ')"
     return 1
   fi
   it_pass "ISOLATION-$tag" "" \
-          "live stores byte-identical; live tmux session set byte-identical ($(printf '%s' "$sessions" | grep -c . ) sessions, incl. $(printf '%s' "$sessions" | grep -c '^dt-') dt-); section work is on socket $IT_TMUX_SOCKET"
+          "${stores_note}live stores byte-identical; live tmux session set byte-identical ($(printf '%s' "$sessions" | grep -c . ) sessions, incl. $(printf '%s' "$sessions" | grep -c '^dt-') dt-); section work is on socket $IT_TMUX_SOCKET"
 }
 
 # Kills only this section's sessions, on the private server, by EXACT name. Two changes from the form that
