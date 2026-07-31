@@ -14,7 +14,7 @@
 # are in `test_store.py`/`test_identity.py`; O4's clean-error-on-EACCES is what `SI-22` fixed) or fails in a
 # way that is self-evident when it happens (O5, O6, O8). The section-level NOT-RUN row stays.
 #
-# Run: bash evidence/04-integration/run-O.sh
+# Run: bash fleet/it/run-O.sh
 IT_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 . "$IT_ROOT/lib.sh"
 
@@ -56,13 +56,13 @@ else
   o7_said_something=0
   { [ "$o7_rows" -gt 0 ] || [ -s "$OUT/O7-lint.err" ]; } && o7_said_something=1
   if [ "$o7_rc" = 124 ]; then
-    it_fail O7 "evidence/04-integration/O/out/O7-lint.err" \
+    it_fail O7 "fleet/it/O/out/O7-lint.err" \
       "lint DID NOT TERMINATE within 30s on an instant containing a symlink loop — it was killed by timeout. A hang is the worst of the failure modes here because it is indistinguishable from slow work"
   elif [ "$o7_said_something" = 1 ]; then
-    it_pass O7 "evidence/04-integration/O/out/O7-lint.tsv" \
+    it_pass O7 "fleet/it/O/out/O7-lint.tsv" \
       "lint TERMINATED (exit $o7_rc, not 124) on an instant containing two shapes of symlink loop — a self-referential 'loop -> .' and a mutual 'a/b/up -> ../..' — and reported $o7_rows row(s) plus $(wc -c < "$OUT/O7-lint.err") bytes on stderr rather than dying silently. Bounded by \`timeout 30\` deliberately: a hang is the failure being tested for, so an unbounded version of this case would hang the suite instead of failing it"
   else
-    it_fail O7 "evidence/04-integration/O/out/O7-lint.tsv" \
+    it_fail O7 "fleet/it/O/out/O7-lint.tsv" \
       "lint exited $o7_rc but said NOTHING — terminating silently on a corrupt instant is 'absence is never success'"
   fi
 fi
@@ -159,13 +159,13 @@ a_state="$(awk -F': ' '/^record_state:/{print $2}' "$OUT/O9-before-state.txt")"
 a_readable="$(awk '/^store_readable:/{print $2}' "$OUT/O9-before-state.txt")"
 a_rc="$(awk -F': ' '/^driver_rc:/{print $2}' "$OUT/O9-before-state.txt")"
 if [ "$a_rc" = 99 ]; then
-  it_fail O9a "evidence/04-integration/O/out/O9-before-state.txt" \
+  it_fail O9a "fleet/it/O/out/O9-before-state.txt" \
     "the driver was never killed, so this measures nothing"
 elif [ "$a_state" = absent ] && [ "$a_readable" = True ]; then
-  it_pass O9a "evidence/04-integration/O/out/O9-before-state.txt" \
+  it_pass O9a "fleet/it/O/out/O9-before-state.txt" \
     "SIGKILL immediately before the atomic replace left NO record at all (not a truncated one) and the store still reads cleanly — so a crash mid-write costs the write and never the register. The temp file that was already on disk is not mistaken for a record, which matters more than the lost write: a store that becomes permanently unreadable after one crash is the worse outcome"
 else
-  it_fail O9a "evidence/04-integration/O/out/O9-before-state.txt" \
+  it_fail O9a "fleet/it/O/out/O9-before-state.txt" \
     "record_state=$a_state (want absent), store_readable=$a_readable (want True)"
 fi
 
@@ -175,22 +175,22 @@ b_state="$(awk -F': ' '/^record_state:/{print $2}' "$OUT/O9-after-state.txt")"
 b_readable="$(awk '/^store_readable:/{print $2}' "$OUT/O9-after-state.txt")"
 b_rc="$(awk -F': ' '/^driver_rc:/{print $2}' "$OUT/O9-after-state.txt")"
 if [ "$b_rc" = 99 ]; then
-  it_fail O9b "evidence/04-integration/O/out/O9-after-state.txt" \
+  it_fail O9b "fleet/it/O/out/O9-after-state.txt" \
     "the driver was never killed, so this measures nothing"
 elif [ "$b_state" = complete ] && [ "$b_readable" = True ]; then
-  it_pass O9b "evidence/04-integration/O/out/O9-after-state.txt" \
+  it_pass O9b "fleet/it/O/out/O9-after-state.txt" \
     "SIGKILL immediately AFTER the atomic replace left a COMPLETE, parseable record. This is the half that makes O9a non-vacuous: without it, a store that simply never wrote anything would satisfy 'the record is absent' perfectly. Together the two say the window around the replace has exactly two states and no third"
 else
-  it_fail O9b "evidence/04-integration/O/out/O9-after-state.txt" \
+  it_fail O9b "fleet/it/O/out/O9-after-state.txt" \
     "record_state=$b_state (want complete), store_readable=$b_readable (want True)"
 fi
 
 # The section-level claim, stated once both halves are in.
 if grep -qP '^O9a\tPASS\t' "$RESULTS" && grep -qP '^O9b\tPASS\t' "$RESULTS"; then
-  it_pass O9 "evidence/04-integration/O/out/O9-before-state.txt" \
+  it_pass O9 "fleet/it/O/out/O9-before-state.txt" \
     "the tmp-then-replace guarantee holds across a REAL SIGKILL, in both directions (O9a absent, O9b complete) — never a truncated record. Every register in the package (records, leases, roadmaps, proposals, declarations) writes through this one function, so this is the case the whole store layer rests on and it had been argued from construction rather than crashed"
 else
-  it_fail O9 "evidence/04-integration/O/out/O9-before-state.txt" \
+  it_fail O9 "fleet/it/O/out/O9-before-state.txt" \
     "one or both halves failed; see O9a/O9b"
 fi
 

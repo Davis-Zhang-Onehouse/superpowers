@@ -72,7 +72,7 @@
 #   * Every `chmod 000` is registered and restored by an EXIT trap. Every kill is `kill -9 <a pid this
 #     harness captured>`; there is no `pkill` and no `kill-server` anywhere in this file.
 #
-# Usage: IT_RESULTS=<file> bash evidence/04-integration/run-D.sh
+# Usage: IT_RESULTS=<file> bash fleet/it/run-D.sh
 set -uo pipefail
 
 D_HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"

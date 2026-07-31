@@ -1,0 +1,13 @@
+{
+  "schema_version": 1,
+  "milestones": [
+    {
+      "id": "M1",
+      "title": "the A1 milestone",
+      "status": "ready",
+      "deps": [],
+      "evidence": [],
+      "owner": null
+    }
+  ]
+}

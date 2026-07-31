@@ -1,0 +1,5 @@
+dry-run	nothing was enrolled
+would-enroll	/home/ubuntu/davis_root/superpowers/fleet/it/L/slots/s1
+slot	s1
+directory-exists	true
+note	the real run validates through pool.enroll, which owns that message

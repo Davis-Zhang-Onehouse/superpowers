@@ -19,7 +19,7 @@
 # case below says what it used to prove and what it proves now.
 #
 # This runs NO tmux, spawns no session and touches no live store: it is pure lease-file state.
-# Run: bash evidence/04-integration/run-e9-leak.sh
+# Run: bash fleet/it/run-e9-leak.sh
 IT_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 . "$IT_ROOT/lib.sh"
 
@@ -69,13 +69,13 @@ fleet leases --porcelain > "$OUT/leases-after-plant.tsv" 2>/dev/null
 # WAS: asserted 'leases' reports s2 FREE. NOW: it must report `interrupted` -- an unclaimable slot described
 # as free is an answer that gets you NoCapacity, and it was half of the two-authorities disagreement.
 if grep -qP '^s2\tinterrupted' "$OUT/leases-after-plant.tsv"; then
-  it_pass E9-leak-a "evidence/04-integration/E9leak/out/leases-after-plant.tsv" \
+  it_pass E9-leak-a "fleet/it/E9leak/out/leases-after-plant.tsv" \
     "the leases view reports s2 as INTERRUPTED, not free (it reported 'free' before the fix, while no claimant could take it)"
 elif grep -qP '^s2\tfree' "$OUT/leases-after-plant.tsv"; then
-  it_fail E9-leak-a "evidence/04-integration/E9leak/out/leases-after-plant.tsv" \
+  it_fail E9-leak-a "fleet/it/E9leak/out/leases-after-plant.tsv" \
     "REGRESSION: the leases view is back to calling an unclaimable slot 'free'"
 else
-  it_fail E9-leak-a "evidence/04-integration/E9leak/out/leases-after-plant.tsv" \
+  it_fail E9-leak-a "fleet/it/E9leak/out/leases-after-plant.tsv" \
     "s2 is in neither expected state: $(tr '\n' ' ' < "$OUT/leases-after-plant.tsv")"
 fi
 
@@ -90,10 +90,10 @@ fi
 touch -d '2 hours ago' "$FLEET_HOME/pool/leases/s2" 2>/dev/null || true
 fleet reap --all --porcelain > "$OUT/reap.tsv" 2>&1; reap_rc=$?
 if grep -q 'reap-reclaimed' "$OUT/reap.tsv" && grep -q 's2' "$OUT/reap.tsv"; then
-  it_pass E9-leak-b "evidence/04-integration/E9leak/out/reap.tsv" \
+  it_pass E9-leak-b "fleet/it/E9leak/out/reap.tsv" \
     "reap RECLAIMED the interrupted claim on s2 and named it under its own kind reap-reclaimed (rc=$reap_rc). Before the fix this exited 0 reporting '0 of them leased; 0 freed, 0 could not be freed'"
 else
-  it_fail E9-leak-b "evidence/04-integration/E9leak/out/reap.tsv" \
+  it_fail E9-leak-b "fleet/it/E9leak/out/reap.tsv" \
     "REGRESSION: reap did not reclaim it or did not name it (rc=$reap_rc): $(tr '\n' ' ' < "$OUT/reap.tsv" | head -c 300)"
 fi
 
@@ -115,10 +115,10 @@ except Exception as e:
 PY
 cat "$OUT/claim.txt"
 if grep -q '^claim -> s2$' "$OUT/claim.txt" && grep -q 'interrupted : \[\]' "$OUT/claim.txt"; then
-  it_pass E9-leak-c "evidence/04-integration/E9leak/out/claim.txt" \
+  it_pass E9-leak-c "fleet/it/E9leak/out/claim.txt" \
     "after the reap the slot is CLAIMABLE and no interrupted claim remains: free_slots(), lease() and the claim path all agree. Before the fix this raised NoCapacity('already leased by an unnamed claim') for the life of the store"
 else
-  it_fail E9-leak-c "evidence/04-integration/E9leak/out/claim.txt" \
+  it_fail E9-leak-c "fleet/it/E9leak/out/claim.txt" \
     "REGRESSION: the slot did not come back: $(tr '\n' ' ' < "$OUT/claim.txt" | head -c 300)"
 fi
 
@@ -155,10 +155,10 @@ cat "$OUT/exhausted.txt"
 if grep -qi 'INTERRUPTED claim' "$OUT/exhausted.txt" \
    && grep -q "'s3'" "$OUT/exhausted.txt" \
    && grep -qi 'reap' "$OUT/exhausted.txt"; then
-  it_pass E9-leak-d "evidence/04-integration/E9leak/out/exhausted.txt" \
+  it_pass E9-leak-d "fleet/it/E9leak/out/exhausted.txt" \
     "the exhausted-pool refusal now NAMES the interrupted claim ('s3'), says it is a dead writer rather than work in progress, and points at reap -- which E9-leak-b proves actually clears it. Before the fix the same sentence named a remedy that was inert, which is FI-30a's unclearable alarm"
 else
-  it_fail E9-leak-d "evidence/04-integration/E9leak/out/exhausted.txt" \
+  it_fail E9-leak-d "fleet/it/E9leak/out/exhausted.txt" \
     "the refusal does not distinguish a lost slot from a busy one: $(tr '\n' ' ' < "$OUT/exhausted.txt" | head -c 400)"
 fi
 

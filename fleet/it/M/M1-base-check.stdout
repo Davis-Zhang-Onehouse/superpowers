@@ -1,0 +1,2 @@
+lineage     mprobe-07310023  info  no git lineage is recorded for this dispatch, so there is nothing to check and nothing gates a claim of done. That is correct for a coordinator, a compaction, or any dispatch made without --lineage-base
+population  mprobe-07310023  info  expected (nothing) in /home/ubuntu/davis_root/superpowers/fleet/it/M/slots/ms1, lineage-mode=(none), 0 repo(s) blocking a claim of done

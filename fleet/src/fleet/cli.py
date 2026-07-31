@@ -2526,6 +2526,18 @@ def _do_selftest(ctx: Ctx, parsed: Parsed) -> int:
     _, head = ctx.git(["rev-parse", "HEAD"], root)
     _, status = ctx.git(["status", "--porcelain"], root)
     dirty = [line[3:].strip() for line in str(status).splitlines() if line.strip()]
+    #: `git status --porcelain` reports paths relative to the REPOSITORY ROOT, not to the directory it was run
+    #: in — so once this package became a SUBDIRECTORY of its repo, every path arrived as `fleet/src/...` and
+    #: nothing matched `COVERED_PATHS`. The dirty-inside-coverage refusal silently stopped firing, which is the
+    #: worst shape of failure available to a control: it kept reporting, and reported clean. `M13` caught it.
+    #:
+    #: `rev-parse --show-prefix` is the package's own path within the repo (empty when they coincide), so
+    #: stripping it makes every path package-relative. A path OUTSIDE the package keeps its repo-relative form
+    #: and therefore correctly fails to match a covered prefix.
+    _, prefix = ctx.git(["rev-parse", "--show-prefix"], root)
+    prefix = str(prefix).strip()
+    if prefix:
+        dirty = [path[len(prefix):] if path.startswith(prefix) else path for path in dirty]
     inside = sorted(path for path in dirty if any(path.startswith(p) for p in COVERED_PATHS))
     # The stamp is unconditional. A verdict with no tree state behind it cannot be re-derived later.
     rows.append(Row(kind="tree", subject=_oneline(head) or "(no commit)", severity=INFO,

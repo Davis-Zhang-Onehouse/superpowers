@@ -1,0 +1,11 @@
+{
+  "schema_version": 1,
+  "sources": [
+    {
+      "base": "00000000",
+      "issues_path": "00000000/ISSUES.md",
+      "registered_at": "2026-07-30T23:54:59Z",
+      "last_run": null
+    }
+  ]
+}

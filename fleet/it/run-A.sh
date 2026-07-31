@@ -36,7 +36,7 @@
 #     starts nothing. The live server is read (`tmux ls`) and never written.
 #   * No `claude` process is started or killed. `pgrep -x claude` is compared before and after (A6).
 #
-# Usage:  IT_RESULTS=.../RESULTS-A.tsv bash evidence/04-integration/run-A.sh
+# Usage:  IT_RESULTS=.../RESULTS-A.tsv bash fleet/it/run-A.sh
 set -uo pipefail
 
 A_HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -69,9 +69,15 @@ scrub()  { sed "s|$INSTANT/||g" | sed -E 's#(^|[[:space:]"'"'"'(])/(tmp|home|var
 #: against its expected value before the rm. A prior agent's interrupted `rm -rf` on an unset path
 #: destroyed 1333 tracked files; the guard costs one line.
 A_EVDIR="$IT_ROOT/A"
+# The guard checks the PARENT'S IDENTITY, not the path's spelling. The original matched
+# `*/evidence/04-integration/A`, which was correct where it was written and refused outright the moment the
+# harness moved — a guard keyed on a layout protects one layout. What actually matters is that IT_ROOT really
+# is the harness root (so `$IT_ROOT/A` cannot be `/A` from an unset variable) and that the target is exactly
+# the §A section dir. `lib.sh` is the proof of identity: only the harness root contains it.
 case "$A_EVDIR" in
-  */evidence/04-integration/A) rm -rf "$A_EVDIR" ;;
-  *) echo "run-A.sh: refusing to rm '$A_EVDIR' — it is not the §A evidence dir" >&2; exit 2 ;;
+  */A) [ -n "${IT_ROOT:-}" ] && [ -f "$IT_ROOT/lib.sh" ] && rm -rf "$A_EVDIR" \
+       || { echo "run-A.sh: refusing to rm '$A_EVDIR' — IT_ROOT=${IT_ROOT:-<unset>} is not a harness root (no lib.sh)" >&2; exit 2; } ;;
+  *) echo "run-A.sh: refusing to rm '$A_EVDIR' — it is not a §A section dir" >&2; exit 2 ;;
 esac
 mkdir -p "$A_EVDIR/out"
 OUT="$A_EVDIR/out"
@@ -189,6 +195,7 @@ a1_args() {               # every required flag supplied; no value contains a sp
     declare)    echo "--instant $A1_INST --phase awaiting-ci" ;;
     park)       echo "--instant $A1_INST --question a1park" ;;
     unpark)     echo "--instant $A1_INST" ;;
+    milestone)  echo "--instant $A1_INST --id a1m --title a1milestone" ;;
     propose)    echo "--instant $A1_INST --milestone M1 --status running --evidence a1evidence" ;;
     apply)      echo "--instant $A1_INST --milestone M1" ;;
     review)     echo "--instant $A1_INST --scope all --verdict READY" ;;
@@ -295,9 +302,9 @@ a2_snapshot_covers_both_stores() {
   #: sha256sum's own form is `<64 hex>  <path>`; anything else is not a snapshot this check can diff.
   local malformed; malformed="$(grep -cvE '^[0-9a-f]{64}[[:space:]]+/' "$LIVE_SNAPSHOT")"
   if [ "$lines" -gt 0 ] && [ "$board" -gt 0 ] && [ "$pool" -gt 0 ] && [ "$malformed" = 0 ]; then
-    a_pass A2a "evidence/04-integration/live-stores.sha256" "$(sq "the snapshot exists and covers BOTH live stores: $lines sha256 lines, $board dispatch-board + $pool ws-pool entries, 0 malformed")"
+    a_pass A2a "fleet/it/live-stores.sha256" "$(sq "the snapshot exists and covers BOTH live stores: $lines sha256 lines, $board dispatch-board + $pool ws-pool entries, 0 malformed")"
   else
-    a_fail A2a "evidence/04-integration/live-stores.sha256" "$(sq "snapshot unusable: $lines lines, dispatch-board=$board, ws-pool=$pool, malformed=$malformed — a snapshot missing a store cannot detect a change in it")"
+    a_fail A2a "fleet/it/live-stores.sha256" "$(sq "snapshot unusable: $lines lines, dispatch-board=$board, ws-pool=$pool, malformed=$malformed — a snapshot missing a store cannot detect a change in it")"
   fi
 }
 
@@ -1140,7 +1147,7 @@ PY
   #:   * A FAIL means the DESIGN violates the rule. It does not. The register (`RESULTS.tsv`) and the
   #:     live-session baseline are state SHARED ACROSS sections — a results file inside one section's
   #:     directory could not be a fleet-wide register, and the baseline has to outlive any single section
-  #:     or it cannot detect drift between them. Both are deliberately at `evidence/04-integration/` level.
+  #:     or it cannot detect drift between them. Both are deliberately at `fleet/it/` level.
   #:   * The clause as the plan words it — "no write outside the section dir" — is therefore stricter than
   #:     the design it audits, and the PLAN is what is wrong. That is the parent's file and the parent is a
   #:     live writer, so it is named here rather than edited (`SD-0`).
@@ -1153,7 +1160,7 @@ PY
   if [ "$nout" = 0 ]; then
     a_pass A8c "$OUT/A8-audit.txt" "$(sq "no harness write lands outside the section dir")"
   else
-    a_skip A8c "$OUT/A8-audit.txt" "$(sq "$nout write site(s) land OUTSIDE <section>/ — the clause as written does not hold, and every one is deliberate: $n_out site(s) write the register (\$RESULTS) and the live-session baseline (\$IT_ROOT/live-tmux-sessions.txt, \$IT_ROOT/dt-sessions-seen-<S>.txt) at evidence/04-integration level, which is right for state SHARED across sections but is outside <section>/; $n_tmp site(s) touch \$TMPDIR — chiefly it_own_cases staging the register through mktemp, the only write that leaves the instant at all, transient and never cited as evidence. What P-3 actually protects (no evidence path outside the instant) HOLDS. SKIP not FAIL: the clause is stricter than the design (SI-18), the register and the baseline are shared-across-sections BY DESIGN, and what P-3 protects — no evidence path outside the instant — holds and is enforced per-commit by lint-evidence-paths.sh")"
+    a_skip A8c "$OUT/A8-audit.txt" "$(sq "$nout write site(s) land OUTSIDE <section>/ — the clause as written does not hold, and every one is deliberate: $n_out site(s) write the register (\$RESULTS) and the live-session baseline (\$IT_ROOT/live-tmux-sessions.txt, \$IT_ROOT/dt-sessions-seen-<S>.txt) at fleet/it level, which is right for state SHARED across sections but is outside <section>/; $n_tmp site(s) touch \$TMPDIR — chiefly it_own_cases staging the register through mktemp, the only write that leaves the instant at all, transient and never cited as evidence. What P-3 actually protects (no evidence path outside the instant) HOLDS. SKIP not FAIL: the clause is stricter than the design (SI-18), the register and the baseline are shared-across-sections BY DESIGN, and what P-3 protects — no evidence path outside the instant — holds and is enforced per-commit by lint-evidence-paths.sh")"
   fi
 
   local bad skipped

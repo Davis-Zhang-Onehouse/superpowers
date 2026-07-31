@@ -1,0 +1,15 @@
+{
+  "schema_version": 1,
+  "milestones": [
+    {
+      "id": "M1",
+      "title": "the A5 milestone",
+      "status": "running",
+      "deps": [],
+      "evidence": [
+        "/home/ubuntu/davis_root/superpowers/fleet/it/A/out/A5-setup.out"
+      ],
+      "owner": null
+    }
+  ]
+}
