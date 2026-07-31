@@ -1880,6 +1880,70 @@ def _do_reconcile(ctx: Ctx, parsed: Parsed) -> int:
 # editing its store by hand.
 
 
+def _do_clone(ctx: Ctx, parsed: Parsed) -> int:
+    """Grow the pool FROM the declared golden, then enrol the result.  `SI-19`.
+
+    The verb that makes the declared golden an INPUT. Before this, `golden()` had one caller — `set-golden`'s
+    own echo-back — so the golden was write-only and a pool grew only by `enroll`ing directories somebody had
+    duplicated by hand, outside the tool, with nothing checking they came from the golden at all. That is the
+    half of `SI-19` that was reported as implemented and did not exist.
+
+    Two steps in one transaction, and the ORDER is the safety property: copy, verify HEAD parity, and only
+    then enrol. A slot enrolled before it was verified is a slot a dispatch can lease while it is still being
+    written, and the pool's own rule is that `mkdir` IS the lock — enrolment is the moment it becomes takeable.
+    A parity failure therefore leaves an unenrolled directory NAMED in the output rather than a leased one:
+    nothing deletes it, because no verb here deletes outward state, and a copy somebody can inspect beats a
+    copy the tool tidied away.
+    """
+    workspace = Workspace(ctx.home, git=ctx.git)
+    target = Path(parsed.get("slot"))
+    #: A comma list of repo NAMES, not `repo=sha` pairs: parity is golden-vs-clone, so there is no expected
+    #: sha to state — the golden's own HEAD is the expectation.
+    repos = [r.strip() for r in str(parsed.get("verify-repos") or "").split(",") if r.strip()]
+
+    if ctx.dry_run:
+        golden = workspace.golden()
+        _emit(ctx, "clone", [("dry-run", "nothing was copied or enrolled"), ("golden", str(golden)),
+                             ("target", str(target)),
+                             ("target_exists", "true — a real run would REFUSE" if target.exists()
+                              else "false"),
+                             ("verify_repos", ", ".join(sorted(repos)) or "(none named)")])
+        return EXIT_OK
+
+    report = workspace.clone(target)
+    rows = [("golden", report["golden"]), ("target", report["target"]),
+            ("files_copied", str(report["files"]))]
+
+    #: Parity is checked on the repos the caller NAMES. Nothing is inferred from the tree: a clone whose
+    #: parity was checked over "whatever looked like a repo" would report a green it did not measure for the
+    #: repo that mattered.
+    mismatched = []
+    if repos:
+        for repo, gold_head, clone_head, same in workspace.clone_parity(target, repos):
+            rows.append((f"parity.{repo}",
+                         f"{(clone_head or 'unreadable')[:12]} vs golden {(gold_head or 'unreadable')[:12]}"
+                         f" — {'same' if same else 'DIFFERENT'}"))
+            if not same:
+                mismatched.append(repo)
+    else:
+        rows.append(("parity", "not checked: no --verify-repos named, so this clone is unverified"))
+
+    if mismatched:
+        raise Refused(
+            f"the clone at {target} does NOT match the golden for {', '.join(mismatched)}, so it was left "
+            f"UNENROLLED — a slot enrolled before it is verified can be leased while it is still wrong, and "
+            f"every `base-check` in it would then compare against the wrong commit. The directory is left in "
+            f"place and named here rather than removed; inspect it, then enrol it by hand or delete it.",
+            clears_when=f"{target} matches the golden for {', '.join(mismatched)}, or is removed")
+
+    ctx.pool.enroll(target)
+    rows.append(("enrolled", str(target)))
+    rows.append(("order", "copied, then verified, THEN enrolled — enrolment is the moment a slot becomes "
+                          "leasable, so it comes last"))
+    _emit(ctx, "clone", rows)
+    return EXIT_OK
+
+
 def _do_enroll(ctx: Ctx, parsed: Parsed) -> int:
     """Put an EXISTING workspace directory into the pool. Opt-in, always.
 
@@ -2743,6 +2807,14 @@ VERBS = {spec.name: spec for spec in (
         Flag("--id", True, False, "the record to harvest; omit for the tick alone"),
         Flag("--max-age", True, False, f"the cadence window in seconds (default {DEFAULT_MAX_AGE_S})"),
     )),
+    _verb("clone", _do_clone, False,
+          "duplicate the declared golden into a new slot and enrol it; the verb that makes the golden an "
+          "INPUT rather than a declaration nothing reads (SI-19)", (
+        Flag("--slot", True, True, "the path to create; refused if it already exists"),
+        Flag("--verify-repos", True, False,
+             "repos to check HEAD parity on, as `alpha,beta` — named, never inferred, because parity over "
+             "'whatever looked like a repo' reports a green it did not measure"),
+    )),
     _verb("enroll", _do_enroll, False, "put an EXISTING workspace directory into the pool; opt-in", (
         Flag("--slot", True, True, "the workspace directory; its basename becomes the slot name"),
     )),
@@ -2819,6 +2891,7 @@ PORCELAIN_COLUMNS = {
     "complete": KV_COLUMNS,
     "abort": KV_COLUMNS,
     "close": KV_COLUMNS,
+    "clone": KV_COLUMNS,
     "enroll": KV_COLUMNS,
     "unenroll": KV_COLUMNS,
     "set-golden": KV_COLUMNS,

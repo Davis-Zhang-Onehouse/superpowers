@@ -384,6 +384,8 @@ class CliCase(unittest.TestCase):
                       "--reason", "the baseline moved under it and the work is unstackable"],
             "close": ["--id", fleet.ids["closable"]],
             "harvest": ["--id", fleet.ids["harvestable"]],
+            #: A path that does NOT exist: `clone` refuses an existing target by design.
+            "clone": ["--slot", str(fleet.tmp / "cloned-slot")],
             "enroll": ["--slot", str(fleet.spare())],
             "unenroll": ["--slot", "ws8"],
             "reap": ["--base", OURS],
@@ -2579,3 +2581,107 @@ class TestTheNearMissRuleReadsShapeAndRetraction(CliCase):
         code, out, err = self._lint(fleet, "## Phase: AWAITING-CI")
 
         self.assertNotIn(cli.NEAR_MISS, out)
+
+
+class TestCloneMakesTheGoldenAnInput(CliCase):
+    """`SI-19`'s remaining half. `FI-6` recorded `clone` as implemented in Plan 2; it did not exist, and the
+    consequence was quieter than a missing feature: `Workspace.golden()` had exactly ONE caller —
+    `set-golden`'s own echo-back — so the declared golden was write-only, and a pool grew only by `enroll`ing
+    directories somebody had duplicated by hand with nothing checking they came from the golden at all.
+
+    A filesystem copy and NOT a git clone, deliberately: a golden carries prebuilt artifacts and a warm build
+    cache, which is the entire reason leasing a slot beats a fresh checkout, and `git clone` would reproduce
+    the source while discarding exactly that.
+    """
+
+    def _golden(self, fleet, repos=("alpha",)):
+        golden = fleet.tmp / "golden"
+        for repo in repos:
+            (golden / repo).mkdir(parents=True)
+            (golden / repo / "f.txt").write_text("content\n")
+            (golden / repo / ".git").mkdir()
+        (golden / ".m2").mkdir()
+        (golden / ".m2" / "warm.jar").write_text("cache\n")
+        fleet.run(["set-golden", "--path", str(golden)])
+        return golden
+
+    def test_clone_copies_the_golden_and_enrols_the_result(self):
+        fleet = self.loaded()
+        self._golden(fleet)
+        target = fleet.tmp / "grown-slot"
+
+        code, out, err = fleet.run(["clone", "--slot", str(target), "--porcelain"])
+
+        self.assertEqual(0, code, err)
+        self.assertTrue((target / "alpha" / "f.txt").is_file(), "the golden's content did not arrive")
+        self.assertTrue((target / ".m2" / "warm.jar").is_file(),
+                        "the build cache did not arrive — which is the whole reason this is a copy and not a "
+                        "git clone")
+        self.assertIn(target.name, [str(p) for p in fleet.pool.slots()],
+                      "the clone was not enrolled, so the pool cannot lease it")
+
+    def test_clone_refuses_an_existing_target(self):
+        """A clone onto an existing directory is either a mistake or a request to erase somebody's leased
+        workspace, and guessing between those is how a live slot is destroyed."""
+        fleet = self.loaded()
+        self._golden(fleet)
+        target = fleet.tmp / "already-there"
+        target.mkdir()
+
+        code, out, err = fleet.run(["clone", "--slot", str(target)])
+
+        self.assertEqual(2, code)
+        self.assertIn("never overwrites", err)
+
+    def test_clone_refuses_when_no_golden_is_declared(self):
+        """`MI-7`: there is deliberately no fallback. A clone that invented a source would put a worker in a
+        workspace nobody declared."""
+        fleet = self.fleet(slots=2)
+
+        code, out, err = fleet.run(["clone", "--slot", str(fleet.tmp / "nope")])
+
+        self.assertEqual(2, code)
+
+    def test_a_parity_mismatch_leaves_the_slot_UNENROLLED(self):
+        """The order is the safety property: copy, verify, THEN enrol. Enrolment is the moment a slot becomes
+        leasable — `mkdir` is the lock — so a slot enrolled before it was verified can be leased while it is
+        still wrong, and every `base-check` in it would compare against the wrong commit.
+
+        The git seam is pointed at a runner that reports a DIFFERENT head for the clone than for the golden,
+        which is the only way to reach this branch without corrupting a real repository.
+        """
+        fleet = self.loaded()
+        golden = self._golden(fleet)
+        target = fleet.tmp / "mismatched"
+        heads = iter(["aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\n",
+                      "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb\n"])
+
+        def divergent(args, cwd=None):
+            if list(args)[:2] == ["rev-parse", "HEAD"]:
+                return 0, next(heads, "cccccccccccccccccccccccccccccccccccccccc\n")
+            return 0, ""
+
+        fleet.git = divergent
+
+        code, out, err = fleet.run(["clone", "--slot", str(target), "--verify-repos", "alpha"])
+
+        self.assertEqual(EXIT_REFUSED, code, f"a parity mismatch was accepted: {out}")
+        self.assertIn("UNENROLLED", err)
+        self.assertTrue(target.is_dir(),
+                        "the mismatched clone was DELETED; no verb here deletes outward state, and a copy "
+                        "somebody can inspect beats one the tool tidied away")
+        self.assertNotIn(target.name, [str(p) for p in fleet.pool.slots()],
+                         "a clone that failed parity was enrolled anyway")
+
+    def test_parity_is_checked_only_on_repos_the_caller_names(self):
+        """Parity over "whatever looked like a repo" would report a green it did not measure for the repo that
+        mattered, so the population is named and the output says when it is empty."""
+        fleet = self.loaded()
+        self._golden(fleet)
+        target = fleet.tmp / "unverified"
+
+        code, out, err = fleet.run(["clone", "--slot", str(target), "--porcelain"])
+
+        self.assertEqual(0, code, err)
+        self.assertIn("this clone is unverified", out,
+                      "a clone with no --verify-repos must SAY it was not verified")

@@ -273,6 +273,8 @@ class Loaded(unittest.TestCase):
             "abort": ["--instant", str(fleet.paths["doomed"]),
                       "--reason", "the baseline moved under it"],
             "close": ["--id", fleet.ids["closable"]],
+            #: A path that does NOT exist: `clone` refuses an existing target by design.
+            "clone": ["--slot", str(fleet.tmp / "cloned-slot")],
             "enroll": ["--slot", str(fleet.spare())],
             "unenroll": ["--slot", "ws8"],
             "reap": ["--base", OURS],
