@@ -1,0 +1,6 @@
+repetition: 2 | always re-derive the state from the join instead of trusting the board | ['/home/ubuntu/davis_root/superpowers/fleet/it/L/reg/l9-A.md:3', '/home/ubuntu/davis_root/superpowers/fleet/it/L/reg/l9-B.md:3']
+cited /home/ubuntu/davis_root/superpowers/fleet/it/L/reg/l9-A.md:3 -> ## RI-5 always re-derive the state from the join instead of trusting the board
+cited /home/ubuntu/davis_root/superpowers/fleet/it/L/reg/l9-B.md:3 -> - OI-9 always re-derive the state from the join instead of trusting the board
+uncited repetition refused: the repetition 'x' cites nowhere. A repetition with no citation is an opinion; e
+min_count=1 refused: min_count=1 is below two, and a 'repetition' of one instance is an observation. 
+OK L9: the shared advice is flagged at count 2 with one verifiable citation per instance (the id prefix RI-5 vs OI-9 and the bullet/heading markers are normalised away)

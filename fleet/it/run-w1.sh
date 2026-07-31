@@ -8,7 +8,7 @@
 #   (b) from the private server the live sessions are NOT VISIBLE — so an IT section cannot even read
 #       them, which is what §E's server-wide isolation assertion was really asking about.
 #
-# Run: bash evidence/04-integration/run-w1.sh
+# Run: bash fleet/it/run-w1.sh
 IT_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 . "$IT_ROOT/lib.sh"
 
@@ -45,30 +45,30 @@ layer.start(name, Path("/tmp"), "sleep 120")
 print("alive:", layer.alive(name))
 PY
 if grep -q '^alive: True$' "$OUT/W1-1-start.txt"; then
-  it_pass W1-1 "evidence/04-integration/W1/out/W1-1-start.txt" \
+  it_pass W1-1 "fleet/it/W1/out/W1-1-start.txt" \
     "the product started $S and reports it alive, with the server taken from FLEET_TMUX_SOCKET=$IT_TMUX_SOCKET and no socket named in the call"
 else
-  it_fail W1-1 "evidence/04-integration/W1/out/W1-1-start.txt" \
+  it_fail W1-1 "fleet/it/W1/out/W1-1-start.txt" \
     "the product did not bring up $S: $(head -3 "$OUT/W1-1-start.txt" | tr '\n' ' ')"
 fi
 
 # W1-2 · it is on the PRIVATE server.
 it_tmux ls -F '#{session_name}' > "$OUT/W1-2-private-sessions.txt" 2>&1 || true
 if grep -qx "$S" "$OUT/W1-2-private-sessions.txt"; then
-  it_pass W1-2 "evidence/04-integration/W1/out/W1-2-private-sessions.txt" \
+  it_pass W1-2 "fleet/it/W1/out/W1-2-private-sessions.txt" \
     "$S is on socket $IT_TMUX_SOCKET"
 else
-  it_fail W1-2 "evidence/04-integration/W1/out/W1-2-private-sessions.txt" \
+  it_fail W1-2 "fleet/it/W1/out/W1-2-private-sessions.txt" \
     "$S is NOT on the private server — where did the product put it?"
 fi
 
 # W1-3 · the live server did not notice. THE case: it is the assertion §M failed and nothing caught.
 it_live_tmux_sessions > "$OUT/live-sessions-after.txt"
 if diff -q "$OUT/live-sessions-before.txt" "$OUT/live-sessions-after.txt" >/dev/null; then
-  it_pass W1-3 "evidence/04-integration/W1/out/live-sessions-after.txt" \
+  it_pass W1-3 "fleet/it/W1/out/live-sessions-after.txt" \
     "the live server's session set is byte-identical across a session being created and made live on the private one ($(grep -c . "$OUT/live-sessions-after.txt") sessions, incl. $(grep -c '^dt-' "$OUT/live-sessions-after.txt") dt-)"
 else
-  it_fail W1-3 "evidence/04-integration/W1/out/live-sessions-after.txt" \
+  it_fail W1-3 "fleet/it/W1/out/live-sessions-after.txt" \
     "THE LIVE SERVER CHANGED: $(diff "$OUT/live-sessions-before.txt" "$OUT/live-sessions-after.txt" | grep '^[<>]' | tr '\n' ' ')"
 fi
 
@@ -77,10 +77,10 @@ fi
 if [ "$(grep -c '^dt-' "$OUT/live-sessions-after.txt")" -eq 0 ]; then
   it_skip W1-4 "" "no dt- session exists on the live server right now, so this cell cannot distinguish blindness from an empty world"
 elif grep -q '^dt-' "$OUT/W1-2-private-sessions.txt"; then
-  it_fail W1-4 "evidence/04-integration/W1/out/W1-2-private-sessions.txt" \
+  it_fail W1-4 "fleet/it/W1/out/W1-2-private-sessions.txt" \
     "a dt- session is VISIBLE from the private server: $(grep '^dt-' "$OUT/W1-2-private-sessions.txt" | tr '\n' ' ')"
 else
-  it_pass W1-4 "evidence/04-integration/W1/out/W1-2-private-sessions.txt" \
+  it_pass W1-4 "fleet/it/W1/out/W1-2-private-sessions.txt" \
     "the $(grep -c '^dt-' "$OUT/live-sessions-after.txt") dt- session(s) live on the default server are NOT visible from socket $IT_TMUX_SOCKET"
 fi
 
@@ -99,10 +99,10 @@ print("default:", SessionLayer(default_probes(tmux_socket=None)).alive(name))
 PY
   # READ-ONLY on both servers: `alive` is has-session, and the name is never passed to anything else.
   if grep -q '^private: False$' "$OUT/W1-5-blindness.txt" && grep -q '^default: True$' "$OUT/W1-5-blindness.txt"; then
-    it_pass W1-5 "evidence/04-integration/W1/out/W1-5-blindness.txt" \
+    it_pass W1-5 "fleet/it/W1/out/W1-5-blindness.txt" \
       "the product reports $DT alive on the default server and NOT alive on $IT_TMUX_SOCKET — the same call, the same name, two servers, so the blindness is the socket's and not a lookup failure"
   else
-    it_fail W1-5 "evidence/04-integration/W1/out/W1-5-blindness.txt" \
+    it_fail W1-5 "fleet/it/W1/out/W1-5-blindness.txt" \
       "want private:False + default:True, got: $(tr '\n' ' ' < "$OUT/W1-5-blindness.txt")"
   fi
 fi
@@ -112,12 +112,12 @@ it_cleanup_tmux
 it_tmux ls -F '#{session_name}' > "$OUT/W1-6-private-after-cleanup.txt" 2>&1 || true
 it_live_tmux_sessions > "$OUT/live-sessions-final.txt"
 if grep -qx "$S" "$OUT/W1-6-private-after-cleanup.txt"; then
-  it_fail W1-6 "evidence/04-integration/W1/out/W1-6-private-after-cleanup.txt" "$S survived cleanup"
+  it_fail W1-6 "fleet/it/W1/out/W1-6-private-after-cleanup.txt" "$S survived cleanup"
 elif ! diff -q "$OUT/live-sessions-before.txt" "$OUT/live-sessions-final.txt" >/dev/null; then
-  it_fail W1-6 "evidence/04-integration/W1/out/live-sessions-final.txt" \
+  it_fail W1-6 "fleet/it/W1/out/live-sessions-final.txt" \
     "cleanup changed the LIVE server: $(diff "$OUT/live-sessions-before.txt" "$OUT/live-sessions-final.txt" | grep '^[<>]' | tr '\n' ' ')"
 else
-  it_pass W1-6 "evidence/04-integration/W1/out/W1-6-private-after-cleanup.txt" \
+  it_pass W1-6 "fleet/it/W1/out/W1-6-private-after-cleanup.txt" \
     "cleanup removed $S from the private server by exact name and left the live server's session set byte-identical"
 fi
 
@@ -133,13 +133,13 @@ tmux -L "$GB" new-session -d -s "session-of-B" "sleep 60" 2>/dev/null
 tmux -L "$GA" ls -F '#{session_name}' > "$OUT/W1-8-groupA.txt" 2>&1 || true
 tmux -L "$GB" ls -F '#{session_name}' > "$OUT/W1-8-groupB.txt" 2>&1 || true
 if ! grep -qx 'session-of-A' "$OUT/W1-8-groupA.txt" || ! grep -qx 'session-of-B' "$OUT/W1-8-groupB.txt"; then
-  it_fail W1-8 "evidence/04-integration/W1/out/W1-8-groupA.txt" \
+  it_fail W1-8 "fleet/it/W1/out/W1-8-groupA.txt" \
     "one of the two group servers never came up, so mutual invisibility would hold vacuously"
 elif grep -qx 'session-of-B' "$OUT/W1-8-groupA.txt" || grep -qx 'session-of-A' "$OUT/W1-8-groupB.txt"; then
-  it_fail W1-8 "evidence/04-integration/W1/out/W1-8-groupA.txt" \
+  it_fail W1-8 "fleet/it/W1/out/W1-8-groupA.txt" \
     "the two group servers can see each other's sessions — a section's server-wide isolation assertion would fail on the other section's work, which is SI-1's original symptom"
 else
-  it_pass W1-8 "evidence/04-integration/W1/out/W1-8-groupA.txt" \
+  it_pass W1-8 "fleet/it/W1/out/W1-8-groupA.txt" \
     "each group server shows ONLY its own session and neither shows the other's — both live, so the invisibility is measured and not vacuous. This is why the socket is per section rather than one shared 'itfleet'"
 fi
 tmux -L "$GA" kill-server 2>/dev/null; tmux -L "$GB" kill-server 2>/dev/null; true
@@ -167,10 +167,10 @@ tmux -L "$GA" kill-server 2>/dev/null; tmux -L "$GB" kill-server 2>/dev/null; tr
   it_assert_isolation W1-7-injected >/dev/null 2>&1
   RESULTS="$REAL_RESULTS"
   if grep -q '^ISOLATION-W1-7-injected	FAIL' "$OUT/W1-7-negative-control.tsv"; then
-    it_pass W1-7 "evidence/04-integration/W1/out/W1-7-negative-control.tsv" \
+    it_pass W1-7 "fleet/it/W1/out/W1-7-negative-control.tsv" \
       "negative control: a live session set differing by ONE non-dt- name is reported FAIL — so W1-3 and W1-6 are assertions and not decoration. The pre-SI-1 check would have passed this, because nothing dt- moved"
   else
-    it_fail W1-7 "evidence/04-integration/W1/out/W1-7-negative-control.tsv" \
+    it_fail W1-7 "fleet/it/W1/out/W1-7-negative-control.tsv" \
       "THE ALARM DOES NOT GO OFF: a doctored baseline produced $(cut -f1,2 "$OUT/W1-7-negative-control.tsv" | tr '\n' ' ') — every isolation PASS in this file is unfalsifiable"
   fi
 )
@@ -180,7 +180,7 @@ tmux -L "$GA" kill-server 2>/dev/null; tmux -L "$GB" kill-server 2>/dev/null; tr
 if diff -q "$OUT/W1-7-baseline-real.txt" "$LIVE_TMUX_SNAPSHOT" >/dev/null; then
   it_pass W1-7-restored "" "the real baseline is byte-identical: the negative control ran against a repointed COPY and never wrote the shared file"
 else
-  it_fail W1-7-restored "evidence/04-integration/live-tmux-sessions.txt" \
+  it_fail W1-7-restored "fleet/it/live-tmux-sessions.txt" \
     "the negative control left the baseline doctored — every later isolation verdict is against a fiction"
 fi
 
@@ -217,10 +217,10 @@ wait "$inside_pid" "$outside_pid" 2>/dev/null
 { printf 'inside_pid\t%s\noutside_pid\t%s\nverdict\t%s\n' "$inside_pid" "$outside_pid" "$w9_detail"; } \
   > "$OUT/W1-9-attribution.tsv"
 if [ "$w9_ok" = 1 ]; then
-  it_pass W1-9 "evidence/04-integration/W1/out/W1-9-attribution.tsv" \
+  it_pass W1-9 "fleet/it/W1/out/W1-9-attribution.tsv" \
     "SI-25's attribution is FALSIFIABLE, both directions with a real process each: a claude-named process started INSIDE the instant attributes to the section (which is what makes an added worker FAIL), and one started outside does not (which is what stopped the operator's quantonOnSpark4 session being charged to §L/§M/§N). Without this the branch that accuses had never fired —$w9_detail"
 else
-  it_fail W1-9 "evidence/04-integration/W1/out/W1-9-attribution.tsv" \
+  it_fail W1-9 "fleet/it/W1/out/W1-9-attribution.tsv" \
     "the attribution does not discriminate:$w9_detail"
 fi
 

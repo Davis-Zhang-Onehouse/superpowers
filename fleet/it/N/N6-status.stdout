@@ -1,0 +1,18 @@
+identity	nprobe-07310028
+kind	worker
+state	DEAD
+holds_slot	true
+note	launched at 2026-07-31T00:28:57Z and no session is alive: the work stopped without renaming its folder
+evidence.base	00000000
+evidence.declared_phase	
+evidence.folder_state	inflight
+evidence.instant	/home/ubuntu/davis_root/superpowers/fleet/it/N/home/instants/00000000-07310028-inflight-append-nprobe
+evidence.lease	held
+evidence.liveness	none
+evidence.milestone	
+evidence.pane	
+evidence.parked	
+evidence.pid	
+evidence.record	nprobe-07310028
+evidence.slot	ns1
+evidence.tmux	itfleet-N-w1

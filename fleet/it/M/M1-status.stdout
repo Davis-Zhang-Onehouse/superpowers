@@ -1,0 +1,16 @@
+mprobe-07310023  RUNNING  (worker)
+  holds_slot               true
+  note                     -
+  evidence.base            00000000
+  evidence.declared_phase  -
+  evidence.folder_state    inflight
+  evidence.instant         /home/ubuntu/davis_root/superpowers/fleet/it/M/home/instants/00000000-07310023-inflight-append-mprobe
+  evidence.lease           held
+  evidence.liveness        session
+  evidence.milestone       -
+  evidence.pane            quiet
+  evidence.parked          -
+  evidence.pid             -
+  evidence.record          mprobe-07310023
+  evidence.slot            ms1
+  evidence.tmux            itfleet-M-worker

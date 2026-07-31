@@ -1,0 +1,3 @@
+population	/home/ubuntu/davis_root/superpowers/fleet/it/L/home/instants/00000000-07310022-inflight-append-l7probe	info	examined 10 file rules and 3 dir rules from cell (inflight, append) at spec-version 1; 10 entries present in the folder		
+population	/home/ubuntu/davis_root/superpowers/fleet/it/L/home/instants/00000000-07310022-inflight-append-l7probe	info	examined 1 of 1 near-miss file(s) (HANDOFF.md); 0 declaration-shaped line(s) found; the declared phase is None		
+population	/home/ubuntu/davis_root/superpowers/fleet/it/L/home/harvest/sources.json	info	examined 1 record(s) over 1 base(s) against 3 watched source(s)		

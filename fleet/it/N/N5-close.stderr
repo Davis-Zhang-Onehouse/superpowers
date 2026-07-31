@@ -1,0 +1,3 @@
+Refused: close: mid-turn — itfleet-N-w1 is still offering a way to interrupt, so it is mid-turn: closing it now ends a turn in progress and whatever that turn had not yet written down. Override: --force.
+  clears when: the turn finishes, or `fleet close --id nprobe-07310028 --force` is said out loud
+  clears who: 00000000

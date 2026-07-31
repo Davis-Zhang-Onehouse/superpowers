@@ -1,0 +1,202 @@
+abort                --instant          value  alone:rc=2    diag=1  appended:rc=2    diag=1
+abort                --reason           value  alone:rc=2    diag=1  appended:rc=2    diag=1
+abort                --home             value  alone:rc=2    diag=1  appended:rc=2    diag=1
+abort                --instants-dir     value  alone:rc=2    diag=1  appended:rc=2    diag=1
+abort                --porcelain        switch appended:rc=0    
+abort                --help             switch appended:rc=0    
+abort                --dry-run          switch appended:rc=0    
+apply                --instant          value  alone:rc=2    diag=1  appended:rc=2    diag=1
+apply                --milestone        value  alone:rc=2    diag=1  appended:rc=2    diag=1
+apply                --home             value  alone:rc=2    diag=1  appended:rc=2    diag=1
+apply                --instants-dir     value  alone:rc=2    diag=1  appended:rc=2    diag=1
+apply                --porcelain        switch appended:rc=0    
+apply                --help             switch appended:rc=0    
+apply                --dry-run          switch appended:rc=0    
+base-check           --id               value  alone:rc=2    diag=1  appended:rc=2    diag=1
+base-check           --home             value  alone:rc=2    diag=1  appended:rc=2    diag=1
+base-check           --instants-dir     value  alone:rc=2    diag=1  appended:rc=2    diag=1
+base-check           --porcelain        switch appended:rc=0    
+base-check           --help             switch appended:rc=0    
+board                --home             value  alone:rc=2    diag=1  appended:rc=2    diag=1
+board                --instants-dir     value  alone:rc=2    diag=1  appended:rc=2    diag=1
+board                --porcelain        switch appended:rc=0    
+board                --help             switch appended:rc=0    
+brief                --instant          value  alone:rc=2    diag=1  appended:rc=2    diag=1
+brief                --home             value  alone:rc=2    diag=1  appended:rc=2    diag=1
+brief                --instants-dir     value  alone:rc=2    diag=1  appended:rc=2    diag=1
+brief                --porcelain        switch appended:rc=0    
+brief                --help             switch appended:rc=0    
+close                --id               value  alone:rc=2    diag=1  appended:rc=2    diag=1
+close                --force            switch appended:rc=0    
+close                --home             value  alone:rc=2    diag=1  appended:rc=2    diag=1
+close                --instants-dir     value  alone:rc=2    diag=1  appended:rc=2    diag=1
+close                --porcelain        switch appended:rc=0    
+close                --help             switch appended:rc=0    
+close                --dry-run          switch appended:rc=0    
+compaction-status    --base             value  alone:rc=2    diag=1  appended:rc=2    diag=1
+compaction-status    --home             value  alone:rc=2    diag=1  appended:rc=2    diag=1
+compaction-status    --instants-dir     value  alone:rc=2    diag=1  appended:rc=2    diag=1
+compaction-status    --porcelain        switch appended:rc=0    
+compaction-status    --help             switch appended:rc=0    
+complete             --instant          value  alone:rc=2    diag=1  appended:rc=2    diag=1
+complete             --home             value  alone:rc=2    diag=1  appended:rc=2    diag=1
+complete             --instants-dir     value  alone:rc=2    diag=1  appended:rc=2    diag=1
+complete             --porcelain        switch appended:rc=2    
+complete             --help             switch appended:rc=0    
+complete             --dry-run          switch appended:rc=2    
+declare              --instant          value  alone:rc=2    diag=1  appended:rc=2    diag=1
+declare              --phase            value  alone:rc=2    diag=1  appended:rc=2    diag=1
+declare              --home             value  alone:rc=2    diag=1  appended:rc=2    diag=1
+declare              --instants-dir     value  alone:rc=2    diag=1  appended:rc=2    diag=1
+declare              --porcelain        switch appended:rc=0    
+declare              --help             switch appended:rc=0    
+declare              --dry-run          switch appended:rc=0    
+dispatch             --profile          value  alone:rc=2    diag=1  appended:rc=2    diag=1
+dispatch             --title            value  alone:rc=2    diag=1  appended:rc=2    diag=1
+dispatch             --base             value  alone:rc=2    diag=1  appended:rc=2    diag=1
+dispatch             --optype           value  alone:rc=2    diag=1  appended:rc=2    diag=1
+dispatch             --from             value  alone:rc=2    diag=1  appended:rc=2    diag=1
+dispatch             --milestone        value  alone:rc=2    diag=1  appended:rc=2    diag=1
+dispatch             --lineage-base     value  alone:rc=2    diag=1  appended:rc=2    diag=1
+dispatch             --lineage-mode     value  alone:rc=2    diag=1  appended:rc=2    diag=1
+dispatch             --slot             value  alone:rc=2    diag=1  appended:rc=2    diag=1
+dispatch             --cap              value  alone:rc=2    diag=1  appended:rc=2    diag=1
+dispatch             --override         value  alone:rc=2    diag=1  appended:rc=2    diag=1
+dispatch             --home             value  alone:rc=2    diag=1  appended:rc=2    diag=1
+dispatch             --instants-dir     value  alone:rc=2    diag=1  appended:rc=2    diag=1
+dispatch             --porcelain        switch appended:rc=4    
+dispatch             --help             switch appended:rc=0    
+dispatch             --dry-run          switch appended:rc=4    
+enroll               --slot             value  alone:rc=2    diag=1  appended:rc=2    diag=1
+enroll               --home             value  alone:rc=2    diag=1  appended:rc=2    diag=1
+enroll               --instants-dir     value  alone:rc=2    diag=1  appended:rc=2    diag=1
+enroll               --porcelain        switch appended:rc=0    
+enroll               --help             switch appended:rc=0    
+enroll               --dry-run          switch appended:rc=0    
+harvest              --id               value  alone:rc=2    diag=1  appended:rc=2    diag=1
+harvest              --max-age          value  alone:rc=2    diag=1  appended:rc=2    diag=1
+harvest              --home             value  alone:rc=2    diag=1  appended:rc=2    diag=1
+harvest              --instants-dir     value  alone:rc=2    diag=1  appended:rc=2    diag=1
+harvest              --porcelain        switch appended:rc=0    
+harvest              --help             switch appended:rc=0    
+harvest              --dry-run          switch appended:rc=0    
+init                 --name             value  alone:rc=2    diag=1  appended:rc=2    diag=1
+init                 --base             value  alone:rc=2    diag=1  appended:rc=2    diag=1
+init                 --optype           value  alone:rc=2    diag=1  appended:rc=2    diag=1
+init                 --home             value  alone:rc=2    diag=1  appended:rc=2    diag=1
+init                 --instants-dir     value  alone:rc=2    diag=1  appended:rc=2    diag=1
+init                 --porcelain        switch appended:rc=0    
+init                 --help             switch appended:rc=0    
+init                 --dry-run          switch appended:rc=0    
+leases               --home             value  alone:rc=2    diag=1  appended:rc=2    diag=1
+leases               --instants-dir     value  alone:rc=2    diag=1  appended:rc=2    diag=1
+leases               --porcelain        switch appended:rc=0    
+leases               --help             switch appended:rc=0    
+lint                 --instant          value  alone:rc=2    diag=1  appended:rc=2    diag=1
+lint                 --home             value  alone:rc=2    diag=1  appended:rc=2    diag=1
+lint                 --instants-dir     value  alone:rc=2    diag=1  appended:rc=2    diag=1
+lint                 --porcelain        switch appended:rc=0    
+lint                 --help             switch appended:rc=0    
+milestone            --instant          value  alone:rc=2    diag=1  appended:rc=2    diag=1
+milestone            --id               value  alone:rc=2    diag=1  appended:rc=2    diag=1
+milestone            --title            value  alone:rc=2    diag=1  appended:rc=2    diag=1
+milestone            --status           value  alone:rc=2    diag=1  appended:rc=2    diag=1
+milestone            --dep              value  alone:rc=2    diag=1  appended:rc=2    diag=1
+milestone            --evidence         value  alone:rc=2    diag=1  appended:rc=2    diag=1
+milestone            --owner            value  alone:rc=2    diag=1  appended:rc=2    diag=1
+milestone            --home             value  alone:rc=2    diag=1  appended:rc=2    diag=1
+milestone            --instants-dir     value  alone:rc=2    diag=1  appended:rc=2    diag=1
+milestone            --porcelain        switch appended:rc=0    
+milestone            --help             switch appended:rc=0    
+milestone            --dry-run          switch appended:rc=0    
+pane-guard           --pane             value  alone:rc=2    diag=1  appended:rc=2    diag=1
+pane-guard           --home             value  alone:rc=2    diag=1  appended:rc=2    diag=1
+pane-guard           --instants-dir     value  alone:rc=2    diag=1  appended:rc=2    diag=1
+pane-guard           --porcelain        switch appended:rc=13   
+pane-guard           --help             switch appended:rc=0    
+park                 --instant          value  alone:rc=2    diag=1  appended:rc=2    diag=1
+park                 --question         value  alone:rc=2    diag=1  appended:rc=2    diag=1
+park                 --home             value  alone:rc=2    diag=1  appended:rc=2    diag=1
+park                 --instants-dir     value  alone:rc=2    diag=1  appended:rc=2    diag=1
+park                 --porcelain        switch appended:rc=0    
+park                 --help             switch appended:rc=0    
+park                 --dry-run          switch appended:rc=0    
+propose              --instant          value  alone:rc=2    diag=1  appended:rc=2    diag=1
+propose              --to               value  alone:rc=2    diag=1  appended:rc=2    diag=1
+propose              --milestone        value  alone:rc=2    diag=1  appended:rc=2    diag=1
+propose              --status           value  alone:rc=2    diag=1  appended:rc=2    diag=1
+propose              --evidence         value  alone:rc=2    diag=1  appended:rc=2    diag=1
+propose              --home             value  alone:rc=2    diag=1  appended:rc=2    diag=1
+propose              --instants-dir     value  alone:rc=2    diag=1  appended:rc=2    diag=1
+propose              --porcelain        switch appended:rc=0    
+propose              --help             switch appended:rc=0    
+propose              --dry-run          switch appended:rc=0    
+reap                 --base             value  alone:rc=2    diag=1  appended:rc=2    diag=1
+reap                 --all              switch appended:rc=0    
+reap                 --home             value  alone:rc=2    diag=1  appended:rc=2    diag=1
+reap                 --instants-dir     value  alone:rc=2    diag=1  appended:rc=2    diag=1
+reap                 --porcelain        switch appended:rc=0    
+reap                 --help             switch appended:rc=0    
+reap                 --dry-run          switch appended:rc=0    
+reconcile            --base             value  alone:rc=2    diag=1  appended:rc=2    diag=1
+reconcile            --home             value  alone:rc=2    diag=1  appended:rc=2    diag=1
+reconcile            --instants-dir     value  alone:rc=2    diag=1  appended:rc=2    diag=1
+reconcile            --porcelain        switch appended:rc=0    
+reconcile            --help             switch appended:rc=0    
+resume               --instant          value  alone:rc=2    diag=1  appended:rc=2    diag=1
+resume               --slot             value  alone:rc=2    diag=1  appended:rc=2    diag=1
+resume               --tmux             value  alone:rc=2    diag=1  appended:rc=2    diag=1
+resume               --profile          value  alone:rc=2    diag=1  appended:rc=2    diag=1
+resume               --home             value  alone:rc=2    diag=1  appended:rc=2    diag=1
+resume               --instants-dir     value  alone:rc=2    diag=1  appended:rc=2    diag=1
+resume               --porcelain        switch appended:rc=0    
+resume               --help             switch appended:rc=0    
+resume               --dry-run          switch appended:rc=0    
+review               --instant          value  alone:rc=2    diag=1  appended:rc=2    diag=1
+review               --scope            value  alone:rc=2    diag=1  appended:rc=2    diag=1
+review               --verdict          value  alone:rc=2    diag=1  appended:rc=2    diag=1
+review               --finding          value  alone:rc=2    diag=1  appended:rc=2    diag=1
+review               --require-scope    value  alone:rc=2    diag=1  appended:rc=2    diag=1
+review               --home             value  alone:rc=2    diag=1  appended:rc=2    diag=1
+review               --instants-dir     value  alone:rc=2    diag=1  appended:rc=2    diag=1
+review               --porcelain        switch appended:rc=2    
+review               --help             switch appended:rc=0    
+review               --dry-run          switch appended:rc=2    
+roadmap              --instant          value  alone:rc=2    diag=1  appended:rc=2    diag=1
+roadmap              --home             value  alone:rc=2    diag=1  appended:rc=2    diag=1
+roadmap              --instants-dir     value  alone:rc=2    diag=1  appended:rc=2    diag=1
+roadmap              --porcelain        switch appended:rc=0    
+roadmap              --help             switch appended:rc=0    
+selftest             --home             value  alone:rc=2    diag=1  appended:rc=2    diag=1
+selftest             --instants-dir     value  alone:rc=2    diag=1  appended:rc=2    diag=1
+selftest             --porcelain        switch appended:rc=124  retry120:rc=1
+selftest             --help             switch appended:rc=0    
+set-golden           --path             value  alone:rc=2    diag=1  appended:rc=2    diag=1
+set-golden           --home             value  alone:rc=2    diag=1  appended:rc=2    diag=1
+set-golden           --instants-dir     value  alone:rc=2    diag=1  appended:rc=2    diag=1
+set-golden           --porcelain        switch appended:rc=0    
+set-golden           --help             switch appended:rc=0    
+set-golden           --dry-run          switch appended:rc=0    
+status               --id               value  alone:rc=2    diag=1  appended:rc=2    diag=1
+status               --home             value  alone:rc=2    diag=1  appended:rc=2    diag=1
+status               --instants-dir     value  alone:rc=2    diag=1  appended:rc=2    diag=1
+status               --porcelain        switch appended:rc=0    
+status               --help             switch appended:rc=0    
+unenroll             --slot             value  alone:rc=2    diag=1  appended:rc=2    diag=1
+unenroll             --force            switch appended:rc=0    
+unenroll             --home             value  alone:rc=2    diag=1  appended:rc=2    diag=1
+unenroll             --instants-dir     value  alone:rc=2    diag=1  appended:rc=2    diag=1
+unenroll             --porcelain        switch appended:rc=4    
+unenroll             --help             switch appended:rc=0    
+unenroll             --dry-run          switch appended:rc=4    
+unpark               --instant          value  alone:rc=2    diag=1  appended:rc=2    diag=1
+unpark               --home             value  alone:rc=2    diag=1  appended:rc=2    diag=1
+unpark               --instants-dir     value  alone:rc=2    diag=1  appended:rc=2    diag=1
+unpark               --porcelain        switch appended:rc=0    
+unpark               --help             switch appended:rc=0    
+unpark               --dry-run          switch appended:rc=0    
+verify               --instant          value  alone:rc=2    diag=1  appended:rc=2    diag=1
+verify               --home             value  alone:rc=2    diag=1  appended:rc=2    diag=1
+verify               --instants-dir     value  alone:rc=2    diag=1  appended:rc=2    diag=1
+verify               --porcelain        switch appended:rc=0    
+verify               --help             switch appended:rc=0    

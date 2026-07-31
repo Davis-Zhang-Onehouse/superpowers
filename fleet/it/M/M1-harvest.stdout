@@ -1,0 +1,3 @@
+source      /home/ubuntu/davis_root/superpowers/fleet/it/M/home/instants/00000000-07310023-inflight-append-mprobe  info  watched since 2026-07-31T00:23:09Z, last run never; a dry run reads the registry and records nothing, so no `last_run` was stamped
+source      00000000                                                                                               info  watched since 2026-07-31T00:23:10Z, last run never; a dry run reads the registry and records nothing, so no `last_run` was stamped
+population  /home/ubuntu/davis_root/superpowers/fleet/it/M/home/harvest/sources.json                               info  examined 2 watched source(s), 0 past the 1800s cadence window; dry run, nothing recorded

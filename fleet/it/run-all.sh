@@ -15,7 +15,7 @@
 # module silently moved another section's expectation. Re-running everything is the only honest answer, and
 # it needs to be one command or it will not happen.
 #
-# Run: bash evidence/04-integration/run-all.sh
+# Run: bash fleet/it/run-all.sh
 set -uo pipefail
 IT_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 INSTANT="$(cd "$IT_ROOT/../.." && pwd)"

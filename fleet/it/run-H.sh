@@ -14,7 +14,7 @@
 # a milestone names no owner it has to invent — so `SI-24` ("reassign has no verb") dissolved rather than
 # being fixed, which is the cheaper of the two resolutions.
 #
-# Run: bash evidence/04-integration/run-H.sh
+# Run: bash fleet/it/run-H.sh
 IT_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 . "$IT_ROOT/lib.sh"
 
@@ -81,13 +81,13 @@ h1_ready="$(awk -F': ' '/^ready:/{print $2}' "$OUT/H1-ready.txt")"
 h1_m2_named=0; grep -q "not-ready m2:.*m1" "$OUT/H1-ready.txt" && h1_m2_named=1
 h1_m3_named=0; grep -q "not-ready m3:.*m2" "$OUT/H1-ready.txt" && h1_m3_named=1
 if [ "$h1_ready" = "['m2']" ] && [ "$h1_m3_named" = 1 ]; then
-  it_pass H1 "evidence/04-integration/H/out/H1-ready.txt" \
+  it_pass H1 "fleet/it/H/out/H1-ready.txt" \
     "three milestones in a chain m1(done)<-m2<-m3: ready is exactly ['m2'] — the one whose dep has LANDED, not merely exists — and m3's row NAMES m2 as its blocker. A chain rather than a pair on purpose: with two milestones 'names its blocker' can pass by naming the only candidate"
 elif [ "$h1_ready" = "['m2']" ]; then
-  it_fail H1 "evidence/04-integration/H/out/H1-ready.txt" \
+  it_fail H1 "fleet/it/H/out/H1-ready.txt" \
     "readiness is right (['m2']) but a not-ready row does not name its blocker: m2_named=$h1_m2_named m3_named=$h1_m3_named — see the file"
 else
-  it_fail H1 "evidence/04-integration/H/out/H1-ready.txt" \
+  it_fail H1 "fleet/it/H/out/H1-ready.txt" \
     "ready=$h1_ready, wanted ['m2'] (m1 is done so m2's dep has landed; m3's has not)"
 fi
 
@@ -122,13 +122,13 @@ h2_unchanged=0; [ "$before_bytes" = "$after_bytes" ] && [ "$before_mtime" = "$af
 h2_listed=0;    grep -q 'pending milestone=m2' "$OUT/H2-attribution.txt" && h2_listed=1
 h2_attributed=0; grep -q '^attributed_to_worker: True$' "$OUT/H2-attribution.txt" && h2_attributed=1
 if [ "$h2_rc" = 0 ] && [ "$h2_unchanged" = 1 ] && [ "$h2_listed" = 1 ] && [ "$h2_attributed" = 1 ]; then
-  it_pass H2 "evidence/04-integration/H/out/H2-attribution.txt" \
+  it_pass H2 "fleet/it/H/out/H2-attribution.txt" \
     "a WORKER proposed into the coordinator's roadmap: roadmap.json byte-identical AND mtime-identical (propose must not even rewrite identical bytes), the proposal is listed as pending, and it is attributed to the WORKER's instant rather than to the roadmap's own — so the coordinator's inbox can say who asked"
 elif [ "$h2_rc" != 0 ]; then
-  it_fail H2 "evidence/04-integration/H/out/H2-propose.out" \
+  it_fail H2 "fleet/it/H/out/H2-propose.out" \
     "a worker cannot propose at all (rc=$h2_rc): $(head -1 "$OUT/H2-propose.out" | cut -c1-200)"
 else
-  it_fail H2 "evidence/04-integration/H/out/H2-attribution.txt" \
+  it_fail H2 "fleet/it/H/out/H2-attribution.txt" \
     "rc=$h2_rc roadmap_unchanged=$h2_unchanged proposal_listed=$h2_listed attributed_to_worker=$h2_attributed — attribution=0 means every proposal claims to come from the roadmap's own instant, so the inbox cannot say who asked"
 fi
 
@@ -149,10 +149,10 @@ PY
 cat "$OUT/H3-after.txt"
 if [ "$h3_rc" = 0 ] && grep -q '^m2 status: done$' "$OUT/H3-after.txt" \
    && grep -q '^pending now: \[\]$' "$OUT/H3-after.txt" && grep -q "^ready now: \['m3'\]$" "$OUT/H3-after.txt"; then
-  it_pass H3 "evidence/04-integration/H/out/H3-after.txt" \
+  it_pass H3 "fleet/it/H/out/H3-after.txt" \
     "apply moved m2 to done, carried the proposal's evidence onto the milestone, CONSUMED the proposal (pending is now empty, so replaying the inbox cannot apply it twice), and readiness recomputed — m3 is now ready because its dep has LANDED. Four consequences of one call, asserted together"
 else
-  it_fail H3 "evidence/04-integration/H/out/H3-after.txt" \
+  it_fail H3 "fleet/it/H/out/H3-after.txt" \
     "rc=$h3_rc; wanted m2=done, pending=[], ready=['m3'] — see the file"
 fi
 
@@ -176,10 +176,10 @@ PY
 cat "$OUT/H4-lib.out"
 h4_lib_ok=$(grep -c 'refused exit=2' "$OUT/H4-lib.out")
 if [ "$h4_cli_rc" = 2 ] && [ "$h4_lib_ok" = 3 ]; then
-  it_pass H4 "evidence/04-integration/H/out/H4-lib.out" \
+  it_pass H4 "fleet/it/H/out/H4-lib.out" \
     "empty evidence is refused with exit 2 at BOTH doors: through the CLI (rc=$h4_cli_rc) and at the library for all three shapes of empty — [] , [\"\"] and whitespace-only. A proposal with no evidence is a claim, and the producer refuses it"
 else
-  it_fail H4 "evidence/04-integration/H/out/H4-lib.out" \
+  it_fail H4 "fleet/it/H/out/H4-lib.out" \
     "cli_rc=$h4_cli_rc (want 2), library refusals=$h4_lib_ok of 3 — see the files"
 fi
 
@@ -238,10 +238,10 @@ awk '/^== 4\./{seen=1} seen && /^not-ready\tcarried\t/{bad=1} END{exit bad?1:0}'
   && h9_ready_after=1
 h9_added=0; grep -q '^added.carried' "$OUT/H9-carry.out" && h9_added=1
 if [ "$h9_rc" = 0 ] && [ "$h9_added" = 1 ] && [ "$h9_step2" = 1 ] && [ "$h9_ready_after" = 1 ]; then
-  it_pass H9 "evidence/04-integration/H/out/H9-carry.out" \
+  it_pass H9 "fleet/it/H/out/H9-carry.out" \
     "SD-5's replacement for reassignment is a MECHANISM, not prose: the whole carry-across runs on \`fleet\` alone — the coordinator raises the carried item with \`fleet milestone\` (which did not exist until SI-26; §H seeded via python and so proved nothing about the coordinator's surface), its blocker is named while the dep is unlanded, a worker lands the dep through propose/apply, and the item becomes ready by DERIVATION with nobody setting a flag"
 else
-  it_fail H9 "evidence/04-integration/H/out/H9-carry.out" \
+  it_fail H9 "fleet/it/H/out/H9-carry.out" \
     "the carry-across does not run from a command line: rc=$h9_rc added=$h9_added blocker-named=$h9_step2 ready-after-dep-landed=$h9_ready_after"
 fi
 
@@ -336,10 +336,10 @@ h10_land=0;  [ "$after_pending" -gt "$before_pending" ] && [ "$worker_pending" =
 h10_board=0; grep -q "	j1	" "$H10/board.tsv" && h10_board=1
 
 if [ "$h10_rc" = 0 ] && [ "$h10_rec$h10_orig$h10_own$h10_stat$h10_dbl$h10_dest$h10_land$h10_board" = "11111111" ]; then
-  it_pass H10 "evidence/04-integration/H/out/h10/join.txt" \
+  it_pass H10 "fleet/it/H/out/h10/join.txt" \
     "the milestone<->instant join holds from all three sides that must agree — the RECORD names j1, the CHILD's origin.json names both this coordinator and j1, and the MILESTONE names the child as owner while its STATUS stays 'blocked' (only \`apply\` may move a status). A second dispatch onto j1 is refused as already claimed. And the worker's \`propose\` with NO --to reached the COORDINATOR's inbox ($before_pending -> $after_pending) leaving its own at $worker_pending: before SI-27 that measured 0 at the coordinator and 1 at the worker, after which \`harvest\` applied it locally and closed the folder — a report lost with no error. \`board\` names j1 in its milestone column"
 else
-  it_fail H10 "evidence/04-integration/H/out/h10/join.txt" \
+  it_fail H10 "fleet/it/H/out/h10/join.txt" \
     "the join does not hold: rc=$h10_rc record=$h10_rec origin=$h10_orig owner=$h10_own status-untouched=$h10_stat double-dispatch-refused=$h10_dbl destination=$h10_dest reached-coordinator=$h10_land($before_pending->$after_pending, worker=$worker_pending) board=$h10_board"
 fi
 

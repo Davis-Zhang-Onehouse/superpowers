@@ -1,0 +1,20 @@
+{
+  "todo_id": "freezemaker-07302354",
+  "child_instant": "/home/ubuntu/davis_root/superpowers/fleet/it/F/instants-f9/00000000-07302354-inflight-compact-freezemaker",
+  "base_instant": "00000000",
+  "slot": "ws1",
+  "tmux": "dt-freezemaker",
+  "profile": "/home/ubuntu/davis_root/superpowers/fleet/it/F/out/profile-compact",
+  "golden": "/home/ubuntu/davis_root/superpowers/fleet/it/F/out/slots-f9/ws1",
+  "lineage_base": "",
+  "title": "freezeMaker",
+  "dispatched_at": "2026-07-30T23:54:59Z",
+  "lineage_mode": "",
+  "golden_base": "",
+  "milestone": null,
+  "launched_at": "2026-07-30T23:54:59Z",
+  "gate_verdict": null,
+  "harvested_at": null,
+  "closed_at": null,
+  "schema_version": 1
+}

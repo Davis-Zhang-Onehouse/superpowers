@@ -8,7 +8,7 @@ set -uo pipefail
 
 IT_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 # The fleet package root — the directory holding src/ and tests/. One level up from `it/`, where the old
-# layout had it two levels up (evidence/04-integration/ inside an instant). Named INSTANT for continuity with
+# layout had it two levels up (fleet/it/ inside an instant). Named INSTANT for continuity with
 # every runner that already uses it; it is the PACKAGE root now, and the runners only ever ask it for
 # src/ and tests/.
 INSTANT="$(cd "$IT_ROOT/.." && pwd)"
@@ -271,12 +271,12 @@ it_assert_isolation() {
     printf '%s\n' "$sessions" > "$LIVE_TMUX_SNAPSHOT"
     # Not a PASS. This call ESTABLISHED the baseline and therefore compared nothing, and a baseline-setting
     # call reported as a pass is the "absence is never success" defect wearing the harness's own badge.
-    it_skip "ISOLATION-$tag" "evidence/04-integration/live-tmux-sessions.txt" \
+    it_skip "ISOLATION-$tag" "fleet/it/live-tmux-sessions.txt" \
             "${stores_note}live-session baseline ESTABLISHED on this call ($(printf '%s' "$sessions" | grep -c . ) sessions), so the tmux comparison is vacuous here; it binds from the next call on"
     return 0
   fi
   if [ "$sessions" != "$(cat "$LIVE_TMUX_SNAPSHOT")" ]; then
-    it_fail "ISOLATION-$tag" "evidence/04-integration/live-tmux-sessions.txt" \
+    it_fail "ISOLATION-$tag" "fleet/it/live-tmux-sessions.txt" \
             "${stores_note}THE LIVE TMUX SERVER'S SESSION SET CHANGED: $(diff <(cat "$LIVE_TMUX_SNAPSHOT") <(printf '%s\n' "$sessions") | grep '^[<>]' | tr '\n' ' ')"
     return 1
   fi

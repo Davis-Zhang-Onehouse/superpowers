@@ -1,0 +1,4 @@
+code	13
+verdict	unknown-pane
+pane	itfleet-L-absent-zzz
+detail	no live process and no session answer for 'itfleet-L-absent-zzz'; sending keys to a pane nobody can name is the send with no target

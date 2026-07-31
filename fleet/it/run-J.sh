@@ -18,7 +18,7 @@
 # J1 is subsumed: J2 cannot be reached without running the whole lifecycle, so the lifecycle is the setup.
 # J3/J4/J5/J6 stay NOT-RUN and the section-level row says so.
 #
-# Run: bash evidence/04-integration/run-J.sh
+# Run: bash fleet/it/run-J.sh
 IT_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 . "$IT_ROOT/lib.sh"
 
@@ -90,7 +90,7 @@ TODO="$(awk -F'\t' '$1=="todo_id"{print $2}' "$OUT/J2-dispatch.out")"
 TMUXN="$(awk -F'\t' '$1=="tmux"{print $2}' "$OUT/J2-dispatch.out")"
 SLOT="$(awk -F'\t' '$1=="slot"{print $2}' "$OUT/J2-dispatch.out")"
 if [ -z "$W" ] || [ ! -d "$W" ]; then
-  it_fail J2 "evidence/04-integration/J/out/J2-dispatch.out" \
+  it_fail J2 "fleet/it/J/out/J2-dispatch.out" \
     "the dispatch produced no instant, so the lifecycle cannot be run: $(head -2 "$OUT/J2-dispatch.out" | tr '\n' ' ')"
 else
   {
@@ -148,13 +148,13 @@ PY
     && [ "$pre_status" != "done" ] && j2_pre_ok=1
   j2_all="$j2_applied$j2_consumed$j2_session_gone$j2_slot_free$j2_stamped$j2_off_board"
   if [ "$j2_pre_ok" = 1 ] && [ "$j2_all" = "111111" ]; then
-    it_pass J2 "evidence/04-integration/J/out/J2-harvest.tsv" \
+    it_pass J2 "fleet/it/J/out/J2-harvest.tsv" \
       "the whole close-out committed as ONE transaction, asserted against a measured pre-image (session alive, slot held, row on the board, milestone not yet done): after \`harvest\` the proposal is APPLIED (j-m1 -> done) and CONSUMED (0 pending, so replaying the inbox cannot apply it twice), the session $TMUXN is GONE, slot $SLOT is FREE, the record carries harvested_at, and the row has LEFT the board — which is what makes an orphan unreachable rather than merely unreported (FD-5). Six facts together; any five of them is a transaction that half-committed"
   elif [ "$j2_pre_ok" != 1 ]; then
-    it_fail J2 "evidence/04-integration/J/out/J2-harvest.tsv" \
+    it_fail J2 "fleet/it/J/out/J2-harvest.tsv" \
       "the PRE-IMAGE was already in the target state, so this case could not have distinguished anything: session_alive=$pre_session slot_held=$pre_slot_held on_board=$pre_board milestone_status='$pre_status'"
   else
-    it_fail J2 "evidence/04-integration/J/out/J2-harvest.tsv" \
+    it_fail J2 "fleet/it/J/out/J2-harvest.tsv" \
       "harvest exit=$j2_rc; applied=$j2_applied consumed=$j2_consumed session_gone=$j2_session_gone slot_free=$j2_slot_free record_stamped=$j2_stamped off_board=$j2_off_board"
   fi
 fi
@@ -190,17 +190,17 @@ sleep 1
 j7_alive=0; it_tmux has-session -t "=$GHOST" 2>/dev/null && j7_alive=1
 j7_proc_alive=0; [ -n "$GHOST_PID" ] && kill -0 "$GHOST_PID" 2>/dev/null && j7_proc_alive=1
 if [ -z "$GHOST_PID" ]; then
-  it_fail J7 "evidence/04-integration/J/out/J7-start.err" \
+  it_fail J7 "fleet/it/J/out/J7-start.err" \
     "could not start the unclaimed session, so nothing below is a verdict"
 elif [ "$j7_seen" = 1 ] && [ "$j7_pid_named" = 1 ] && [ "$j7_unclaimed_said" = 1 ] \
      && [ "$j7_alive" = 1 ] && [ "$j7_proc_alive" = 1 ]; then
-  it_pass J7 "evidence/04-integration/J/out/J7-reap.tsv" \
+  it_pass J7 "fleet/it/J/out/J7-reap.tsv" \
     "a live tmux session that NO record claims ($GHOST, pid $GHOST_PID) was REPORTED as kind=unknown-session with its pid named, and \`fleet reap --all\` left both the session and the process ALIVE. That is the whole point: what may be killed is a policy decision, and 'some of those sessions are people's' — a reap that tidied this away would be the tool killing somebody else's pane, which is why the operator's seed forbids touching dt- at all"
 elif [ "$j7_alive" != 1 ] || [ "$j7_proc_alive" != 1 ]; then
-  it_fail J7 "evidence/04-integration/J/out/J7-reap.tsv" \
+  it_fail J7 "fleet/it/J/out/J7-reap.tsv" \
     "REAP KILLED AN UNCLAIMED SESSION: session_alive=$j7_alive process_alive=$j7_proc_alive (pid $GHOST_PID). This is the dangerous direction"
 else
-  it_fail J7 "evidence/04-integration/J/out/J7-before.tsv" \
+  it_fail J7 "fleet/it/J/out/J7-before.tsv" \
     "the unclaimed session was not REPORTED: seen_as_unknown=$j7_seen pid_named=$j7_pid_named said-unclaimed=$j7_unclaimed_said (pid $GHOST_PID, session $GHOST)"
 fi
 
@@ -251,7 +251,7 @@ EOF
 J8_FIXTURE_OK=1
 if [ -z "${BUSY_TODO:-}" ] || [ -z "${Q_TODO:-}" ]; then
   J8_FIXTURE_OK=0
-  it_fail J8 "evidence/04-integration/J/out/J8-resume-busypane.out" \
+  it_fail J8 "fleet/it/J/out/J8-resume-busypane.out" \
     "the fixture produced no record (busy_todo='${BUSY_TODO:-}' queued_todo='${Q_TODO:-}'), so nothing here would be a verdict about panes. First time round this was a slot PATH where `resume` wants a slot NAME, and both closes then refused with 'no record matching ...' — two real non-zero exits that meant nothing"
 fi
 
@@ -274,10 +274,10 @@ if [ "$J8_FIXTURE_OK" = 0 ]; then
   :                                # already reported above; do not emit a second J8 row
 elif [ "$j8_busy_refused$j8_q_refused$j8_busy_override$j8_q_override" = "1111" ] \
    && [ "$j8_force_rc" = 0 ] && [ "$j8_forced_gone" = 1 ] && [ "$j8_still_alive" = 1 ]; then
-  it_pass J8 "evidence/04-integration/J/out/J8-queued.out" \
+  it_pass J8 "fleet/it/J/out/J8-queued.out" \
     "\`close\` refused BOTH live-pane shapes against real panes and real text — a BUSY pane (exit $j8_busy_rc, 'esc to interrupt' in the rendered tail) and a pane holding UNSUBMITTED INPUT (exit $j8_q_rc, a prompt row with typed text) — and each refusal NAMES --force, so it is a guard a human can act on rather than one that gets forced blindly. \`--force\` then closed the busy one for real (session gone) while the queued one is still alive, untouched. The second half is FI-9: unsubmitted text is what a rate-limit auto-resume concatenates with its retry and sends"
 else
-  it_fail J8 "evidence/04-integration/J/out/J8-queued.out" \
+  it_fail J8 "fleet/it/J/out/J8-queued.out" \
     "busy_refused=$j8_busy_refused queued_refused=$j8_q_refused busy_names_force=$j8_busy_override queued_names_force=$j8_q_override force_rc=$j8_force_rc forced_session_gone=$j8_forced_gone queued_untouched=$j8_still_alive"
 fi
 
@@ -297,7 +297,7 @@ CW="$(awk -F'\t' '$1=="instant"{print $2}' "$OUT/J9-dispatch.out")"
 CTODO="$(awk -F'\t' '$1=="todo_id"{print $2}' "$OUT/J9-dispatch.out")"
 CSLOT="$(awk -F'\t' '$1=="slot"{print $2}' "$OUT/J9-dispatch.out")"
 if [ -z "$CW" ] || [ ! -d "$CW" ]; then
-  it_fail J9 "evidence/04-integration/J/out/J9-dispatch.out" \
+  it_fail J9 "fleet/it/J/out/J9-dispatch.out" \
     "could not dispatch the worker to crash-harvest: $(head -2 "$OUT/J9-dispatch.out" | tr '\n' ' ')"
 else
   {
@@ -393,13 +393,13 @@ $(j9_verdict at-release)
 EOF
 
   if [ "$k1" != 1 ] || [ "$k2" != 1 ]; then
-    it_fail J9 "evidence/04-integration/J/out/J9-at-stamp-state.txt" \
+    it_fail J9 "fleet/it/J/out/J9-at-stamp-state.txt" \
       "a driver was not killed (at-stamp killed=$k1, at-release killed=$k2), so this measures nothing"
   elif [ "$f1" = 0 ] && [ "$f2" = 0 ]; then
-    it_pass J9 "evidence/04-integration/J/out/J9-at-stamp-state.txt" \
+    it_pass J9 "fleet/it/J/out/J9-at-stamp-state.txt" \
       "a real SIGKILL inside EITHER of the close-out's two mutation windows leaves a RECOVERABLE state, never the forbidden one. at-stamp: stamped=$s1 slot_held=$h1 — nothing durable landed and the slot is still held, so \`status\` reads DEAD and \`reap\` reclaims it. at-release: stamped=$s2 slot_held=$h2 — the record is closed and only the slot is outstanding, which the same verb clears. The forbidden combination is a FREE slot with an UNSTAMPED record, and it is forbidden because nothing can clear it: the cap counts the record forever and no lease is left for \`reap\`. SI-31 measured exactly that state before the fix (harvested_at: None, slot_held: False); the fix is ordering — stamp, THEN release — because real atomicity across a filesystem, a tmux server and a lease directory would need a journal, and what is actually required is only that no window be invisible or unrecoverable"
   else
-    it_fail J9 "evidence/04-integration/J/out/J9-at-stamp-state.txt" \
+    it_fail J9 "fleet/it/J/out/J9-at-stamp-state.txt" \
       "a crash left the FORBIDDEN state (free slot + unstamped record): at-stamp forbidden=$f1 (stamped=$s1 held=$h1), at-release forbidden=$f2 (stamped=$s2 held=$h2)"
   fi
 fi

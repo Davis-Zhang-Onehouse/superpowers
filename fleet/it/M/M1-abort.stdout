@@ -1,0 +1,5 @@
+dry-run        nothing was renamed, released, closed or written
+would-rename   00000000-07310023-inflight-append-mprobe -> 00000000-07310023-abort-append-mprobe
+would-record   abort.json: mreason
+would-close    itfleet-M-worker
+would-release  ms1

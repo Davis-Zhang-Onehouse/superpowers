@@ -1,0 +1,53 @@
+{
+  "schema_version": 1,
+  "sources": [
+    {
+      "base": "/home/ubuntu/davis_root/superpowers/fleet/it/A/A5/instants/00000000-07310004-inflight-append-a5subject",
+      "issues_path": "/home/ubuntu/davis_root/superpowers/fleet/it/A/A5/instants/00000000-07310004-inflight-append-a5subject/ISSUES.md",
+      "registered_at": "2026-07-31T00:04:55Z",
+      "last_run": null
+    },
+    {
+      "base": "/home/ubuntu/davis_root/superpowers/fleet/it/A/A5/instants/00000000-07310004-inflight-append-a5lintbad",
+      "issues_path": "/home/ubuntu/davis_root/superpowers/fleet/it/A/A5/instants/00000000-07310004-inflight-append-a5lintbad/ISSUES.md",
+      "registered_at": "2026-07-31T00:04:55Z",
+      "last_run": null
+    },
+    {
+      "base": "/home/ubuntu/davis_root/superpowers/fleet/it/A/A5/instants/00000000-07310004-inflight-append-a5gatefail",
+      "issues_path": "/home/ubuntu/davis_root/superpowers/fleet/it/A/A5/instants/00000000-07310004-inflight-append-a5gatefail/ISSUES.md",
+      "registered_at": "2026-07-31T00:04:55Z",
+      "last_run": null
+    },
+    {
+      "base": "/home/ubuntu/davis_root/superpowers/fleet/it/A/A5/instants/00000000-07310004-inflight-append-a5gatepass",
+      "issues_path": "/home/ubuntu/davis_root/superpowers/fleet/it/A/A5/instants/00000000-07310004-inflight-append-a5gatepass/ISSUES.md",
+      "registered_at": "2026-07-31T00:04:55Z",
+      "last_run": null
+    },
+    {
+      "base": "/home/ubuntu/davis_root/superpowers/fleet/it/A/A5/instants/00000000-07310004-inflight-append-a5abortee",
+      "issues_path": "/home/ubuntu/davis_root/superpowers/fleet/it/A/A5/instants/00000000-07310004-inflight-append-a5abortee/ISSUES.md",
+      "registered_at": "2026-07-31T00:04:55Z",
+      "last_run": null
+    },
+    {
+      "base": "/home/ubuntu/davis_root/superpowers/fleet/it/A/A5/instants/00000000-07310004-inflight-append-a5undecidable",
+      "issues_path": "/home/ubuntu/davis_root/superpowers/fleet/it/A/A5/instants/00000000-07310004-inflight-append-a5undecidable/ISSUES.md",
+      "registered_at": "2026-07-31T00:04:56Z",
+      "last_run": null
+    },
+    {
+      "base": "/home/ubuntu/davis_root/superpowers/fleet/it/A/A5/instants/00000000-07310004-inflight-append-a5extra",
+      "issues_path": "/home/ubuntu/davis_root/superpowers/fleet/it/A/A5/instants/00000000-07310004-inflight-append-a5extra/ISSUES.md",
+      "registered_at": "2026-07-31T00:04:59Z",
+      "last_run": null
+    },
+    {
+      "base": "00000000",
+      "issues_path": "00000000/ISSUES.md",
+      "registered_at": "2026-07-31T00:05:00Z",
+      "last_run": null
+    }
+  ]
+}

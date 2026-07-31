@@ -1,0 +1,19 @@
+{
+  "schema_version": 1,
+  "rounds": [
+    {
+      "number": 1,
+      "scope": "all",
+      "verdict": "READY",
+      "at": "2026-07-31T00:05:00Z",
+      "findings": []
+    },
+    {
+      "number": 2,
+      "scope": "all",
+      "verdict": "NOT-READY",
+      "at": "2026-07-31T00:05:44Z",
+      "findings": []
+    }
+  ]
+}

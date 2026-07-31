@@ -1,0 +1,23 @@
+fleet close --id <value>
+    shut a pane this store owns and stamp the record; disarms the monitor (FD-10)
+    --id <value>                 (required) the record whose session is being closed
+    --force                      close a mid-turn pane or one holding unsubmitted text anyway
+    --home <value>               the record/pool store root; overrides $FLEET_HOME
+    --instants-dir <value>       where instants live; overrides $FLEET_INSTANTS
+    --porcelain                  machine form on stdout: tab-separated, no banner (NFR2-7)
+    --help                       print this verb's derived usage and exit 0
+    --dry-run                    evaluate every gate and CREATE NOTHING; the delta is asserted to be zero
+
+exit codes:
+    0  ok
+    1  needs attention / check failed
+    2  bad input
+    3  no capacity
+    4  refused by an admission rule
+    pane-guard only (FD-10):
+    0  safe
+    10 queued-text
+    11 mid-turn
+    12 not-claude
+    13 unknown-pane
+

@@ -1,0 +1,5 @@
+gate	review-undecidable
+allowed	false
+reason	UNDECIDABLE: no review round has been recorded, so this gate cannot decide. That is not the same as deciding against it — nothing has been judged. Failing closed. population: 0 round(s) [none]; scopes covered: none; 0 finding(s), 0 open blocking; ledger /home/ubuntu/davis_root/superpowers/fleet/it/L/home/instants/00000000-07310022-inflight-append-l7probe/.fleet/review.json
+clears_when	a review round is recorded in the ledger (`review add-round <scope> ...`)
+clears_who	the reviewing instant
