@@ -491,7 +491,14 @@ fleet dispatch --profile "$OUT/profile" --title "j4NoRound" --base 00000000 --op
       --cap 9 --porcelain > "$J34/j4-dispatch.out" 2>&1
 J4W="$(awk -F'\t' '$1=="instant"{print $2}' "$J34/j4-dispatch.out")"
 J4TODO="$(awk -F'\t' '$1=="todo_id"{print $2}' "$J34/j4-dispatch.out")"
-mv "$J4W" "${J4W/-inflight-/-complete-}"
+# Replace in the BASENAME only. `${path/-inflight-/-complete-}` substitutes the FIRST match anywhere in
+# the string, so a checkout living under a directory whose own name contains `-inflight-` (an instant
+# folder, say) rewrites THAT and produces a destination whose parent does not exist. The mv then fails,
+# the instant stays `-inflight-`, and this case goes on to assert a refusal about a RENAMED folder against
+# one that was never renamed -- a vacuous pass, which is worse than a failure.
+J4DIR="${J4W%/*}"; J4BASE="${J4W##*/}"
+mv "$J4W" "$J4DIR/${J4BASE/-inflight-/-complete-}" || { echo "J4: could not rename the instant"; exit 1; }
+[ -d "$J4DIR/${J4BASE/-inflight-/-complete-}" ] || { echo "J4: rename did not land"; exit 1; }
 fleet harvest --id "$J4TODO" --porcelain > "$J34/j4-harvest.tsv" 2>&1
 j4_refused=0; grep -q 'harvest-refused' "$J34/j4-harvest.tsv" && j4_refused=1
 j4_undecidable=0; grep -qi 'undecidable' "$J34/j4-harvest.tsv" && j4_undecidable=1

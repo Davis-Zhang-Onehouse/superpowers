@@ -433,3 +433,55 @@ class TestControl(unittest.TestCase):
         s.kill("dt-a")
         self.assertEqual(started, [("dt-a", pathlib.Path("/ws1"), "claude --foo")])
         self.assertEqual(killed, ["dt-a"])
+
+class TestTrustModalIsNotBusy(unittest.TestCase):
+    """`SI-37`. The folder-trust modal is a pane WAITING ON A HUMAN, not a pane doing work.
+
+    Both states offer an escape key and the strings read alike, which is exactly why this was wrong for as
+    long as it was. The distinction is not cosmetic: "busy" means a send queues behind a turn that will
+    finish on its own, and "waiting" means nothing happens until somebody answers. Measured on the first
+    production dispatch, where a coordinator sat at an unanswered trust prompt while `board` said RUNNING.
+    """
+
+    TRUST_MODAL = (
+        "Quick safety check: Is this a project you created or one you trust? (Like your\n"
+        "own code, a well-known open source project, or work from your team).\n"
+        "Claude Code'll be able to read, edit, and execute files here.\n"
+        "> 1. Yes, I trust this folder\n"
+        "  2. No, exit\n"
+        "Enter to confirm . Esc to cancel"
+    )
+
+    def setUp(self):
+        self.sessions, _, _ = layer()
+
+    def test_the_trust_modal_is_not_busy(self):
+        self.assertFalse(self.sessions.busy(self.TRUST_MODAL),
+                         "'Esc to cancel' is a modal affordance; treating it as work makes an unanswered "
+                         "prompt read as a turn in flight, and the wait never ends")
+
+    def test_the_trust_modal_IS_unsubmitted_text(self):
+        self.assertIsNotNone(self.sessions.unsubmitted(self.TRUST_MODAL),
+                             "the selected line sits in the input position, which is what makes this "
+                             "reachable as 'waiting on a human' rather than needing a new rule")
+
+    def test_a_working_pane_is_still_busy(self):
+        self.assertTrue(self.sessions.busy("* Actioning... (1m 5s)\n  esc to interrupt"),
+                        "the fix must not cost us the case busy() exists for")
+
+
+class TestIsClaudeProcess(unittest.TestCase):
+    """`SI-38`. Process evidence outranks screen scraping for 'is this a claude pane'."""
+
+    def test_a_live_claude_session_is_a_claude_pane(self):
+        sessions, _, _ = layer(procs=[LiveSession(42, pathlib.Path("/w"), "dt-x")])
+        self.assertTrue(sessions.is_claude_process("dt-x"))
+
+    def test_an_unrelated_session_name_is_not(self):
+        sessions, _, _ = layer(procs=[LiveSession(42, pathlib.Path("/w"), "dt-x")])
+        self.assertFalse(sessions.is_claude_process("dt-other"))
+
+    def test_an_empty_name_is_not_a_claude_pane(self):
+        sessions, _, _ = layer(procs=[LiveSession(42, pathlib.Path("/w"), "dt-x")])
+        self.assertFalse(sessions.is_claude_process(""),
+                         "an unnamed pane must never be asserted to be anything")
