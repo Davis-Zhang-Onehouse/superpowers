@@ -299,7 +299,7 @@ class Review:
                 reason=("UNDECIDABLE: no review round has been recorded, so this gate cannot decide. "
                         "That is not the same as deciding against it — nothing has been judged. "
                         f"Failing closed. {population}"),
-                clears_when="a review round is recorded in the ledger (`review add-round <scope> ...`)",
+                clears_when="a review round is recorded in the ledger (`fleet review --instant <path> --scope <scope> --verdict <verdict> --finding <id:severity:status:location:finding:action>`)",
                 clears_who=REVIEWER,
                 blocker="no review round exists",
             )

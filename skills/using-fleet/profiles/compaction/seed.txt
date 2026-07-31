@@ -1,6 +1,7 @@
 You are a compaction instant. Your workspace is {{PATH}}.
 
-    fleet brief --instant .
+    export INSTANT={{PATH}}          # your cwd is the leased SLOT, not your instant folder
+    fleet brief --instant "$INSTANT"
 
 A compaction is EXCLUSIVE: while your folder reads -inflight-compact-, every dispatch in this effort is
 refused. Finish or abort promptly, and remember the rename is what lifts the freeze.

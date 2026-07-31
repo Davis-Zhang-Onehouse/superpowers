@@ -47,6 +47,7 @@ from fleet.pool import Pool
 from fleet.review import Finding, Review
 from fleet import origin as origin_mod
 from fleet.origin import Origin
+from fleet.review import Review
 from fleet.roadmap import Milestone, Roadmap
 from fleet.session import LiveSession, Probes, SessionLayer
 from fleet.store import Declarations, Record, Store
@@ -2364,3 +2365,85 @@ class TestBrief(CliCase):
 
         self.assertEqual(0, code, err)
         self.assertEqual(before, fleet.record_state(), "brief wrote to the record store")
+
+
+class TestFoundByARealWorker(CliCase):
+    """Three defects a real dispatched `claude` found in `§P` by following the skills literally.
+
+    None was reachable from the hermetic suite as it stood, and the reason is worth recording: every existing
+    test asserted the RECORDED path. Nobody had asked what a worker sees when it does the responsible thing
+    first — interrogate the gate with `--dry-run`, read the remedy string a refusal hands you, read a status
+    row before acting on it. That is what a real worker does, and it is where all three lived.
+    """
+
+    def test_review_dry_run_exits_zero_on_valid_input(self):
+        """`--dry-run` answers "would this be admitted?", not "what does the pre-existing ledger say?".
+
+        Before: a valid FIRST round with `--dry-run` returned the gate's code, and the gate saw a ledger
+        without the round being proposed — so it read UNDECIDABLE and the verb exited 2 with NOTHING on
+        stderr while stdout said "would record …". The worker's report: *"a worker doing the responsible
+        thing gets a bare failure code with no explanation and would reasonably conclude their finding
+        string is malformed and start editing a string that was already correct. I nearly did."*
+        """
+        fleet = self.loaded()
+        fresh = fleet.worker("dryRunReview")
+        self.assertEqual([], Review(fresh, now=lambda: NOW).rounds(),
+                         "this test needs a ledger with NO prior round, or it cannot reproduce")
+
+        code, out, err = fleet.run(["review", "--instant", str(fresh), "--scope", "all",
+                                    "--verdict", "READY",
+                                    "--finding", "P-1:Minor:applied:evidence/INDEX.md:the report:none",
+                                    "--dry-run"])
+
+        self.assertEqual(0, code,
+                         f"a valid first round with --dry-run must exit 0; stderr was {err!r}")
+        self.assertEqual([], Review(fresh, now=lambda: NOW).rounds(), "--dry-run wrote to the ledger")
+
+    def test_a_malformed_finding_is_still_refused_under_dry_run(self):
+        """The other half: making the dry run exit 0 must not make it accept anything. `_finding_of` refuses
+        a malformed finding before the gate is ever consulted, and that has to keep happening."""
+        fleet = self.loaded()
+        fresh = fleet.worker("dryRunBadFinding")
+
+        code, out, err = fleet.run(["review", "--instant", str(fresh), "--scope", "all",
+                                    "--verdict", "READY", "--finding", "not-six-fields", "--dry-run"])
+
+        self.assertEqual(2, code, "a malformed finding must still be refused under --dry-run")
+
+    def test_the_review_gates_remedy_names_a_command_that_exists(self):
+        """A refusal must name what clears it — and naming it WRONG is worse than naming nothing, because a
+        worker who trusts the remedy over the skill gets a second exit 2. The gate said the round is recorded
+        by `review add-round <scope> ...`; there has never been an `add-round` subcommand, and `review`
+        declares no positionals at all."""
+        fleet = self.loaded()
+        fresh = fleet.worker("remedyString")
+
+        code, out, err = fleet.run(["review", "--instant", str(fresh), "--porcelain"])
+
+        remedy = [line for line in out.splitlines() if line.startswith("gate\t")]
+        self.assertTrue(remedy, f"no gate row: {out}")
+        self.assertNotIn("add-round", remedy[0],
+                         "the gate's clears_when names a subcommand that does not exist")
+        self.assertIn("--verdict", remedy[0],
+                      "the remedy must name the real flag form, or a worker cannot act on it")
+
+    def test_briefs_milestone_row_does_not_state_blocked_and_ready_together(self):
+        """The worker's report: *"says status=blocked AND ready on the same row, with no blocker named. I
+        could not tell from the row whether something was actually blocking me."* The stored status is a
+        label; readiness is derived. Two facts, so the row must not run them together as if one contradicts
+        the other."""
+        fleet = self.loaded()
+        coordinator = fleet.paths["readyWorker"]
+        child = fleet.paths["solo"]
+        Roadmap(coordinator).add(Milestone(id="R1", title="stale label", status="blocked",
+                                           deps=[], evidence=[]))
+        origin_mod.write(child, Origin(coordinator=str(coordinator), dispatched_at=NOW, milestone="R1"))
+
+        code, out, err = fleet.run(["brief", "--instant", str(child), "--porcelain"])
+
+        self.assertEqual(0, code, err)
+        row = [line for line in out.splitlines() if line.startswith("milestone\t")][0]
+        self.assertIn("stored status", row,
+                      "the row must mark the status as a STORED LABEL, not present it as the live answer")
+        self.assertIn("READY to start", row, "and it must say plainly whether the worker may begin")
+        self.assertIn("DERIVED", row, "and say where readiness comes from, so a stale label is not confusing")
