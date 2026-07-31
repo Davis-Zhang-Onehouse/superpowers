@@ -1,7 +1,7 @@
 # Coordinator and dispatch skills, rebuilt on `fleet` — design
 
 - **Date:** 2026-07-30
-- **Status:** design approved section by section; not yet implemented
+- **Status:** IMPLEMENTED 2026-07-31. V1–V3 green via `bin/superpowers-selftest` (11 suites). **`§P`/AC-11 has now RUN** — a real `claude`, dispatched from the shipped worker profile, completed the whole contract from its seed alone and reported four defects it hit by following the instructions literally (all four fixed, each with a regression test). Behavioural validity is therefore MEASURED for one task, not merely argued — and one task is what it is.
 - **Replaces:** `skills/coordinating-instants` (345 lines), `skills/dispatchInstants` (140),
   `skills/dispatching-parallel-agents` (167)
 - **Depends on:** `fleet` at `operations/tasks/metaOpt/00000000-07300312-inflight-append-fleetInfraRebuild`,
@@ -327,9 +327,26 @@ turned on the skills.
 
 **What none of this verifies.** Whether a model *reading* the prose does the right thing. V1–V3 prove the
 commands exist, the refusals are real and the sequence runs; they say nothing about whether the instructions
-are followable. That is measurable only by dispatching a real worker against a real `claude`, which is `§P` /
-AC-11 — one case, never run. **Until `§P` runs, "the skills work" is an argument and not a measurement**, and
-the spec says so rather than implying otherwise.
+are followable. That is measurable only by dispatching a real worker against a real `claude` — `§P`/AC-11.
+
+**`§P` has now run, and it earned its place.** A real worker completed the contract from its seed alone, and
+found four defects that V1, V2 and V3 structurally could not:
+
+| Found | Why no other check could reach it |
+|---|---|
+| the worker skill's copy-paste `--finding` example was **invalid** (`info`/`closed` outside their domains), so the block a finishing worker pastes exited 2 | V1 passes — `review` is a real verb. V2 passes — the claim beside it was true. A six-field colon-joined string with two closed domains is not checkable by eye |
+| the review gate's remedy named `review add-round`, **a subcommand that never existed** | every test asserted the recorded path; nobody read the string a refusal hands you |
+| `review --dry-run` exited 2 **silently** on valid input | the hermetic suite tested the *recorded* path. Only a worker doing the responsible thing first — interrogating the gate — hits it |
+| `brief`'s milestone row read `status=blocked … ready`, two facts run together | it takes a reader with a stake in the answer to notice that a row is ambiguous |
+
+Plus two the run itself surfaced: `close` refuses a pane that is mid-turn even after the worker has renamed
+itself complete (so closing out is four steps, and the fourth is a wait on `pane-guard`), and **nothing in
+`fleet` delivers the seed to a worker** — `dispatch` writes it into the instant and starts the process in the
+slot with no prompt.
+
+So the honest statement is now narrower and stronger than "the skills work": **one real worker, one task, one
+end-to-end pass, four defects found and fixed.** A second task would likely find more, and that is the
+argument for running `§P` again whenever the skills change rather than treating it as a one-off.
 
 ## Prerequisites
 

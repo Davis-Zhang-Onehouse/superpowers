@@ -6,7 +6,7 @@ passes it silently. That is the day's recurring family: a check that passes with
 thing you care about. This asks the one question the content checks cannot.
 
 Authority for the set is superpowers:maintain-workspace (templates.md). NOTE that `STATE.md` is NOT
-in it: `dispatch-todo` seeds one as a convenience, and folding its contents into HANDOFF is a
+in it: the retired `dispatch-todo` seeded one as a convenience, and folding its contents into HANDOFF is a
 legitimate choice several instants made — so a missing STATE.md is reported as INFO, never a
 violation. Nothing else may be absent.
 
