@@ -39,7 +39,15 @@ set -uo pipefail
 
 MAP="${CLAUDE_OWNERS_MAP:-/home/ubuntu/.claude-owners.tsv}"
 
-usage() { echo "usage: $(basename "$0") <directory>" >&2; }
+usage() { echo "usage: $(basename "$0") [--email] <directory>" >&2; }
+
+# `--email` prints the owner's address instead of the config dir. Both facts come from the SAME row of the
+# SAME map, which is the point: CLAUDE_CONFIG_DIR and CLAUDE_OWNER_EMAIL are two halves of one identity, and
+# pinning one while letting the other be inherited is how a session ends up half-attributed.
+WANT=dir
+case "${1:-}" in
+  --email) WANT=email; shift ;;
+esac
 
 case "${1:-}" in
   ""|--help|-h) usage; exit 2 ;;
@@ -53,13 +61,13 @@ target="$(readlink -m "$target" 2>/dev/null || printf '%s' "$target")"
 
 [ -r "$MAP" ] || { echo "$(basename "$0"): no readable owners map at $MAP" >&2; exit 1; }
 
-best=""
-while IFS=$'\t' read -r root _email; do
+best=""; best_email=""
+while IFS=$'\t' read -r root email; do
   [ -z "${root:-}" ] && continue
   case "$root" in \#*) continue ;; esac                 # allow comments in the map
   root="${root%/}"
   case "$target/" in
-    "$root"/*) [ "${#root}" -gt "${#best}" ] && best="$root" ;;
+    "$root"/*) [ "${#root}" -gt "${#best}" ] && { best="$root"; best_email="$email"; } ;;
   esac
 done < "$MAP"
 
@@ -67,5 +75,9 @@ if [ -z "$best" ]; then
   echo "$(basename "$0"): no root in $MAP owns $target" >&2
   exit 1
 fi
-printf '%s/.claude\n' "$best"
+if [ "$WANT" = email ]; then
+  printf '%s\n' "$best_email"
+else
+  printf '%s/.claude\n' "$best"
+fi
 exit 0
