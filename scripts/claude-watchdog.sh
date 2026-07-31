@@ -63,10 +63,58 @@ monitor_target_pid() { printf '%s\n' "$1" | grep -oE 'monitor\.js +%[0-9]+ +[0-9
 # 2026-07-28 two workers nine days past the end of their effort still had live monitors. That is not
 # merely wasteful — on a rate-limit banner the monitor types "Continue where you left off." + Enter
 # into a pane whose cwd may since have been re-leased to a different effort.
-DISPATCH_SESSIONS="${CLAUDE_WATCHDOG_SESSIONS_TOOL:-$DAVIS/superpowers/skills/dispatchInstants/dispatch-sessions.sh}"
+#
+# The default is now the FLEET-backed answer. pdispatch is retired, and a default pointing into a retired
+# tree is a dependency that works until somebody deletes a directory and then fails the safe way — silently,
+# because `finished_dispatch_pids` treats every failure as "no exclusions", which is correct for a fault and
+# indistinguishable from a genuinely empty answer. `CLAUDE_WATCHDOG_SESSIONS_TOOL` still overrides, so the
+# old tool remains one variable away for as long as it exists.
+#
+# Verified in both directions by `scripts/tests/fleet-finished-pids.sh` against a real store, a real tmux
+# server and three live processes: a finished worker's pid is printed, a working worker's is not, and an
+# UNMANAGED session's is not — that last one being the failure that matters, since excluding unmanaged
+# sessions would switch auto-resume off for the whole box while looking like a quiet success.
+DISPATCH_SESSIONS="${CLAUDE_WATCHDOG_SESSIONS_TOOL:-$DAVIS/superpowers/scripts/fleet-finished-pids.sh}"
+
+# The store is STATED, not inherited. `fleet`'s read-only verbs default to `$HOME/.fleet` on their own, so
+# leaving this unset would work — and would mean the watchdog's exclusion silently followed whatever
+# `FLEET_HOME` happened to be exported into the shell that armed the daemon, which is a different store per
+# operator and per effort. A daemon that reconciles every 300s for weeks must not depend on that.
+FLEET_HOME="${FLEET_HOME:-$HOME/.fleet}"; export FLEET_HOME
+
+# `finished_dispatch_pids` treats EVERY failure as "exclude nothing". That is the right default — excluding a
+# pid in error costs an auto-resume that should have happened, and there is no error channel back to a caller
+# that only reads pids — but it makes a broken exclusion and an empty one look identical. And they are not
+# the same thing at all: on a box with no fleet store, "exclude nothing" is permanent.
+#
+# So the two are distinguished in the LOG, and only when the answer CHANGES. The daemon wakes every
+# $INTERVAL; a line per pass would be ~288/day of the same sentence, which is how a log stops being read.
+EXCLUSION_STATE_FILE="$CAR_DIR/watchdog-exclusion.state"
+log_exclusion_state() {           # log_exclusion_state <state-string>
+  local now="$1" was=""
+  [ -f "$EXCLUSION_STATE_FILE" ] && was="$(cat "$EXCLUSION_STATE_FILE" 2>/dev/null)"
+  [ "$now" = "$was" ] && return 0
+  mkdir -p "$CAR_DIR"
+  printf '%s\n' "$now" > "$EXCLUSION_STATE_FILE"
+  printf '[%s] exclusion: %s\n' "$(date -Is 2>/dev/null || date)" "$now" >> "$LOGFILE" 2>/dev/null || true
+}
+
 finished_dispatch_pids() {
-  [ -x "$DISPATCH_SESSIONS" ] || return 0
-  "$DISPATCH_SESSIONS" --finished-pids 2>/dev/null
+  if [ ! -x "$DISPATCH_SESSIONS" ]; then
+    log_exclusion_state "INACTIVE — no executable exclusion tool at $DISPATCH_SESSIONS, so no finished worker will ever be excluded"
+    return 0
+  fi
+  local out; out="$("$DISPATCH_SESSIONS" --finished-pids 2>/dev/null)"
+  if [ -n "$out" ]; then
+    log_exclusion_state "active — excluding $(printf '%s\n' "$out" | grep -c '^[0-9]') finished worker pid(s): $(printf '%s' "$out" | tr '\n' ' ')"
+    printf '%s\n' "$out"
+  elif [ ! -d "$FLEET_HOME/records" ]; then
+    # Not a fault, and not nothing-to-do either: there is no store to ask. Worth one log line, because the
+    # exclusion is inert until a dispatch actually writes records HERE, and nothing else would ever say so.
+    log_exclusion_state "INERT — no store at $FLEET_HOME/records, so there are no dispatch records to derive finished workers from"
+  else
+    log_exclusion_state "active — store at $FLEET_HOME/records has no finished workers to exclude"
+  fi
   return 0
 }
 

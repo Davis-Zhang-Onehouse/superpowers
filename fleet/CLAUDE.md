@@ -7,8 +7,8 @@ This file is scoped to `fleet/`. The repository root's `CLAUDE.md` is about cont
 obra/superpowers and does not apply to anything here.
 
 ```
-fleet/src/fleet/     18 modules, 30 verbs, entry point `python3 -m fleet.cli`
-fleet/tests/         the hermetic suite (832 tests) + fixtures/
+fleet/src/fleet/     18 modules, 31 verbs, entry point `python3 -m fleet.cli`
+fleet/tests/         the hermetic suite (864 tests) + fixtures/
 fleet/it/            the integration harness: run-*.sh, lib.sh, RESULTS.tsv, controls in bin/
 ../bin/fleet         launcher, so you can type `fleet <verb>` from anywhere
 ```
@@ -28,7 +28,7 @@ saves you from trusting the wrong green.
 
 ```bash
 cd fleet
-PYTHONPATH=src python3 -m unittest discover -s tests -q      # ~43s, 832 tests
+PYTHONPATH=src python3 -m unittest discover -s tests -q      # ~45s, 864 tests
 PYTHONPATH=src python3 -m unittest tests.test_cli -v         # one module
 PYTHONPATH=src python3 -m unittest tests.test_cli.TestBrief  # one class
 ```
@@ -54,21 +54,24 @@ IT_RESULTS="$R" bash run-group5.sh             # §L §M §N in one process — 
 |---|---|
 | `run-A` | §A environment, isolation, exit codes |
 | `run-B` `run-C` `run-D` | instant model / pool + workspace / dispatch + rollback |
-| `run-F` | §F admission control (F2 F3 F9 F11) |
+| `run-F` | §F admission control, F1–F11 |
 | `run-group3` | §E concurrency + §K compaction |
 | `run-group5` | §L meta loop, §M CLI surface, §N real tmux lifecycle |
 | `run-H` | §H roadmap, propose/apply, the carry-across |
-| `run-J` | §J the harvest transaction (J2 J7 J8 J9) |
-| `run-O` | §O failure injection (O7 O9) |
+| `run-G` | §G the roadmap/agent surface |
+| `run-I` | §I the agent-facing contract |
+| `run-J` | §J the harvest transaction, J1–J9 |
+| `run-O` | §O failure injection, O1–O9 |
 | `run-lineage` | §LB the lineage gate on `propose --status done` |
 | `run-w1` | §W1 the private tmux server |
 | `run-e9-leak` `run-m9-mutation` `run-rmw` | targeted regressions |
 | `run-P` | §P the real dispatch — see below |
 
 **`RESULTS.tsv` is current state, not an append log.** Each runner declares the case ids it owns via
-`it_own_cases` and *replaces* those rows. That is what makes "zero NOT-RUN" expressible. Five section-level
-`NOT-RUN` rows remain (§F §G §I §J §O), each annotated with which cases have run and which have not — a
-partial pass must never read as a full one.
+`it_own_cases` and *replaces* those rows. That is what makes "zero NOT-RUN" expressible — and it is currently
+**273 PASS / 0 FAIL / 9 SKIP / 0 NOT-RUN**. Every SKIP carries a stated reason; a partial pass must never read
+as a full one, which is why the section-level `NOT-RUN` rows that used to stand in for §F §G §I §J §O were
+replaced by real cases rather than deleted.
 
 ## Running §P — the real dispatch
 
@@ -176,32 +179,57 @@ bash scripts/claude-watchdog.sh arm         # start the daemon, arm in-scope ses
 bash scripts/claude-watchdog.sh disarm      # stop the daemon, kill in-scope monitors
 ```
 
-It has ONE pdispatch dependency: `finished_dispatch_pids()` calls
-`skills/dispatchInstants/dispatch-sessions.sh --finished-pids` to build the list of pids that must NOT be
-armed. That is the only reason those two files still exist. The reason the exclusion matters is in the
+`finished_dispatch_pids()` builds the list of pids that must NOT be armed, and **its default is now
+`scripts/fleet-finished-pids.sh`** — the fleet-backed answer. The reason the exclusion matters is in the
 watchdog itself: two workers nine days past the end of their effort still had live monitors, and on a
 rate-limit banner a monitor types into a pane whose cwd may since have been **re-leased to a different
-effort**.
-
-`scripts/fleet-finished-pids.sh` answers the same contract from `fleet`, and the watchdog already exposes the
-seam to swap it in:
-
-```bash
-CLAUDE_WATCHDOG_SESSIONS_TOOL=/home/ubuntu/davis_root/superpowers/scripts/fleet-finished-pids.sh \
-  bash scripts/claude-watchdog.sh status
-```
+effort**. `CLAUDE_WATCHDOG_SESSIONS_TOOL` still overrides, so the old pdispatch tool is one variable away for
+as long as it exists.
 
 The mapping that matters, and it is easy to get backwards: exclude a **`worker` subject in `state COMPLETE`**,
 never an `unarmed` row. `reconcile` marks every unmanaged session `unarmed` because nothing in the store
 authorises acting on it — correct for reconcile's question, and catastrophic for this one, since it would
-exclude every session on a box with no fleet records and silently switch auto-resume off. With an empty store
-the fleet-backed tool prints nothing, which is what the old one printed against an empty board.
+exclude every session on a box with no fleet records and silently switch auto-resume off.
 
-**The bigger win is not yet done.** The monitor sends `Continue…` on a rate-limit banner **without consulting
-`fleet pane-guard`**, which is precisely the guard for that hazard (`0` safe / `10` queued-text / `11`
-mid-turn / `12` not-claude / `13` unknown). Gating the send would need a change inside the vendored
+`scripts/tests/fleet-finished-pids.sh` asserts both directions against a real store, a real tmux server and
+three live processes — a finished worker IS printed, a working worker is not, and an unmanaged session is not:
+
+```bash
+bash scripts/tests/fleet-finished-pids.sh      # ~15s, spends no claude
+```
+
+It uses a copy of `/bin/sleep` named `claude`, because the CLI builds its probes with `default_probes()` and
+`pgrep -x claude` is not overridable from outside. Run it if you touch either script.
+
+**Which store the watchdog reads.** `FLEET_HOME` is now *stated* in the watchdog (`${FLEET_HOME:-$HOME/.fleet}`)
+rather than inherited. `fleet`'s read-only verbs default to `$HOME/.fleet` anyway, so leaving it unset would
+have worked — and would have meant a daemon that runs for weeks silently followed whatever `FLEET_HOME` was
+exported into the shell that happened to arm it, which differs per effort.
+
+**The exclusion announces its own state, and this is the part worth knowing.** `finished_dispatch_pids` treats
+every failure as "exclude nothing" — right, because excluding a pid in error costs an auto-resume that should
+have happened and there is no error channel back to a caller that only reads pids. But it makes a *broken*
+exclusion and an *empty* one look identical, and on a box with no fleet store "exclude nothing" is permanent.
+So the state is written to the log, and only when it changes (the daemon wakes every 300s; a line per pass is
+how a log stops being read):
+
+```bash
+tail -5 "$DAVIS/.claude-auto-retry/watchdog-daemon.log"
+cat "$DAVIS/.claude-auto-retry/watchdog-exclusion.state"
+# INERT — no store at /home/ubuntu/.fleet/records, so there are no dispatch records to derive
+#          finished workers from
+```
+
+`INERT` is the expected reading until a dispatch actually writes records into that store; it becomes `active`
+on its own once one does. Note `CAR_DIR` is `$DAVIS/.claude-auto-retry` — the tool's `HOME` is `$DAVIS`, not
+the operator's, so its state is NOT under `~`.
+
+**The bigger win is still not done.** The monitor sends `Continue…` on a rate-limit banner **without
+consulting `fleet pane-guard`**, which is precisely the guard for that hazard (`0` safe / `10` queued-text /
+`11` mid-turn / `12` not-claude / `13` unknown). Gating the send would need a change inside the vendored
 `claude-auto-retry` monitor, not in this repo. `J8` proves `fleet close` refuses both dangerous pane shapes; the
-monitor has no such gate.
+monitor has no such gate. Note what the switch above did and did not buy: it fixed WHICH sessions get armed,
+not what a monitor does once armed.
 
 ## Known gaps
 
@@ -213,4 +241,6 @@ monitor has no such gate.
 - **The coordinator can type a wrong lineage SHA.** Nothing checks it is the *right* base for a milestone, only
   that the slot ends up there. The design that closes this (`propose --tip`, `dispatch --lineage-from`) is
   written up but not built.
-- **§G and §I have never run**, and §F/§J/§O are partial. See the `NOT-RUN` rows for exactly which cases.
+- **§C10 is the one structural SKIP worth knowing about.** It needs a *succeeding* dispatch, which §C's own
+  contract forbids, so it cannot be asserted there. Its second reason — "there is no clone to observe" — was
+  removed by `fleet clone` (`SI-19`); the first still stands.
