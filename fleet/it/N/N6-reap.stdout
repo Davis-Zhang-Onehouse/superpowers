@@ -1,2 +1,0 @@
-reaped	ns1	info	the lease held by nprobe-07310028 (tmux itfleet-N-w1, effort 00000000) was stale — no live session and nothing holding /home/ubuntu/davis_root/superpowers/fleet/it/N/slots/ns1 as its cwd — and has been given back BY THIS CALL		
-population	00000000	info	examined 1 enrolled slot(s), 1 of them leased; 1 freed by this call, 0 interrupted claim(s) reclaimed, 0 could not be freed, 0 left to their owners; scope '00000000'		

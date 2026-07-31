@@ -1,4 +1,0 @@
-code     11
-verdict  mid-turn
-pane     itfleet-M-busy
-detail   itfleet-M-busy is still offering a way to interrupt, so it is mid-turn; a send now is queued behind the current turn

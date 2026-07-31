@@ -1,6 +1,0 @@
-(a) ids parsed: ['RI-9a', 'W2-14', 'RCF-B-8'] ids_found: 3
-(b) VacuousExtraction: VacuousExtraction
-(b) rows: [('vacuous-extraction', 'violation')]
-(c) primed: 0
-(c) rows: [('source', 'info', 0), ('empty-register', 'info', 0)]
-OK L5: (a) ids_found=3 incl RI-9a from ### headings · (b) non-empty/zero-ids raises VacuousExtraction and reports exit 1 · (c) empty register is clean with an empty-register info row

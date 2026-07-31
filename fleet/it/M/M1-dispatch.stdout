@@ -1,9 +1,0 @@
-dry-run                         every gate evaluated; nothing was claimed, created or started
-coordinator                     (none — the child will have no origin.json and `propose` will stay LOCAL)
-milestone                       (none — this dispatch is not about a roadmap row)
-lineage_base                    (none — no git lineage is recorded, so nothing gates a claim of done)
-lineage_mode                    (none)
-guard.compaction-exclusive      allow: no compaction of this effort is inflight. examined 1 recorded subject(s) and the instants directory, for 00000000, 0 unfinished compaction(s)
-guard.wip-cap                   refuse: the WIP cap is 1 and 1 active-dev subject(s) hold it: 00000000-07310023-inflight-append-mprobe. examined 1 subject(s) of 00000000; 1 counted, 0 excluded
-guard.profile-optype-agreement  allow: the profile at /home/ubuntu/davis_root/superpowers/fleet/it/M/profile declares kind='worker', whose opType(s) are append; dispatching as 'append' agrees
-guard.pool-capacity             refuse: every enrolled slot is leased (ms1). examined 1 enrolled slot(s)

@@ -5,19 +5,26 @@ fleet/it/*/home/
 fleet/it/*/instants/
 fleet/it/*/slot/
 fleet/it/*/slots/
-fleet/it/RESULTS-closeout-*.tsv
+fleet/it/RESULTS-*.tsv
 fleet/it/*.log
 # fleet: the dummy-project fixture is unpacked from it/fixtures/dummy-project.tar.gz on demand.
 fleet/it/dummy-project/
-# fleet: the dummy-project fixture is unpacked from it/fixtures/dummy-project.tar.gz on demand.
-fleet/it/dummy-project/
 
-# fleet: baselines of THIS BOX (the operator's pdispatch stores, the live tmux session set, and the dt-
-# sessions observed). Established on first run by it/lib.sh and machine-local by nature — another checkout
-# has different sessions, so committing them would fail every fresh clone on its first run.
+# fleet integration harness. Every SUBDIRECTORY of fleet/it/ is generated section output — section trees,
+# leased slots, unpacked fixtures, real git repos built by a runner — and the runners regenerate all of it.
+# The only committed subdirectories are the controls and the archived dummy-project fixture.
+#
+# Structural rather than a list of names: a named rule was written twice and slipped twice (§C's fixture
+# repos, §LB's slot), because each new section invents its own directory and nothing reminds you.
+fleet/it/*/
+!fleet/it/bin/
+!fleet/it/fixtures/
+
+# Box-local baselines, established on first run by it/lib.sh: another checkout has different live sessions.
 fleet/it/live-stores.sha256
 fleet/it/live-tmux-sessions.txt
 fleet/it/dt-sessions-seen*.txt
+
 
 .worktrees/
 .private-journal/
