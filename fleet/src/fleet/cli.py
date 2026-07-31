@@ -2510,7 +2510,17 @@ CLAUDE_MARKERS = ("esc to interrupt", "esc to cancel", "? for shortcuts", "/ for
                   "# for memory", "bypass permissions", "new task?", "claude code")
 
 
-def _is_claude(sessions, text: str) -> bool:
+def _is_claude(sessions, text: str, name: str = "") -> bool:
+    """Is this pane a claude? PROCESS FIRST, then the screen.
+
+    `SI-38`. The glyph test alone answers "does the visible tail contain UI chrome", which is a different
+    question and drifts from it the moment a long answer scrolls the chrome away. Asking whether a live
+    claude process is attributed to the session is evidence; the markers are a fallback for the case the
+    process probe cannot attribute (a claude the pane owns indirectly, or a pane on a server we can see
+    but whose processes we cannot).
+    """
+    if sessions.is_claude_process(name):
+        return True
     lowered = str(text).lower()
     if any(marker in lowered for marker in CLAUDE_MARKERS):
         return True
@@ -2531,7 +2541,7 @@ def _do_pane_guard(ctx: Ctx, parsed: Parsed) -> int:
                                       "to a pane nobody can name is the send with no target")
     else:
         text = ctx.sessions.pane(pane)
-        if not _is_claude(ctx.sessions, text):
+        if not _is_claude(ctx.sessions, text, pane):
             code, detail = PANE_NOT_CLAUDE, (f"{pane} is alive and nothing in its tail is claude; a send "
                                              "here goes to somebody else's shell")
         elif ctx.sessions.busy(text):
