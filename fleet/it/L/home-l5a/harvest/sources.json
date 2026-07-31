@@ -1,0 +1,11 @@
+{
+  "schema_version": 1,
+  "sources": [
+    {
+      "base": "/home/ubuntu/davis_root/superpowers/fleet/it/L/reg/l5a",
+      "issues_path": "/home/ubuntu/davis_root/superpowers/fleet/it/L/reg/l5a/ISSUES.md",
+      "registered_at": "2026-07-31T00:11:50Z",
+      "last_run": null
+    }
+  ]
+}

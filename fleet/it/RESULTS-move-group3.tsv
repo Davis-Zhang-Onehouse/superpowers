@@ -1,0 +1,29 @@
+case	verdict	evidence	note
+ISOLATION-E-enter	PASS		live stores byte-identical; live tmux session set byte-identical (3 sessions, incl. 0 dt-); section work is on socket itfleet-E
+E1	PASS	it/E/out/E1-per-iteration.tsv	n=20 iterations x 10 concurrent dispatch, 3 slots: every iteration 3x exit 0 / 7x exit 3, 3 distinct slots
+E2	PASS	it/E/out/E2-per-iteration.tsv	n=10 x 10 concurrent claims on ONE named slot: 1 winner / 9x exit 3 every time, lease body names the winner
+E3	PASS	it/E/out/E3-per-iteration.tsv	n=20 x 5 concurrent dispatch at cap 1: exactly one entered active dev every time, the rest exit 4 naming the cap
+E4	PASS	it/E/out/E4-per-iteration.tsv	n=50 iterations, 300 concurrent board reads against a live dispatch: no torn record, no short row, no traceback; all 50 records render with a state
+E5	PASS	it/E/out/E5-per-iteration.tsv	n=20 x 2 concurrent declare on one instant: file always valid JSON, last writer wins, every echo-back is a value a consumer could read
+E6	PASS	it/E/out/E6-per-iteration.tsv	n=5 x 2 concurrent harvest of DIFFERENT workers: both transactions completed (2 harvested rows), both slots free, both records stamped and readable, no violation other than the synthetic base's absent register
+E7	PASS	it/E/out/E7-per-iteration.tsv	n=20 x 2 concurrent record_dispatch for DIFFERENT bases: both bases in sources.json every time
+E8	PASS	it/E/out/E8-per-iteration.tsv	n=10 x 2 concurrent reap over 4 stale leases: every slot freed exactly once, never double-reported, no exception escaped
+E9	PASS	it/E/out/E9-per-iteration.tsv	n=20 SIGKILLs of a random one of 3 concurrent dispatchers at a random point: 7 of 20 iteration(s) ACTUALLY produced an orphaned lease and reap recovered every one of them by name. The exercised count is stated because a run that produced none proves nothing (SI-8)
+ISOLATION-E-live-tmux	PASS	it/E/out/live-tmux-after.txt	live tmux server session list byte-identical; no dt- session created or killed
+ISOLATION-E-claude-count	PASS		pgrep -x claude: 10 before and after (A6)
+ISOLATION-E-leave	PASS		live stores byte-identical; live tmux session set byte-identical (3 sessions, incl. 0 dt-); section work is on socket itfleet-E
+ISOLATION-K-enter	PASS		live stores byte-identical; live tmux session set byte-identical (3 sessions, incl. 0 dt-); section work is on socket itfleet-K
+K1	PASS	it/K/out/kA/k1-dispatch.out	born 00000000-07310011-inflight-compact-foldTheStack
+K2	PASS	it/K/out/kA/k2-lint.out	COMPACTED.md reported 'info', exit 0, 0 violations
+K3a	PASS	it/K/out/kA/k3-dispatch.out	dispatch exit 4 naming 00000000-07310011-inflight-compact-foldTheStack
+K3b	PASS	it/K/out/kA/k3-resume.out	resume exit 0 under the freeze (FD-9: refusing a resume is its own outage)
+K4	PASS	it/K/out/kA/k4.out	names 00000000-07310011-inflight-compact-foldTheStack, exit 1, zero delta over store+pool+slots+instants (content+mtime)
+K5	PASS	it/K/out/kA/k5-dryrun.out	declared awaiting-ci: wip-cap says ROOM (allow: 0 of 1 active-dev slot(s) in use. examined 1 subject(s) of 00000000; 0 counted, 1 excluded (00000000-07310011-inflight-compact-foldTheStack (AWAITING-CI))), compaction-exclusive still REFUSES, real dispatch exit 4
+K7	PASS	it/K/out/kA/k7-lint-after.out	-complete-compact- without COMPACTED.md: 1 violation(s), exit 1; after writing it: clean exit 0; the freeze LIFTED (dispatch exit 0)
+K6	SKIP	it/K/out/K6-why-not-runnable.txt	no verb produces COMPACTED.md and no rule checks its CONTENT (layout.validate is presence-only), so no assertion here can fail if the four-part contract is violated
+K8	PASS	it/K/out/kB/lint.out	-abort-compact-: lint clean with NO COMPACTED.md row at all (optional, not even info); freeze lifted (dispatch exit 0). direct abort with the pane still live: exit 0
+K9	PASS	it/K/out/kC/dispatch.out	exit 4 naming the profile, BEFORE any side effect: 0 leases, 0 records, 0 instants, zero delta (content+mtime)
+K10	PASS	it/K/out/K10-per-iteration.tsv	n=20 x 2 concurrent compaction dispatches: exactly one compaction existed every time, the second refused by the first
+ISOLATION-K-live-tmux	PASS	it/K/out/live-tmux-after.txt	live tmux server session list byte-identical; no dt- session created or killed
+ISOLATION-K-claude-count	PASS		pgrep -x claude: 10 before and after (A6)
+ISOLATION-K-leave	PASS		live stores byte-identical; live tmux session set byte-identical (3 sessions, incl. 0 dt-); section work is on socket itfleet-K

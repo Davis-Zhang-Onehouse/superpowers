@@ -1,0 +1,4 @@
+source	/home/ubuntu/davis_root/superpowers/fleet/it/L/home/instants/00000000-07310022-inflight-append-l7probe	info	watched since 2026-07-31T00:22:22Z, last run never; a dry run reads the registry and records nothing, so no `last_run` was stamped		
+source	/home/ubuntu/davis_root/superpowers/fleet/it/L/reg/l7stale	info	watched since 2020-01-01T00:00:00Z, last run never; a dry run reads the registry and records nothing, so no `last_run` was stamped		
+source	00000000	info	watched since 2026-07-31T00:22:23Z, last run never; a dry run reads the registry and records nothing, so no `last_run` was stamped		
+population	/home/ubuntu/davis_root/superpowers/fleet/it/L/home/harvest/sources.json	info	examined 3 watched source(s), 1 past the 1800s cadence window; dry run, nothing recorded		

@@ -17,8 +17,8 @@
 # star's "prefer a mechanical fix to a documented warning" pointed at my own workflow.
 #
 # Usage:
-#   . evidence/04-integration/bin/adhoc-sandbox.sh            # a fresh scratch store + private server
-#   . evidence/04-integration/bin/adhoc-sandbox.sh keep        # reuse the previous one
+#   . fleet/it/bin/adhoc-sandbox.sh            # a fresh scratch store + private server
+#   . fleet/it/bin/adhoc-sandbox.sh keep        # reuse the previous one
 #
 # It exports FLEET_HOME, FLEET_INSTANTS, FLEET_TMUX_SOCKET and PYTHONPATH, and prints what it set.
 # It deliberately does NOT cd anywhere and does not touch the live store or the live server.

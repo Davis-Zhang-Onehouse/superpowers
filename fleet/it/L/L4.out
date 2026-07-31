@@ -1,0 +1,4 @@
+primed: 3
+new ids: [] expected: []
+register now: ['## QQ-1 — first issue', '## QQ-9a — an id with a letter suffix', '## QQ-12 — third issue']
+OK L4: new=none (expected zero new)

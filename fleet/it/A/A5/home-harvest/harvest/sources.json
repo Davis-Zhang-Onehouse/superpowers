@@ -1,0 +1,11 @@
+{
+  "schema_version": 1,
+  "sources": [
+    {
+      "base": "/home/ubuntu/davis_root/superpowers/fleet/it/A/A5/instants-harvest/00000000-07310004-inflight-append-a5hv",
+      "issues_path": "/home/ubuntu/davis_root/superpowers/fleet/it/A/A5/instants-harvest/00000000-07310004-inflight-append-a5hv/ISSUES.md",
+      "registered_at": "2026-07-31T00:04:56Z",
+      "last_run": "2026-07-31T00:05:44Z"
+    }
+  ]
+}

@@ -1,0 +1,64 @@
+pinned at 2026-07-31T00:29:12+00:00
+git HEAD: 4a596596fb8704725a2d98fa1600877353d3b082
+git status --porcelain:
+ M fleet/it/bin/adhoc-sandbox.sh
+ M fleet/it/lib.sh
+ M fleet/it/run-A.sh
+ M fleet/it/run-B.sh
+ M fleet/it/run-C.sh
+ M fleet/it/run-D.sh
+ M fleet/it/run-F.sh
+ M fleet/it/run-H.sh
+ M fleet/it/run-J.sh
+ M fleet/it/run-O.sh
+ M fleet/it/run-all.sh
+ M fleet/it/run-e9-leak.sh
+ M fleet/it/run-group3.sh
+ M fleet/it/run-group5.sh
+ M fleet/it/run-lineage.sh
+ M fleet/it/run-m9-mutation.sh
+ M fleet/it/run-rmw.sh
+ M fleet/it/run-w1.sh
+ M fleet/src/fleet/cli.py
+?? fleet/it/A/
+?? fleet/it/C/
+?? fleet/it/D/
+?? fleet/it/F/
+?? fleet/it/L/
+?? fleet/it/M/
+?? fleet/it/M9-mutation/
+?? fleet/it/N/
+?? fleet/it/RESULTS-move-A.tsv
+?? fleet/it/RESULTS-move-B.tsv
+?? fleet/it/RESULTS-move-C.tsv
+?? fleet/it/RESULTS-move-D.tsv
+?? fleet/it/RESULTS-move-F.tsv
+?? fleet/it/RESULTS-move-J.tsv
+?? fleet/it/RESULTS-move-LB.tsv
+?? fleet/it/RESULTS-move-O.tsv
+?? fleet/it/RESULTS-move-e9-leak.tsv
+?? fleet/it/RESULTS-move-group3.tsv
+?? fleet/it/RESULTS-move-group5.tsv
+?? fleet/it/RESULTS-move-m9-mutation.tsv
+?? fleet/it/RESULTS-move-rmw.tsv
+?? fleet/it/SOURCE-PIN-group5-after.txt
+?? fleet/it/SOURCE-PIN-group5-before.txt
+sha256 of the package under test:
+4930abb9f7ccc5d1ee717307f87b15c02a05ab8ac898504e5e4fffc87c5dd451  src/fleet/__init__.py
+c462241255a8f0062d6e8a4997847e8bb0c1705fd3b27f1c29b79f69a87ee660  src/fleet/atomic.py
+d7df3039a66c82b96baab8b6a5a30e5af4a543054ac17ed8a401f3466e6ace51  src/fleet/cli.py
+863d30099166ba260c23770215046d18e6dcaab2dcc018dd08503a2df944e827  src/fleet/errors.py
+04e5f1e6a507d1561b763c3bbacd22b7a6e9e5d9851ce5c2674d0b4a64081a3c  src/fleet/guards.py
+e61086d9c10896c0d05024d2b1f4c5d6f8337855079abcf0839a443543b0e00f  src/fleet/harvest.py
+18509ebcf303893a4c31e59a503c0061ef6ef205af0bd7cc90bef9a8753fda25  src/fleet/identity.py
+6f953a747facc5b753c3f2d5c62661c518c0898053dcbb51e7aac982f10ab91c  src/fleet/layout.py
+c5458319a7816e14d009f10ad5eac0646cb2d54a69d78747ca8fc40aadb78fa1  src/fleet/origin.py
+760ce9f0d15389bf23a024a30c5911245a4faba399a0d1d54c6fb61ffdc54b3c  src/fleet/pool.py
+05a3404b9586469075c23474e900e6763eff0c07f99f0620f9af40b5f9c1b0e8  src/fleet/profiles.py
+9a0b2516854b3b5833b4d4014d36a0d6f087520bfa1c4eb7a3826ce307fe1b8c  src/fleet/reconcile.py
+4e0f905d3f728e9eab0785a8b40ee146cc4181538e073884c56ab91711fd0551  src/fleet/render.py
+e06952c0c82cfc9cedd38ec3ab4a7f03e6233b500bea02283419e4bf6eef0146  src/fleet/review.py
+5dd96de53dfa36dcefe6be1fb5969f5d51a55525d0c2b6d42a86b846fdbbeae8  src/fleet/roadmap.py
+20a94a421edaf6ba3d0903d01c51c01d578ab6223a9436648335d2ef12f3a39f  src/fleet/session.py
+b9efe937286aee460eed680dddfd76b4a4a0fbdbb664ebce127e6f4f7b86a57d  src/fleet/store.py
+0572e9c58fed266dbc554e3cf8b38c32f4bc78e853095bfd7c29ac0cf165f43d  src/fleet/workspace.py

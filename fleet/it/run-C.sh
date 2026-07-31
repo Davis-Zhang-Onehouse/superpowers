@@ -39,7 +39,7 @@
 # C6 starts a REAL `sleep 300` inside a slot. Its pid is recorded in C_SLEEPS and killed BY PID from an
 # EXIT/INT/TERM trap, so it cannot outlive this run however the run ends. Never `pkill`.
 #
-# Usage: IT_RESULTS=<file> bash evidence/04-integration/run-C.sh [all|C1..C13]
+# Usage: IT_RESULTS=<file> bash fleet/it/run-C.sh [all|C1..C13]
 set -uo pipefail
 
 C_HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"

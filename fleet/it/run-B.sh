@@ -36,7 +36,7 @@
 # THE TRAP THIS FILE WALKED INTO ONCE, RECORDED SO IT CANNOT COME BACK
 # -------------------------------------------------------------------
 # `${path/-inflight-/-complete-}` over a FULL path is wrong here and fails SILENTLY. This harness lives
-# inside `.../00000000-07300312-inflight-append-fleetInfraRebuild/evidence/04-integration/`, so the first
+# inside `.../00000000-07300312-inflight-append-fleetInfraRebuild/fleet/it/`, so the first
 # `-inflight-` in any absolute path under `$EV` belongs to the HARNESS's own instant folder, not to the
 # fixture. The substitution rewrote the wrong component, the `mv` failed with "No such file or
 # directory", and the case that followed it PASSED — against a folder that had never been renamed. Every
@@ -44,7 +44,7 @@
 # dash-field and refuses anything that is not a 5-field instant name, and every case that depends on a
 # rename asserts the new folder exists and the old one does not.
 #
-# Usage: IT_RESULTS=<file> bash evidence/04-integration/run-B.sh [all|B1..B14]
+# Usage: IT_RESULTS=<file> bash fleet/it/run-B.sh [all|B1..B14]
 set -uo pipefail
 
 B_HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"

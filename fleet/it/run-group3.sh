@@ -33,7 +33,7 @@
 #
 #   The live server's session list is snapshotted before and compared after; `it_assert_isolation` now
 #   compares the whole live session-name SET against `live-tmux-sessions.txt` as well (`SI-1`).
-#   * `evidence/04-integration/bin/claude` is placed first on PATH: a real process in a real pane that
+#   * `fleet/it/bin/claude` is placed first on PATH: a real process in a real pane that
 #     is not claude. `pgrep -x claude` is asserted identical before and after each section (§A6).
 #     Plan 6 §J1 endorses this substitution ("a real tmux worker (a shell, not `claude`)").
 #
@@ -93,7 +93,12 @@ g3_skip() { it_skip "$1" "$(g3_rel "${2:-}")" "${3:-}"; }
 g3_live_tmux() { env -u TMUX_TMPDIR tmux ls 2>/dev/null | sort; }
 
 g3_enter() {                    # g3_enter <SECTION>
-  it_section "$1"                                    # own FLEET_HOME, own slots, own SOCKET, isolation asserted
+  it_section "$1"
+  # The expected `board --porcelain` field count, read from the DECLARED schema rather than typed. It was the
+  # literal 6, and `SI-27` added a `milestone` column — after which all 50 iterations reported a torn render
+  # and E4 failed for a reason that had nothing to do with concurrency. A check that hardcodes a schema
+  # measures the schema it was written against, not the one in front of it.
+  G3_BOARD_COLS="$(python3 -c 'from fleet.cli import PORCELAIN_COLUMNS; print(len(PORCELAIN_COLUMNS["board"]))')"                                    # own FLEET_HOME, own slots, own SOCKET, isolation asserted
   #: Evidence dir override. A section's evidence path is otherwise `<SECTION>/`, and re-running §E would
   #: overwrite logs that rows in a results file THIS RUN does not own still cite. Section identity —
   #: FLEET_HOME's shape, the tmux socket, the case ids — is unchanged; only where the bytes land moves.
@@ -381,7 +386,7 @@ e4_board_never_tears() {
     # A torn record shows up three ways, and all three are checked: a row with the wrong number of
     # fields, a non-zero exit from `board`, or a python traceback (json.loads is not guarded).
     local badfields nonzero tb cad verdict
-    badfields="$(awk -F'\t' 'NF!=6 && NF>0 {c++} END{print c+0}' "$CD"/b$i-*.out)"
+    badfields="$(awk -F'\t' -v want="$G3_BOARD_COLS" 'NF!=want && NF>0 {c++} END{print c+0}' "$CD"/b$i-*.out)"
     nonzero="$(awk '$1!=0' "$CD/b$i.rc" 2>/dev/null | wc -l | tr -d ' ')"
     tb="$(g3_traceback_in "$CD"/b$i-*.err)"; [ -n "$tb" ] && tb=yes || tb=no
     cad="$(grep -l 'could not be evaluated' "$CD"/b$i-*.err 2>/dev/null | wc -l | tr -d ' ')"
