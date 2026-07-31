@@ -1,3 +1,0 @@
-primed: 3
-new ids: ['RI-40', 'RI-41'] expected: ['RI-40', 'RI-41']
-OK L2: new=['RI-40', 'RI-41'] (expected ['RI-40', 'RI-41'])

@@ -1,6 +1,0 @@
-sessions on the box that start with the prefix:
-itfleet-N-pre-ab: 1 windows (created Fri Jul 31 00:29:07 2026)
-
-alive(itfleet-N-pre-ab)=True  alive(itfleet-N-pre-a)=False
-pane(itfleet-N-pre-a) first line: []
-OK N7: the prefix name is not alive and does not capture the longer session's pane

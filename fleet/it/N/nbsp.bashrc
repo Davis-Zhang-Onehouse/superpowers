@@ -1,2 +1,0 @@
-PS1=$'\u276f\u00a0'
-unset PROMPT_COMMAND

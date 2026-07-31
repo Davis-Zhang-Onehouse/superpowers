@@ -1,2 +1,0 @@
-lineage	l7probe-07310022	info	no git lineage is recorded for this dispatch, so there is nothing to check and nothing gates a claim of done. That is correct for a coordinator, a compaction, or any dispatch made without --lineage-base		
-population	l7probe-07310022	info	expected (nothing) in /home/ubuntu/davis_root/superpowers/fleet/it/L/slots/s1, lineage-mode=(none), 0 repo(s) blocking a claim of done		

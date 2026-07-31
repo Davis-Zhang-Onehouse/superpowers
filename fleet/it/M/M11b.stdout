@@ -1,4 +1,0 @@
-code     10
-verdict  queued-text
-pane     itfleet-M-padded
-detail   itfleet-M-padded holds unsubmitted text in its input box ('draft message'); a send would concatenate onto it

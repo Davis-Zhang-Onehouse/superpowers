@@ -1,5 +1,0 @@
-dry-run                    nothing was adopted, claimed or written
-instant                    /home/ubuntu/davis_root/superpowers/fleet/it/M/home/instants/00000000-07310023-inflight-append-mprobe
-todo_id                    mprobe-07310023
-already_recorded           true
-guard.admission-exemption  allow: 'resume' evaluates no admission rule: `resume` adopts an instant that already exists; it is resume, not dispatch, and refusing a recovery path is its own outage — the alarm that blocks the fix. `OI-2`/`MD-9.2` keeps this as an accepted risk whose reason must survive every refactor, and design §10's 'no alarm blocks a documented recovery path' is only true if this door stays open. The residual bypass (hand-create an instant, then resume it) is accepted knowingly.

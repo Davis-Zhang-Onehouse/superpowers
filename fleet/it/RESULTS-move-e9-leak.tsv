@@ -1,7 +1,0 @@
-case	verdict	evidence	note
-ISOLATION-E9leak-enter	PASS		live stores byte-identical; live tmux session set byte-identical (3 sessions, incl. 0 dt-); section work is on socket itfleet-E9leak
-E9-leak-a	PASS	evidence/04-integration/E9leak/out/leases-after-plant.tsv	the leases view reports s2 as INTERRUPTED, not free (it reported 'free' before the fix, while no claimant could take it)
-E9-leak-b	PASS	evidence/04-integration/E9leak/out/reap.tsv	reap RECLAIMED the interrupted claim on s2 and named it under its own kind reap-reclaimed (rc=0). Before the fix this exited 0 reporting '0 of them leased; 0 freed, 0 could not be freed'
-E9-leak-c	PASS	evidence/04-integration/E9leak/out/claim.txt	after the reap the slot is CLAIMABLE and no interrupted claim remains: free_slots(), lease() and the claim path all agree. Before the fix this raised NoCapacity('already leased by an unnamed claim') for the life of the store
-E9-leak-d	PASS	evidence/04-integration/E9leak/out/exhausted.txt	the exhausted-pool refusal now NAMES the interrupted claim ('s3'), says it is a dead writer rather than work in progress, and points at reap -- which E9-leak-b proves actually clears it. Before the fix the same sentence named a remedy that was inert, which is FI-30a's unclearable alarm
-ISOLATION-E9leak-leave	PASS		live stores byte-identical; live tmux session set byte-identical (3 sessions, incl. 0 dt-); section work is on socket itfleet-E9leak

@@ -1,7 +1,0 @@
-dry-run             no proposal was written
-milestone           M1
-status              done
-proposer            /home/ubuntu/davis_root/superpowers/fleet/it/M/home/instants/00000000-07310023-inflight-append-mprobe
-roadmap             /home/ubuntu/davis_root/superpowers/fleet/it/M/home/instants/00000000-07310023-inflight-append-mprobe
-destination-chosen  LOCAL — no --to and no origin.json, so this proposal stays in this instant's own inbox and NO COORDINATOR WILL SEE IT. Correct for an instant with no coordinator; wrong for a dispatched worker
-evidence            e1

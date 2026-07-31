@@ -1,48 +1,100 @@
-pinned at 2026-07-31T00:29:12+00:00
-git HEAD: 4a596596fb8704725a2d98fa1600877353d3b082
+pinned at 2026-07-31T00:36:37+00:00
+git HEAD: 4a842f98fd449b28041dd08f2edc0971ed7d513a
 git status --porcelain:
- M fleet/it/bin/adhoc-sandbox.sh
- M fleet/it/lib.sh
- M fleet/it/run-A.sh
- M fleet/it/run-B.sh
- M fleet/it/run-C.sh
- M fleet/it/run-D.sh
- M fleet/it/run-F.sh
- M fleet/it/run-H.sh
- M fleet/it/run-J.sh
- M fleet/it/run-O.sh
- M fleet/it/run-all.sh
- M fleet/it/run-e9-leak.sh
- M fleet/it/run-group3.sh
- M fleet/it/run-group5.sh
- M fleet/it/run-lineage.sh
- M fleet/it/run-m9-mutation.sh
- M fleet/it/run-rmw.sh
- M fleet/it/run-w1.sh
- M fleet/src/fleet/cli.py
-?? fleet/it/A/
-?? fleet/it/C/
-?? fleet/it/D/
-?? fleet/it/F/
-?? fleet/it/L/
-?? fleet/it/M/
-?? fleet/it/M9-mutation/
-?? fleet/it/N/
-?? fleet/it/RESULTS-move-A.tsv
-?? fleet/it/RESULTS-move-B.tsv
-?? fleet/it/RESULTS-move-C.tsv
-?? fleet/it/RESULTS-move-D.tsv
-?? fleet/it/RESULTS-move-F.tsv
-?? fleet/it/RESULTS-move-J.tsv
-?? fleet/it/RESULTS-move-LB.tsv
-?? fleet/it/RESULTS-move-O.tsv
-?? fleet/it/RESULTS-move-e9-leak.tsv
-?? fleet/it/RESULTS-move-group3.tsv
-?? fleet/it/RESULTS-move-group5.tsv
-?? fleet/it/RESULTS-move-m9-mutation.tsv
-?? fleet/it/RESULTS-move-rmw.tsv
-?? fleet/it/SOURCE-PIN-group5-after.txt
-?? fleet/it/SOURCE-PIN-group5-before.txt
+ M fleet/it/L/L6.out
+ M fleet/it/L/L7-abort.stdout
+ M fleet/it/L/L7-apply.stdout
+ M fleet/it/L/L7-base-check.stdout
+ M fleet/it/L/L7-board.stdout
+ M fleet/it/L/L7-brief.stdout
+ M fleet/it/L/L7-close.stdout
+ M fleet/it/L/L7-complete.stdout
+ M fleet/it/L/L7-dispatch.stdout
+ M fleet/it/L/L7-harvest.stdout
+ M fleet/it/L/L7-init.stdout
+ M fleet/it/L/L7-leases.stdout
+ M fleet/it/L/L7-lint.stdout
+ M fleet/it/L/L7-milestone.stdout
+ M fleet/it/L/L7-per-verb.txt
+ M fleet/it/L/L7-propose.stdout
+ M fleet/it/L/L7-reap.stdout
+ M fleet/it/L/L7-reconcile.stdout
+ M fleet/it/L/L7-resume.stdout
+ M fleet/it/L/L7-review.stdout
+ M fleet/it/L/L7-roadmap.stdout
+ M fleet/it/L/L7-selftest.stdout
+ M fleet/it/L/L7-setup-init.out
+ M fleet/it/L/L7-setup.out
+ M fleet/it/L/L7-status.stdout
+ M fleet/it/L/L7-unenroll.stdout
+ M fleet/it/L/L7-verify.stdout
+ M fleet/it/L/L8-first.stdout
+ M fleet/it/L/L8-first.tsv
+ M fleet/it/L/L8-second.stdout
+ M fleet/it/L/L8-second.tsv
+ M fleet/it/L/home-l1/harvest/sources.json
+ M fleet/it/L/home-l2/harvest/sources.json
+ M fleet/it/L/home-l3/harvest/sources.json
+ M fleet/it/L/home-l4/harvest/sources.json
+ M fleet/it/L/home-l5c/harvest/sources.json
+ M fleet/it/L/home-l6/harvest/sources.json
+ M fleet/it/L/home-l8/harvest/sources.json
+ M fleet/it/M/M-setup.out
+ M fleet/it/M/M1-abort.stdout
+ M fleet/it/M/M1-apply.stdout
+ M fleet/it/M/M1-base-check.stdout
+ M fleet/it/M/M1-board.stdout
+ M fleet/it/M/M1-brief.stdout
+ M fleet/it/M/M1-close.stdout
+ M fleet/it/M/M1-complete.stdout
+ M fleet/it/M/M1-dispatch.stdout
+ M fleet/it/M/M1-harvest.stdout
+ M fleet/it/M/M1-init.stdout
+ M fleet/it/M/M1-leases.stdout
+ M fleet/it/M/M1-lint.stdout
+ M fleet/it/M/M1-milestone.stdout
+ M fleet/it/M/M1-per-verb.txt
+ M fleet/it/M/M1-propose.stdout
+ M fleet/it/M/M1-reap.stdout
+ M fleet/it/M/M1-reconcile.stdout
+ M fleet/it/M/M1-resume.stdout
+ M fleet/it/M/M1-review.stdout
+ M fleet/it/M/M1-roadmap.stdout
+ M fleet/it/M/M1-selftest.stdout
+ M fleet/it/M/M1-status.stdout
+ M fleet/it/M/M1-unenroll.stdout
+ M fleet/it/M/M1-verify.stdout
+ M fleet/it/M/M10-verdicts.txt
+ M fleet/it/M/M12-setup.out
+ M fleet/it/M/M12.stdout
+ M fleet/it/M/M13-git-after.txt
+ M fleet/it/M/M13-git-before.txt
+ M fleet/it/M/M13-git-dirty.txt
+ M fleet/it/M/M13-inside.stdout
+ M fleet/it/M/M13-inside.tsv
+ M fleet/it/M/M13-outside.stdout
+ M fleet/it/M/M13-outside.tsv
+ M fleet/it/M/M13-suite-with-guard.txt
+ M fleet/it/M/M13-suite-without-guard.txt
+ M fleet/it/M/M5-per-flag.txt
+ M fleet/it/M/M7.out
+ M fleet/it/N/N-setup.out
+ M fleet/it/N/N1.stdout
+ M fleet/it/N/N3-status.stdout
+ M fleet/it/N/N4-status.stdout
+ M fleet/it/N/N5-close.stderr
+ M fleet/it/N/N6-leases-before.stdout
+ M fleet/it/N/N6-reap-foreign.stdout
+ M fleet/it/N/N6-reap.stdout
+ M fleet/it/N/N6-status.stdout
+ M fleet/it/N/N7-sessions.txt
+ M fleet/it/N/N7.out
+ M fleet/it/N/N9-sessions-after.txt
+ M fleet/it/N/N9-setup.out
+ M fleet/it/N/N9.stdout
+ M fleet/it/RESULTS-move-group5.tsv
+ M fleet/it/SOURCE-PIN-group5-after.txt
+ M fleet/it/SOURCE-PIN-group5-before.txt
 sha256 of the package under test:
 4930abb9f7ccc5d1ee717307f87b15c02a05ab8ac898504e5e4fffc87c5dd451  src/fleet/__init__.py
 c462241255a8f0062d6e8a4997847e8bb0c1705fd3b27f1c29b79f69a87ee660  src/fleet/atomic.py

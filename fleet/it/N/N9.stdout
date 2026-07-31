@@ -1,6 +1,0 @@
-record           nowned-07310029
-closed           itfleet-N-own
-closed_at        2026-07-31T00:29:11Z
-forced           true
-slot_still_held  ns2 — released by `fleet harvest --id nowned-07310029` when the delta lands, or by `fleet reap --base 00000000` once nothing is sitting in it
-disarmed         the monitor's arm set is recomputed from the join; this pane is no longer in it

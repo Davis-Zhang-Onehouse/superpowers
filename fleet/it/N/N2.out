@@ -1,9 +1,0 @@
-probe capture lines: 33 tmux capture lines: 33
-busy: False unsubmitted: None
-pane-guard rc: 12
-code     12
-verdict  not-claude
-pane     itfleet-N-w1
-detail   itfleet-N-w1 is alive and nothing in its tail is claude; a send here goes to somebody else's shell
-
-OK N2: the captured text round-trips — probe == tmux, busy=False, unsubmitted=None, and pane-guard agrees (rc=12: a bash pane carries no claude marker)

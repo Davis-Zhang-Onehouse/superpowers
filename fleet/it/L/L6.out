@@ -1,4 +1,0 @@
-row: source /home/ubuntu/davis_root/superpowers/fleet/it/L/reg/l6quiet info | 1 id(s) in /home/ubuntu/davis_root/superpowers/fleet/it/L/reg/l6quiet/ISSUES.md, 0 new — this source produced 
-row: source /home/ubuntu/davis_root/superpowers/fleet/it/dummy-project info | 3 id(s) in /home/ubuntu/davis_root/superpowers/fleet/it/dummy-project/ISSUES.md, 0 new — this source produced 
-row: population /home/ubuntu/davis_root/superpowers/fleet/it/L/home-l6/harvest/sources.json info | examined 2 watched source(s) at 2026-07-31T00:22:22Z, 0 of them past a 1800s cadence window (live_work=False),
-OK L6: both silent sources are rows that say 'produced nothing'; the population row counts 2

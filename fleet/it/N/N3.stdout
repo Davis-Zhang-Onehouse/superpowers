@@ -1,4 +1,0 @@
-code     10
-verdict  queued-text
-pane     itfleet-N-w1
-detail   itfleet-N-w1 holds unsubmitted text in its input box ('draft message'); a send would concatenate onto it
