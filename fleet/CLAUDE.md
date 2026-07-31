@@ -107,6 +107,24 @@ It also reads the worker's own written report at
 worker to be blunt about what was wrong, missing or unfollowable, and that prose is the actual deliverable —
 the four PASS rows only say the mechanism held.
 
+## Working with a fleet from a shell
+
+```bash
+. scripts/fleet-env.sh                    # observe ANY fleet — no effort knowledge needed
+. scripts/fleet-env.sh <instants-dir>     # ...and create instants there (init, dispatch)
+```
+
+Sets `FLEET_HOME`, `FLEET_TMUX_SOCKET` and `PATH` as **defaults** (an effort that wants a different store
+exports it first), and defines `fleet_instant`, `fleet_running`, `fleet_peek`, `fleet_attach`.
+
+The instants directory is an argument rather than a setting because **observation does not need one**: a
+record stores an absolute `child_instant` and `reconcile` re-resolves it through the stable key, so it
+follows the worker's own rename. `FLEET_INSTANTS` says where NEW instants are made, not where existing ones
+are found. Nothing about an effort belongs in this file.
+
+`fleet_instant <id>` is the one to remember instead of globbing an instants directory: an aborted run
+leaves `…-abort-append-<name>` beside `…-inflight-append-<name>`, and it sorts FIRST.
+
 ## Reading a fleet: `bin/fleet-view`
 
 `fleet`'s human output is one padded-column formatter shared by every verb, so it cannot be
