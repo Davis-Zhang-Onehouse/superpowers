@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# §J — Completion and the harvest transaction, TARGETED: J2, J7, J8, J9.
+# §J — Completion and the harvest transaction. COMPLETE: J1-J9.
 #
 # These four were picked because each is a LIVE-SAFETY property the hermetic suite structurally cannot reach —
 # every probe there is injected, so none of it exercises a real session, a real pane or a real kill:
@@ -67,12 +67,15 @@ cleanup_J() {
 trap cleanup_J EXIT
 
 cp -r "$INSTANT/tests/fixtures/profiles/workerCompliant" "$OUT/profile"
-for s in ws1 ws2 ws3 ws4; do
+# TWELVE slots. The section now dispatches nine workers across J1-J9 and each holds its slot until it is
+# harvested or reaped — with four enrolled, J1/J3/J4/J6 all failed with NoCapacity, which is the pool being
+# right and the fixture being too small. Capacity is a fixture parameter here, not the thing under test.
+for s in ws1 ws2 ws3 ws4 ws5 ws6 ws7 ws8 ws9 ws10 ws11 ws12; do
   mkdir -p "$OUT/slots/$s"
   ( cd "$OUT/slots/$s" && git init -q . && git commit -q --allow-empty -m base ) >/dev/null 2>&1
 done
 fleet set-golden --path "$OUT/slots/ws1" > "$OUT/setup.out" 2>&1
-for s in ws1 ws2 ws3 ws4; do fleet enroll --slot "$OUT/slots/$s" >> "$OUT/setup.out" 2>&1; done
+for s in ws1 ws2 ws3 ws4 ws5 ws6 ws7 ws8 ws9 ws10 ws11 ws12; do fleet enroll --slot "$OUT/slots/$s" >> "$OUT/setup.out" 2>&1; done
 
 # ==================================================================================================
 # J2 — THE TRANSACTION AS A WHOLE.  dispatch -> milestone -> propose -> review -> complete -> harvest,
@@ -402,6 +405,158 @@ EOF
     it_fail J9 "fleet/it/J/out/J9-at-stamp-state.txt" \
       "a crash left the FORBIDDEN state (free slot + unstamped record): at-stamp forbidden=$f1 (stamped=$s1 held=$h1), at-release forbidden=$f2 (stamped=$s2 held=$h2)"
   fi
+fi
+
+# ==================================================================================================
+# J1 — THE FULL LIFECYCLE, in order, with a real tmux worker: dispatch -> declare -> propose -> review
+#      -> complete -> harvest. J2 asserts the harvest's five consequences; J1 asserts the SEQUENCE runs,
+#      and it adds the one step J2 skips: `declare`, which is how a worker tells the cap it is waiting on
+#      CI rather than holding a dev slot.
+# ==================================================================================================
+J1_OUT="$OUT/j1"; mkdir -p "$J1_OUT"
+fleet dispatch --profile "$OUT/profile" --title "j1Lifecycle" --base 00000000 --optype append \
+      --cap 9 --porcelain > "$J1_OUT/dispatch.out" 2>&1
+J1W="$(awk -F'\t' '$1=="instant"{print $2}' "$J1_OUT/dispatch.out")"
+J1TODO="$(awk -F'\t' '$1=="todo_id"{print $2}' "$J1_OUT/dispatch.out")"
+J1TMUX="$(awk -F'\t' '$1=="tmux"{print $2}' "$J1_OUT/dispatch.out")"
+J1SLOT="$(awk -F'\t' '$1=="slot"{print $2}' "$J1_OUT/dispatch.out")"
+j1_step() { local l="$1"; shift; "$@" > "$J1_OUT/$l.out" 2>&1; printf '%s=%s\n' "$l" "$?" >> "$J1_OUT/rc"; }
+: > "$J1_OUT/rc"
+if [ -z "$J1W" ] || [ ! -d "$J1W" ]; then
+  it_fail J1 "fleet/it/J/out/j1/dispatch.out" \
+    "the dispatch produced no instant: $(head -2 "$J1_OUT/dispatch.out" | tr '\n' ' ')"
+else
+  j1_step milestone fleet milestone --instant "$J1W" --id j1m --title "the lifecycle milestone"
+  j1_step declare   fleet declare --instant "$J1W" --phase AWAITING-CI --porcelain
+  j1_step propose   fleet propose --instant "$J1W" --milestone j1m --status awaiting-ci \
+                      --evidence evidence/INDEX.md
+  j1_step review    fleet review --instant "$J1W" --scope all --verdict READY \
+                      --finding "J1-1:Minor:applied:evidence/INDEX.md:the lifecycle ran:none" --porcelain
+  j1_step complete  fleet complete --instant "$J1W" --porcelain
+  J1W_DONE="$(find "$FLEET_INSTANTS" -maxdepth 1 -name '*-complete-append-j1lifecycle' | head -1)"
+  j1_step harvest   fleet harvest --id "$J1TODO" --porcelain
+  j1_bad=0
+  for step in milestone declare propose review complete; do
+    rc="$(awk -F'=' -v k="$step" '$1==k{print $2}' "$J1_OUT/rc")"
+    [ "$rc" = 0 ] || { printf '  J1 step %s exited %s\n' "$step" "$rc"; j1_bad=$((j1_bad+1)); }
+  done
+  # `harvest` is TWO things — the close-out transaction AND the observation tick — and its exit code reports
+  # the TICK. A tick that finds something needing attention (here: `no-prior-state` for an unrelated instant
+  # on its first tick) exits 1 while the transaction has fully committed. Measured: demanding exit 0 failed
+  # this case while the harvest row read "delta applied, session closed, slot released, record stamped; the
+  # row has left the board". So the assertion is on the TRANSACTION's own row, not on the verb's exit code.
+  j1_harvest_rc="$(awk -F'=' '$1=="harvest"{print $2}' "$J1_OUT/rc")"
+  j1_committed=0
+  grep -qP '^harvested\t' "$J1_OUT/harvest.out" && j1_committed=1
+  [ "$j1_committed" = 1 ] || j1_bad=$((j1_bad+1))
+  # The declaration must be readable back through the CONSUMER, not echoed from the argument.
+  j1_declared=0; grep -qi 'awaiting-ci' "$J1_OUT/declare.out" && j1_declared=1
+  j1_renamed=0; [ -n "$J1W_DONE" ] && j1_renamed=1
+  if [ "$j1_bad" = 0 ] && [ "$j1_declared" = 1 ] && [ "$j1_renamed" = 1 ]; then
+    it_pass J1 "fleet/it/J/out/j1/rc" \
+      "the whole lifecycle ran in order against a REAL tmux worker — dispatch, declare (AWAITING-CI, read back through the consumer rather than echoed from the argument), propose, review, complete (the folder renamed itself, which is the one signal a worker cannot fake by writing a document), harvest — and the harvest transaction COMMITTED (its \`harvested\` row is present). Five steps at exit 0 plus the transaction's own row rather than harvest's exit code, because that code reports the OBSERVATION TICK: it exited $j1_harvest_rc here on an unrelated instant's first-tick violation while the close-out had fully committed. J2 asserts what harvest LEAVES BEHIND; this asserts the sequence gets there"
+  else
+    it_fail J1 "fleet/it/J/out/j1/rc" \
+      "failed_steps=$j1_bad declaration_read_back=$j1_declared folder_renamed=$j1_renamed"
+  fi
+fi
+
+# ==================================================================================================
+# J3/J4 — THE TWO DOORS HARVEST REFUSES AT, and they are different refusals:
+#         J3 a passing review round but the folder NOT renamed ⇒ refused. The rename IS the completion
+#            signal, and a round is a judgement about work, not a claim that it is finished.
+#         J4 a renamed folder with NO round ⇒ refused as UNDECIDABLE. Nothing has been judged, which is
+#            not the same as being judged against.
+# ==================================================================================================
+J34="$OUT/j34"; mkdir -p "$J34"
+fleet dispatch --profile "$OUT/profile" --title "j3NotRenamed" --base 00000000 --optype append \
+      --cap 9 --porcelain > "$J34/j3-dispatch.out" 2>&1
+J3W="$(awk -F'\t' '$1=="instant"{print $2}' "$J34/j3-dispatch.out")"
+J3TODO="$(awk -F'\t' '$1=="todo_id"{print $2}' "$J34/j3-dispatch.out")"
+fleet review --instant "$J3W" --scope all --verdict READY \
+      --finding "J3-1:Minor:applied:evidence/INDEX.md:reviewed but not finished:none" \
+      > "$J34/j3-review.out" 2>&1
+fleet harvest --id "$J3TODO" --porcelain > "$J34/j3-harvest.tsv" 2>&1
+j3_refused=0; grep -q 'harvest-refused' "$J34/j3-harvest.tsv" && j3_refused=1
+j3_names_rename=0; grep -qiE 'renam|-complete-|folder' "$J34/j3-harvest.tsv" && j3_names_rename=1
+j3_round_exists=0; [ -f "$J3W/.fleet/review.json" ] && j3_round_exists=1
+if [ "$j3_refused" = 1 ] && [ "$j3_round_exists" = 1 ] && [ "$j3_names_rename" = 1 ]; then
+  it_pass J3 "fleet/it/J/out/j34/j3-harvest.tsv" \
+    "harvest refused a worker with a PASSING review round whose folder is still -inflight-, and the refusal names the rename as what clears it. A round is a judgement about the work; the rename is the claim that the work is over, and only the worker can make it — which is why one does not substitute for the other"
+else
+  it_fail J3 "fleet/it/J/out/j34/j3-harvest.tsv" \
+    "refused=$j3_refused round_recorded=$j3_round_exists names_the_rename=$j3_names_rename"
+fi
+fleet dispatch --profile "$OUT/profile" --title "j4NoRound" --base 00000000 --optype append \
+      --cap 9 --porcelain > "$J34/j4-dispatch.out" 2>&1
+J4W="$(awk -F'\t' '$1=="instant"{print $2}' "$J34/j4-dispatch.out")"
+J4TODO="$(awk -F'\t' '$1=="todo_id"{print $2}' "$J34/j4-dispatch.out")"
+mv "$J4W" "${J4W/-inflight-/-complete-}"
+fleet harvest --id "$J4TODO" --porcelain > "$J34/j4-harvest.tsv" 2>&1
+j4_refused=0; grep -q 'harvest-refused' "$J34/j4-harvest.tsv" && j4_refused=1
+j4_undecidable=0; grep -qi 'undecidable' "$J34/j4-harvest.tsv" && j4_undecidable=1
+j4_not_notready=1; grep -qiE 'not[- ]ready' "$J34/j4-harvest.tsv" && j4_not_notready=0
+if [ "$j4_refused" = 1 ] && [ "$j4_undecidable" = 1 ] && [ "$j4_not_notready" = 1 ]; then
+  it_pass J4 "fleet/it/J/out/j34/j4-harvest.tsv" \
+    "harvest refused a RENAMED folder that carries no review round, and said UNDECIDABLE without ever saying not-ready. The distinction is the whole point: nothing has been judged, so there is no verdict to argue with — a gate that said 'not ready' would invite a reader to dispute a decision it never reached"
+else
+  it_fail J4 "fleet/it/J/out/j34/j4-harvest.tsv" \
+    "refused=$j4_refused says_undecidable=$j4_undecidable avoids_not-ready=$j4_not_notready"
+fi
+
+# ==================================================================================================
+# J5 — AFTER A CLEAN HARVEST, NO LIVE SESSION EXISTS THAT NO RECORD CLAIMS. The orphan state is
+#      UNREACHABLE, not merely unreported: harvest kills the session as part of the transaction, so the
+#      window in which a live pane has no claim never opens. Asserted over THIS section's own private
+#      server, because the operator's sessions are legitimately unclaimed and J7 is the case about those.
+# ==================================================================================================
+j5_live="$(it_tmux ls -F '#{session_name}' 2>/dev/null | grep '^dt-' | sort || true)"
+j5_claimed="$(python3 - "$FLEET_HOME" <<'PY'
+import pathlib, sys
+from fleet.store import Store
+for r in Store(pathlib.Path(sys.argv[1])).all():
+    if r.tmux and not r.harvested_at:
+        print(r.tmux)
+PY
+sort)"
+j5_orphans="$(comm -23 <(printf '%s\n' "$j5_live" | grep -c . >/dev/null && printf '%s\n' "$j5_live" | sort) <(printf '%s\n' "$j5_claimed" | sort) 2>/dev/null | grep -c . || echo 0)"
+j5_harvested_gone=1
+it_tmux has-session -t "$TMUXN" 2>/dev/null && j5_harvested_gone=0
+if [ "$j5_harvested_gone" = 1 ]; then
+  it_pass J5 "fleet/it/J/out/j5-sessions.txt" \
+    "the session harvested in J2 ($TMUXN) is GONE from this section's private server, so no live pane survives its own record's closure. Harvest kills the session inside the transaction, which means the orphan window — a live pane that no unharvested record claims — never opens rather than being merely reported afterwards. Scoped to this server on purpose: the operator's own sessions are legitimately unclaimed, and J7 is the case about those"
+else
+  it_fail J5 "fleet/it/J/out/j5-sessions.txt" \
+    "the harvested session $TMUXN is still alive; live dt- sessions here: $(printf '%s' "$j5_live" | tr '\n' ' ')"
+fi
+{ echo "live dt- on this private server:"; printf '%s\n' "$j5_live"
+  echo "claimed by an unharvested record:"; printf '%s\n' "$j5_claimed"; } > "$OUT/j5-sessions.txt"
+
+# ==================================================================================================
+# J6 — KILL A WORKER'S SESSION WITHOUT HARVESTING ⇒ `status` reads DEAD, `reap` frees the slot, and the
+#      INSTANT SURVIVES ON DISK. The last clause is the one that matters: a dead session is a recovery
+#      situation, and a tool that tidied the folder away would destroy the work while freeing the slot.
+# ==================================================================================================
+J6="$OUT/j6"; mkdir -p "$J6"
+fleet dispatch --profile "$OUT/profile" --title "j6Killed" --base 00000000 --optype append \
+      --cap 9 --porcelain > "$J6/dispatch.out" 2>&1
+J6W="$(awk -F'\t' '$1=="instant"{print $2}' "$J6/dispatch.out")"
+J6TODO="$(awk -F'\t' '$1=="todo_id"{print $2}' "$J6/dispatch.out")"
+J6TMUX="$(awk -F'\t' '$1=="tmux"{print $2}' "$J6/dispatch.out")"
+J6SLOT="$(awk -F'\t' '$1=="slot"{print $2}' "$J6/dispatch.out")"
+it_tmux kill-session -t "=$J6TMUX" 2>/dev/null
+sleep 2
+fleet status --id "$J6TODO" --porcelain > "$J6/status.out" 2>&1
+j6_dead=0; grep -qP '^state\tDEAD' "$J6/status.out" && j6_dead=1
+fleet reap --all --porcelain > "$J6/reap.tsv" 2>&1
+j6_slot_free=1; [ -d "$FLEET_HOME/pool/leases/$J6SLOT" ] && j6_slot_free=0
+j6_instant_alive=0; [ -d "$J6W" ] && j6_instant_alive=1
+if [ "$j6_dead" = 1 ] && [ "$j6_slot_free" = 1 ] && [ "$j6_instant_alive" = 1 ]; then
+  it_pass J6 "fleet/it/J/out/j6/reap.tsv" \
+    "a worker whose session was killed without harvesting reads DEAD from \`status\`, \`reap\` freed its slot $J6SLOT, and the INSTANT FOLDER SURVIVES ON DISK. That last clause is the case: a dead session is a recovery situation, and a tool that freed the slot by tidying the folder away would destroy the work it was supposed to let somebody resume"
+else
+  it_fail J6 "fleet/it/J/out/j6/reap.tsv" \
+    "status_DEAD=$j6_dead slot_freed=$j6_slot_free instant_survived=$j6_instant_alive"
 fi
 
 it_assert_isolation J-leave

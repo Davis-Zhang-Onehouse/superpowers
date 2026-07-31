@@ -843,6 +843,9 @@ def _do_dispatch(ctx: Ctx, parsed: Parsed) -> int:
                         slot=lease.slot, tmux=tmux, profile=str(profile.path),
                         golden=str(lease.path), lineage_base=parsed.get("lineage-base") or "",
                         lineage_mode=lineage_mode, title=title,
+                        #: `SI-34`. Persisted, not merely evaluated: an override is a judgement that a guard
+                        #: was wrong here, and it has to outlive the terminal it was typed into.
+                        override_reason=parsed.get("override") or "",
                         milestone=milestone_id, dispatched_at=ctx.now())
         # `SI-32`. Each repo's HEAD as the slot was leased — read-only, and read BEFORE the worker exists.
         # This is what the prebuilt native artifacts were built from, and the only way to answer later
@@ -912,6 +915,7 @@ def _do_dispatch(ctx: Ctx, parsed: Parsed) -> int:
     _emit(ctx, "dispatch", [("todo_id", todo_id), ("instant", str(child)), ("slot", lease.slot),
                             ("tmux", tmux), ("watched_source", source.base),
                             ("milestone", milestone_id or "(none)"),
+                            ("override_reason", record.override_reason or "(none — no rule was overridden)"),
                             ("lineage_base", record.lineage_base or "(none)"),
                             ("lineage_mode", record.lineage_mode or "(none)"),
                             ("golden_base", record.golden_base or "(none recorded)"),
@@ -965,6 +969,7 @@ def _do_resume(ctx: Ctx, parsed: Parsed) -> int:
                     golden=str(held.path) if held else (existing.golden if existing else ""),
                     lineage_base=existing.lineage_base if existing else "",
                     lineage_mode=existing.lineage_mode if existing else "",
+                    override_reason=existing.override_reason if existing else "",
                     golden_base=existing.golden_base if existing else "",
                     title=name.name, dispatched_at=existing.dispatched_at if existing else ctx.now(),
                     launched_at=ctx.now() if ctx.sessions.alive(tmux) else
@@ -992,6 +997,22 @@ def _do_declare(ctx: Ctx, parsed: Parsed) -> int:
     child = _instant(ctx, parsed)
     asked = parsed.get("phase")
     phase = _normalise_phase(asked)
+    #: `SI-36`. An empty phase is BAD INPUT, not a silent clear. `_normalise_phase("")` returns `""`, which is
+    #: not `None`, so `set_phase` stored it and this handler's own guard — `if value is None`, the one check
+    #: meant to catch a declaration that did not land — never fired. `declare --phase ""` therefore exited 0,
+    #: cleared the phase, and did something worse: `near_miss_rows` skipped every line while a phase was
+    #: stored, so it ALSO switched the RCF-9 lint off. Silence from the control, and no exclusion from the cap,
+    #: which still compares against `awaiting-ci`. `§G6` measured it.
+    #:
+    #: Refused rather than treated as a clear, and `park --question ""` already draws the line the same way:
+    #: an empty park is not a park. Clearing is `unpark`'s job there and has no counterpart here by design —
+    #: a phase is declared or it is not.
+    if not phase:
+        raise BadInput(
+            f"--phase {asked!r} normalises to nothing, and an empty phase is not a declaration. It is refused "
+            f"rather than stored, because a stored empty phase reads as '(none declared)' to every consumer "
+            f"while still suppressing the near-miss lint — silence from the control and no exclusion from the "
+            f"cap. Declare a real phase, or leave the instant undeclared.")
     if ctx.dry_run:
         _emit(ctx, "declare", [("dry-run", "nothing was declared"), ("would-declare", phase),
                                ("asked", asked)])
@@ -2051,8 +2072,28 @@ NEAR_MISS_FILES = ("HANDOFF.md",)
 #: emphasis run, the word, a separator, a value. Assembled as a pattern rather than spelled as an example
 #: so this module's own source is not a member of the population it checks (`FI-1`).
 _DECLARATION_SHAPED = re.compile(
-    r"^[\s>*_#`|-]*" + "phase" + r"\s*[:=]\s*(?P<value>[A-Za-z][A-Za-z0-9._/-]*)\s*$",
+    #: Emphasis may sit on EITHER side of the separator — `**Phase**:` and `Phase:**` both occur, and a
+    #: pattern that allowed it only before the colon still missed `## **Phase:** AWAITING-CI`.
+    r"^[\s>*_#`|-]*" + "phase" + r"[\s*_`]*[:=][\s*_`]*(?P<value>[A-Za-z][A-Za-z0-9._/-]*)"
+    r"[*_`]*\s*(?P<tail>.*)$",
     re.IGNORECASE)
+
+#: A line that RETRACTS a declaration is not a near miss, and this is the only thing that lets `G3` and `G4`
+#: both hold. `§G3` measured the old rule flagging 2 of 4 shapes: emphasis was permitted only BEFORE the word,
+#: so `**Phase:** AWAITING-CI` slipped through, and the value was anchored at end of line, so
+#: `## Phase: AWAITING-CI — waiting on the CI queue` slipped through too.
+#:
+#: Closing the trailing-prose gap by itself would have broken `G4`, whose fixture — *"Phase: AWAITING-CI was
+#: declared and is now REMOVED"* — is ALSO value-then-prose. A shape-only rule cannot separate them, and `G4`
+#: exists because a naive version of this lint fired on 5 of 5 live instants. So the rule reads the tail:
+#: retraction language exempts the line.
+#:
+#: STATED AS A HEURISTIC, because it is one. It can be fooled — *"Phase: AWAITING-CI, and the removal is
+#: pending"* would be exempted wrongly. That is the cheaper error: this rule's whole purpose is that *the
+#: author must be TOLD, not merely ignored*, and a lint that cries wolf over every retraction gets switched
+#: off, after which it tells nobody anything.
+_RETRACTION = re.compile(
+    r"\b(remov|retract|rescind|withdraw|no longer|cleared|superseded|obsolete)", re.IGNORECASE)
 
 
 def near_miss_rows(child: Path) -> list:
@@ -2072,8 +2113,15 @@ def near_miss_rows(child: Path) -> list:
         for number, line in enumerate(path.read_text().splitlines(), start=1):
             if _DECLARATION_SHAPED.match(line) is None:
                 continue
+            if _RETRACTION.search(line):
+                #: Counted nowhere: a retraction is not a near miss, so it is not part of the population this
+                #: rule reports over either.
+                continue
             shaped += 1
-            if declared is not None:
+            #: Truthiness, not `is not None`. A STORED EMPTY phase used to satisfy this and suppress the rule
+            #: entirely — see `SI-36`. `declare` now refuses an empty phase, and this is the second door,
+            #: because a store written by an older build can still carry one.
+            if declared:
                 continue
             rows.append(Row(
                 kind=NEAR_MISS, subject=f"{path}:{number}", severity=VIOLATION,
