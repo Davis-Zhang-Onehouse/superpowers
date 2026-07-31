@@ -1,0 +1,34 @@
+examined 18 module(s) behind 30 handlers
+spawn seam (no handler reaches it): cli.py:495 _default_runner._spawn() -> subprocess.run()
+spawn seam (no handler reaches it): session.py:296 default_probes.run() -> subprocess.run()
+spawn seam (no handler reaches it): session.py:321 default_probes.pane_owners() -> run()
+spawn seam (no handler reaches it): session.py:332 default_probes.list_processes() -> run()
+spawn seam (no handler reaches it): session.py:358 default_probes.capture_pane() -> run()
+spawn seam (no handler reaches it): session.py:362 default_probes.has_session() -> run()
+spawn seam (no handler reaches it): session.py:365 default_probes.start_session() -> run()
+spawn seam (no handler reaches it): session.py:370 default_probes.kill_session() -> run()
+spawn seam (no handler reaches it): workspace.py:60 default_git.run() -> subprocess.run()
+in-package method, not a spawn: harvest.py:692 report() -> self.run()
+DELETE site: atomic.py:138 _break() -> lock.rmdir()
+DELETE site: atomic.py:90 atomic_write() -> os.unlink()
+DELETE site: pool.py:272 unenroll() -> record.unlink()
+DELETE site: pool.py:376 _reclaim() -> entry.unlink()
+DELETE site: pool.py:389 _reclaim() -> claim_dir.rmdir()
+DELETE site: pool.py:537 release() -> unlink()
+DELETE site: pool.py:541 release() -> leftover.unlink()
+DELETE site: pool.py:542 release() -> claim_dir.rmdir()
+DELETE site: roadmap.py:361 _consume() -> pending.remove()
+DELETE site: store.py:18 _sneaky_cleanup() -> victim.unlink()
+atomic.py:_break() rmdir() targets ['lock'] derived from the store root or its own operand: True
+atomic.py:atomic_write() unlink() targets ['tmp'] derived from the store root or its own operand: True
+pool.py:_reclaim() rmdir() targets ['claim_dir', 'entry'] derived from the store root or its own operand: True
+pool.py:_reclaim() unlink() targets ['claim_dir', 'entry'] derived from the store root or its own operand: True
+pool.py:release() rmdir() targets ['claim_dir', 'leftover'] derived from the store root or its own operand: True
+pool.py:release() unlink() targets ['claim_dir', 'leftover'] derived from the store root or its own operand: True
+pool.py:unenroll() unlink() targets ['record'] derived from the store root or its own operand: True
+roadmap.py:_consume() remove() is a list operation, not a filesystem delete
+store.py:_sneaky_cleanup() unlink() targets ['victim'] derived from the store root or its own operand: True
+Traceback (most recent call last):
+  File "/home/ubuntu/davis_root/superpowers/fleet/it/M9-mutation/m9.py", line 201, in <module>
+    assert not bad, "\n".join(bad)
+AssertionError: UNDECLARED DELETE SITE(S): [('store.py', '_sneaky_cleanup', 'unlink')]

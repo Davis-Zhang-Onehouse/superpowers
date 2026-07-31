@@ -1,0 +1,16 @@
+--- board: rc=0 porcelain lines=1 cols=7
+    human lines=2
+    porcelain set=[('mprobe-07310023', 'RUNNING')]
+    human set    =[('mprobe-07310023', 'RUNNING')]
+--- leases: rc=0 porcelain lines=1 cols=7
+    human lines=2
+    porcelain set=[('ms1', 'held')]
+    human set    =[('ms1', 'held')]
+--- roadmap: rc=0 porcelain lines=2 cols=6
+    human lines=3
+    porcelain set=[('/home/ubuntu/davis_root/superpowers/fleet/it/M/home/instants/00000000-07310023-inflight-append-mprobe', 'info'), ('M1', 'attention')]
+    human set    =[('/home/ubuntu/davis_root/superpowers/fleet/it/M/home/instants/00000000-07310023-inflight-append-mprobe', 'info'), ('M1', 'attention')]
+--- status: rc=0 porcelain lines=18 cols=2
+    human lines=16
+    porcelain pair=('mprobe-07310023', 'RUNNING') human pair=('mprobe-07310023', 'RUNNING')
+OK M7: board/leases/roadmap/status parse at their declared column counts with stderr discarded, and each view's human form reports the same (identity, state) set as its porcelain form

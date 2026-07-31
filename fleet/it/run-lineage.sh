@@ -22,7 +22,7 @@
 # an ancestor of the golden, because in the real incident lift-01 stacked on R2's tips rather than on the
 # wave's terminal tip — *"some milestones deliberately stack on a sibling's tips."*
 #
-# Run: bash evidence/04-integration/run-lineage.sh
+# Run: bash fleet/it/run-lineage.sh
 IT_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 . "$IT_ROOT/lib.sh"
 
@@ -75,7 +75,7 @@ fleet dispatch --profile "$OUT/profile" --title "liftOne" --base 00000000 --opty
 W="$(awk -F'\t' '$1=="instant"{print $2}' "$OUT/LB1-dispatch.out")"
 TODO="$(awk -F'\t' '$1=="todo_id"{print $2}' "$OUT/LB1-dispatch.out")"
 if [ -z "$W" ] || [ ! -d "$W" ]; then
-  it_fail LB1 "evidence/04-integration/LB/out/LB1-dispatch.out" \
+  it_fail LB1 "fleet/it/LB/out/LB1-dispatch.out" \
     "the dispatch produced no instant: $(head -2 "$OUT/LB1-dispatch.out" | tr '\n' ' ')"
 else
   cp "$W/.fleet/seed.txt" "$OUT/LB1-seed.txt"
@@ -85,10 +85,10 @@ else
   lb1_warns=0;    grep -qF "REFUSE" "$OUT/LB1-seed.txt" && lb1_warns=1
   lb1_native=0;   grep -qi 'native' "$OUT/LB1-seed.txt" && lb1_native=1
   if [ "$lb1_recorded$lb1_golden$lb1_cmd$lb1_warns$lb1_native" = "11111" ]; then
-    it_pass LB1 "evidence/04-integration/LB/out/LB1-seed.txt" \
+    it_pass LB1 "fleet/it/LB/out/LB1-seed.txt" \
       "dispatch recorded the git lineage as DATA (lineage_base=alpha=${L:0:12}) and, separately, where the slot actually was (golden_base=alpha=${G:0:12}, read-only — this verb performs no checkout). The seed the worker reads first carries the LITERAL command \`git -C alpha checkout --detach ${L:0:12}\`, generated from that same field, plus the fact that propose/complete REFUSE without it and a note about the prebuilt native artifacts. OI-1 was two prose authorities disagreeing about the base; an instruction generated from the recorded field cannot drift from the field the gate checks"
   else
-    it_fail LB1 "evidence/04-integration/LB/out/LB1-seed.txt" \
+    it_fail LB1 "fleet/it/LB/out/LB1-seed.txt" \
       "recorded=$lb1_recorded golden_base=$lb1_golden checkout-command=$lb1_cmd names-the-refusal=$lb1_warns native-note=$lb1_native"
   fi
 
@@ -115,10 +115,10 @@ else
   if [ "$lb2_running_rc" = 0 ] && [ "$lb2_done_rc" != 0 ] && [ "$lb2_complete_rc" != 0 ] \
      && [ "$lb2_named" = 1 ] && [ "$lb2_howto" = 1 ] && [ "$lb2_still_inflight" = 1 ] \
      && [ "$lb2_viol" = 1 ] && [ "$lb2_bc_rc" != 0 ]; then
-    it_pass LB2 "evidence/04-integration/LB/out/LB2-done.out" \
+    it_pass LB2 "fleet/it/LB/out/LB2-done.out" \
       "from the unrepositioned golden — the exact position ws3 arrived in — \`propose --status done\` was REFUSED (exit $lb2_done_rc) and so was \`complete\` (exit $lb2_complete_rc), each naming the base ${L:0:12} it expected and pointing at \`fleet base-check\`; the folder is still -inflight-, so the rename that IS the state transition did not happen. \`propose --status running\` was ALLOWED (exit 0), because a worker legitimately reports progress from wherever it is while it works — gating that would fire on every worker before it had done anything. This is why the mechanism is a GATE and not a check the worker runs: OI-3 records the worker running the old check and the id failing to resolve"
   else
-    it_fail LB2 "evidence/04-integration/LB/out/LB2-done.out" \
+    it_fail LB2 "fleet/it/LB/out/LB2-done.out" \
       "running_rc=$lb2_running_rc(want 0) done_rc=$lb2_done_rc(want !=0) complete_rc=$lb2_complete_rc(want !=0) names-base=$lb2_named says-base-check=$lb2_howto still-inflight=$lb2_still_inflight basecheck-violation=$lb2_viol basecheck_rc=$lb2_bc_rc(want !=0)"
   fi
 
@@ -135,10 +135,10 @@ else
   lb3_at_base=0; grep -qF "at the base" "$OUT/LB3-basecheck.tsv" && lb3_at_base=1
   lb3_no_viol=1; grep -qP '^lineage\t[^\t]*\tviolation\t' "$OUT/LB3-basecheck.tsv" && lb3_no_viol=0
   if [ "$lb3_done_rc" = 0 ] && [ "$lb3_at_base" = 1 ] && [ "$lb3_no_viol" = 1 ] && [ "$lb3_bc_rc" = 0 ]; then
-    it_pass LB3 "evidence/04-integration/LB/out/LB3-basecheck.tsv" \
+    it_pass LB3 "fleet/it/LB/out/LB3-basecheck.tsv" \
       "running the one command the seed printed cleared the gate: base-check reports 'at the base' with no violation (exit 0) and the same \`propose --status done\` that was refused in LB2 now succeeds. The pair is the assertion — LB2 alone would pass against a gate that refuses every claim of done, which would be a worse product than the defect it fixes"
   else
-    it_fail LB3 "evidence/04-integration/LB/out/LB3-basecheck.tsv" \
+    it_fail LB3 "fleet/it/LB/out/LB3-basecheck.tsv" \
       "done_rc=$lb3_done_rc(want 0) at-base=$lb3_at_base no-violation=$lb3_no_viol basecheck_rc=$lb3_bc_rc(want 0)"
   fi
 
@@ -160,10 +160,10 @@ else
   lb4_info=0
   grep -qP '^lineage\t[^\t]*\tinfo\t[^\t]*STALE NATIVE' "$OUT/LB3-basecheck.tsv" && lb4_info=1
   if [ "$lb4_fires" = 1 ] && [ "$lb4_clears" = 1 ] && [ "$lb4_info" = 1 ]; then
-    it_pass LB4 "evidence/04-integration/LB/out/LB3-basecheck.tsv" \
+    it_pass LB4 "fleet/it/LB/out/LB3-basecheck.tsv" \
       "the stale-native warning FIRED once the source moved off the commit the slot was leased at (libvelox.so predating the checkout) and CLEARED when the artifact was rebuilt — and it is severity=info, never a refusal, because a JVM-only milestone is legitimately unaffected and nothing here can tell whether this milestone touches native code. This is the check that actually caught something in the real incident, and the half that clears is what stops it becoming an alarm nobody reads"
   else
-    it_fail LB4 "evidence/04-integration/LB/out/LB4-after-rebuild.tsv" \
+    it_fail LB4 "fleet/it/LB/out/LB4-after-rebuild.tsv" \
       "fires-when-stale=$lb4_fires clears-after-rebuild=$lb4_clears severity-is-info=$lb4_info"
   fi
 fi

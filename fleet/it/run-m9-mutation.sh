@@ -23,7 +23,7 @@
 # poisoned one satisfied it. The rule now requires EVERY assignment to the deleted name to be safe. That
 # word was bought by this mutation.
 #
-# Run: bash evidence/04-integration/run-m9-mutation.sh
+# Run: bash fleet/it/run-m9-mutation.sh
 IT_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 . "$IT_ROOT/lib.sh"
 
@@ -56,10 +56,10 @@ run_audit() {                 # run_audit <instant-root> <logfile>  -> exit code
 
 # --- baseline: the REAL package must pass, or every kill below is noise ----------------------------
 if run_audit "$INSTANT" "$EV/real.out"; then
-  it_pass M9-mut-baseline "evidence/04-integration/M9-mutation/real.out" \
+  it_pass M9-mut-baseline "fleet/it/M9-mutation/real.out" \
     "the real package passes the widened rule: every delete target is DERIVED (by following the assignments, not by matching a substring) from the store root or from that function's own parameters"
 else
-  it_fail M9-mut-baseline "evidence/04-integration/M9-mutation/real.out" \
+  it_fail M9-mut-baseline "fleet/it/M9-mutation/real.out" \
     "the audit does not pass on the unmutated package, so no kill below means anything: $(grep -m1 -E 'AssertionError|Error' "$EV/real.out" | cut -c1-200)"
   echo "baseline is red — refusing to report mutation results" >&2
   exit 1
@@ -124,13 +124,13 @@ declare -A WHAT=(
 
 for n in 1 2 3 4; do
   if run_audit "$EV/mut$n" "$EV/mut$n.out"; then
-    it_fail "M9-mut-$n" "evidence/04-integration/M9-mutation/mut$n.out" \
+    it_fail "M9-mut-$n" "fleet/it/M9-mutation/mut$n.out" \
       "SURVIVED: ${WHAT[$n]} — the rule did not fire, so it is decoration on this shape"
   elif grep -q "${WHY[$n]}" "$EV/mut$n.out"; then
-    it_pass "M9-mut-$n" "evidence/04-integration/M9-mutation/mut$n.out" \
+    it_pass "M9-mut-$n" "fleet/it/M9-mutation/mut$n.out" \
       "KILLED by the named check (${WHY[$n]}): ${WHAT[$n]}"
   else
-    it_fail "M9-mut-$n" "evidence/04-integration/M9-mutation/mut$n.out" \
+    it_fail "M9-mut-$n" "fleet/it/M9-mutation/mut$n.out" \
       "died for the WRONG reason — a kill that is really an import failure proves nothing: $(grep -m1 -E 'Error' "$EV/mut$n.out" | cut -c1-200)"
   fi
 done

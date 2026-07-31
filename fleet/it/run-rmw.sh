@@ -14,7 +14,7 @@
 # Real OS processes released by a FIFO barrier, the way §E does it — a thread pool in one interpreter would
 # measure the GIL, not the file.
 #
-# Run: bash evidence/04-integration/run-rmw.sh [iterations]
+# Run: bash fleet/it/run-rmw.sh [iterations]
 IT_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 . "$IT_ROOT/lib.sh"
 
@@ -71,13 +71,13 @@ print(len(json.loads(p.read_text())['rounds']) if p.is_file() else 0)" "$inst" 2
 done
 
 if [ "$ran_review" -eq 0 ]; then
-  it_skip RMW-review "evidence/04-integration/RMW/out/review-per-iteration.tsv" \
+  it_skip RMW-review "fleet/it/RMW/out/review-per-iteration.tsv" \
     "NOT MEASURED: zero iterations completed setup, so nothing was raced. Reported rather than passed — a loss counter that stayed at 0 because no writer ever ran is absence presented as success, and this runner did exactly that on its first attempt (SI-8's rule, applied to itself)"
 elif [ "$lost_total" -eq 0 ]; then
-  it_pass RMW-review "evidence/04-integration/RMW/out/review-per-iteration.tsv" \
+  it_pass RMW-review "fleet/it/RMW/out/review-per-iteration.tsv" \
     "n=$ITERS x $WRITERS concurrent review rounds on one instant: every round survived in all $ran_review exercised iteration(s) (0 lost of $(( ran_review * WRITERS )) ). review._save's read-modify-write did NOT lose a write under this load"
 else
-  it_fail RMW-review "evidence/04-integration/RMW/out/review-per-iteration.tsv" \
+  it_fail RMW-review "fleet/it/RMW/out/review-per-iteration.tsv" \
     "MEASURED LOSS: $lost_total of $(( ran_review * WRITERS )) rounds vanished across $iters_with_loss of the exercised iterations. review._save reads the whole ledger, appends in memory and writes it back, so two concurrent rounds resolve last-writer-wins — FI-30c, now observed rather than argued"
 fi
 
@@ -121,13 +121,13 @@ print(len(json.loads(p.read_text())['milestones']) if p.is_file() else 0)" "$ins
 done
 
 if [ "$ran_road" -eq 0 ]; then
-  it_skip RMW-roadmap "evidence/04-integration/RMW/out/roadmap-per-iteration.tsv" \
+  it_skip RMW-roadmap "fleet/it/RMW/out/roadmap-per-iteration.tsv" \
     "NOT MEASURED: zero iterations completed setup, so nothing was raced. See RMW-review's note"
 elif [ "$lost_total" -eq 0 ]; then
-  it_pass RMW-roadmap "evidence/04-integration/RMW/out/roadmap-per-iteration.tsv" \
+  it_pass RMW-roadmap "fleet/it/RMW/out/roadmap-per-iteration.tsv" \
     "n=$ITERS x $WRITERS concurrent Roadmap.add calls on one instant: every milestone survived in all $ran_road exercised iteration(s) (0 lost of $(( ran_road * WRITERS )) ). roadmap._save's read-modify-write did NOT lose a write under this load"
 else
-  it_fail RMW-roadmap "evidence/04-integration/RMW/out/roadmap-per-iteration.tsv" \
+  it_fail RMW-roadmap "fleet/it/RMW/out/roadmap-per-iteration.tsv" \
     "MEASURED LOSS: $lost_total of $(( ran_road * WRITERS )) milestones vanished across $iters_with_loss of the exercised iterations. roadmap._save is a last-writer-wins read-modify-write — FI-30c, now observed"
 fi
 

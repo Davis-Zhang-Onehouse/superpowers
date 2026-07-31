@@ -381,7 +381,9 @@ PY
       set-golden) echo "--path $DUMMY/alpha --dry-run" ;;
       board|leases|selftest|reconcile|compaction-status) echo "" ;;
       status)    echo "--id $TODO" ;;
-      roadmap|lint|verify) echo "--instant $INSTP" ;;
+      roadmap|lint|verify|brief) echo "--instant $INSTP" ;;
+      base-check) echo "--id $TODO" ;;
+      milestone) echo "--instant $INSTP --id l7m --title l7milestone --dry-run" ;;
       pane-guard) echo "--pane itfleet-L-absent-zzz" ;;
       *) echo "UNMAPPED" ;;
     esac
@@ -567,7 +569,9 @@ PY
       set-golden) echo "--path $DUMMY/alpha --dry-run" ;;
       board|leases|selftest|reconcile|compaction-status) echo "" ;;
       status)    echo "--id $TODO" ;;
-      roadmap|lint|verify) echo "--instant $INSTP" ;;
+      roadmap|lint|verify|brief) echo "--instant $INSTP" ;;
+      base-check) echo "--id $TODO" ;;
+      milestone) echo "--instant $INSTP --id m5m --title m5milestone --dry-run" ;;
       pane-guard) echo "--pane itfleet-M-absent-zzz" ;;
       *) echo "UNMAPPED" ;;
     esac
@@ -668,6 +672,10 @@ PY
       # shape (b): a full valid argv with the flag appended last
       args="$(m_args "$v")"
       # shellcheck disable=SC2086
+      if [ "$args" = "UNMAPPED" ]; then
+        printf '%-20s %-18s UNMAPPED — add it to m_args\n' "$v" "$f" >> "$M5LOG"
+        m5_bad=$((m5_bad+1)); continue
+      fi
       timeout 5 python3 -m fleet.cli "$v" $args "$f" > /dev/null 2> "$EV/M5-b.stderr"; rcb=$?
       diagb=$(grep -c 'needs a value' "$EV/M5-b.stderr")
       printf '%-20s %-18s value  alone:rc=%-4s diag=%s  appended:rc=%-4s diag=%s\n' \
@@ -677,6 +685,10 @@ PY
     else
       m5_switch=$((m5_switch+1))
       args="$(m_args "$v")"
+      if [ "$args" = "UNMAPPED" ]; then
+        printf '%-20s %-18s UNMAPPED — add it to m_args\n' "$v" "$f" >> "$M5LOG"
+        m5_bad=$((m5_bad+1)); continue
+      fi
       # shellcheck disable=SC2086
       timeout 5 python3 -m fleet.cli "$v" $args "$f" > /dev/null 2>&1; rcs=$?
       extra=""

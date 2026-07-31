@@ -1,0 +1,18 @@
+identity	nprobe-07310028
+kind	worker
+state	BLOCKED
+holds_slot	true
+note	the pane is waiting on a human: 'draft message'
+evidence.base	00000000
+evidence.declared_phase	
+evidence.folder_state	inflight
+evidence.instant	/home/ubuntu/davis_root/superpowers/fleet/it/N/home/instants/00000000-07310028-inflight-append-nprobe
+evidence.lease	held
+evidence.liveness	session
+evidence.milestone	
+evidence.pane	waiting on a human
+evidence.parked	
+evidence.pid	
+evidence.record	nprobe-07310028
+evidence.slot	ns1
+evidence.tmux	itfleet-N-w1

@@ -1,0 +1,2 @@
+tmux -L itfleet-N has-session -t itfleet-N-pre-a (loose) rc=0
+tmux -L itfleet-N has-session -t =itfleet-N-pre-a (exact) rc=1

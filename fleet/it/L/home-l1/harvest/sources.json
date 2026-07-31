@@ -1,0 +1,11 @@
+{
+  "schema_version": 1,
+  "sources": [
+    {
+      "base": "/home/ubuntu/davis_root/superpowers/fleet/it/dummy-project",
+      "issues_path": "/home/ubuntu/davis_root/superpowers/fleet/it/dummy-project/ISSUES.md",
+      "registered_at": "2026-07-31T00:11:50Z",
+      "last_run": "2026-07-31T00:22:22Z"
+    }
+  ]
+}

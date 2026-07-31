@@ -15,7 +15,7 @@
 #
 # The remaining §F cases stay NOT-RUN and the section-level row says so.
 #
-# Run: bash evidence/04-integration/run-F.sh
+# Run: bash fleet/it/run-F.sh
 IT_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 . "$IT_ROOT/lib.sh"
 
@@ -96,10 +96,10 @@ fleet dispatch --profile "$OUT/profile" --title "secondB" --base 00000000 --opty
 f3_rc=$?
 f3_instants="$(find "$FLEET_INSTANTS" -maxdepth 1 -mindepth 1 -type d | wc -l)"
 if [ "$f3_rc" != 0 ] && grep -qiE 'cap|wip' "$OUT/F3-dispatch.out"; then
-  it_pass F3 "evidence/04-integration/F/out/F3-dispatch.out" \
+  it_pass F3 "fleet/it/F/out/F3-dispatch.out" \
     "a phase written as PROSE into HANDOFF.md did NOT free the cap: the second dispatch is still refused (exit $f3_rc, naming the cap) and no instant was created. The stated direction is under-trigger, never mis-trigger, and the failure it guards against is on record — a profile's kind was once read out of charter prose and 3 of 5 silently became 'worker'"
 else
-  it_fail F3 "evidence/04-integration/F/out/F3-dispatch.out" \
+  it_fail F3 "fleet/it/F/out/F3-dispatch.out" \
     "prose changed admission (exit $f3_rc): $(head -2 "$OUT/F3-dispatch.out" | tr '\n' ' ')"
 fi
 
@@ -114,10 +114,10 @@ fleet dispatch --profile "$OUT/profile" --title "secondC" --base 00000000 --opty
 f2_rc=$?
 W2="$(awk -F'\t' '$1=="instant"{print $2}' "$OUT/F2-dispatch.out")"
 if [ "$f2_declare_rc" = 0 ] && [ "$f2_rc" = 0 ] && [ -n "$W2" ] && [ -d "$W2" ]; then
-  it_pass F2 "evidence/04-integration/F/out/F2-dispatch.out" \
+  it_pass F2 "fleet/it/F/out/F2-dispatch.out" \
     "one DECLARATION freed the cap that identical prose could not: with '## Phase: AWAITING-CI' still sitting in HANDOFF.md and refusing (F3), \`fleet declare --phase AWAITING-CI\` made the same dispatch succeed and produce $(basename "$W2"). The pair is the assertion — F3 alone would pass against a cap that refuses everything"
 else
-  it_fail F2 "evidence/04-integration/F/out/F2-dispatch.out" \
+  it_fail F2 "fleet/it/F/out/F2-dispatch.out" \
     "a declaration did not free the cap: declare_rc=$f2_declare_rc dispatch_rc=$f2_rc instant='$W2'"
 fi
 
@@ -157,10 +157,10 @@ f9_zero=0
   it_zero_delta F9-zero-delta fleet compaction-status --porcelain )
 grep -qP '^F9-zero-delta\tPASS\t' "$RESULTS" && f9_zero=1
 if [ "$f9_reports" = 1 ] && [ "$f9_zero" = 1 ]; then
-  it_pass F9 "evidence/04-integration/F/out/F9-status.tsv" \
+  it_pass F9 "fleet/it/F/out/F9-status.tsv" \
     "\`compaction-status\` named the live -inflight-compact- sibling ($(basename "$COMPACT")) and left FLEET_HOME and the slots byte-identical. Both halves are required: a zero delta from a verb that reported no freeze would be vacuous, and this is the verb whose ABSENCE made two actors interrogate the guard destructively"
 else
-  it_fail F9 "evidence/04-integration/F/out/F9-status.tsv" \
+  it_fail F9 "fleet/it/F/out/F9-status.tsv" \
     "reports-the-freeze=$f9_reports zero-delta=$f9_zero (compact sibling: ${COMPACT:-none created})"
 fi
 
@@ -205,10 +205,10 @@ f11_status=0; grep -qP '^compaction\t[^\t]*ondiskonly[^\t]*\tviolation' "$OUT/F1
 f11_landed=0; find "$F11_INSTANTS" -maxdepth 1 -name '*-append-shouldbefrozen' | grep -q . && f11_landed=1
 if [ "$f11_records" = 0 ] && [ "$f11_exit" = 4 ] && [ "$f11_named" = 1 ] && [ "$f11_status" = 1 ] \
    && [ "$f11_landed" = 0 ]; then
-  it_pass F11 "evidence/04-integration/F/out/F11.out" \
+  it_pass F11 "fleet/it/F/out/F11.out" \
     "a compaction present ONLY as a folder — 0 records in the store, which is exactly what maintain-workspace's compact op produces — froze the dispatch (exit 4, naming the folder and how to clear it) and \`compaction-status\` reported it as a VIOLATION rather than 'no compaction of this effort is inflight'. No instant was created. Before SI-30 this measured exit 0 with the work landed: the guard declares direction=MIS_TRIGGERS and was under-triggering, toward the outcome its own docstring calls unrepairable"
 else
-  it_fail F11 "evidence/04-integration/F/out/F11.out" \
+  it_fail F11 "fleet/it/F/out/F11.out" \
     "records=$f11_records (want 0) dispatch_exit=$f11_exit (want 4) folder-named=$f11_named status-violation=$f11_status work-landed=$f11_landed (want 0)"
 fi
 

@@ -1,0 +1,22 @@
+status: '--not-a-declared-flag' is not a flag status declares. Declared: --help, --home, --id, --instants-dir, --porcelain. Refused, not ignored: a parser that accepts what no spec declares is a second, hand-maintained copy of the flag list.
+fleet status --id <value>
+    one subject in full, with the evidence behind its state
+    --id <value>                 (required) the subject identity, or a unique substring of it
+    --home <value>               the record/pool store root; overrides $FLEET_HOME
+    --instants-dir <value>       where instants live; overrides $FLEET_INSTANTS
+    --porcelain                  machine form on stdout: tab-separated, no banner (NFR2-7)
+    --help                       print this verb's derived usage and exit 0
+
+exit codes:
+    0  ok
+    1  needs attention / check failed
+    2  bad input
+    3  no capacity
+    4  refused by an admission rule
+    pane-guard only (FD-10):
+    0  safe
+    10 queued-text
+    11 mid-turn
+    12 not-claude
+    13 unknown-pane
+
