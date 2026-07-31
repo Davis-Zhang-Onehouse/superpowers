@@ -206,6 +206,43 @@ def blocks(entries):
 
 # --- views -------------------------------------------------------------------------------------------
 
+def _find_session(name):
+    """Which tmux SERVER has this session, if any.
+
+    `UNREACHABLE` means "a process holds the slot but no session answers here", and the remedy is always a
+    socket name — so the view goes and finds it rather than telling the reader to. tmux keeps one socket
+    file per server under $TMUX_TMPDIR|/tmp/tmux-<uid>, so the candidates are simply readable.
+
+    Only called when something is already UNREACHABLE, which is rare: it costs one `has-session` per
+    server, and doing that on every render would put ~30 subprocesses in the way of a healthy board.
+    """
+    if not name:
+        return None
+    base = os.environ.get("TMUX_TMPDIR") or "/tmp"
+    d = os.path.join(base, f"tmux-{os.getuid()}")
+    try:
+        candidates = sorted(os.listdir(d))
+    except OSError:
+        return None
+    for sock in candidates:
+        if sock == os.environ.get("FLEET_TMUX_SOCKET"):
+            continue                      # already asked; that is why we are here
+        r = subprocess.run(["tmux", "-L", sock, "has-session", "-t", f"={name}"],
+                           capture_output=True, text=True)
+        if r.returncode == 0:
+            return sock
+    return None
+
+
+def _session_name(subject_id):
+    """The record's tmux name, read as a FIELD from `status` rather than scraped out of a note."""
+    rows, _, _ = run("status", ("--id", subject_id))
+    for r in rows:
+        if r.get("field") == "evidence.tmux":
+            return r.get("value") or ""
+    return ""
+
+
 def _collapse(rows):
     """Fold each unknown-session row into the record that leases the same slot.
 
@@ -247,6 +284,14 @@ def view_board(wide):
         pid = r.get("_folded_pid")
         if pid and f"pid {pid}" not in note:
             note = f"pid {pid} · {note}" if note.strip() else f"pid {pid}"
+        if state == "UNREACHABLE":
+            found = _find_session(_session_name(r.get("identity", "")))
+            if found:
+                note += (f"  →  FOUND IT on socket '{found}'. Run: "
+                         f"export FLEET_TMUX_SOCKET={found}   (then re-run; "
+                         f"attach with tmux -L {found} attach -t <session>)")
+            else:
+                note += "  →  no tmux server on this box has that session; the work may be running outside tmux."
         entries.append({"state": state, "subject": r.get("identity", ""), "style": style, "glyph": glyph,
                         "meta": [r.get("slot", ""), r.get("milestone", "")], "note": note})
     return blocks(entries), err
