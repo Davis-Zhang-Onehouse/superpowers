@@ -107,6 +107,32 @@ It also reads the worker's own written report at
 worker to be blunt about what was wrong, missing or unfollowable, and that prose is the actual deliverable —
 the four PASS rows only say the mechanism held.
 
+## Reading a fleet: `bin/fleet-view`
+
+`fleet`'s human output is one padded-column formatter shared by every verb, so it cannot be
+terminal-width aware or drop empty columns without putting layout decisions inside the tool whose job is to
+be correct. `fleet-view` does the presentation instead, over `--porcelain`:
+
+```bash
+fleet-view            # dashboard: subjects, then slots
+fleet-view board --wide
+fleet-view roadmap --instant "$INSTANT"
+fleet-view --cadence  # the banner it hides by default
+```
+
+It **computes nothing** — it cannot change a state, hide a refusal, or disagree with `fleet`, because every
+value it prints came from a porcelain field. It imports `PORCELAIN_COLUMNS` rather than hardcoding column
+order, so adding a column to a verb does not silently shift its fields by one.
+
+Three things it does that the core deliberately does not: folds each `unknown-session` row into the record
+leasing the same slot (one process was surfacing twice with contradictory notes), elides long paths from the
+LEFT so the identifying tail survives, and states a missing `FLEET_TMUX_SOCKET` in its header — the single
+most common reason a healthy fleet reads wrong.
+
+`scripts/tests/fleet-view.sh` asserts the properties that would make "computes nothing" false: every subject
+and state in porcelain appears in the view, rendering writes nothing, and layout is byte-identical with and
+without colour.
+
 ## Hard rules
 
 **Never start a `dt-` session on the default tmux server.** `fleet dispatch` launches a real `claude` in a
