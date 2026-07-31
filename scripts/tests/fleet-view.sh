@@ -75,10 +75,14 @@ PY
 stripped="$(printf '%s' "$colored" | sed 's/\x1b\[[0-9;]*m//g')"
 check "colour does not change layout" "$plain" "$stripped"
 
-# --- no line may exceed the declared width ------------------------------------------------------------
+# --- no line may exceed the width, EXCEPT one that cannot be broken -----------------------------------
+# A single unbreakable token -- an absolute instant path -- is allowed to run long on purpose. Wrapping a
+# path mid-directory makes it un-copy-pasteable, which costs more than a ragged line; the terminal will
+# soft-wrap it. Anything with a space in it had the chance to wrap and did not, so that IS a defect.
 long="$(FLEET_VIEW_WIDTH=100 NO_COLOR=1 python3 "$VIEW" 2>/dev/null | sed 's/\x1b\[[0-9;]*m//g' \
-        | awk '{ if (length($0) > 100) c++ } END { print c+0 }')"
-check "no line overflows the terminal width" "0" "$long"
+        | awk '{ line=$0; sub(/^ +/, "", line);
+                 if (length($0) > 100 && line ~ / /) c++ } END { print c+0 }')"
+check "no wrappable line overflows the terminal width" "0" "$long"
 
 # --- path elision keeps the tail ----------------------------------------------------------------------
 el="$(PYTHONPATH="$REPO/fleet/src" python3 - <<PY
@@ -93,7 +97,7 @@ case "$el" in
 esac
 
 if [ "$fails" = 0 ]; then
-  echo "PASS: fleet-view renders every subject porcelain reports with the same state, writes nothing, lays out identically with and without colour, keeps every line inside the terminal width, and elides long paths from the left so the identifying tail survives"
+  echo "PASS: fleet-view renders every subject porcelain reports with the same state, writes nothing, lays out identically with and without colour, keeps every WRAPPABLE line inside the terminal width (an unbreakable path is allowed to run long, because cutting it makes it un-copy-pasteable), and elides long paths from the left so the identifying tail survives"
   exit 0
 fi
 echo FAIL
