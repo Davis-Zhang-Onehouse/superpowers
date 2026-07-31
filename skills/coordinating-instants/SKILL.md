@@ -107,13 +107,20 @@ Be exact about this when you report, because a coordinator's own confidence is t
 - **Measured.** The refusals cited above each have an integration case that passed: the single-writer
   invariant, the derived readiness, the compaction freeze over records ∪ disk, the cap-freeing declaration,
   the lineage gate, the unclaimed-session rule, the queued-pane refusal, and the atomicity of close-out.
-  `fleet`'s suite stands at 219 PASS / 9 SKIP / 5 NOT-RUN. This skill's own suites check three further
-  properties: every verb it names is a registered verb (V1), every refusal it claims cites a case that
-  passed (V2), and the loop above executes against a scratch store (V3).
-- **Argued, not measured.** Five integration sections are only partially covered (`§F §G §I §J §O`), and
-  `§P` — a real dispatch against a real `claude` — has never run. So "these instructions are followable by a
-  model" is an argument. V1–V3 prove the commands exist, the refusals are real and the sequence executes;
-  they say nothing about whether a worker reading its seed does the right thing.
+  `fleet`'s integration suite stands at **273 PASS / 0 FAIL / 9 SKIP / 0 NOT-RUN**, over 864 hermetic tests.
+  Every SKIP carries a stated reason. This skill's own suites check three further properties: every verb it
+  names is a registered verb (V1), every refusal it claims cites a case that passed (V2), and the loop above
+  executes against a scratch store (V3).
+- **Measured, and it is the one that matters here.** `§P` — a real dispatch against a real `claude`, reading
+  the real seed and following these skills — **has run, 6/6**. It found four defects that V1, V2 and V3 were
+  structurally unable to find, all of them on the path a worker takes when it does the responsible thing
+  first: an invalid copy-paste `--finding` example that exited 2 in the exact block a finishing worker pastes,
+  a refusal whose remedy named a subcommand that never existed, `review --dry-run` exiting 2 *silently* on
+  valid input, and a `brief` row that presented a stored label and a derived fact as if they contradicted.
+  So "a model can follow these instructions" is no longer purely an argument — though it is evidence from one
+  task, not a general guarantee, and a real effort is larger than anything §P exercised.
+- **Argued, not measured.** That the loop scales to a *multi-milestone* effort with several concurrent workers.
+  §P dispatched one worker and closed one loop.
 - **Not checked at all:** whether the `--lineage-base` SHA you typed is the *right* base for the milestone.
   Only that the slot ends up there and every document agrees. The predecessor's tip is recorded in its
   `HANDOFF.md` branch-stack table and retyped into the next dispatch; the design that closes this is worked
