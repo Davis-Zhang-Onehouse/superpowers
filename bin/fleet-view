@@ -1,0 +1,311 @@
+#!/usr/bin/env python3
+"""fleet-view — a human-readable view of a fleet, built entirely on `--porcelain`.
+
+    fleet-view                 the dashboard: subjects, then slots
+    fleet-view board
+    fleet-view leases
+    fleet-view roadmap         needs --instant, or infers the coordinator
+    fleet-view --wide          do not truncate long notes
+    fleet-view --cadence       show the cadence banner (hidden by default)
+    fleet-view --no-color
+
+WHY THIS IS A SEPARATE PROGRAM AND NOT A `--pretty` FLAG.
+
+`fleet`'s human output is one padded-column formatter shared by every verb, and its porcelain form is a
+DECLARED schema with tests asserting the exact column count per verb. Presentation wants the opposite of
+both: terminal-width awareness, wrapping, dropped empty columns, colour, and rows that are grouped rather
+than listed. Pushing that into the shared formatter would put layout decisions inside the tool whose job is
+to be correct, and every one of them would be a new way for a verdict to render wrong.
+
+So this reads `--porcelain` — the interface that exists precisely so something else can present it — and
+owns none of the logic. It cannot change a state, cannot hide a refusal, and cannot disagree with `fleet`
+about anything, because it computes nothing.
+
+It imports `PORCELAIN_COLUMNS` from the package rather than hardcoding column order. Porcelain emits no
+header row, so a consumer must know the schema; importing the declaration means adding a column to a verb
+does not silently shift this view's fields by one. That is the one coupling worth having.
+"""
+import os
+import re
+import shutil
+import subprocess
+import sys
+
+HERE = os.path.dirname(os.path.abspath(__file__))
+REPO = os.path.dirname(HERE)
+sys.path.insert(0, os.path.join(REPO, "fleet", "src"))
+
+try:
+    from fleet.cli import PORCELAIN_COLUMNS
+except Exception:                                    # the view must never be the reason nothing renders
+    PORCELAIN_COLUMNS = {}
+
+FLEET = os.environ.get("FLEET_BIN") or os.path.join(REPO, "bin", "fleet")
+
+# --- presentation ------------------------------------------------------------------------------------
+
+COLOR = sys.stdout.isatty() and os.environ.get("NO_COLOR") is None
+def _c(code, text):
+    return f"\033[{code}m{text}\033[0m" if COLOR else text
+
+DIM    = lambda t: _c("2", t)
+BOLD   = lambda t: _c("1", t)
+RED    = lambda t: _c("31", t)
+GREEN  = lambda t: _c("32", t)
+YELLOW = lambda t: _c("33", t)
+BLUE   = lambda t: _c("36", t)
+
+#: How each state reads at a glance. The mapping is deliberately coarse — the point of a dashboard is
+#: "is anything wrong", and a palette with ten shades answers that no faster than one with three.
+STATE_STYLE = {
+    "RUNNING": (GREEN, "●"), "IDLE": (YELLOW, "○"), "BLOCKED": (RED, "!"),
+    "PARKED": (YELLOW, "?"), "AWAITING-CI": (BLUE, "⋯"), "COMPLETE": (DIM, "✓"),
+    "DEAD": (RED, "✗"), "UNREACHABLE": (YELLOW, "~"), "PENDING-LAUNCH": (DIM, "·"),
+    "UNKNOWN-SESSION": (DIM, "·"), "STALE-LEASE": (YELLOW, "~"),
+}
+
+def width():
+    env = os.environ.get("FLEET_VIEW_WIDTH")
+    if env and env.isdigit():
+        return int(env)
+    return shutil.get_terminal_size((100, 24)).columns
+
+
+def run(verb, extra=()):
+    """One porcelain read. stderr is captured, not inherited, so the cadence banner is ours to place."""
+    proc = subprocess.run([FLEET, verb, "--porcelain", *extra],
+                          capture_output=True, text=True)
+    rows = []
+    cols = PORCELAIN_COLUMNS.get(verb)
+    for line in proc.stdout.splitlines():
+        if not line.strip():
+            continue
+        parts = line.split("\t")
+        rows.append(dict(zip(cols, parts)) if cols else {"raw": line})
+    return rows, proc.stderr, proc.returncode
+
+
+_ANSI = re.compile(r"\033\[[0-9;]*m")
+def _vlen(text):
+    """Visible width: what the terminal shows, not what the string contains."""
+    return len(_ANSI.sub("", str(text)))
+
+
+def wrap(text, budget, indent):
+    """Wrap to `budget`, continuation lines indented by `indent`. Long unbroken tokens are left alone —
+    a path split across lines is worse than a line that runs long, because it stops being copy-pasteable."""
+    if budget < 20:
+        return [text]
+    out, line = [], ""
+    for word in str(text).split():
+        if line and len(line) + 1 + len(word) > budget:
+            out.append(line)
+            line = word
+        else:
+            line = f"{line} {word}".strip()
+    if line:
+        out.append(line)
+    return [out[0]] + [" " * indent + l for l in out[1:]] if out else [""]
+
+
+def shorten(value, cap):
+    """Fit a value into `cap` visible columns.
+
+    A PATH is elided from the LEFT (`…/00000000-…-v2stackcoordinator`), because the informative part of an
+    instant path is its tail and the leading directories are identical for every row. Anything else is cut
+    from the right. Without this one long path sets the column width for the whole table and squeezes every
+    other column to nothing — which is exactly what the roadmap's `population` row did.
+    """
+    value = str(value)
+    if _vlen(value) <= cap:
+        return value
+    if "/" in value:
+        parts = value.split("/")
+        out = parts[-1]
+        for part in reversed(parts[:-1]):
+            candidate = f"{part}/{out}"
+            if len(candidate) + 2 > cap:
+                break
+            out = candidate
+        return "…/" + out if len(out) + 2 <= cap else "…" + out[-(cap - 1):]
+    return value[:cap - 1] + "…"
+
+
+def table(rows, columns, note_column=None, wide=False):
+    """Aligned columns, with one column allowed to wrap under a hanging indent.
+
+    Columns that are empty in EVERY row are dropped: a table of `-` teaches a reader to skip columns,
+    and the one time it matters they skip it too.
+    """
+    if not rows:
+        return []
+    cols = [c for c in columns
+            if c != note_column and any((r.get(c) or "").strip() not in ("", "-") for r in rows)]
+    # Width is measured on VISIBLE text. An ANSI escape is zero columns wide on screen and several
+    # characters long in the string, so padding by len() silently skews every colourised column.
+    # No single column may eat the line. 35% is enough for an instant name and leaves the note readable.
+    cap = max(12, int(width() * 0.35))
+    for r in rows:
+        for c in cols:
+            if c in r and not wide:
+                r[c] = shorten(r.get(c) or "", cap)
+    w = {c: max(len(c), max(_vlen(r.get(c, "") or "") for r in rows)) for c in cols}
+    total = 2 + sum(w[c] + 2 for c in cols)
+    budget = max(20, width() - total)
+
+    out = [DIM("  " + "  ".join(c.upper().ljust(w[c]) for c in cols)
+               + ("  " + note_column.upper() if note_column else ""))]
+    for r in rows:
+        cells = []
+        for c in cols:
+            v = (r.get(c) or "") or "-"
+            style = r.get("_style")
+            pad = " " * max(0, w[c] - _vlen(v))
+            cells.append((style(v) if (style and c == r.get("_style_col")) else v) + pad)
+        line = "  " + "  ".join(cells)
+        if note_column:
+            note = (r.get(note_column) or "").strip()
+            if note and note not in ("-",):
+                if wide:
+                    for i, seg in enumerate(wrap(note, budget, total)):
+                        line = (line + "  " + seg) if i == 0 else line + "\n" + seg
+                else:
+                    line += "  " + DIM(note[:budget - 1] + ("…" if len(note) > budget else ""))
+        out.append(line.rstrip())
+    return out
+
+
+# --- views -------------------------------------------------------------------------------------------
+
+def _collapse(rows):
+    """Fold each unknown-session row into the record that leases the same slot.
+
+    `reconcile` reports process-first and record-second, so ONE process can surface twice: once as
+    `session:pid…  UNKNOWN-SESSION  ws3  no dispatch record claims this session`, and once as the record
+    that does lease ws3. Both are honest about what their own pass saw and together they contradict each
+    other, which is confusing exactly when you are already confused — the usual cause is being pointed at
+    the wrong tmux server.
+
+    Folding is presentational and reversible: the pid moves onto the record's row, and nothing is dropped
+    that `fleet board` would have shown. An unknown session whose slot NO record claims is left alone,
+    because that one is a real finding (`D-6`: an unmanaged session is reported, never acted on).
+    """
+    leased = {r.get("slot") for r in rows
+              if r.get("kind") == "worker" and (r.get("slot") or "").strip()}
+    kept, folded = [], {}
+    for r in rows:
+        if r.get("state") == "UNKNOWN-SESSION" and r.get("slot") in leased:
+            pid = re.search(r"pid(\d+)|:(\d+)$", r.get("identity", ""))
+            folded[r["slot"]] = (pid.group(1) or pid.group(2)) if pid else "?"
+            continue
+        kept.append(r)
+    for r in kept:
+        if r.get("slot") in folded and r.get("kind") == "worker":
+            r["_folded_pid"] = folded[r["slot"]]
+    return kept
+
+
+def view_board(wide):
+    rows, err, _ = run("board")
+    rows = _collapse(rows)
+    if not rows:
+        return ["  (no subjects)"], err
+    body = []
+    for r in rows:
+        state = r.get("state", "")
+        style, glyph = STATE_STYLE.get(state, (lambda t: t, " "))
+        note = r.get("note", "")
+        pid = r.get("_folded_pid")
+        if pid and f"pid {pid}" not in note:
+            # UNREACHABLE already names the holder pid in its own note; prefixing it again is how a
+            # summary starts reading like a stutter and stops being read at all.
+            note = f"pid {pid} · {note}" if note.strip() else f"pid {pid}"
+        body.append({"": glyph, "state": state, "slot": r.get("slot", ""),
+                     "milestone": r.get("milestone", ""), "subject": r.get("identity", ""),
+                     "note": note, "_style": style, "_style_col": "state"})
+    return table(body, ("", "state", "slot", "milestone", "subject"), "note", wide), err
+
+
+def view_leases(wide):
+    rows, err, _ = run("leases")
+    if not rows:
+        return ["  (no slots enrolled)"], err
+    body = []
+    for r in rows:
+        held = r.get("lease") == "held"
+        body.append({"slot": r.get("slot", ""),
+                     "lease": GREEN("held") if held else DIM("free"),
+                     "holder": r.get("todo_id", "") if held else "",
+                     "session": r.get("tmux", "") if held else "",
+                     "since": (r.get("claimed_at", "") or "")[11:16] if held else "",
+                     "path": r.get("path", "") if held else ""})
+    # The path is dropped unless asked for: it is the one column that cannot be usefully truncated, and a
+    # path cut mid-directory is worse than no path -- it looks copy-pasteable and is not.
+    return table(body, ("slot", "lease", "holder", "session", "since"),
+                 "path" if wide else None, wide), err
+
+
+def view_roadmap(wide, extra):
+    rows, err, rc = run("roadmap", extra)
+    if rc != 0 and not rows:
+        return ["  " + DIM((err or "roadmap needs --instant").strip().splitlines()[-1][:width() - 4])], ""
+    body = []
+    for r in rows:
+        sev = r.get("severity", "")
+        style = RED if sev == "violation" else (YELLOW if sev == "attention" else DIM)
+        body.append({"kind": style(r.get("kind", "")), "subject": r.get("subject", ""),
+                     "detail": r.get("detail", "")})
+    return table(body, ("kind", "subject"), "detail", wide), err
+
+
+def main():
+    args = [a for a in sys.argv[1:]]
+    wide = "--wide" in args;      args = [a for a in args if a != "--wide"]
+    show_cadence = "--cadence" in args; args = [a for a in args if a != "--cadence"]
+    if "--no-color" in args:
+        globals()["COLOR"] = False
+        args = [a for a in args if a != "--no-color"]
+    verb = args[0] if args and not args[0].startswith("-") else "all"
+    extra = args[1:] if args and not args[0].startswith("-") else args
+
+    home = os.environ.get("FLEET_HOME", "(unset — defaults to ~/.fleet for reads)")
+    sock = os.environ.get("FLEET_TMUX_SOCKET")
+    head = f"store {home}"
+    if sock:
+        head += f" · tmux -L {sock}"
+    else:
+        # The single most common reason this view looks wrong, so it is stated up front rather than
+        # inferred from a row that says UNREACHABLE.
+        head += " · " + YELLOW("no FLEET_TMUX_SOCKET — sessions on a private server will read UNREACHABLE")
+    # The header wraps like everything else. It is the longest line on an otherwise-empty fleet, and an
+    # overflowing header is the first thing a reader sees go wrong.
+    print(DIM("\n".join(wrap(head, width(), 0))))
+
+    errs = []
+    if verb in ("all", "board"):
+        print(BOLD("\nSUBJECTS"))
+        lines, err = view_board(wide); errs.append(err); print("\n".join(lines))
+    if verb in ("all", "leases"):
+        print(BOLD("\nSLOTS"))
+        lines, err = view_leases(wide); errs.append(err); print("\n".join(lines))
+    if verb == "roadmap":
+        print(BOLD("\nROADMAP"))
+        lines, err = view_roadmap(wide, extra); errs.append(err); print("\n".join(lines))
+
+    if show_cadence:
+        for err in errs:
+            for line in (err or "").splitlines():
+                if line.startswith("cadence:"):
+                    print("\n" + DIM("\n".join(wrap(line, width() - 2, 2))))
+                    break
+            else:
+                continue
+            break
+    print()
+
+
+if __name__ == "__main__":
+    try:
+        main()
+    except BrokenPipeError:
+        pass
