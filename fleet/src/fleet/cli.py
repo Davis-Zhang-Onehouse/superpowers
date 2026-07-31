@@ -1101,11 +1101,17 @@ def _checkout_instruction(lineage: dict, mode: str) -> str:
         sha = lineage[repo]
         lines.append(f"    git -C {repo} fetch --all")
         if mode == "code":
-            lines.append(f"    git -C {repo} checkout --detach {sha}    # then cut your own branch")
+            lines.append(f"    git -C {repo} checkout --detach {sha}")
         else:
             lines.append(f"    git -C {repo} cat-file -e {sha}^{{commit}}   # readable via refs; do NOT "
                          f"check out")
     lines += [
+        "",
+        "A detached HEAD is enough: `base-check` is satisfied by it, and it is satisfied equally by a branch "
+        "you cut from it, because commits on top of the base are the intended end state. Cut one if you need "
+        "to commit; the gate does not require it and imposes no naming convention. (The instruction used to "
+        "end '# then cut your own branch' without saying whether to, what to call it, or whether the gate "
+        "cared — a real worker in §P flagged exactly that.)",
         "",
         "Then prove it, do not assume it:",
         "    fleet base-check --id <your todo id>",
@@ -1406,7 +1412,9 @@ def _do_review(ctx: Ctx, parsed: Parsed) -> int:
         rows.append(Row(kind="round", subject="dry-run", severity=INFO,
                         detail=f"would record scope {parsed.get('scope', 'all')}, verdict "
                                f"{verdict_asked}, {len(findings)} finding(s); no ledger was written and "
-                               f"{review.view_path()} was not rendered"))
+                               f"{review.view_path()} was not rendered. The gate row below reflects the "
+                               f"ledger WITHOUT this round, so it will read UNDECIDABLE for a first round — "
+                               f"that is the current state, not a verdict on this input"))
     gate = review.gate(require_scope=parsed.get("require-scope"))
     rows.append(Row(kind="gate", subject=gate.guard,
                     severity=INFO if gate.allowed else VIOLATION, detail=gate.reason,
@@ -1421,6 +1429,19 @@ def _do_review(ctx: Ctx, parsed: Parsed) -> int:
                             f"{population['findings']} finding(s), "
                             f"{len(population['open_blocking'])} open blocking")))
     _emit(ctx, "review", rows)
+    #: A DRY RUN's exit code answers "would this action be admitted?", never "what does the pre-existing
+    #: ledger say?". It used to return the gate's code — and on a dry run the round is not recorded, so the
+    #: gate saw a ledger without it and a valid FIRST round always exited 2 (UNDECIDABLE) with NOTHING on
+    #: stderr while stdout reported "would record ...". A worker doing the responsible thing — interrogating
+    #: the gate non-destructively, which is exactly what `--dry-run` is for — got a bare failure code for
+    #: input that was correct, and would reasonably start editing a finding string that was already fine.
+    #: Found by a real dispatched worker in `§P`, which is the only place it could have been found: every
+    #: hermetic test asserted the recorded path.
+    #:
+    #: The findings were parsed above (`_finding_of` refuses a malformed one at exit 2 before this point), so
+    #: reaching here on a dry run means the input IS valid and the round WOULD be recorded.
+    if ctx.dry_run and verdict_asked:
+        return EXIT_OK
     return exit_code_for(gate)
 
 
@@ -2110,11 +2131,19 @@ def _do_brief(ctx: Ctx, parsed: Parsed) -> int:
         try:
             milestone = roadmap.milestone(recorded.milestone)
             blocker = roadmap.blocker_of(recorded.milestone)
+            #: The stored status and the derived readiness are DIFFERENT FACTS and the row must not run them
+            #: together. It used to read `status=blocked, owner=…; ready`, and a real worker in `§P` reported
+            #: exactly that: *"says status=blocked AND ready on the same row, with no blocker named. I could
+            #: not tell from the row whether something was actually blocking me."* Nothing was. The stored
+            #: status is a LABEL a coordinator set; readiness is recomputed from whether the deps landed, so a
+            #: `blocked` milestone whose deps have all landed IS ready and the label is simply stale.
             rows.append(Row(
                 kind="milestone", subject=milestone.id, severity=INFO,
-                detail=(f"{milestone.title!r}, status={milestone.status}, owner="
-                        f"{milestone.owner or '(unowned)'}; "
-                        + (f"NOT ready: {blocker}" if blocker else "ready")),
+                detail=(f"{milestone.title!r}; owner={milestone.owner or '(unowned)'}; "
+                        f"stored status={milestone.status} (a label the coordinator set) — "
+                        + (f"and NOT READY to start: {blocker}" if blocker else
+                           "and READY to start: readiness is DERIVED from whether its deps landed, so a "
+                           "stale 'blocked' label does not block you")),
                 clears_when=blocker or "", clears_who=COORDINATOR if blocker else ""))
         except BadInput as exc:
             rows.append(Row(kind="milestone", subject=recorded.milestone, severity=VIOLATION,
