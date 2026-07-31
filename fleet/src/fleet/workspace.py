@@ -21,6 +21,7 @@ filed defects got the least specification (FI-6).
 
 `git` is INJECTED — `(args, cwd) -> (rc, stdout)`. `default_git()` is the only subprocess in this module.
 """
+import shutil
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -100,6 +101,63 @@ class Workspace:
                 "discovered at clone time — inside a dispatch that has already claimed a slot."
             )
         atomic_write(self._golden_file, f"{path}\n")
+
+    # ---- clone: growing the pool FROM the declared golden ----------------------------------------
+
+    def clone(self, target: Path) -> dict:
+        """Duplicate the declared golden into `target`. -> a report dict.  `SI-19`.
+
+        The missing half of `SI-19`, and the reason the other half looked like a working feature: `set_golden`
+        validated and stored a golden, and `golden()` had exactly ONE caller — `set-golden`'s own echo-back.
+        The declared golden was write-only in practice, so a pool grew only by `enroll`ing directories somebody
+        had duplicated by hand, outside the tool, with nothing checking they came from the golden at all.
+
+        A filesystem copy, `shutil.copytree`, and NOT a git clone. That is the whole point of a golden: it
+        carries prebuilt artifacts and a warm build cache, and a `git clone` would reproduce the source while
+        throwing away the thing that makes a leased slot cheaper than a fresh checkout. It is also why this
+        stays in stdlib and adds no subprocess seam — the module states its seam count deliberately.
+
+        Refuses rather than overwrites. A clone onto an existing directory is either a mistake or a request to
+        blow away somebody's leased workspace, and neither is worth guessing between.
+        """
+        golden = self.golden()
+        target = Path(target)
+        if not golden.is_dir():
+            raise BadInput(
+                f"the declared golden {golden} is not a directory, so there is nothing to clone. It is "
+                f"validated at SET time for exactly this reason; something has moved or removed it since.")
+        if target.exists():
+            raise BadInput(
+                f"{target} already exists. A clone never overwrites: the target is either a mistake or "
+                f"somebody's leased workspace, and guessing between those is how a live slot gets erased. "
+                f"Pick a fresh path, or remove that one by hand if you are sure.")
+        if str(target).startswith(str(golden) + "/") or target == golden:
+            raise BadInput(
+                f"{target} is inside the golden {golden}. Cloning a directory into itself does not terminate.")
+        target.parent.mkdir(parents=True, exist_ok=True)
+        shutil.copytree(golden, target, symlinks=True, ignore_dangling_symlinks=True)
+        files = sum(1 for _ in target.rglob("*") if _.is_file())
+        return {"golden": str(golden), "target": str(target), "files": files}
+
+    def clone_parity(self, target: Path, repos) -> list:
+        """-> [(repo, golden_head, clone_head, same)] for each repo present in BOTH.
+
+        A clone nobody checked is a clone you hope worked. Parity is asserted on the git HEAD per repo rather
+        than on a byte count, because HEAD is the thing a worker's lineage base is compared against — a copy
+        that landed at a different commit would send every `base-check` in that slot to the wrong answer.
+        """
+        golden, target = self.golden(), Path(target)
+        out = []
+        for repo in sorted(repos):
+            g, t = golden / repo, target / repo
+            if not (g / ".git").exists() or not (t / ".git").exists():
+                continue
+            grc, ghead = self.git(["rev-parse", "HEAD"], g)
+            trc, thead = self.git(["rev-parse", "HEAD"], t)
+            gh = ghead.strip() if grc == 0 else None
+            th = thead.strip() if trc == 0 else None
+            out.append((repo, gh, th, bool(gh) and gh == th))
+        return out
 
     # ---- build-cache isolation: applied here, not asked of the worker ---------------------------
 
