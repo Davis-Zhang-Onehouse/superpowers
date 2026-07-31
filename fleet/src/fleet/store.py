@@ -43,6 +43,12 @@ class Record:
     #: It is the SINGLE authority for "what do I build on top of". `OI-1` was two prose authorities
     #: disagreeing — a seed rendered once per wave said one base, a per-milestone charter said another — and
     #: the worker had to decide which was real. Rendered into both documents from here, they cannot.
+    #: `SI-34`. WHY a refusing rule was overridden, persisted. An override is an AUDIT EVENT: somebody
+    #: decided a guard was wrong for this one dispatch, and the only record of that judgement used to be the
+    #: sentence the guard printed to a terminal. `F7` requires "the reason is in the record" and it was not:
+    #: the value reached `guards.Context` and was never written anywhere. A refusal that was overridden with
+    #: no durable reason is indistinguishable, a week later, from a rule that never fired.
+    override_reason: str = ""
     lineage_mode: str = ""          # "code" | "analysis" | "" (no git lineage recorded)
     #: Each repo's HEAD at DISPATCH time, before the worker touched anything, as `repo=sha,...`. What the
     #: slot's prebuilt native artifacts were built from, and therefore the only way to answer "has the source
@@ -97,12 +103,12 @@ class Store:
         path = self.records / f"{todo_id}.json"
         if not path.is_file():
             raise BadInput(f"no record {todo_id!r} in {self.records}")
-        return Record.from_json(json.loads(path.read_text()))
+        return Record.from_json(_read_json(path, "record"))
 
     def all(self) -> list[Record]:
         if not self.records.is_dir():
             return []
-        return [Record.from_json(json.loads(p.read_text()))
+        return [Record.from_json(_read_json(p, "record"))
                 for p in sorted(self.records.glob("*.json"))]
 
     def resolve_id(self, partial: str) -> str:
@@ -114,6 +120,26 @@ class Store:
         if len(hits) > 1:
             raise AmbiguousId(f"{partial!r} matches {len(hits)}: {', '.join(hits)}. Refusing to guess.")
         return hits[0]
+
+
+def _read_json(path: Path, what: str) -> dict:
+    """Parse a store file, or refuse NAMING IT.  `SI-35`.
+
+    Three call sites used a bare `json.loads` and one truncated file therefore raised `JSONDecodeError` out of
+    `Store.all()` — which every view calls, so `board`, `status` and `reap` all died with a traceback instead of
+    telling the operator which file to look at. `§O1` found it. These are the verbs you run when the store is
+    already in a state you do not understand, so a traceback is the least useful thing they can do.
+
+    Refused, never skipped. A record that cannot be parsed is not absent: pretending it is would make a
+    dispatched worker invisible to the cap and to the board, which is strictly worse than stopping.
+    """
+    try:
+        return json.loads(path.read_text())
+    except (OSError, ValueError) as exc:
+        raise BadInput(
+            f"the {what} at {path} cannot be read ({exc}). It is refused rather than skipped: a record that "
+            f"cannot be parsed is not the same as one that is absent, and treating it as absent would hide a "
+            f"dispatched worker from the cap and from the board. Inspect or move the file by hand.") from exc
 
 
 class Declarations:
@@ -128,7 +154,7 @@ class Declarations:
     def _load(self) -> dict:
         if not self.path.is_file():
             return {}
-        return json.loads(self.path.read_text())
+        return _read_json(self.path, "declarations file")
 
     def _save(self, data: dict) -> None:
         atomic_write(self.path, json.dumps(data, indent=2, ensure_ascii=False))

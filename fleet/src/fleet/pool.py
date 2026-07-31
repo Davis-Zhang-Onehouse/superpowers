@@ -285,10 +285,37 @@ class Pool:
     # ---- leases ----------------------------------------------------------------------------
 
     def lease(self, slot: str) -> Optional[Lease]:
+        """The claim on `slot`, or None when there is none.
+
+        `SI-35`. An unreadable lease body used to raise `JSONDecodeError` straight out of here, and `reap`
+        builds its view with a dict comprehension over every slot — so one corrupt file took the whole verb
+        down with a traceback, and `reap` is the verb you run precisely when the pool is already in a state
+        you do not understand. `§O5` found it.
+
+        Refused as `BadInput` NAMING THE FILE, not swallowed to None. The distinction matters: None means
+        "no claim", and a slot whose claim exists but cannot be read is not free — treating it as free is how
+        a second worker gets leased into a directory somebody is still in. `free_slots` already draws that
+        line the same way, on the claim DIRECTORY rather than on a readable body.
+        """
         body = self.leases / slot / _LEASE_BODY
         if not body.is_file():
             return None
-        return Lease.from_json(json.loads(body.read_text()))
+        try:
+            data = json.loads(body.read_text())
+        except FileNotFoundError:
+            #: VANISHED between the `is_file()` above and this read, which is not corruption — it is the
+            #: concurrent-freer race, and "the body is gone" already has an answer three lines up: there is no
+            #: lease. `tests/test_pool.py::TestFreeingIsIdempotentUnderAConcurrentFreer` caught the first
+            #: version of this guard refusing here, and it was right to: two reapers freeing the same slot is
+            #: normal, and one of them losing the read must not raise at the other.
+            return None
+        except (OSError, ValueError) as exc:
+            raise BadInput(
+                f"the lease body {body} cannot be read ({exc}). The slot is NOT free — its claim directory "
+                f"exists, so something holds it — but who holds it cannot be determined from this file. "
+                f"Inspect it by hand; a slot treated as free here is how a second worker is leased into a "
+                f"directory somebody is still in.") from exc
+        return Lease.from_json(data)
 
     def free_slots(self) -> list:
         """Slots with no claim DIRECTORY. Deliberately not "slots with no lease body": the directory is the
