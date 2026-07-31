@@ -1,0 +1,123 @@
+--- a/src/tmux.js
++++ b/src/tmux.js
+@@ -3,6 +3,25 @@
+ 
+ const execFileAsync = promisify(execFileCb);
+ 
++// --- tmux SERVER selection (local patch; see superpowers/patches/claude-auto-retry) -----------------
++//
++// Upstream invokes `tmux` with no server option, so every call lands on the DEFAULT server. That is
++// correct for the common case and wrong for ours: dispatched agent sessions are deliberately started on
++// a private server (`tmux -L <socket>`) so that killing a session by name cannot reach another person's
++// live work, and so a long-lived default server cannot hand new sessions a stale environment.
++//
++// Without this, `reconcile` sees no panes on that server and NOTHING dispatched is ever auto-resumed —
++// silently, because "no panes" and "no panes needing help" produce identical output.
++//
++// One resolution point, applied at the exec boundary rather than inside each builder: the builders stay
++// pure (their unit tests assert exact argv) and no future call site can forget the prefix.
++//
++// `-L` is a SERVER option and tmux requires it BEFORE the subcommand.
++const TMUX_SOCKET = process.env.CLAUDE_AUTO_RETRY_TMUX_SOCKET || '';
++export function tmuxArgv(args) {
++  return TMUX_SOCKET ? ['-L', TMUX_SOCKET, ...args] : args;
++}
++
+ export function buildCaptureArgs(pane, lines = 200) {
+   return ['capture-pane', '-t', pane, '-p', '-S', `-${lines}`];
+ }
+@@ -42,7 +61,7 @@
+ }
+ 
+ export async function sendKey(pane, key) {
+-  await execFileAsync('tmux', buildSendKeyArgs(pane, key));
++  await execFileAsync('tmux', tmuxArgv(buildSendKeyArgs(pane, key)));
+ }
+ 
+ export function buildDisplayArgs(pane, format) {
+@@ -56,24 +75,24 @@
+ 
+ export function getTmuxVersion() {
+   try {
+-    return parseTmuxVersion(execFileSync('tmux', ['-V'], { encoding: 'utf-8' }).trim());
++    return parseTmuxVersion(execFileSync('tmux', tmuxArgv(['-V']), { encoding: 'utf-8' }).trim());
+   } catch { return 0; }
+ }
+ 
+ export async function capturePane(pane, lines = 200) {
+-  const { stdout } = await execFileAsync('tmux', buildCaptureArgs(pane, lines));
++  const { stdout } = await execFileAsync('tmux', tmuxArgv(buildCaptureArgs(pane, lines)));
+   return stdout;
+ }
+ 
+ export async function sendKeys(pane, text) {
+   // Submit-to-TUI in two steps. See SUBMIT_DELAY_MS for why.
+-  await execFileAsync('tmux', buildSendTextArgs(pane, text));
++  await execFileAsync('tmux', tmuxArgv(buildSendTextArgs(pane, text)));
+   await new Promise(r => setTimeout(r, SUBMIT_DELAY_MS));
+-  await execFileAsync('tmux', buildSendEnterArgs(pane));
++  await execFileAsync('tmux', tmuxArgv(buildSendEnterArgs(pane)));
+ }
+ 
+ export async function getPaneCommand(pane) {
+-  const { stdout } = await execFileAsync('tmux', buildDisplayArgs(pane, '#{pane_current_command}'));
++  const { stdout } = await execFileAsync('tmux', tmuxArgv(buildDisplayArgs(pane, '#{pane_current_command}')));
+   return stdout.trim();
+ }
+ 
+--- a/src/reconcile.js
++++ b/src/reconcile.js
+@@ -10,6 +10,7 @@
+ // reuse case — is unit-tested.
+ 
+ import { execFile as execFileCb, spawn } from 'node:child_process';
++import { tmuxArgv } from './tmux.js';
+ import { promisify } from 'node:util';
+ import { readFile, writeFile, unlink, link, mkdir, appendFile } from 'node:fs/promises';
+ import { fileURLToPath } from 'node:url';
+@@ -425,7 +426,13 @@
+ 
+ async function gather() {
+   const [{ stdout: panesOut }, { stdout: psOut }] = await Promise.all([
+-    execFile('tmux', ['list-panes', '-a', '-F', '#{pane_id} #{pane_pid}']),
++    // Local patch: honour CLAUDE_AUTO_RETRY_TMUX_SOCKET so discovery covers a private tmux server.
++    // `-a` is all panes on ONE server, so without this the whole arm set for that server is empty.
++    // The monitor spawned below inherits process.env, so it talks to the same server with no extra
++    // argument -- which matters, because the monitor's argv shape (`monitor.js <pane> <pid>`) is
++    // parsed by both this file's coverage check and the external watchdog. A positional socket
++    // would break both.
++    execFile('tmux', tmuxArgv(['list-panes', '-a', '-F', '#{pane_id} #{pane_pid}'])),
+     execFile('ps', ['-eo', 'pid=,ppid=,stat=,comm=,args=']),
+   ]);
+   let pgrepErr = null, monOut = '';
+--- a/src/status-file.js
++++ b/src/status-file.js
+@@ -30,7 +30,28 @@
+ // can't rely on its own $TMUX (a status-bar `#()` command runs in the tmux *server's*
+ // environment, not a client's — see the README PATH caveat), so it instead receives
+ // `#{socket_path}` as an explicit argument, which resolves to the same value.
++//
++// LOCAL PATCH. The paragraph above states the assumption this breaks: "The monitor is forked from a
++// process running inside the pane it's watching, so it reliably inherits this." A monitor armed by
++// `reconcile` is NOT — it is spawned by whatever shell ran the CLI, and inherits THAT server's $TMUX.
++//
++// Within one server that is harmless, because the socket id is the same either way. Across servers it is
++// exactly the collision this function exists to prevent: a monitor watching `%0` on `-L fleet`, armed from
++// a shell sitting in the default server, wrote `_tmp_tmux-1000_default__0.json` — the default server's
++// namespace, for a pane that is not in it. Observed, not theorised.
++//
++// So an explicitly named server wins over the ambient one. The socket NAME is resolved to the same path
++// tmux itself would use (`$TMUX_TMPDIR|/tmp` + `/tmux-<uid>/<name>`), so this agrees with the
++// `#{socket_path}` the reader script is handed rather than inventing a second key format.
++function socketPathForName(name, env = process.env) {
++  const base = env.TMUX_TMPDIR || '/tmp';
++  const uid = typeof process.getuid === 'function' ? process.getuid() : '';
++  return `${base}/tmux-${uid}/${name}`;
++}
++
+ function socketIdFromEnv(env = process.env) {
++  const named = env.CLAUDE_AUTO_RETRY_TMUX_SOCKET;
++  if (named) return socketPathForName(named, env);
+   const tmuxEnv = env.TMUX || '';
+   return tmuxEnv.split(',')[0] || 'default';
+ }
