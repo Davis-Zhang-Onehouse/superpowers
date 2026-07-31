@@ -40,11 +40,22 @@ PARKED = "PARKED"
 AWAITING_CI = "AWAITING-CI"
 COMPLETE = "COMPLETE"
 DEAD = "DEAD"
+#: `SI-39`. A live process holds this record's SLOT, but no session answers for its tmux name. The work is
+#: running; what is missing is our ability to reach its session — almost always because the caller is
+#: pointed at the wrong tmux SERVER (`FLEET_TMUX_SOCKET`).
+#:
+#: This is emphatically not DEAD, and the difference was measured on live work: with the socket unset,
+#: `board` reported both instants of a running effort as *"launched at ... and no session is alive: the
+#: work stopped without renaming its folder"* while both processes were an hour into their tasks. DEAD is
+#: an ACTIONABLE claim — the response to it is `reap` — so a wrong DEAD invites a human to free a slot out
+#: from under running work. (`reap` itself refuses, because its cwd-holder half reads `/proc` and never
+#: asks tmux; this state gives the REPORT the same independence the safety net already had.)
+UNREACHABLE = "UNREACHABLE"
 UNKNOWN_SESSION = "UNKNOWN-SESSION"
 STALE_LEASE = "STALE-LEASE"
 
 STATES = (PENDING_LAUNCH, RUNNING, IDLE, BLOCKED, PARKED, AWAITING_CI, COMPLETE, DEAD,
-          UNKNOWN_SESSION, STALE_LEASE)
+          UNREACHABLE, UNKNOWN_SESSION, STALE_LEASE)
 
 KIND_WORKER = "worker"
 KIND_UNKNOWN = "unknown-session"
@@ -107,7 +118,7 @@ def reconcile(store, pool, sessions, instants_dir: Path, idle_after_s: int = 180
                 continue                     # one record, one subject, even with two processes on it
             seen_records.add(rec.todo_id)
             subject = _worker_subject(rec, pool, sessions, instants_dir, idle_after_s,
-                                      live=True, sess=sess)
+                                      live=True, sess=sess, live_sessions=live_sessions)
             if subject.holds_slot:
                 accounted_slots.add(rec.slot)
             subjects.append(subject)
@@ -123,7 +134,8 @@ def reconcile(store, pool, sessions, instants_dir: Path, idle_after_s: int = 180
             continue
         seen_records.add(rec.todo_id)
         subject = _worker_subject(rec, pool, sessions, instants_dir, idle_after_s,
-                                  live=sessions.alive(rec.tmux), sess=None)
+                                  live=sessions.alive(rec.tmux), sess=None,
+                                  live_sessions=live_sessions)
         if subject.holds_slot:
             accounted_slots.add(rec.slot)
         subjects.append(subject)
@@ -141,7 +153,8 @@ def reconcile(store, pool, sessions, instants_dir: Path, idle_after_s: int = 180
 # --- workers ---------------------------------------------------------------------------------------
 
 
-def _worker_subject(rec, pool, sessions, instants_dir: Path, idle_after_s: int, live: bool, sess):
+def _worker_subject(rec, pool, sessions, instants_dir: Path, idle_after_s: int, live: bool, sess,
+                    live_sessions=()):
     instant = _instant_on_disk(rec, instants_dir)
     folder_state = _folder_state(instant)
     declared = Declarations(instant) if instant is not None else None
@@ -149,8 +162,11 @@ def _worker_subject(rec, pool, sessions, instants_dir: Path, idle_after_s: int, 
     parked = declared.parked() if declared is not None else None
     pane = sessions.pane(rec.tmux) if (live and rec.tmux) else ""
 
+    #: The slot holder is PROCESS evidence and never touches tmux, so it survives being pointed at the
+    #: wrong server — which is exactly when the tmux answer is the one that misleads.
+    holder = _slot_holder_pid(rec, pool, live_sessions)
     state, note = _state_of(rec, folder_state, live, phase, parked, pane, sessions,
-                            instant, idle_after_s)
+                            instant, idle_after_s, holder)
     holds = _holds_slot(pool, rec)
     evidence = {
         "record": rec.todo_id,
@@ -159,7 +175,7 @@ def _worker_subject(rec, pool, sessions, instants_dir: Path, idle_after_s: int, 
         "folder_state": folder_state or "missing",
         "liveness": "process" if sess is not None else ("session" if live else "none"),
         "tmux": rec.tmux,
-        "pid": str(sess.pid) if sess is not None else "",
+        "pid": str(sess.pid) if sess is not None else (str(holder) if holder else ""),
         "slot": rec.slot if holds else "",
         #: `SI-27`. Joined here rather than looked up per view, so `board` and `status` cannot disagree
         #: about which milestone an instant is on.
@@ -173,7 +189,34 @@ def _worker_subject(rec, pool, sessions, instants_dir: Path, idle_after_s: int, 
                    evidence=evidence, note=note)
 
 
-def _state_of(rec, folder_state, live, phase, parked, pane, sessions, instant, idle_after_s):
+def _slot_holder_pid(rec, pool, live_sessions):
+    """The pid of a live process sitting in THIS record's slot, or None.
+
+    `SI-39`. Two independent liveness derivations, and this is the one that does not go through tmux:
+    a session lookup answers only for the server we happen to be pointed at, while a process holding a
+    directory is true regardless. `pool.reap` has consulted both since `OBS-48`; `reconcile` consulted
+    only the first, which is how a report could say DEAD about work that `reap` would refuse to free.
+
+    Membership is delegated to `_slot_holding` rather than compared here. `rec.slot` is a slot NAME
+    (`ws3`) and a session carries a PATH, so the two are never equal and a hand-rolled comparison is
+    silently always-false — which is exactly the bug the first draft of this function shipped, and its
+    test agreed with it because the fixture stored a path where the product stores a name. Reusing the
+    existing rule also inherits its subtlety for free: a worker that has `cd`-ed into a subdirectory of
+    its slot still holds it.
+    """
+    if not rec.slot:
+        return None
+    for session in live_sessions or ():
+        try:
+            if _slot_holding(pool, session.cwd) == rec.slot:
+                return session.pid
+        except Exception:
+            continue
+    return None
+
+
+def _state_of(rec, folder_state, live, phase, parked, pane, sessions, instant, idle_after_s,
+              slot_holder=None):
     """The single state decision. Every branch is reachable from one join of all five fact sources."""
     if folder_state in TERMINAL_FOLDER_STATES:
         # The worker's own rename is the completion signal, and it outranks the recorded path — that is
@@ -181,6 +224,13 @@ def _state_of(rec, folder_state, live, phase, parked, pane, sessions, instant, i
         # inflight and complete and never abort, and abort is legal.
         return COMPLETE, f"the instant folder is `-{folder_state}-`; the work is over"
     if not live:
+        if slot_holder is not None:
+            # Alive by the probe that does not need tmux. Say what is missing rather than inventing a
+            # death: the remedy is a server, not a recovery.
+            return UNREACHABLE, (
+                f"pid {slot_holder} is live and holds this record's slot, but no session answers for "
+                f"{rec.tmux or 'it'} — the process is running and its SESSION is unreachable from here. "
+                f"Usually the wrong tmux server: export FLEET_TMUX_SOCKET to the one it was dispatched on.")
         if rec.launched_at is None:
             # READ from an absent field, never stamped. Back-filling it here is exactly the defect that
             # made the predecessor's report a writer.

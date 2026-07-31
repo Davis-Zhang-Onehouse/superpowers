@@ -15,7 +15,7 @@ import unittest
 from dataclasses import fields as dataclass_fields
 
 from fleet.pool import Pool
-from fleet.reconcile import KINDS, STATES, Subject, reconcile
+from fleet.reconcile import DEAD, KINDS, STATES, UNREACHABLE, Subject, reconcile
 from fleet.session import LiveSession, Probes, SessionLayer
 from fleet.store import Declarations, Record, Store
 
@@ -322,3 +322,57 @@ class TestReconcile(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class TestUnreachableIsNotDead(unittest.TestCase):
+    """`SI-39`. A record whose SLOT is held by a live process is not dead, whatever tmux says.
+
+    Measured on live work: with `FLEET_TMUX_SOCKET` unset, `board` called both instants of a running
+    effort DEAD -- "the work stopped without renaming its folder" -- while both processes were an hour
+    into their tasks. DEAD is actionable (the response is `reap`), so a wrong DEAD invites a human to free
+    a slot out from under running work.
+    """
+
+    def _worker(self, proc_cwd):
+        """One recorded worker whose tmux name NOTHING answers for, plus an optional live process.
+
+        `tmux_live` is left empty on purpose: that is what being pointed at the wrong tmux server looks
+        like from inside the join -- the session is simply not there.
+        """
+        fleet = SyntheticFleet()
+        slot = fleet.slots_dir / "ws3"
+        slot.mkdir(exist_ok=True)
+        # `slot` is the NAME, as every real record stores it -- checked against the live store, because the
+        # first version of this test stored a PATH here and so agreed with a bug instead of the product.
+        fleet.pool.enroll(slot)
+        rec = _record(todo_id="t1", child_instant="00000000-07310348-inflight-append-w",
+                      slot="ws3", tmux="dt-w")
+        fleet.store.write(rec)
+        fleet.pool.claim("ws3", rec.todo_id, rec.base_instant, rec.tmux)
+        if proc_cwd is not None:
+            fleet.procs.append(LiveSession(pid=99, cwd=proc_cwd(fleet), name=None))
+        subs = reconcile(fleet.store, fleet.pool, fleet.sessions, fleet.instants)
+        return [s for s in subs if s.identity == "t1"][0]
+
+    def test_a_slot_held_by_a_live_process_is_UNREACHABLE_not_DEAD(self):
+        worker = self._worker(lambda f: f.slots_dir / "ws3")
+        self.assertEqual(worker.state, UNREACHABLE,
+                         "tmux could not name the session, but a live process holds the slot")
+        self.assertIn("99", worker.note)
+        self.assertIn("FLEET_TMUX_SOCKET", worker.note,
+                      "the note must name the remedy; the usual cause is the wrong tmux server")
+
+    def test_the_holder_pid_is_reported_as_evidence(self):
+        worker = self._worker(lambda f: f.slots_dir / "ws3")
+        self.assertEqual(worker.evidence.get("pid"), "99",
+                         "a state derived from a pid must show the pid, or nobody can check it")
+
+    def test_nothing_holding_the_slot_is_still_DEAD(self):
+        worker = self._worker(None)
+        self.assertEqual(worker.state, DEAD,
+                         "the fix must not make a genuinely dead record un-diagnosable")
+
+    def test_a_process_in_a_DIFFERENT_directory_does_not_rescue_the_record(self):
+        worker = self._worker(lambda f: f.slots_dir / "ws9")
+        self.assertEqual(worker.state, DEAD,
+                         "only a process in THIS record's slot is evidence about THIS record")
