@@ -224,6 +224,25 @@ cat "$DAVIS/.claude-auto-retry/watchdog-exclusion.state"
 on its own once one does. Note `CAR_DIR` is `$DAVIS/.claude-auto-retry` — the tool's `HOME` is `$DAVIS`, not
 the operator's, so its state is NOT under `~`.
 
+**Dispatched instants ARE covered now, and it needed a patch.** `claude-auto-retry` invokes `tmux` with no
+server option, so it only ever saw the default server — and `fleet dispatch` deliberately uses a private one.
+The result was silent: `reconcile` printed *"All live claude sessions already monitored"*, which is also what
+it prints when everything is genuinely covered, while no dispatched instant had auto-resume at all.
+
+```bash
+bash patches/claude-auto-retry/verify.sh          # is the patch present AND behaving?
+bash patches/claude-auto-retry/verify.sh --apply  # re-apply after an npm install reverts it
+```
+
+`CLAUDE_AUTO_RETRY_TMUX_SOCKET=<name>` now selects the server for every tmux call and for pane discovery; the
+monitor inherits it through the environment, never argv, because `monitor.js <pane> <pid>` is parsed by a
+regex in two places. `claude-watchdog.sh` sweeps every server in `CLAUDE_WATCHDOG_TMUX_SOCKETS` (default
+`fleet`) — included by default rather than opt-in, since an opt-in list is one somebody forgets on the day it
+matters. Verified against a pristine upstream v0.6.0: applies cleanly, 352/352 of the package's own tests
+still pass, because the argv builders are untouched and the prefix goes on at the exec boundary.
+
+**Run `verify.sh` after any npm install in `opt/car`.** The patch lives in `node_modules`.
+
 **The bigger win is still not done.** The monitor sends `Continue…` on a rate-limit banner **without
 consulting `fleet pane-guard`**, which is precisely the guard for that hazard (`0` safe / `10` queued-text /
 `11` mid-turn / `12` not-claude / `13` unknown). Gating the send would need a change inside the vendored
