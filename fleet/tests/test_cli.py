@@ -2447,3 +2447,135 @@ class TestFoundByARealWorker(CliCase):
                       "the row must mark the status as a STORED LABEL, not present it as the live answer")
         self.assertIn("READY to start", row, "and it must say plainly whether the worker may begin")
         self.assertIn("DERIVED", row, "and say where readiness comes from, so a stale label is not confusing")
+
+
+class TestAnOverrideIsAudited(CliCase):
+    """`SI-34`. An override is a judgement that a guard was WRONG for one dispatch, and the only record of it
+    was the sentence the guard printed to a terminal.
+
+    Plan 6's `F7` requires "with a reason ⇒ exit 0 and the reason is in the record". It was not: the value
+    reached `guards.Context`, decided admission, and was never written anywhere. A week later an overridden
+    refusal is indistinguishable from a rule that never fired.
+    """
+
+    def test_the_override_reason_is_written_to_the_record(self):
+        fleet = self.loaded()
+        reason = "the compaction is stalled on CI and this milestone does not touch its tree"
+
+        code, out, err = fleet.run(["dispatch", "--porcelain", "--profile", str(fleet.profile("worker")),
+                                    "--title", "overridden", "--base", FRESH_BASE_DIGITS,
+                                    "--optype", "append", "--cap", "9", "--override", reason])
+
+        self.assertEqual(0, code, err)
+        todo = [l.split("\t")[1] for l in out.splitlines() if l.startswith("todo_id\t")][0]
+        record = [r for r in fleet.store.all() if r.todo_id == todo][0]
+        self.assertEqual(reason, record.override_reason,
+                         "the override reason is not on the record, so the audit trail is terminal scrollback")
+
+    def test_a_dispatch_with_no_override_records_an_empty_reason(self):
+        """The field must not acquire a value nobody asked for: an unset override is empty, not a placeholder
+        that later reads as a decision somebody made."""
+        fleet = self.loaded()
+
+        code, out, err = fleet.run(["dispatch", "--porcelain", "--profile", str(fleet.profile("worker")),
+                                    "--title", "notOverridden", "--base", FRESH_BASE_DIGITS,
+                                    "--optype", "append"])
+
+        self.assertEqual(0, code, err)
+        todo = [l.split("\t")[1] for l in out.splitlines() if l.startswith("todo_id\t")][0]
+        record = [r for r in fleet.store.all() if r.todo_id == todo][0]
+        self.assertEqual("", record.override_reason)
+
+
+class TestADeclarationIsNeverEmpty(CliCase):
+    """`SI-36`, found by `§G6`. `declare --phase ""` exited 0 and silently cleared the phase — and did
+    something worse than that.
+
+    `_normalise_phase("")` returns `""`, which is not `None`, so `set_phase` stored it and the handler's own
+    guard (`if value is None`) never fired. The consequence was not merely a wrong exit code: `near_miss_rows`
+    skipped every line while a phase was stored, so an empty declaration bought SILENCE FROM THE RCF-9 LINT
+    while buying no exclusion from the cap, which still compares against `awaiting-ci`.
+    """
+
+    def test_an_empty_phase_is_refused(self):
+        fleet = self.loaded()
+        ready = str(fleet.paths["readyWorker"])
+        fleet.run(["declare", "--instant", ready, "--phase", "AWAITING-CI"])
+        before = Declarations(fleet.paths["readyWorker"]).phase()
+        self.assertEqual("awaiting-ci", before, "this test needs a standing declaration to be meaningful")
+
+        code, out, err = fleet.run(["declare", "--instant", ready, "--phase", ""])
+
+        self.assertEqual(2, code, "an empty phase was accepted")
+        self.assertEqual(before, Declarations(fleet.paths["readyWorker"]).phase(),
+                         "the standing declaration was cleared by an empty one")
+
+    def test_whitespace_only_is_refused_too(self):
+        """`_normalise_phase` collapses whitespace, so `"   "` also normalises to nothing — and a check that
+        only tested `""` would miss the shape a human actually types."""
+        fleet = self.loaded()
+        code, out, err = fleet.run(["declare", "--instant", str(fleet.paths["readyWorker"]),
+                                    "--phase", "   "])
+        self.assertEqual(2, code)
+
+    def test_a_stored_empty_phase_cannot_suppress_the_near_miss_rule(self):
+        """The second door. `declare` now refuses an empty phase, but a store written by an older build can
+        still carry one, and the rule must not go quiet because of it."""
+        fleet = self.loaded()
+        child = fleet.paths["readyWorker"]
+        Declarations(child).set_phase("")
+        (child / "HANDOFF.md").write_text("Updated: now\n\n## Phase: AWAITING-CI\n")
+
+        code, out, err = fleet.run(["lint", "--instant", str(child), "--porcelain"])
+
+        self.assertIn(cli.NEAR_MISS, out,
+                      "a stored EMPTY phase suppressed the near-miss rule; only a real phase may do that")
+
+
+class TestTheNearMissRuleReadsShapeAndRetraction(CliCase):
+    """`§G3`. The rule flagged 2 of 4 declaration shapes: emphasis was permitted only BEFORE the word, and
+    the value was anchored at end of line.
+
+    Closing the trailing-prose gap alone would have broken `G4`, whose fixture — a retraction — is also
+    value-then-prose. A shape-only rule cannot separate them, so the rule reads the tail for retraction
+    language. That is a heuristic and is documented as one; the cheaper error is exempting a retraction
+    wrongly, because a lint that cries wolf over every retraction gets switched off.
+    """
+
+    def _lint(self, fleet, body):
+        child = fleet.paths["readyWorker"]
+        (child / "HANDOFF.md").write_text("Updated: now\n\n" + body + "\n")
+        return fleet.run(["lint", "--instant", str(child), "--porcelain"])
+
+    def test_all_four_declaration_shapes_are_flagged(self):
+        fleet = self.loaded()
+        for shape in ("## Phase: AWAITING-CI",
+                      "    Phase: AWAITING-CI",
+                      "## **Phase:** AWAITING-CI",
+                      "- **Phase**: AWAITING-CI",
+                      "## Phase: AWAITING-CI — waiting on the CI queue"):
+            with self.subTest(shape=shape):
+                code, out, err = self._lint(fleet, shape)
+                self.assertIn(cli.NEAR_MISS, out,
+                              f"the shape {shape!r} was not flagged; an author who writes it is not told")
+
+    def test_a_retraction_is_not_flagged(self):
+        """`G4`'s fixture, and the reason the rule cannot be shape-only."""
+        fleet = self.loaded()
+        for retraction in ("Phase: AWAITING-CI was declared and is now REMOVED",
+                           "`Phase: AWAITING-CI` — retracted, no longer in effect"):
+            with self.subTest(retraction=retraction):
+                code, out, err = self._lint(fleet, retraction)
+                self.assertNotIn(cli.NEAR_MISS, out,
+                                 f"the retraction {retraction!r} was flagged; a naive version of this rule "
+                                 f"fired on 5 of 5 live instants for exactly this reason")
+
+    def test_a_real_declaration_silences_the_rule(self):
+        """It is a RULE, not a grep: the same line with a declaration behind it is not a near miss."""
+        fleet = self.loaded()
+        child = fleet.paths["readyWorker"]
+        fleet.run(["declare", "--instant", str(child), "--phase", "AWAITING-CI"])
+
+        code, out, err = self._lint(fleet, "## Phase: AWAITING-CI")
+
+        self.assertNotIn(cli.NEAR_MISS, out)

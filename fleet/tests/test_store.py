@@ -1,4 +1,4 @@
-import json, pathlib, tempfile, unittest
+import json, pathlib, shutil, tempfile, unittest
 from fleet.store import SCHEMA_VERSION, Record, Store, Declarations
 from fleet.errors import AmbiguousId, BadInput
 
@@ -105,3 +105,48 @@ class TestDeclarations(unittest.TestCase):
                 super()._save(data)
 
         self.assertEqual(LossyChannel(self.instant).set_phase("awaiting-ci"), "## awaiting-ci")
+
+
+class TestACorruptFileIsRefusedByName(unittest.TestCase):
+    """`SI-35`. Three bare `json.loads` calls in this module meant one truncated file raised
+    `JSONDecodeError` out of `Store.all()` — which every view calls, so `board`, `status` and `reap` all
+    died with a traceback rather than naming the file. Found by `§O1`.
+
+    Those are the verbs you reach for when the store is already in a state you do not understand, so a
+    traceback is the least useful answer available.
+    """
+
+    def setUp(self):
+        self.tmp = pathlib.Path(tempfile.mkdtemp(prefix="fleet-store-corrupt-"))
+        self.addCleanup(shutil.rmtree, self.tmp, ignore_errors=True)
+        self.records = self.tmp / "records"
+        self.records.mkdir()
+
+    def test_all_refuses_a_truncated_record_and_names_the_file(self):
+        (self.records / "truncated.json").write_text('{"todo_id": "truncated", "child_ins')
+
+        with self.assertRaises(BadInput) as caught:
+            Store(self.tmp).all()
+
+        self.assertIn("truncated.json", str(caught.exception),
+                      "the refusal must name the file, or the operator cannot act on it")
+
+    def test_read_refuses_a_truncated_record_and_names_the_file(self):
+        (self.records / "one.json").write_text("not json")
+
+        with self.assertRaises(BadInput) as caught:
+            Store(self.tmp).read("one")
+
+        self.assertIn("one.json", str(caught.exception))
+
+    def test_a_corrupt_record_is_refused_and_NOT_treated_as_absent(self):
+        """The distinction the fix rests on: skipping it would hide a dispatched worker from the cap and from
+        the board, which is worse than stopping."""
+        (self.records / "good.json").write_text(json.dumps(
+            Record(todo_id="good", child_instant="/x", base_instant="00000000", slot="ws1", tmux="dt-x",
+                   profile="p", golden="g", lineage_base="", title="t",
+                   dispatched_at="2026-07-31T00:00:00Z").to_json()))
+        (self.records / "bad.json").write_text("{oh no")
+
+        with self.assertRaises(BadInput):
+            Store(self.tmp).all()
