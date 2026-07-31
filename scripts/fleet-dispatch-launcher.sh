@@ -68,6 +68,28 @@ CONFIG_DIR="$("$RESOLVER" "$SLOT")" || {
   exit 1
 }
 
+OWNER_EMAIL="$("$RESOLVER" --email "$SLOT" 2>/dev/null)"
+
+# --- the gh identity, by the same rule and for the same reason ---------------------------------------
+# `gh` picks its account from a shared ~/.config/gh/hosts.yml whose ACTIVE account is whoever switched
+# last, and the per-operator override is an `export GH_TOKEN` in a shell rc that only sources for
+# INTERACTIVE shells inside the owner's root. Measured on 2026-07-31:
+#
+#     zsh -l -i -c  'echo $GH_TOKEN'   -> set
+#     zsh -c        'echo $GH_TOKEN'   -> UNSET          <- what tmux and every tool-spawned shell use
+#     gh api user   (non-interactive)  -> chinmay291     <- somebody else entirely
+#
+# That is the third instance of one pattern today: an identity guard implemented as interactive shell
+# config, silently bypassed by automation. A worker that opens a PR would open it as the wrong person, and
+# a PR is outward-facing and awkward to withdraw.
+#
+# The token file is named for the owner root, so this stays a rule rather than a special case:
+# /home/ubuntu/davis_root -> $HOME/.gh-token-davis. Absent, GH_TOKEN is left ALONE rather than blanked --
+# a worker whose owner has no token file should fall back to whatever the environment already provides,
+# and be told, not silently handed an empty credential.
+OWNER_SLUG="$(basename "$(dirname "$CONFIG_DIR")")"; OWNER_SLUG="${OWNER_SLUG%_root}"
+GH_TOKEN_FILE="$HOME/.gh-token-$OWNER_SLUG"
+
 REAL_CLAUDE="${REAL_CLAUDE:-/home/ubuntu/.local/bin/claude}"
 [ -x "$REAL_CLAUDE" ] || { echo "$(basename "$0"): no real claude at $REAL_CLAUDE" >&2; exit 1; }
 
@@ -83,6 +105,13 @@ cat > "$DIR/bin/claude" <<WRAP
 set -uo pipefail
 
 export CLAUDE_CONFIG_DIR="$CONFIG_DIR"
+export CLAUDE_OWNER_EMAIL="$OWNER_EMAIL"
+
+# Read at RUN time, not baked in at generation time: a token belongs in a mode-600 file, and a copy of it
+# inside a generated script is a second place to rotate and a second place to leak.
+if [ -r "$GH_TOKEN_FILE" ]; then
+  GH_TOKEN="\$(cat "$GH_TOKEN_FILE")"; export GH_TOKEN
+fi
 
 # --- passthrough: any invocation after the first is NOT a dispatch -----------------------------------
 # A plugin hook, a subagent, a \`claude --version\` -- they must get the real binary with their own args.
