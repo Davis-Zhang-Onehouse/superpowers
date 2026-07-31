@@ -1,5 +1,0 @@
-case	verdict	evidence	note
-ISOLATION-RMW-enter	PASS		live stores byte-identical; live tmux session set byte-identical (3 sessions, incl. 0 dt-); section work is on socket itfleet-RMW
-RMW-review	PASS	evidence/04-integration/RMW/out/review-per-iteration.tsv	n=10 x 6 concurrent review rounds on one instant: every round survived in all 10 exercised iteration(s) (0 lost of 60 ). review._save's read-modify-write did NOT lose a write under this load
-RMW-roadmap	PASS	evidence/04-integration/RMW/out/roadmap-per-iteration.tsv	n=10 x 6 concurrent Roadmap.add calls on one instant: every milestone survived in all 10 exercised iteration(s) (0 lost of 60 ). roadmap._save's read-modify-write did NOT lose a write under this load
-ISOLATION-RMW-leave	PASS		live stores byte-identical; live tmux session set byte-identical (3 sessions, incl. 0 dt-); section work is on socket itfleet-RMW
