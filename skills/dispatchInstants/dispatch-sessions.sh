@@ -171,7 +171,8 @@ if [ "${#reapable[@]}" -gt 0 ]; then
   {
     echo "${#reapable[@]} FINISHED session(s) past the ${TTL}m TTL still holding a pane:"
     printf '  %s\n' "${reapable[@]}"
-    echo "  reap them:  pdispatch sessions --reap"
+    echo "  reap them:  this tool is RETIRED except for the live claude-watchdog; \`pdispatch\` is gone."
+    echo "              see skills/dispatchInstants/README.md, and \`fleet reap\` for the replacement."
     echo "  (transcripts persist under ~/.claude/projects/ — closing a pane loses context, not history)"
   } >&2
   exit 1
