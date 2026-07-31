@@ -1,0 +1,71 @@
+# fleet-env.sh — the shell settings and helpers for working with any fleet on this box.
+#
+#     . /home/ubuntu/davis_root/superpowers/scripts/fleet-env.sh
+#     . /home/ubuntu/davis_root/superpowers/scripts/fleet-env.sh <instants-dir>
+#
+# Source it; do not execute it. Nothing here is specific to an effort — the first form is enough to
+# OBSERVE any fleet (`fleet-view`, `board`, `leases`, `status`, attaching to a session). Pass an
+# instants directory only when you intend to CREATE instants there (`init`, `dispatch`).
+#
+# Why observation needs no instants directory: a dispatch record stores an ABSOLUTE `child_instant`, and
+# `reconcile` re-resolves it through the stable key so it follows the worker's own rename. `FLEET_INSTANTS`
+# is where NEW instants get made, not where existing ones are found.
+#
+# Each setting is defaulted, never forced, so an effort that wants a different store just exports it first.
+
+# The record + pool store. Box-wide on purpose: the pool is ws1..ws6, a shared resource, and the watchdog
+# reads the same store to decide which finished workers to stop auto-resuming. `fleet`'s read-only verbs
+# already default here; it is stated anyway because a WRITE with no store named is refused outright, and
+# "no default for a write" is much easier to live with when the read path and the write path agree.
+export FLEET_HOME="${FLEET_HOME:-$HOME/.fleet}"
+
+# The tmux SERVER dispatched sessions live on. Not the default server, deliberately:
+#   * `close`/`harvest`/`abort` kill sessions BY NAME, and on the default server that name resolves
+#     alongside other people's live work. A private server bounds the blast radius.
+#   * a tmux session inherits the environment of the SERVER, not of the process asking for the session, so
+#     a long-lived default server hands new sessions whatever environment it was started with. On this box
+#     that put a dispatched coordinator under another operator's Claude account.
+# Attaching still works, it just needs the flag:  tmux -L "$FLEET_TMUX_SOCKET" attach -t dt-<name>
+export FLEET_TMUX_SOCKET="${FLEET_TMUX_SOCKET:-fleet}"
+
+case ":$PATH:" in
+  *":/home/ubuntu/davis_root/superpowers/bin:"*) ;;
+  *) export PATH="/home/ubuntu/davis_root/superpowers/bin:$PATH" ;;
+esac
+
+# Only when you are going to create instants. Given as an argument so no effort's path is baked in here.
+if [ -n "${1:-}" ]; then
+  export FLEET_INSTANTS="$1"
+fi
+
+# --- helpers -----------------------------------------------------------------------------------------
+
+# The CURRENT instant folder for a subject id. Use this instead of globbing an instants directory: an
+# aborted run leaves `...-abort-append-<name>` beside `...-inflight-append-<name>`, and it sorts FIRST, so
+# a glob hands you the dead one and every `--instant` read after it describes the wrong folder.
+fleet_instant() {
+  [ -n "${1:-}" ] || { echo "usage: fleet_instant <subject-id>" >&2; return 2; }
+  fleet status --id "$1" --porcelain 2>/dev/null | awk -F'\t' '$1=="evidence.instant"{print $2}'
+}
+
+# Every running subject: "<id>\t<slot>".
+fleet_running() {
+  fleet board --porcelain 2>/dev/null | awk -F'\t' '$3=="RUNNING"{print $1"\t"$5}'
+}
+
+# Read a pane WITHOUT attaching. The trailing colon on the target is required: `-t '=name'` returns an
+# EMPTY string for a session that exists, so a check written without it passes vacuously.
+fleet_peek() {
+  [ -n "${1:-}" ] || { echo "usage: fleet_peek <session> [lines]" >&2; return 2; }
+  tmux -L "${FLEET_TMUX_SOCKET:-fleet}" capture-pane -p -t "=$1:" | grep -v '^$' | tail -"${2:-30}"
+}
+
+# Attach to a dispatched session without having to remember the -L.
+fleet_attach() {
+  [ -n "${1:-}" ] || { tmux -L "${FLEET_TMUX_SOCKET:-fleet}" ls; return 0; }
+  tmux -L "${FLEET_TMUX_SOCKET:-fleet}" attach -t "=$1"
+}
+
+# `fv` is a convenience for interactive shells only; scripts should call `fleet-view` directly, since an
+# alias does not exist in a non-interactive shell.
+alias fv='fleet-view' 2>/dev/null || true
