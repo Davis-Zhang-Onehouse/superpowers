@@ -29,6 +29,9 @@ Three facts define the role, and each is a mechanism rather than a resolution:
 The verb surface, exit codes, porcelain schema and store environment are in **superpowers:using-fleet**.
 Read it once; this skill does not restate it.
 
+**If you were dispatched by `fleet dispatch`, your cwd is the leased SLOT and not your instant folder**, so
+`--instant .` names the wrong directory. Your seed exports `$INSTANT`; every command below uses it.
+
 **Announce at start:** "I'm using the coordinating-instants skill to coordinate this effort."
 
 ## The loop
@@ -38,15 +41,23 @@ are long-lived and will restart mid-effort, and memory is not a source.
 
 | Phase | What you type | Why it is not optional |
 |---|---|---|
-| **Observe** | `fleet board --porcelain`, `fleet leases --porcelain`, `fleet roadmap --instant . --porcelain` | Three different questions: who holds a slot, what slots exist, what work exists. Reading one and inferring the others is how a worker gets dispatched onto an unlanded base. |
+| **Observe** | `fleet board --porcelain`, `fleet leases --porcelain`, `fleet roadmap --instant "$INSTANT" --porcelain` | Three different questions: who holds a slot, what slots exist, what work exists. Reading one and inferring the others is how a worker gets dispatched onto an unlanded base. |
 | **Reconcile** | `fleet reconcile --porcelain`, `fleet reap --all` | `reap` recovers a slot whose writer died; skipping it leaks capacity silently. A live session the board cannot account for is reported to you, never reaped <!-- v2-cite: unclaimed-session-never-reaped J7 --> — one such stray sat idle for eight days, invisible to every records-first check. |
 | **Decide** | *nothing* — read the `ready` rows | Readiness is derived. A row you believe is ready whose dependency has not landed is not ready, and the row says which dependency. |
-| **Raise** | `fleet milestone --instant . --id <x> --title "<what it is>" --dep <y>` | The only way work becomes dispatchable. Every `--dep` must already be on the roadmap, and is checked at the moment you type it — a typo'd dependency is not an error later, it is a milestone that reads as permanently in progress. Add dependencies in order. |
+| **Raise** | `fleet milestone --instant "$INSTANT" --id <x> --title "<what it is>" --dep <y>` | The only way work becomes dispatchable. Every `--dep` must already be on the roadmap, and is checked at the moment you type it — a typo'd dependency is not an error later, it is a milestone that reads as permanently in progress. Add dependencies in order. |
 | **Dispatch** | `fleet dispatch --profile <dir> --title <t> --base <b> --optype append --from . --milestone <m> --lineage-base "repo=<sha>" --cap <n>` | One command claims the lease, creates the instant, renders the charter and seed, records `origin.json` so the worker's reports reach *your* roadmap, and claims the milestone. State the cap you want; do not police it. A compaction present only as a folder still freezes every dispatch in the effort <!-- v2-cite: folder-compaction-freezes F11 --> and a worker that has declared `awaiting-ci` no longer counts against the cap <!-- v2-cite: declaration-does-free-the-cap F2 --> — both are computed, not remembered. The `--lineage-base` you type is the single authority: it is rendered into the seed and the charter, and a claim of done from a slot that is not there is refused. <!-- v2-cite: done-from-wrong-base-refused LB2 --> |
-| **Receive** | `fleet roadmap --instant . --porcelain` shows the pending proposal → `fleet apply --instant . --milestone <m>` | `apply` moves the status, carries the evidence onto the milestone, and consumes the proposal, so replaying your inbox cannot apply the same report twice. Readiness recomputes and the dependent rows open. |
+| **Receive** | `fleet roadmap --instant "$INSTANT" --porcelain` shows the pending proposal → `fleet apply --instant "$INSTANT" --milestone <m>` | `apply` moves the status, carries the evidence onto the milestone, and consumes the proposal, so replaying your inbox cannot apply the same report twice. Readiness recomputes and the dependent rows open. |
 | **Escalate** | `fleet park --instant <w> --question "<the fork>"` / `fleet unpark --instant <w>` | A blocked worker becomes a named question instead of a stalled pane. Most parked forks are yours to answer; escalate only the operator-only ones. |
 | **Abandon** | `fleet abort --instant <w> --reason "<why>"` | A reason is mandatory, and the abort releases the milestone's claim so the work is re-dispatchable. |
 | **Close out** | `fleet review --instant <w> --scope all --verdict READY` → the worker's own `fleet complete` → `fleet harvest --id <todo>` | `review` gates `complete`, and the **rename is the state transition** — the one signal a worker cannot fake with a document. `harvest` applies the remaining proposals, kills the session, stamps the record and releases the slot as one transaction; a crash part-way through does not leave a free slot holding an in-flight record. <!-- v2-cite: harvest-commits-whole J2 --> It also refuses to close a pane holding unsubmitted input, so teardown never discards a worker's last turn. <!-- v2-cite: close-refuses-queued-pane J8 --> |
+
+**Closing out is four steps, not three, and the fourth is a wait.** A worker that has renamed itself
+`-complete-` may still be mid-turn, and `close` refuses one: *"still offering a way to interrupt, so closing it
+now ends a turn in progress and whatever that turn had not yet written down."* Poll the contract before you
+close — `fleet pane-guard --pane <session>`, where `10` (queued text) and `11` (mid-turn) mean wait, and `0`,
+`12` or `13` mean the pane can go. Then `close`, then `harvest`. Finishing the work and finishing the turn are
+different moments; conflating them means either a refusal or a `--force` you did not need.
+<!-- v2-cite: close-refuses-queued-pane J8 -->
 
 Two verbs answer specific questions when the loop is not enough: `fleet status --id <todo>` for one subject in
 full, and `fleet compaction-status` for what is holding dispatch.
