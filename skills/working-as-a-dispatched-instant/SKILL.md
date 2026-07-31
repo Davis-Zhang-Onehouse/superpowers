@@ -24,7 +24,12 @@ command its message names and move on; what follows is only what no mechanism ca
 
 Run both before you touch any code. Both are read-only.
 
-### 1. `fleet brief --instant .`
+### 1. `fleet brief --instant "$INSTANT"`
+
+**Your cwd is the leased SLOT, not your instant folder.** `fleet dispatch` starts you in the workspace it
+leased — that is the point of a pool, you land in prebuilt code — while your instant folder (`CHARTER.md`,
+`HANDOFF.md`, `evidence/`, `.fleet/`) lives elsewhere. So `--instant .` names the slot and every verb refuses
+it. Your seed exports the right path as `$INSTANT`; if it is not set, read it from `.fleet/seed.txt`.
 
 One screen, one row per question you would otherwise guess at:
 
@@ -45,6 +50,11 @@ Do not hand-parse `.fleet/origin.json` instead: `brief` reads every field throug
 verbs read, so what it prints is what the gate will decide on.
 
 ### 2. `fleet base-check --id <your todo id>`
+
+**Note the flag: `--id`, not `--instant`.** This is the one verb whose subject is your *todo id* rather than
+your instant path, because it asks about the SLOT your record points at rather than about the instant folder.
+`fleet brief` prints the whole command with your id already filled in, and `CHARTER.md` carries it on its
+`Todo id:` line.
 
 Your todo id is on `CHARTER.md`'s `Todo id:` line, and `brief`'s `outstanding` row prints this command with it
 already filled in. Your slot is a **duplicate of the golden checkout, and nothing moved it to your base.** The
@@ -81,31 +91,50 @@ after you report into it, and your proposal arrives attributed to *you*.
 **Report.** Progress reaches the coordinator as an attributed proposal carrying evidence:
 
 ```bash
-fleet propose --instant . --milestone <m> --status running     --evidence evidence/03-build/build.log
-fleet propose --instant . --milestone <m> --status awaiting-ci --evidence evidence/05-ci/checks.txt
+fleet propose --instant "$INSTANT" --milestone <m> --status running     --evidence evidence/03-build/build.log
+fleet propose --instant "$INSTANT" --milestone <m> --status awaiting-ci --evidence evidence/05-ci/checks.txt
 ```
 
 `running` → `awaiting-ci` → `done`. No `--to` is needed — the destination is a fact in `origin.json`, written
 by the dispatcher. Evidence is mandatory: an empty list is refused at the producer for all three shapes of
 empty, because a proposal with no evidence is a claim rather than a report.
 <!-- v2-cite: evidence-is-mandatory H4 -->
-When the work waits on CI rather than on you, say so: `fleet declare --instant . --phase awaiting-ci` is the
+When the work waits on CI rather than on you, say so: `fleet declare --instant "$INSTANT" --phase awaiting-ci` is the
 phase the WIP cap excludes, so declaring it frees the coordinator to dispatch the next milestone.
 
 **Get stuck.** A decision only the operator can make is a parked question, never a stalled pane:
 
 ```bash
-fleet park --instant . --question "which baseline is the ruler for the regression numbers?"
+fleet park --instant "$INSTANT" --question "which baseline is the ruler for the regression numbers?"
 ```
 
-Carry on with anything the answer does not block, and `fleet unpark --instant .` once it is answered.
+Carry on with anything the answer does not block, and `fleet unpark --instant "$INSTANT"` once it is answered.
 
 **Finish.** Three commands, in this order:
 
 ```bash
-fleet review --instant . --scope all --verdict READY --finding "RV-1:info:closed:evidence/INDEX.md:every AC has an artifact:none"
-fleet propose --instant . --milestone <m> --status done --evidence evidence/INDEX.md
-fleet complete --instant .
+fleet review --instant "$INSTANT" --scope all --verdict READY \
+  --finding "RV-1:Minor:applied:evidence/INDEX.md:every AC has an artifact:none"
+```
+
+`--finding` is six colon-separated fields — `id:severity:status:location:finding:action` — and every one is
+required, because a finding with no location is a feeling and a finding with no action asks the reader to
+invent the remedy. **Two of them are closed domains and a value outside them is refused with exit 2:**
+
+| Field | Allowed |
+|---|---|
+| `severity` | `Critical` · `Important` · `Minor` · `Nit` — capitalised |
+| `status` | `open` · `applied` · `wont-fix` |
+| `--verdict` | `READY` · `READY-WITH-FIXES` · `NOT-READY` |
+| `--scope` | `format` · `alignment` · `code` · `all` |
+
+Interrogate it first if you are unsure — `fleet review … --dry-run` validates the input, writes nothing, and
+exits 0 when the round would be recorded. The gate row it prints reflects the ledger *without* your round, so
+a first round reads `UNDECIDABLE` there; that is the current state, not a verdict on what you typed.
+
+```
+fleet propose --instant "$INSTANT" --milestone <m> --status done --evidence evidence/INDEX.md
+fleet complete --instant "$INSTANT"
 ```
 
 `review` gates `complete`, and with no round on file the gate answers UNDECIDABLE rather than NOT-READY —

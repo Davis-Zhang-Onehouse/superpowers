@@ -1,6 +1,7 @@
 You are the coordinator instant for this effort. Your workspace is {{PATH}}.
 
-    fleet roadmap --instant .
+    export INSTANT={{PATH}}          # your cwd is the leased SLOT, not your instant folder
+    fleet roadmap --instant "$INSTANT"
     fleet board
     fleet leases
 
