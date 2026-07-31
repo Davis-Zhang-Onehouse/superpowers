@@ -175,6 +175,35 @@ def table(rows, columns, note_column=None, wide=False):
     return out
 
 
+def blocks(entries):
+    """One block per row: a headline, a metadata line, then the note in full.
+
+    A table is the wrong shape for these. Its column width is set by the LONGEST value, so one three-
+    sentence `UNREACHABLE` explanation either squeezes every other column or gets cut — and the note is
+    the part you actually came to read. `reconcile`'s notes are prose by design (they name what was
+    measured and what clears it), so they get the width of the terminal instead of the leftovers.
+
+    Slots stay a table: short, uniform, scannable, and nothing there is prose.
+    """
+    out, w = [], width()
+    # Width from the data, not a guess: `pending-proposal` is 16 and a hardcoded 11 silently ragged every
+    # roadmap row.
+    sw = max((len(e["state"]) for e in entries), default=0)
+    for e in entries:
+        style, glyph = e["style"], e["glyph"]
+        pad = " " * max(0, sw - len(e["state"]))
+        out.append(f"  {glyph}  {style(e['state'])}{pad}  {BOLD(e['subject'])}")
+        meta = " · ".join(x for x in e["meta"] if x)
+        if meta:
+            out.append(DIM(f"        {meta}"))
+        note = (e.get("note") or "").strip()
+        if note and note != "-":
+            for line in wrap(note, w - 8, 0):
+                out.append(DIM(f"        {line}"))
+        out.append("")
+    return out[:-1] if out else ["  (nothing)"]
+
+
 # --- views -------------------------------------------------------------------------------------------
 
 def _collapse(rows):
@@ -210,20 +239,17 @@ def view_board(wide):
     rows = _collapse(rows)
     if not rows:
         return ["  (no subjects)"], err
-    body = []
+    entries = []
     for r in rows:
         state = r.get("state", "")
         style, glyph = STATE_STYLE.get(state, (lambda t: t, " "))
         note = r.get("note", "")
         pid = r.get("_folded_pid")
         if pid and f"pid {pid}" not in note:
-            # UNREACHABLE already names the holder pid in its own note; prefixing it again is how a
-            # summary starts reading like a stutter and stops being read at all.
             note = f"pid {pid} · {note}" if note.strip() else f"pid {pid}"
-        body.append({"": glyph, "state": state, "slot": r.get("slot", ""),
-                     "milestone": r.get("milestone", ""), "subject": r.get("identity", ""),
-                     "note": note, "_style": style, "_style_col": "state"})
-    return table(body, ("", "state", "slot", "milestone", "subject"), "note", wide), err
+        entries.append({"state": state, "subject": r.get("identity", ""), "style": style, "glyph": glyph,
+                        "meta": [r.get("slot", ""), r.get("milestone", "")], "note": note})
+    return blocks(entries), err
 
 
 def view_leases(wide):
@@ -249,13 +275,14 @@ def view_roadmap(wide, extra):
     rows, err, rc = run("roadmap", extra)
     if rc != 0 and not rows:
         return ["  " + DIM((err or "roadmap needs --instant").strip().splitlines()[-1][:width() - 4])], ""
-    body = []
+    entries = []
     for r in rows:
         sev = r.get("severity", "")
         style = RED if sev == "violation" else (YELLOW if sev == "attention" else DIM)
-        body.append({"kind": style(r.get("kind", "")), "subject": r.get("subject", ""),
-                     "detail": r.get("detail", "")})
-    return table(body, ("kind", "subject"), "detail", wide), err
+        glyph = "!" if sev == "violation" else ("•" if sev == "attention" else "·")
+        entries.append({"state": r.get("kind", ""), "subject": r.get("subject", ""), "style": style,
+                        "glyph": glyph, "meta": [r.get("clears_who", "")], "note": r.get("detail", "")})
+    return blocks(entries), err
 
 
 def main():
@@ -276,7 +303,9 @@ def main():
     else:
         # The single most common reason this view looks wrong, so it is stated up front rather than
         # inferred from a row that says UNREACHABLE.
-        head += " · " + YELLOW("no FLEET_TMUX_SOCKET — sessions on a private server will read UNREACHABLE")
+        head += " · " + YELLOW("no FLEET_TMUX_SOCKET: dispatched sessions read UNREACHABLE. "
+                               "Fix: open a new shell in davis_root, or "
+                               "`source ~/davis_root/superpowers/scripts/fleet-env.sh`")
     # The header wraps like everything else. It is the longest line on an otherwise-empty fleet, and an
     # overflowing header is the first thing a reader sees go wrong.
     print(DIM("\n".join(wrap(head, width(), 0))))
