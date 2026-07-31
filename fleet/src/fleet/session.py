@@ -66,9 +66,22 @@ _PLACEHOLDERS = (
 )
 
 #: A pane is busy when it is still offering a way to interrupt the work.
+#: What a pane shows while it is WORKING. `SI-37`: "esc to cancel" was here and is not that — it is what a
+#: MODAL offers while it waits for a human to choose. The two read alike and mean opposite things: one says
+#: "a turn is in flight, your send will queue behind it", the other says "nothing will happen until somebody
+#: answers me".
+#:
+#: The cost was measured on the first production dispatch. A fresh claude in an untrusted directory shows
+#: "Is this a project you created or one you trust?" with "Enter to confirm · Esc to cancel". `busy` matched,
+#: so `pane-guard` said `11 mid-turn` and `reconcile` said RUNNING — for a session that had not started and
+#: never would. A coordinator following the documented loop waits forever on a pane needing one keystroke.
+#:
+#: Removing it costs nothing, because `unsubmitted` ALREADY detects the modal's selected line as text in the
+#: input position. With `busy` no longer firing, the guard reaches its queued-text branch and `_live_state`
+#: reaches BLOCKED — "the pane is waiting on a human", which is exactly what a trust modal is. It stays in
+#: `CLAUDE_MARKERS`: a modal is still a claude pane, it is just not a busy one.
 _BUSY_MARKERS = (
     "esc to interrupt",
-    "esc to cancel",
     "ctrl+c to stop",
 )
 
@@ -246,6 +259,24 @@ class SessionLayer:
         if not box or _is_placeholder(box):
             return None
         return box
+
+    def is_claude_process(self, name: str) -> bool:
+        """Whether a live CLAUDE PROCESS is attributed to this session.
+
+        `SI-38`. Process evidence, not screen scraping. `live()` comes from `pgrep -x claude` joined to
+        tmux pane ownership, so a True here means a real claude is running in that session — a fact no
+        amount of scrollback can change.
+
+        This exists because the glyph test cannot answer it. A pane's markers ("esc to interrupt",
+        "? for shortcuts", …) are UI chrome that scrolls away: a long answer followed by an idle prompt
+        contains none of them, and a claude idle for twenty minutes was classified `12 not-claude` on a
+        live coordinator whose pid was verified alive in the same breath. `12` is one of the codes the
+        close-out contract treats as "the pane can go", and its own text says "a send here goes to
+        somebody else's shell" — both false, in the dangerous direction.
+        """
+        if not name:
+            return False
+        return any(session.name == name for session in self.live())
 
     def busy(self, pane_text: str) -> bool:
         """Whether the pane is still working. Anchored to the tail for the same reason as above — an
