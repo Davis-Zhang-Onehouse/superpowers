@@ -132,7 +132,7 @@ destructively — twice, by two actors, one of whom had read the entry that decl
 ## Where the pieces live
 
 ```
-fleet/src/fleet/      the package (30 verbs)
+fleet/src/fleet/      the package (31 verbs)
 fleet/tests/          the hermetic suite
 fleet/it/             the integration harness: run-*.sh, lib.sh, RESULTS.tsv, and four controls in bin/
 bin/fleet             this launcher
