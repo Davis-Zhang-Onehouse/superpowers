@@ -52,10 +52,31 @@ finished="$("$FLEET" reconcile --porcelain 2>/dev/null \
             | awk -F'\t' '($1=="armed" || $1=="unarmed") && $4 ~ /^state COMPLETE,/ { print $2 }')"
 [ -n "$finished" ] || exit 0
 
+# `kind == worker` is then re-asserted, and this is belt-and-braces rather than a fix for a live bug — the
+# distinction is worth stating precisely, because a comment that overclaims is how the next reader loses trust
+# in the rest of them.
+#
+# The state filter alone IS sufficient today: `state COMPLETE` is produced at exactly one place in
+# `reconcile.py`, and only for a `worker` subject. Non-worker kinds get `UNKNOWN_SESSION` or `STALE_LEASE`,
+# never COMPLETE. So nothing else can currently reach the loop below.
+#
+# It is asserted anyway because the sufficiency is a coincidence in ANOTHER module, and one this file cannot
+# see. `reconcile` renders `state <STATE>` at the head of the detail column for every subject regardless of
+# why it declined to arm one, so the moment any non-worker kind gains a folder-derived state, a row beginning
+# `state COMPLETE,` starts meaning something this tool must not act on — and the failure would be invisible,
+# because the watchdog only ever sees a pid, and a pid excluded in error looks exactly like a pid correctly
+# excluded. One field comparison buys immunity to a change made three modules away.
+#
+# Kind is asked of `status`, which emits it as a field, in the pass that already reads the pid. `reconcile`
+# cannot answer it: its own `kind` column carries `armed`/`unarmed`, and a subject's kind reaches that
+# porcelain only inside the refusal prose for non-workers. Matching prose would work today and break the next
+# time somebody rewords a sentence; a field will not.
 for subject in $finished; do
   # `evidence.pid` is empty when no live process matched the record — a finished worker that has already gone
   # needs no exclusion, because there is nothing left to arm.
   "$FLEET" status --id "$subject" --porcelain 2>/dev/null \
-    | awk -F'\t' '$1=="evidence.pid" && $2 ~ /^[0-9]+$/ { print $2 }'
+    | awk -F'\t' '$1=="kind"          { kind = $2 }
+                  $1=="evidence.pid" && $2 ~ /^[0-9]+$/ { pid = $2 }
+                  END { if (kind == "worker" && pid != "") print pid }'
 done | sort -un
 exit 0
