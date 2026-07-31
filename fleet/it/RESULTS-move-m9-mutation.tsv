@@ -1,8 +1,0 @@
-case	verdict	evidence	note
-ISOLATION-M9mut-enter	PASS		live stores byte-identical; live tmux session set byte-identical (3 sessions, incl. 0 dt-); section work is on socket 
-M9-mut-baseline	PASS	fleet/it/M9-mutation/real.out	the real package passes the widened rule: every delete target is DERIVED (by following the assignments, not by matching a substring) from the store root or from that function's own parameters
-M9-mut-1	PASS	fleet/it/M9-mutation/mut1.out	KILLED by the named check (derived neither from the store root): a second assignment putting the delete target under $HOME. Reported SURVIVED-then-KILLED (FI-28's convention): it survived the first rule, which accepted a name if ANY of its assignments looked rooted, and forced the rule to require EVERY assignment to be safe
-M9-mut-2	PASS	fleet/it/M9-mutation/mut2.out	KILLED by the named check (could not name): a delete of an absolute string literal (quoted here as  so the note itself does not trip lint-evidence-paths: the injected call is os.unlink of a hard-coded path under var-tmp). Caught on the UNVERIFIABLE branch, not the unrooted one: a string literal leaves no name to trace, so the audit refuses to vouch for it at all
-M9-mut-3	PASS	fleet/it/M9-mutation/mut3.out	KILLED by the named check (UNDECLARED DELETE SITE): a brand-new delete site the allowlist does not declare — the ceiling itself
-M9-mut-4	PASS	fleet/it/M9-mutation/mut4.out	KILLED by the named check (derived neither from the store root): a delete target read out of os.environ['HOME']
-ISOLATION-M9mut-leave	PASS		live stores byte-identical; live tmux session set byte-identical (3 sessions, incl. 0 dt-); section work is on socket 
