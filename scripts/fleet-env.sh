@@ -33,9 +33,20 @@ case ":$PATH:" in
   *) export PATH="/home/ubuntu/davis_root/superpowers/bin:$PATH" ;;
 esac
 
-# Only when you are going to create instants. Given as an argument so no effort's path is baked in here.
+# Only when you are going to create instants. An argument, so no effort's path is baked into this file.
+#
+# It must be a real directory, and that check is not pedantry. This file is designed to be sourced from a
+# shell rc -- and on this box that rc sources it from INSIDE a function (`_load_davis_root_env`), where
+# `$1` belongs to the function, not to the person sourcing. A stray positional would otherwise silently
+# point FLEET_INSTANTS at nonsense, and the first symptom would be `init` creating an instant somewhere
+# nobody looks. A non-directory argument is reported rather than ignored: a typo'd path the tool quietly
+# discards is the same bug one step later.
 if [ -n "${1:-}" ]; then
-  export FLEET_INSTANTS="$1"
+  if [ -d "$1" ]; then
+    export FLEET_INSTANTS="$1"
+  else
+    echo "fleet-env.sh: '$1' is not a directory; FLEET_INSTANTS left as ${FLEET_INSTANTS:-unset}" >&2
+  fi
 fi
 
 # --- helpers -----------------------------------------------------------------------------------------
