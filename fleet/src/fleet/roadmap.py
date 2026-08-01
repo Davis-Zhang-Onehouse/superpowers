@@ -71,6 +71,31 @@ TERMINAL = ("done", "dropped")
 #: label is simply stale.
 PENDING = ("blocked", "ready")
 
+def _proposer(recorded) -> str:
+    """Where the proposing instant is NOW, not where it was when it proposed.
+
+    `SI-40`. A proposal records the instant's path at propose time, and a worker's completion signal is
+    RENAMING ITS OWN FOLDER — so by the time a coordinator reads its inbox, the most important proposals
+    (the `done` ones) are precisely the ones whose recorded path no longer exists. Observed on the first
+    production effort: every pending row cited
+    `…-07310400-inflight-append-splitproposaldigestrcompact` while the folder on disk was `-complete-`.
+
+    Nothing was broken by it — `p.instant` is used ONLY in this string, and `apply` re-resolves through
+    the stable key like everything else. But this row is what a human reads before deciding to apply, and
+    handing them a path that does not resolve, in a protocol whose premise is "evidence, with a path behind
+    it", teaches them the paths are decorative.
+
+    The recorded value is still in the proposal JSON, so nothing is lost for forensics. When the folder
+    cannot be found at all the recorded path is shown and SAID to be missing — a resolver that silently
+    substitutes its input is worse than one that admits it failed.
+    """
+    recorded = Path(recorded)
+    found = resolve(recorded)
+    if found is None:
+        return f"{recorded} (no longer on disk)"
+    return str(found)
+
+
 NOT_READY, PENDING_PROPOSAL, POPULATION = "not-ready", "pending-proposal", "population"
 
 ATTENTION, INFO = "attention", "info"
@@ -383,7 +408,7 @@ class Roadmap:
         for p in pending:
             rows.append(Row(
                 kind=PENDING_PROPOSAL, subject=p.milestone,
-                detail=(f"{p.instant} proposes {p.milestone} -> {p.status} at {p.at} with "
+                detail=(f"{_proposer(p.instant)} proposes {p.milestone} -> {p.status} at {p.at} with "
                         f"{len(p.evidence)} evidence item(s); the roadmap is UNCHANGED until the "
                         "coordinator applies it"),
                 severity=ATTENTION,
