@@ -74,7 +74,7 @@ from fleet.reconcile import COMPLETE, KIND_WORKER, reconcile
 from fleet.review import Finding, Review, exit_code_for
 from fleet import origin as origin_mod
 from fleet.origin import Origin
-from fleet.roadmap import TERMINAL, Milestone, Roadmap
+from fleet.roadmap import COORDINATOR, TERMINAL, Milestone, Roadmap
 from fleet.session import SessionLayer, default_probes
 from fleet.store import Declarations, Record, Store
 from fleet.workspace import GOLDEN_FILE, Workspace, default_git
