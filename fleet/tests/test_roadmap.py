@@ -19,6 +19,7 @@ coordinator about updating roadmap status."* Three properties carry the weight a
 """
 import json
 import pathlib
+import shutil
 import tempfile
 import unittest
 
@@ -225,3 +226,46 @@ class TestPopulation(RoadmapCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class TestProposalCitesTheCurrentFolder(unittest.TestCase):
+    """`SI-40`. A pending-proposal row must name where the proposer is NOW.
+
+    A worker's completion signal is renaming its own folder, so the `done` proposals -- the ones a
+    coordinator most needs to act on -- are exactly the ones whose recorded path has gone stale.
+    """
+
+    def setUp(self):
+        self.tmp = pathlib.Path(tempfile.mkdtemp())
+        self.coord = self.tmp / "00000000-07310348-inflight-append-coord"
+        (self.coord / ".fleet").mkdir(parents=True)
+        self.worker = self.tmp / "00000000-07310400-inflight-append-w"
+        (self.worker / ".fleet").mkdir(parents=True)
+
+    def tearDown(self):
+        shutil.rmtree(self.tmp, ignore_errors=True)
+
+    def _row(self):
+        r = Roadmap(self.coord)
+        r.add(Milestone(id="m1", title="a milestone", status="blocked", deps=[], evidence=[]))
+        r.propose(self.worker, "m1", "done", ["evidence/INDEX.md"])
+        return [row for row in r.report() if row.kind == PENDING_PROPOSAL][0]
+
+    def test_the_row_follows_the_workers_rename(self):
+        renamed = self.tmp / "00000000-07310400-complete-append-w"
+        self.worker.rename(renamed)
+        detail = self._row().detail
+        self.assertIn("-complete-append-w", detail,
+                      "the row must cite the folder that exists, not the one recorded at propose time")
+        self.assertNotIn("-inflight-append-w ", detail + " ")
+
+    def test_an_unrenamed_proposer_is_unchanged(self):
+        self.assertIn("-inflight-append-w", self._row().detail,
+                      "resolution must be a no-op when nothing moved")
+
+    def test_a_vanished_proposer_is_named_AND_flagged(self):
+        shutil.rmtree(self.worker)
+        detail = self._row().detail
+        self.assertIn("-inflight-append-w", detail, "the recorded path is still shown")
+        self.assertIn("no longer on disk", detail,
+                      "a resolver that silently substitutes its input is worse than one that admits it failed")
