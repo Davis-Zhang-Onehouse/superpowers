@@ -164,10 +164,17 @@ def _worker_subject(rec, pool, sessions, instants_dir: Path, idle_after_s: int, 
 
     #: The slot holder is PROCESS evidence and never touches tmux, so it survives being pointed at the
     #: wrong server — which is exactly when the tmux answer is the one that misleads.
-    holder = _slot_holder_pid(rec, pool, live_sessions)
+    #:
+    #: `SI-41`. Gated on `holds`, and that gate is the whole correctness of it. `rec.slot` is a slot NAME,
+    #: and a TERMINATED record keeps naming the slot it used — so when that slot is re-leased, the dead
+    #: record and the live one name the same `ws3`. Without this check the dead record inherits the live
+    #: process's pid, and `evidence.pid` on a `COMPLETE` subject becomes the pid of somebody still working.
+    #: That is not cosmetic: `scripts/fleet-finished-pids.sh` maps COMPLETE -> exclude-from-auto-resume by
+    #: pid, so it silently switched auto-resume OFF for a live coordinator. Observed on the live effort.
+    holds = _holds_slot(pool, rec)
+    holder = _slot_holder_pid(rec, pool, live_sessions) if holds else None
     state, note = _state_of(rec, folder_state, live, phase, parked, pane, sessions,
                             instant, idle_after_s, holder)
-    holds = _holds_slot(pool, rec)
     evidence = {
         "record": rec.todo_id,
         "base": rec.base_instant,
