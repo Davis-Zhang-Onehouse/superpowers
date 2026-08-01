@@ -35,7 +35,7 @@
  }
  
  export function buildDisplayArgs(pane, format) {
-@@ -56,24 +75,24 @@
+@@ -56,27 +75,70 @@
  
  export function getTmuxVersion() {
    try {
@@ -65,6 +65,52 @@
    return stdout.trim();
  }
  
++// --- the send gate (local patch; see superpowers/patches/claude-auto-retry) -------------------------
++//
++// Before typing into a pane, ask `fleet pane-guard` whether that is safe. The codes are the interface:
++//   0 safe · 10 queued text in the input box · 11 mid-turn · 12 not-claude · 13 unknown pane
++//
++// WHY SHELL OUT INSTEAD OF CHECKING HERE. This monitor already guards code 12 (checkForeground). The gap
++// is 10, and detecting it means knowing what an unsubmitted input box looks like on screen -- which
++// `fleet` already decides, and which two independent implementations would eventually disagree about.
++// A second derivation of the same judgement is the failure this whole toolkit keeps re-learning.
++//
++// WHY CODE 10 MATTERS HERE SPECIFICALLY. sendKeys() sends the text literally, waits 150ms, then sends
++// Enter as a SEPARATE call. If the input box already holds something -- an operator half-way through
++// typing while the pane sits at a rate-limit banner -- the result is
++// `<their unfinished sentence>Continue where you left off.` and then Enter SUBMITS the concatenation.
++//
++// FAILS OPEN, deliberately. If fleet is missing, the pane cannot be named, or the guard errors, this
++// returns null and the caller sends anyway. A gate that silently disables auto-resume is worse than the
++// hazard it prevents: the bug costs one garbled message a human can see, the fail-closed version costs
++// every overnight resume with no signal at all.
++const FLEET_BIN = process.env.FLEET_BIN || '/home/ubuntu/davis_root/superpowers/bin/fleet';
++
++export async function paneGuardCode(pane) {
++  try {
++    // pane-guard takes a SESSION name; the monitor holds a pane id (%N). Pane ids are per-server, so this
++    // lookup must go through the same server as everything else -- hence tmuxArgv.
++    const { stdout } = await execFileAsync(
++      'tmux', tmuxArgv(['display-message', '-t', pane, '-p', '#{session_name}']));
++    const session = (stdout || '').trim();
++    if (!session) return null;
++    // fleet must be pointed at the same tmux server, or it reports 13 (unknown pane) about a live session.
++    const env = { ...process.env };
++    if (TMUX_SOCKET) env.FLEET_TMUX_SOCKET = TMUX_SOCKET;
++    try {
++      await execFileAsync(FLEET_BIN, ['pane-guard', '--pane', session], { env });
++      return 0;
++    } catch (err) {
++      return typeof err.code === 'number' ? err.code : null;
++    }
++  } catch {
++    return null;
++  }
++}
++
+ export function buildSetWindowOptionArgs(target, option, value) {
+   return ['set-window-option', '-t', target, option, value];
+ }
 --- a/src/reconcile.js
 +++ b/src/reconcile.js
 @@ -10,6 +10,7 @@
@@ -121,3 +167,68 @@
    const tmuxEnv = env.TMUX || '';
    return tmuxEnv.split(',')[0] || 'default';
  }
+--- a/src/monitor.js
++++ b/src/monitor.js
+@@ -1,6 +1,6 @@
+ import { stripAnsi, isRateLimited, findRateLimitMessage, isRateLimitOptionsPrompt, menuStepsToWaitOption, detectOverload, overloadMatch, detectSafeguard, safeguardMatch, isWorking } from './patterns.js';
+ import { parseResetTime, calculateWaitMs } from './time-parser.js';
+-import { capturePane, sendKeys, sendKey, getPaneCommand, isProcessForeground } from './tmux.js';
++import { capturePane, sendKeys, sendKey, getPaneCommand, isProcessForeground, paneGuardCode } from './tmux.js';
+ import { loadConfig } from './config.js';
+ import { createLogger } from './logger.js';
+ import { readStopFailureEvent, clearStopFailureEvent, isRetryableError } from './events.js';
+@@ -73,6 +73,19 @@
+   return { ok: false, fg, isShell };
+ }
+ 
++// LOCAL PATCH. True when the pane holds unsubmitted text, so a send would concatenate onto it.
++//
++// Called at each send site rather than inside sendKeys, and that placement is the whole point: the callers
++// increment their attempt counter immediately BEFORE sending, so a gate inside sendKeys would consume a
++// retry every time it declined. With maxRetries=5 and a ~30s cooldown, an operator who leaves a half-typed
++// line in the box for three minutes would exhaust the episode's entire retry budget and auto-resume would
++// give up -- a worse outcome than the concatenation this prevents. Returning early here costs nothing.
++async function sendWouldConcatenate(tmuxAdapter, pane) {
++  if (!tmuxAdapter.paneGuardCode) return false;      // adapter without the gate behaves exactly as before
++  const code = await tmuxAdapter.paneGuardCode(pane);
++  return code === 10;                                // 10 = queued text; 11/12/13 are handled elsewhere
++}
++
+ function enterUsageWait(state, stripped, config) {
+   const message = findRateLimitMessage(stripped, config.customPatterns);
+   state.lastRateLimitMessage = message;
+@@ -199,6 +212,13 @@
+       }
+     }
+ 
++    if (await sendWouldConcatenate(tmuxAdapter, pane)) {
++      // Unsubmitted text is sitting in the input box. Wait it out rather than appending to it. No attempt
++      // is consumed, so the retry budget survives however long the human takes to finish their sentence.
++      state.waitUntil = Date.now() + (config.pollIntervalSeconds * 1000 * 6);
++      return 'skipped-queued-text';
++    }
++
+     // Increment attempts and set cooldown BEFORE sendKeys so that a failure
+     // (e.g. pane destroyed) still consumes a retry and avoids tight-loop errors.
+     state.attempts++;
+@@ -304,6 +324,11 @@
+     }
+ 
+     // Alive at the prompt → send the retry, then schedule the next backoff window.
++    if (await sendWouldConcatenate(tmuxAdapter, pane)) {
++      state.overloadWaitUntil = Date.now() + (config.pollIntervalSeconds * 1000 * 6);
++      return 'skipped-queued-text';
++    }
++
+     // Increment + schedule BEFORE sendKeys so a send failure still consumes the slot.
+     state.overloadAttempts++;
+     const w = nextOverloadWaitMs(state.overloadAttempts, overload, rand);
+@@ -475,7 +500,7 @@
+ 
+   const eventMaxAgeMs = (config.overload?.eventMaxAgeSeconds || 120) * 1000;
+   const tmuxAdapter = {
+-    capturePane, sendKeys, sendKey, getPaneCommand,
++    capturePane, sendKeys, sendKey, getPaneCommand, paneGuardCode,
+     isClaudeForeground: () => isProcessForeground(pid),
+     // Pane-keyed StopFailure markers (written by the hook). The daemon owns the pane,
+     // so this is a direct read — no session-id resolution needed.

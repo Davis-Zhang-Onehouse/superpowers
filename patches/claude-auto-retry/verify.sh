@@ -99,8 +99,35 @@ else
   esac
 fi
 
+# --- behaviour 4: the send gate (F-7) -------------------------------------------------------------------
+# The monitor must not type into a pane holding unsubmitted text: sendKeys sends the text, waits 150ms,
+# then sends Enter separately, so an operator's half-finished line would be SUBMITTED with the retry
+# message appended to it.
+if grep -q 'sendWouldConcatenate' "$CAR/src/monitor.js" 2>/dev/null; then
+  note "ok   monitor.js consults the send gate"
+else
+  note "FAIL monitor.js has no send gate; a retry can concatenate onto queued text"; fails=1
+fi
+# Placement is the property, not presence: the gate must come BEFORE the attempt counter, or a decline
+# consumes a retry and maxRetries=5 exhausts the episode while a human is mid-sentence.
+if "$NODE" -e "
+const s = require('fs').readFileSync('$CAR/src/monitor.js','utf8');
+const g = s.indexOf('sendWouldConcatenate(tmuxAdapter, pane)');
+const a = s.indexOf('state.attempts++');
+process.exit(g > -1 && a > -1 && g < a ? 0 : 1);
+" 2>/dev/null; then
+  note "ok   the gate is evaluated BEFORE the attempt counter, so declining costs no retry"
+else
+  note "FAIL the gate runs after the attempt counter; declining would burn the retry budget"; fails=1
+fi
+if grep -q 'export async function paneGuardCode' "$CAR/src/tmux.js" 2>/dev/null; then
+  note "ok   the gate asks fleet pane-guard rather than re-deriving the judgement"
+else
+  note "FAIL paneGuardCode missing"; fails=1
+fi
+
 if [ "$fails" = 0 ]; then
-  echo "PASS: the tmux-socket patch is present and behaving — argv is unchanged with no socket named, carries -L before the subcommand when one is, pane discovery follows the named server, and status files are namespaced per server rather than per spawner"
+  echo "PASS: the tmux-socket patch is present and behaving — argv is unchanged with no socket named, carries -L before the subcommand when one is, pane discovery follows the named server, status files are namespaced per server rather than per spawner, and the send gate consults fleet pane-guard BEFORE the attempt counter so a decline costs no retry"
   exit 0
 fi
 
