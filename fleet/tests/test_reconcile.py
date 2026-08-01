@@ -15,7 +15,7 @@ import unittest
 from dataclasses import fields as dataclass_fields
 
 from fleet.pool import Pool
-from fleet.reconcile import DEAD, KINDS, STATES, UNREACHABLE, Subject, reconcile
+from fleet.reconcile import COMPLETE, DEAD, KINDS, STATES, UNREACHABLE, Subject, reconcile
 from fleet.session import LiveSession, Probes, SessionLayer
 from fleet.store import Declarations, Record, Store
 
@@ -340,22 +340,25 @@ class TestUnreachableIsNotDead(unittest.TestCase):
         like from inside the join -- the session is simply not there.
         """
         fleet = SyntheticFleet()
-        slot = fleet.slots_dir / "ws3"
+        # ws9 is the fixture's unleased slot. ws3 is pre-claimed by another effort, so a record naming it
+        # does not HOLD it -- and since SI-41 gates the holder probe on holding, using ws3 here would make
+        # this case vacuous. The first version of this test did exactly that and passed anyway.
+        slot = fleet.slots_dir / "ws9"
         slot.mkdir(exist_ok=True)
         # `slot` is the NAME, as every real record stores it -- checked against the live store, because the
         # first version of this test stored a PATH here and so agreed with a bug instead of the product.
-        fleet.pool.enroll(slot)
         rec = _record(todo_id="t1", child_instant="00000000-07310348-inflight-append-w",
-                      slot="ws3", tmux="dt-w")
+                      slot="ws9", tmux="dt-w")
         fleet.store.write(rec)
-        fleet.pool.claim("ws3", rec.todo_id, rec.base_instant, rec.tmux)
+        fleet.pool.claim(todo_id=rec.todo_id, tmux=rec.tmux, base_instant=rec.base_instant,
+                         child_instant=rec.child_instant, slot="ws9")
         if proc_cwd is not None:
             fleet.procs.append(LiveSession(pid=99, cwd=proc_cwd(fleet), name=None))
         subs = reconcile(fleet.store, fleet.pool, fleet.sessions, fleet.instants)
         return [s for s in subs if s.identity == "t1"][0]
 
     def test_a_slot_held_by_a_live_process_is_UNREACHABLE_not_DEAD(self):
-        worker = self._worker(lambda f: f.slots_dir / "ws3")
+        worker = self._worker(lambda f: f.slots_dir / "ws9")
         self.assertEqual(worker.state, UNREACHABLE,
                          "tmux could not name the session, but a live process holds the slot")
         self.assertIn("99", worker.note)
@@ -363,7 +366,7 @@ class TestUnreachableIsNotDead(unittest.TestCase):
                       "the note must name the remedy; the usual cause is the wrong tmux server")
 
     def test_the_holder_pid_is_reported_as_evidence(self):
-        worker = self._worker(lambda f: f.slots_dir / "ws3")
+        worker = self._worker(lambda f: f.slots_dir / "ws9")
         self.assertEqual(worker.evidence.get("pid"), "99",
                          "a state derived from a pid must show the pid, or nobody can check it")
 
@@ -373,6 +376,53 @@ class TestUnreachableIsNotDead(unittest.TestCase):
                          "the fix must not make a genuinely dead record un-diagnosable")
 
     def test_a_process_in_a_DIFFERENT_directory_does_not_rescue_the_record(self):
-        worker = self._worker(lambda f: f.slots_dir / "ws9")
+        # ws3, i.e. NOT this record's slot (which is ws9). The point of the case is that only a process in
+        # THIS record's slot is evidence about THIS record.
+        worker = self._worker(lambda f: f.slots_dir / "ws3")
         self.assertEqual(worker.state, DEAD,
                          "only a process in THIS record's slot is evidence about THIS record")
+
+
+class TestATerminatedRecordDoesNotInheritTheLiveHolder(unittest.TestCase):
+    """`SI-41`. A record that no longer holds its slot must not report the new holder's pid.
+
+    `rec.slot` is a NAME, and a terminated record keeps naming the slot it used. When that slot is
+    re-leased -- routine, since re-dispatching after an abort reuses both the slot and the title -- the dead
+    record and the live one both say `ws3`.
+
+    Observed on the live effort, and it was not cosmetic: `scripts/fleet-finished-pids.sh` maps
+    `COMPLETE -> exclude from auto-resume` BY PID, so an aborted coordinator carrying the live
+    coordinator's pid switched auto-resume off for a session that was still working -- silently, because
+    the watchdog only ever sees a list of pids.
+    """
+
+    def test_the_dead_record_reports_no_pid_and_the_live_one_does(self):
+        fleet = SyntheticFleet()
+        # ws9 is the fixture's deliberately-UNLEASED slot. ws3 is pre-claimed by another effort, which is
+        # what this fixture exists to model -- using it here would have made `_holds_slot` false for the
+        # live record too, and the test would have "passed" for the wrong reason.
+        slot = fleet.slots_dir / "ws9"
+        slot.mkdir(exist_ok=True)
+
+        dead_dir = fleet.instants / "00000000-07310334-abort-append-coord"
+        (dead_dir / ".fleet").mkdir(parents=True)
+        live_dir = fleet.instants / "00000000-07310348-inflight-append-coord"
+        (live_dir / ".fleet").mkdir(parents=True)
+
+        # Both name ws9 and both name the same tmux session -- exactly what re-dispatching produces.
+        dead = _record(todo_id="coord-334", child_instant=str(dead_dir), slot="ws9", tmux="dt-coord")
+        live = _record(todo_id="coord-348", child_instant=str(live_dir), slot="ws9", tmux="dt-coord")
+        fleet.store.write(dead)
+        fleet.store.write(live)
+        fleet.pool.claim(todo_id=live.todo_id, tmux=live.tmux, base_instant=live.base_instant,
+                         child_instant=live.child_instant, slot="ws9")   # only the LIVE one holds it
+        fleet.procs.append(LiveSession(pid=4242, cwd=slot, name=None))        # a live process in ws9
+
+        subs = {s.identity: s for s in reconcile(fleet.store, fleet.pool, fleet.sessions, fleet.instants)}
+        self.assertEqual(subs["coord-348"].evidence.get("pid"), "4242",
+                         "the record that HOLDS the slot may report the holder")
+        self.assertEqual(subs["coord-334"].evidence.get("pid"), "",
+                         "a record that no longer holds the slot must NOT inherit the new holder's pid — "
+                         "that pid is fed to the watchdog's exclude list")
+        self.assertEqual(subs["coord-334"].state, COMPLETE,
+                         "the aborted folder still decides its state; only the pid was wrong")
