@@ -133,6 +133,20 @@ if [ ! -s "$SEED" ]; then
   echo "no seed arrived within 180s; starting an interactive session rather than a blank prompt" >&2
   exec "$REAL_CLAUDE" --permission-mode auto
 fi
+# --- Remote Control, on by default for every dispatched instant --------------------------------------
+# Lets the operator check on this instant, and reply to it, from the mobile app or claude.ai/code. The
+# session keeps running here; this only adds a second way to reach it, which matters for a fleet whose
+# whole point is running unattended.
+#
+# The name is taken from the tmux session this shim is running INSIDE, so a dispatched instant shows up as
+# \`dt-<title>\` rather than a hostname-and-number. No extra argument to pass and nothing to keep in sync:
+# the shim is the pane's own process, so tmux will tell it who it is. If that lookup fails the flag is
+# omitted entirely rather than guessed -- an unnamed remote session is worse than none, because you cannot
+# tell which instant you are talking to.
+RC_NAME="\$(tmux display-message -p '#{session_name}' 2>/dev/null || true)"
+if [ -n "\$RC_NAME" ]; then
+  exec "$REAL_CLAUDE" --permission-mode auto --remote-control "\$RC_NAME" "\$(cat "$SEED")"
+fi
 exec "$REAL_CLAUDE" --permission-mode auto "\$(cat "$SEED")"
 WRAP
 chmod +x "$DIR/bin/claude"
