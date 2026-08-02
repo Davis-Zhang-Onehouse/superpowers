@@ -114,7 +114,22 @@ one-writer-per-file rule has clean boundaries.
 
 ## The release lifecycle
 
-### `fleet release cut <version> [--notes <text>]`
+### Why flat verbs, and the hazard that forces `--repo`
+
+Not `fleet release <subverb>`, and not by preference. `parse()` refuses positionals with a documented
+rationale (`FI-19d` — a bare token is what a mistyped value looks like once its flag has been dropped), and
+`main()` dispatches on `argv[0]` against one flat table with no sub-verb mechanism. Flat verbs also enrol
+automatically into §A5's exit-code matrix and §M's flag matrices, which derive their population from
+`cli.VERBS`.
+
+That has one consequence worth stating as a hazard rather than a detail: **§A5 and §M drive every
+registered verb through a REAL invocation.** A `release-cut` that inferred its repository from the working
+directory would tag the live repo during an IT run. `--repo` is therefore required and never inferred, and
+`FLEET_RELEASES` is refused-if-unset for every mutating release verb — driven with no flags, these verbs
+exit 2 on a missing required flag and mutate nothing.
+
+
+### `fleet release-cut --version <X.Y.Z> --repo <path> [--notes <text>]`
 
 Ordered so the changelog ships *inside* the artifact it describes.
 
@@ -150,7 +165,7 @@ cut_by         davis@onehouse.ai
 notes          <--notes text, or ->
 ```
 
-### `fleet release verify <version>`
+### `fleet release-verify --version <X.Y.Z> [--full]`
 
 Runs both suites **against the frozen export**. This is what makes contamination structurally impossible
 rather than procedurally discouraged: nothing can edit the tree underneath the run.
@@ -238,7 +253,7 @@ baseline the suite cannot own: contamination is never a verdict. It costs a re-r
 `verify` **warns** on a busy box; it does not refuse. Refusing would make releases impossible during normal
 operation, which here is most of the time. Exit code is 0 for GREEN, 1 for RED or INCONCLUSIVE.
 
-### `fleet release promote <version>`
+### `fleet release-promote --version <X.Y.Z>`
 
 Refuses (exit 4) unless `evidence/VERDICT.tsv` exists and records GREEN for both suites. On success writes
 `STATE=RELEASED`. `promote` never runs tests — it only reads the evidence `verify` left.
@@ -248,7 +263,7 @@ requires evidence from a `--full` run, and `promote` refuses a minor or major wh
 gate set. A patch bump promotes on the gate set. This is the one place the two tiers are enforced, so the
 tier policy lives in exactly one function rather than in an operator's memory.
 
-### `fleet release deploy <version>` / `fleet release deploy --dev` `[--reason <text>]`
+### `fleet release-deploy --version <X.Y.Z>` / `--dev` `[--reason <text>] [--force]`
 
 Flips `current` and appends one line to `RELEASE-HISTORY.tsv`.
 
@@ -262,7 +277,7 @@ Flips `current` and appends one line to `RELEASE-HISTORY.tsv`.
   leave a window in which `current` does not exist, and every `davis_root` shell's `PATH` points through
   it.
 
-### `fleet release rollback [--to <version>] --reason <text>`
+### `fleet release-rollback [--to <X.Y.Z>] --reason <text>`
 
 Mechanically the same flip, recorded as `action=ROLLBACK`. `--reason` is **required** (exit 4 without it) —
 the reason is the whole point of the history file. `--to` defaults to the previously-deployed version,
@@ -320,12 +335,11 @@ from anywhere, matching fleet's existing read-only/mutating split.
 
 ## Concurrency
 
-Two shells on this box can plausibly cut and deploy at the same time, so `cut`, `verify`, `promote`,
-`deploy` and `rollback` all take `$FLEET_RELEASES/.lock/` for their duration. `mkdir` **is** the lock — the
-same idiom the rest of fleet uses, because it is the one filesystem primitive that is atomic and
-self-cleaning to reason about. The lock directory holds a `holder` file naming the pid, the verb and the
-start time, so a stale lock can be identified rather than guessed at; a mutating verb that cannot take the
-lock reports the holder and exits 4. Read-only verbs never take it.
+Two shells on this box can plausibly cut and deploy at the same time, so every mutating verb holds one
+lock for its duration. It is **`atomic.held_for_update` over `$FLEET_RELEASES/.releases-lock`**, not a new
+mechanism: that is already the `mkdir` lock the rest of fleet uses, it already breaks a holder that died
+(`LOCK_TIMEOUT_S`), and it is already tested. Building a second lock beside it is how `FI-20` produced
+eight hand-rolled copies of one primitive. Read-only verbs never take it.
 
 The lock covers the history append as well as the flip, so the ordering of `RELEASE-HISTORY.tsv` always
 matches the ordering of the flips it describes.
