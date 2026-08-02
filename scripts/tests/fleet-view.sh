@@ -152,6 +152,21 @@ PY
 rstripped="$(printf '%s' "$rcolored" | sed 's/\x1b\[[0-9;]*m//g')"
 check "colour does not change the releases layout" "$rplain" "$rstripped"
 
+# --- an unknown view is REFUSED, exit 2 ---------------------------------------------------------------
+# `fleet` answers an unknown verb with exit 2 and the list; this viewer used to fall through every branch
+# and exit 0. That is why `check "the … view renders" "0" "$rc"` passed for views that did not exist yet —
+# the assertion could not tell "rendered" from "silently did nothing".
+python3 "$VIEW" totalNonsense >/dev/null 2>"$TMP/unknown.err"; rc=$?
+check "an unknown view exits 2" "2" "$rc"
+grep -q "is not a fleet-view view" "$TMP/unknown.err" \
+  || { note "FAIL the refusal does not name the problem"; fails=1; }
+grep -q "releases" "$TMP/unknown.err" \
+  || { note "FAIL the refusal does not list the views"; fails=1; }
+for v in all board leases roadmap releases; do
+  python3 "$VIEW" "$v" >/dev/null 2>&1 || { note "FAIL known view '$v' no longer exits 0"; fails=1; }
+done
+note "ok   every declared view still exits 0"
+
 if [ "$fails" = 0 ]; then
   echo "PASS: fleet-view renders every subject porcelain reports with the same state, writes nothing, lays out identically with and without colour, keeps every WRAPPABLE line inside the terminal width (an unbreakable path is allowed to run long, because cutting it makes it un-copy-pasteable), elides long paths from the left so the identifying tail survives, and renders the release history in list form so a long reason reaches the reader whole"
   exit 0
