@@ -246,6 +246,60 @@ class Verify:
         return code
 
     @staticmethod
+    def _carry_cited_evidence(copy_root: Path, evidence: Path) -> list:
+        """Copy every file a FAIL row CITES out of the worktree, before the worktree is removed.
+
+        `QI-5`. A release carries the proof of every claim it makes, and a RED row is a claim. Release
+        0.2.2's one FAIL row cited `it/E/out/E9-per-iteration.tsv` -- the table naming WHICH of twenty
+        SIGKILL iterations leaked a lease -- and the release kept only the `RESULTS-*.tsv` registers. The
+        worktree went, the file went with it, and the artifact recorded a failure while discarding the
+        only thing that said what failed. The sole remaining route to a diagnosis was "re-run the suite
+        and hope the flake recurs", which for a 1-in-20 defect is not a route.
+
+        Same family as `SI-38`/`II-6`: a verdict whose cited evidence does not support it. There because
+        nobody had opened the file; here because the file is gone.
+
+        Only what FAILING rows cite, and only paths that resolve inside the worktree. Copying the whole
+        tree would drag ~66 MB of IT output into every release, and following an absolute or `..` path
+        would let a register's contents decide what this reads -- so both are refused, and refusing is
+        reported rather than skipped.
+        """
+        it_dir = copy_root / IT_SCRIPT[0] / IT_SCRIPT[1]
+        cited, carried = [], []
+        for register in sorted(it_dir.glob("RESULTS-closeout-*.tsv")):
+            for line in register.read_text(errors="replace").splitlines()[1:]:
+                cells = line.split("\t")
+                if len(cells) >= 3 and cells[1] == "FAIL" and cells[2].strip() not in ("", "-"):
+                    cited.append(cells[2].strip())
+        if not cited:
+            return []
+        root = copy_root.resolve()
+        target = evidence / "it-cited"
+        for rel in dict.fromkeys(cited):                 # de-duplicated, order kept
+            #: The registers are relativised to the instant root by `sed` at the end of each runner, so a
+            #: citation is `it/E/out/…` under `<root>/fleet`. Both spellings are tried and neither is
+            #: allowed to escape.
+            for base in (copy_root / IT_SCRIPT[0], copy_root):
+                source = (base / rel)
+                try:
+                    resolved = source.resolve()
+                except OSError:
+                    continue
+                if not str(resolved).startswith(str(root) + os.sep) or not resolved.is_file():
+                    continue
+                destination = target / resolved.relative_to(root)
+                destination.parent.mkdir(parents=True, exist_ok=True)
+                shutil.copy(resolved, destination)
+                carried.append(str(resolved.relative_to(root)))
+                break
+        if carried:
+            (evidence / "it-cited-INDEX.txt").write_text(
+                "Evidence cited by a FAIL row, copied out of the verification worktree before it was\n"
+                "removed (QI-5). Paths are relative to the worktree root, under it-cited/.\n\n"
+                + "\n".join(carried) + "\n")
+        return carried
+
+    @staticmethod
     def it_failures(copy_root: Path) -> list:
         """Every FAIL row THIS run produced, read from the per-runner registers.
 
@@ -296,6 +350,8 @@ class Verify:
 
         failures = self.it_failures(copy_root)
         if failures:
+            # `QI-5`. Before the worktree goes, take what the failures point at.
+            self._carry_cited_evidence(copy_root, evidence)
             (evidence / "it-FAILURES.txt").write_text("\n".join(failures) + "\n")
             self._it_failures_seen = failures
             return code or 1

@@ -712,6 +712,59 @@ class VerifyCase(unittest.TestCase):
         self.assertEqual(len(repo.removed), 1, "the worktree was left behind on the refusal path")
         self.assertFalse(repo.removed[0].exists())
 
+    def test_the_evidence_a_fail_row_cites_is_carried_into_the_release(self):
+        """`QI-5`. A release must carry the proof of every claim it makes, and a RED row is a claim.
+
+        Measured on release 0.2.2: its one FAIL row, `E9`, cited `it/E/out/E9-per-iteration.tsv` — the
+        per-iteration table naming WHICH of twenty SIGKILL iterations leaked a lease. That file lived in
+        the verification worktree, the worktree is removed when the run ends, and the release kept only
+        the `RESULTS-*.tsv` registers. So the artifact recorded a failure and threw away the only thing
+        that said what failed, leaving "re-run the suite and hope the flake recurs" as the sole route to
+        a diagnosis.
+
+        This is the same family as `SI-38`/`II-6`: a verdict whose cited evidence does not support it —
+        there, because nobody had opened the file; here, because the file is gone.
+        """
+        from fleet.release_verify import Verify
+        rel, v = self._export()
+
+        def emit_a_cited_failure(command, where):
+            if "run-all.sh" not in command or not where:
+                return
+            it = pathlib.Path(where) / "fleet" / "it"
+            (it / "E" / "out").mkdir(parents=True, exist_ok=True)
+            (it / "E" / "out" / "E9-per-iteration.tsv").write_text("iter\tverdict\n7\tLEAKED\n")
+            (it / "RESULTS.tsv").write_text("case\tverdict\tevidence\tnote\n")
+            (it / "RESULTS-closeout-E.tsv").write_text(
+                "case\tverdict\tevidence\tnote\n"
+                "E9\tFAIL\tit/E/out/E9-per-iteration.tsv\tone iteration leaked a lease\n")
+
+        Verify(rel, v, self.Runner(watcher=emit_a_cited_failure),
+               repo=self._repo_for(rel, v)).run()
+
+        # Laid out by the path from the WORKTREE ROOT, not from the citation, so a reader can see where
+        # in the tree the file lived — `it/E/out/x` and `fleet/it/E/out/x` are the same file cited two
+        # ways, and the root-relative form is the one that is unambiguous.
+        carried = (self.meta_evidence(rel, v)
+                   / "it-cited" / "fleet" / "it" / "E" / "out" / "E9-per-iteration.tsv")
+        self.assertTrue(carried.is_file(),
+                        f"the release does not carry the evidence its FAIL row cites; it has "
+                        f"{sorted(p.name for p in self.meta_evidence(rel, v).iterdir())}")
+        self.assertIn("LEAKED", carried.read_text())
+
+    def test_a_green_run_carries_no_cited_evidence_tree(self):
+        """Nothing to cite, nothing copied. A release that passed should not grow an empty directory —
+        and this is also what stops the fix quietly copying the whole worktree."""
+        from fleet.release_verify import Verify
+        rel, v = self._export()
+        Verify(rel, v, self.Runner(watcher=self._emit_results),
+               repo=self._repo_for(rel, v)).run()
+        self.assertFalse((self.meta_evidence(rel, v) / "it-cited").exists())
+
+    def meta_evidence(self, rel, v):
+        from fleet.release import META_DIR
+        return rel.dir_for(v) / META_DIR / "evidence"
+
     def _freeze(self, root):
         """`chmod -R a-w`, which is what a cut leaves behind. Restored on teardown so the temp tree can
         be removed -- and so a failure here does not litter /tmp with unreadable directories."""
