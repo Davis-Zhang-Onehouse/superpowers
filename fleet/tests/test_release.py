@@ -489,8 +489,15 @@ class VerifyCase(unittest.TestCase):
         """Stand in for `run-all.sh`: write the merged results file beside itself, which is the whole
         reason the suite cannot run inside a read-only export."""
         if "run-all.sh" in command and where:
-            out = pathlib.Path(where) / "fleet" / "it" / "RESULTS-closeout-all.tsv"
-            out.write_text("section\tid\tverdict\nQ\tQ1\tPASS\n")
+            it = pathlib.Path(where) / "fleet" / "it"
+            # The MERGED register — what the verdict cites. `RESULTS-closeout-all.tsv` carries only the
+            # batch's own two ISOLATION rows, which is how a release once shipped GREEN evidence that said
+            # nothing about the 180 cases that ran.
+            (it / "RESULTS.tsv").write_text("case\tverdict\tevidence\tnote\nQ1\tPASS\tev\tnote\n")
+            (it / "RESULTS-closeout-all.tsv").write_text(
+                "case\tverdict\tevidence\tnote\nISOLATION-ALL-leave\tPASS\tev\tnote\n")
+            (it / "RESULTS-closeout-Q.tsv").write_text(
+                "case\tverdict\tevidence\tnote\nQ1\tPASS\tev\tnote\n")
 
     def _copies_under(self, rel):
         """Every directory in the releases root that is not a release. `verify`'s working copy lives
@@ -719,6 +726,33 @@ class VerifyCase(unittest.TestCase):
                         "the merged IT results were not copied out of the working copy before it was "
                         "deleted, so the verdict cites evidence that no longer exists")
         self.assertIn("Q1", (evidence / "it-RESULTS.tsv").read_text())
+
+    def test_a_fail_row_is_red_even_when_the_orchestrator_exits_zero(self):
+        """THE case. `run-all.sh` has no final `exit`, so it returns 0 however many sections failed.
+
+        Shipped: release 0.1.1's first verify recorded GREEN while §A had 2 FAIL rows, group5 had 4 and
+        m9mut had 1 — because the gate read the orchestrator's status instead of the registers. A runner
+        that exits 0 while its own register says FAIL is not hypothetical; group5 does exactly that.
+        """
+        from fleet.release_verify import RED, Verify, read_verdict
+
+        def emit_a_failure(command, where):
+            if "run-all.sh" in command and where:
+                it = pathlib.Path(where) / "fleet" / "it"
+                (it / "RESULTS.tsv").write_text("case\tverdict\tevidence\tnote\nA1b\tFAIL\tev\tn\n")
+                # Exactly the shape that fooled the gate: the batch register is all-PASS.
+                (it / "RESULTS-closeout-all.tsv").write_text(
+                    "case\tverdict\tevidence\tnote\nISOLATION-ALL-leave\tPASS\tev\tn\n")
+                (it / "RESULTS-closeout-A.tsv").write_text(
+                    "case\tverdict\tevidence\tnote\nA1\tPASS\tev\tn\nA1b\tFAIL\tev\tn\n")
+
+        rel, v = self._export()
+        export = rel.dir_for(v)
+        # The orchestrator exits 0 — the defect's precondition.
+        self.assertEqual(Verify(rel, v, self.Runner(watcher=emit_a_failure)).run(), RED)
+        self.assertEqual(read_verdict(export / ".release")["suites"]["it"], RED)
+        failures = (export / ".release" / "evidence" / "it-FAILURES.txt").read_text()
+        self.assertIn("A1b[A]", failures)
 
     def test_a_failing_it_suite_on_a_quiet_box_is_recorded_red(self):
         from fleet.release_verify import GREEN, RED, Verify, read_verdict
@@ -1375,3 +1409,49 @@ class CliCase(unittest.TestCase):
                 self.assertEqual(self.snapshot(), before,
                                  f"{verb} --dry-run touched the tree (mtimes included)")
                 self.assertEqual(self.calls, [], f"{verb} --dry-run ran a command")
+
+
+class ItVerdictFromRowsCase(unittest.TestCase):
+    """The IT verdict comes from FAIL ROWS, never from `run-all.sh`'s exit status.
+
+    This class exists because the gate shipped a GREEN over a suite with 7 FAIL rows on its first real
+    use. `run-all.sh` has no final `exit` — it prints its tallies and falls off the end, so its status is
+    whatever the last `say` returned. A gate reading that status cannot fail.
+    """
+
+    def setUp(self):
+        import shutil
+        self.tmp = pathlib.Path(tempfile.mkdtemp())
+        self.addCleanup(shutil.rmtree, self.tmp, True)
+        self.it = self.tmp / "fleet" / "it"
+        self.it.mkdir(parents=True)
+
+    def _register(self, name, rows):
+        body = ["case\tverdict\tevidence\tnote"]
+        body += [f"{case}\t{verdict}\tev\tnote" for case, verdict in rows]
+        (self.it / f"RESULTS-closeout-{name}.tsv").write_text("\n".join(body) + "\n")
+
+    def test_no_fail_rows_means_no_failures(self):
+        from fleet.release_verify import Verify
+        self._register("B", [("B1", "PASS"), ("B2", "SKIP")])
+        self.assertEqual(Verify.it_failures(self.tmp), [])
+
+    def test_a_fail_row_is_found_and_names_its_section(self):
+        from fleet.release_verify import Verify
+        self._register("A", [("A1", "PASS"), ("A1b", "FAIL")])
+        self._register("group5", [("M5", "FAIL"), ("M9", "PASS")])
+        found = Verify.it_failures(self.tmp)
+        self.assertEqual(sorted(found), ["A1b[A]", "M5[group5]"])
+
+    def test_the_batch_isolation_register_alone_does_not_hide_section_failures(self):
+        # The exact shape of the shipped false GREEN: the file the verdict used to cite carries only the
+        # batch's own two ISOLATION rows, both PASS, while the per-runner registers carry the failures.
+        from fleet.release_verify import Verify
+        self._register("all", [("ISOLATION-ALL-enter", "SKIP"), ("ISOLATION-ALL-leave", "PASS")])
+        self._register("m9mut", [("M9-mut-baseline", "FAIL")])
+        self.assertEqual(Verify.it_failures(self.tmp), ["M9-mut-baseline[m9mut]"])
+
+    def test_a_skip_is_not_a_failure(self):
+        from fleet.release_verify import Verify
+        self._register("C", [("C1", "SKIP"), ("C2", "NOT-RUN")])
+        self.assertEqual(Verify.it_failures(self.tmp), [])
