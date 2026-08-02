@@ -1,5 +1,10 @@
 # fleet — changelog
 
+## fleet/v0.2.2 — 2026-08-02T18:45:51Z
+Cut from 956d168 on `live` (upstream base pre-merge-fleet-skills-20260731). 1 commit(s) since fleet/v0.2.1.
+
+- 956d168 fleet: a stalled worker is actionable, and a proposal can carry a note
+
 ## fleet/v0.2.1 — 2026-08-02T18:14:30Z
 Cut from b836240 on `live` (upstream base pre-merge-fleet-skills-20260731). 1 commit(s) since fleet/v0.2.0.
 
