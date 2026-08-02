@@ -252,6 +252,9 @@ b2_state_md_is_not_created() {
   fi
 }
 
+# B3 — GIVEN an instant that lints clean, WHEN a `STATE.md` is written into it BY HAND, THEN lint reports
+# exactly one violation, under the rule `forbidden`, NAMING that file, at exit 1. The clean run before the
+# write is half the case: without it, a lint that reported a violation on every instant would pass.
 b3_state_md_by_hand_is_a_violation() {
   b_home b3
   b_init "$CD/init.out" --name b3state

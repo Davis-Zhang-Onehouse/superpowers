@@ -257,6 +257,10 @@ PY
 # §E — concurrency.  Own FLEET_HOME, serial section.
 # ===================================================================================================
 
+# E1 — GIVEN three enrolled slots and ten dispatchers held at a start barrier, WHEN the barrier opens,
+# THEN exactly three exit 0 onto three DISTINCT slots, seven exit 3, and three leases are held — on every
+# one of twenty iterations. The distinctness is the load-bearing half: a pool that hands the same slot to
+# two winners still produces 3x exit 0, so counting exit codes alone would pass a double-lease.
 e1_ten_dispatchers_three_slots() {
   local iters=20 procs=10 log="$EV/out/E1-per-iteration.tsv" bad=0 i k
   printf 'iter\texit0\texit3\tother\tdistinct_slots\tleases_held\tverdict\n' > "$log"
@@ -292,6 +296,10 @@ e1_ten_dispatchers_three_slots() {
   fi
 }
 
+# E2 — GIVEN three enrolled slots but all ten claims naming s1 BY NAME, WHEN they race, THEN exactly one
+# wins, nine exit 3, and the lease body names the winner. Reading the winner out of the lease BODY rather
+# than out of the exit codes is what makes this an atomicity assertion: nine refusals are also what a
+# capacity check that ran before any claim would produce, and that would prove nothing about the race.
 e2_ten_claims_one_named_slot() {
   local iters=10 procs=10 log="$EV/out/E2-per-iteration.tsv" bad=0 i k
   printf 'iter\texit0\texit3\tother\twinner\tlease_body_todo_id\tverdict\n' > "$log"
@@ -327,6 +335,9 @@ except Exception as e: print("UNREADABLE:%s"%e)' "$FLEET_HOME/pool/leases/s1/lea
   fi
 }
 
+# E3 — GIVEN a WIP cap of 1, WHEN five dispatchers race twenty times, THEN exactly one enters active dev
+# every time and the rest exit 4 NAMING the cap. The window is real rather than theoretical: the cap is
+# evaluated from RECORDS and the record is written AFTER the gate, so a read-then-write cap admits two.
 e3_concurrent_under_cap_one() {
   local iters=20 procs=5 log="$EV/out/E3-per-iteration.tsv" bad=0 i k
   printf 'iter\texit0\texit4\tother\tcap_named\tverdict\n' > "$log"
@@ -358,6 +369,10 @@ e3_concurrent_under_cap_one() {
   fi
 }
 
+# E4 — GIVEN a dispatch actively mutating the store, WHEN six `board` reads run against it concurrently,
+# fifty times, THEN no read sees a torn record, a short row, or a traceback. `board` is the verb an
+# operator polls while work is in flight, so a reader that can observe a half-written record turns routine
+# polling into a false alarm — and the alarm arrives at the moment the fleet is busiest.
 e4_board_never_tears() {
   local iters=50 reads=6 log="$EV/out/E4-per-iteration.tsv" bad=0 i
   g3_home "e4" 50
@@ -411,6 +426,10 @@ e4_board_never_tears() {
   fi
 }
 
+# E5 — GIVEN one instant, WHEN two `declare` calls race on it, THEN the file is always valid JSON, the
+# last writer wins, and every echo-back is a value a CONSUMER could read. Valid JSON on its own is too weak
+# an assertion: a declaration that parses but reports a phase nobody set is exactly the failure here, and
+# it is invisible to a check that only asks whether the file loads.
 e5_concurrent_declare() {
   local iters=20 log="$EV/out/E5-per-iteration.tsv" bad=0 i
   printf 'iter\techo_a\techo_b\tconsumer_reads\tjson_valid\tverdict\n' > "$log"
@@ -556,6 +575,10 @@ print(ok)' "$FLEET_HOME")"
 #: reproduces it exactly. The case had a 5/5 "failure rate" that no product change could ever move, which
 #: is the same family as an unclearable alarm — a red light whose remedy does not exist.
 
+# E7 — GIVEN two DIFFERENT bases, WHEN `record_dispatch` runs for both concurrently, THEN both appear in
+# sources.json every time. One file, two writers, read-modify-write. The lost update is silent at the
+# moment it happens; the symptom surfaces later as an unregistered-base violation against a base that WAS
+# registered, which reads as a product bug rather than as a race.
 e7_concurrent_record_dispatch_two_bases() {
   local iters=20 log="$EV/out/E7-per-iteration.tsv" bad=0 i
   printf 'iter\trc_a\trc_b\tsources_in_registry\tbases\tregistry_readable\tverdict\n' > "$log"
@@ -591,6 +614,10 @@ except Exception as e:
   fi
 }
 
+# E8 — GIVEN four stale leases, WHEN two `reap`s run concurrently, THEN every slot is freed exactly once,
+# no slot is double-REPORTED, and no exception escapes. Double-reporting is asserted alongside
+# double-freeing because the count is what an operator reads to decide whether the pool recovered: a reap
+# that frees four slots and claims eight is wrong in the only field anyone acts on.
 e8_concurrent_reap() {
   local iters=10 stale=4 log="$EV/out/E8-per-iteration.tsv" bad=0 i k
   printf 'iter\trc_a\trc_b\tfreed_union\tdouble_reported\theld_after\ttraceback\tverdict\n' > "$log"
@@ -633,6 +660,10 @@ e8_concurrent_reap() {
   fi
 }
 
+# E9 — GIVEN three concurrent dispatchers, WHEN a random one is SIGKILLed at a random point, twenty times,
+# THEN every lease it orphaned is recovered by `reap`, BY NAME. The pass note states how many iterations
+# ACTUALLY produced an orphan, because a run that happened to produce none would pass while measuring
+# nothing (`SI-8`) — the exercised count is what separates this from a vacuous green.
 e9_sigkill_a_dispatcher() {
   local iters=20 procs=3 log="$EV/out/E9-per-iteration.tsv" bad=0 i k
   printf 'iter\tvictim\tdelay_s\tleases_held\torphan_leases\treap_recovered\treap_says_so\tverdict\n' \
@@ -900,6 +931,10 @@ MD
   g3_kill_sessions
 }
 
+# K6 — GIVEN `COMPACTED.md`'s four-part contract, WHEN this build is searched for either a producer or a
+# checker of it, THEN neither exists — so the case records WHY it cannot be asserted and SKIPs, naming the
+# search it performed. A skip that states its reason is the honest outcome here; a pass would certify a
+# contract that nothing in the product enforces, which is worse than an admitted gap.
 k6_four_part_contract() {
   local note ev="$EV/out/K6-why-not-runnable.txt"
   mkdir -p "$EV/out"
@@ -923,6 +958,10 @@ k6_four_part_contract() {
   g3_skip K6 "$ev" "$note"
 }
 
+# K8 — GIVEN a compaction that was dispatched and then ABORTED, WHEN lint runs and a dispatch is
+# attempted, THEN lint emits no `COMPACTED.md` row at all — not even an info — and the freeze is lifted
+# (dispatch exit 0). Both halves matter: an abandoned compaction that kept freezing dispatch would be an
+# outage with no verb to clear it, and an info row would train the reader to ignore the column.
 k8_abort_lifts_the_freeze() {
   g3_home "kB" 2
   local out="$CD"
@@ -970,6 +1009,10 @@ k8_abort_lifts_the_freeze() {
   g3_kill_sessions
 }
 
+# K9 — GIVEN `--optype compact` handed a WORKER profile, WHEN dispatch runs, THEN it exits 4 naming the
+# profile BEFORE any side effect: zero leases, zero records, zero instants, and a zero delta over content
+# AND mtime. Refusing AFTER a partial build is the failure mode this exists for, and only the manifest
+# comparison can tell the two apart — the exit code is identical either way.
 k9_wrong_kind_refused_before_any_side_effect() {
   g3_home "kC" 2
   local out="$CD" before after
@@ -991,6 +1034,9 @@ k9_wrong_kind_refused_before_any_side_effect() {
   fi
 }
 
+# K10 — GIVEN three slots and a cap of 5, so that neither the pool nor the WIP cap can stand in for the
+# exclusivity rule, WHEN two compaction dispatches race twenty times, THEN exactly one compaction exists
+# every time and the second is refused BY THE FIRST rather than by capacity.
 k10_two_concurrent_compactions() {
   local iters=20 log="$EV/out/K10-per-iteration.tsv" bad=0 i
   printf 'iter\trc_a\trc_b\tinflight_compact_folders\tcompact_records\tsecond_refused_by_first\tverdict\n' \
