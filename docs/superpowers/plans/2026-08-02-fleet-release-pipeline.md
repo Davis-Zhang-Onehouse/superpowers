@@ -57,7 +57,29 @@ calls `shutil.rmtree(scratch)` twice. Register it — the argument is that the s
 module created itself, under `$FLEET_RELEASES`, and that not removing it leaves a full copy of every
 verified release on disk. Do not work around the audit; writing the argument IS the audit.
 
-**5. The suite is 908 tests, not 864.** Any task quoting a count should quote the current one.
+**5. The suite is 927 tests as of Task 2, not 864.** Any task quoting a count should quote the current one.
+`test_contracts.py` generates three cases per `src/fleet/*.py`, so each new module adds three for free.
+
+**6. NEVER call `subprocess` directly from a new module — inject the runner.** `test_cli.py`'s
+`test_the_three_spawn_seams_are_three_and_session_py_names_all_of_them` derives the spawn-seam set from an
+AST scan and asserts it equals `SPAWN_SEAMS` **exactly**, and separately requires `session.py`'s docstring
+to name every member. A new `subprocess.run` therefore breaks a test whose own name asserts the count is
+three, and forces edits to two more files. Task 2 hit this and solved it correctly:
+`Repo(path, git=None)` defaults to `workspace.default_git`, an already-registered seam.
+
+**Task 3 must do the same, and its plan code does NOT.** The plan writes
+`self.runner = runner or (lambda argv, **kw: subprocess.run(argv, **kw))` — that is a new spawn site in
+`release_verify.py`. Make the runner a **required** constructor argument instead, and have `cli.py` pass
+`ctx.runner`. That is the existing architecture, stated in `default_context`'s own docstring: *"a handler
+calls `ctx.runner`, never a spawner"* — which is exactly what lets the outward-state audit hold while
+`verify` still runs real commands.
+
+**7. Task 2's rebase fixture is the correct one; the plan's did not rebase anything.** The plan branched
+`upstream` from the tag, so the tagged commit stayed an ancestor of HEAD — `cherry` and `log` returned the
+identical set, and the test failed under both implementations for a reason unrelated to patch-id. The
+fixture now forks `upstream` from a commit that PRECEDES the tag, which is what this fork looks like: our
+commits sit on top of an upstream release and the cron replays them onto the next one. Any later task
+building a rebase fixture should copy `GitCase`'s, not the plan's.
 
 ---
 
