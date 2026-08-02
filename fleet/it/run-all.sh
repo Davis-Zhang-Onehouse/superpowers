@@ -61,6 +61,7 @@ RUNNERS=(
   "B:bash $IT_ROOT/run-B.sh"
   "C:bash $IT_ROOT/run-C.sh"
   "D:bash $IT_ROOT/run-D.sh"
+  "Q:bash $IT_ROOT/run-Q.sh"
   "rmw:bash $IT_ROOT/run-rmw.sh 8"
   "K:bash $IT_ROOT/run-group3.sh K"
   "group5:bash $IT_ROOT/run-group5.sh L M N"
