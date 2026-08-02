@@ -29,7 +29,7 @@ commentary, headers or blank lines, so `2>/dev/null | cut -f1` is a supported wa
 import re
 
 from fleet.errors import BadInput
-from fleet.reconcile import ACTIONABLE_STATES
+from fleet.reconcile import ACTIONABLE_STATES, needs_a_human
 
 #: The shortest label that will ever be handed out. It is a floor, never a truncation: `label()` grows
 #: past it until the result is unique, because OBS-32's collapse was a fixed-width prefix.
@@ -119,13 +119,18 @@ def _slot_holders(subjects) -> list:
 
 
 def _needs_a_human(subjects) -> list:
-    """The "needs you" population, taken from `reconcile.ACTIONABLE_STATES` rather than decided here.
+    """The "needs you" population, taken from `reconcile.needs_a_human` rather than decided here.
 
     `W2-14`/`OBS-57`: the predecessor counted DEAD sessions in this banner while drawing them PARKED. A
     dead worker needs a reap, not a keystroke, and a banner that cries for attention on a session nobody
     can answer trains people to ignore the banner.
+
+    Was a filter on `ACTIONABLE_STATES` directly. `FI-12` is not a pure state predicate — a COMPLETE
+    instant still holding a workspace needs a `harvest` and a harvested one needs nobody — so the
+    decision moved WHOLE into `reconcile`, rather than this view growing a second opinion beside it.
+    Two views disagreeing about a population is how `W2-14` happened in the first place.
     """
-    return [s for s in subjects if s.state in ACTIONABLE_STATES]
+    return [s for s in subjects if needs_a_human(s)]
 
 
 def _row_state(subject) -> str:

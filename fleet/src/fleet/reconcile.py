@@ -85,6 +85,29 @@ KINDS = (KIND_WORKER, KIND_UNKNOWN, KIND_STALE_LEASE)
 #: human can actually DO would trade one silence for one more thing to tune out.
 ACTIONABLE_STATES = (BLOCKED, IDLE)
 
+
+def needs_a_human(subject) -> bool:
+    """Whether this subject is waiting on a person RIGHT NOW. The one authority; views transport it.
+
+    `ACTIONABLE_STATES` covers the cases a state alone decides. This exists because `FI-12` is not one of
+    them: a COMPLETE instant that still holds a workspace needs a `harvest`, and a COMPLETE instant that
+    has been harvested needs nobody — same state, opposite answers, and the difference is `holds_slot`.
+    Expressing that by adding COMPLETE to the tuple would have made every finished instant on the board
+    shout forever.
+
+    `FI-12`'s measurement: an instant whose own row read *"the work is over"* held `ws6` for TWENTY-TWO
+    HOURS while `reconcile` reported thirteen `info` rows and nothing else. Eleven slots leaked this way
+    once. The rename is the WORKER's transition; releasing the slot is a separate coordinator-side act,
+    and nothing connected the two.
+
+    Kept to what a human can actually DO. `DEAD` needs a reap, not a keystroke, and counting it is the
+    defect `W2-14`/`OBS-57` recorded — a banner nobody can answer is a banner people learn to ignore,
+    which is the same failure `FI-14` and `FI-12` are both instances of.
+    """
+    if subject.state in ACTIONABLE_STATES:
+        return True
+    return subject.state == COMPLETE and subject.holds_slot
+
 #: Folder states that mean the work is over. The instant's own rename is the completion signal, so disk
 #: outranks the record here — the record's path is what goes stale, never the folder.
 TERMINAL_FOLDER_STATES = ("complete", "abort")
