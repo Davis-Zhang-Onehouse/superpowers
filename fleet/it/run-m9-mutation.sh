@@ -117,7 +117,13 @@ declare -A WHY=(
 )
 declare -A WHAT=(
   [1]="a second assignment putting the delete target under \$HOME. Reported SURVIVED-then-KILLED (FI-28's convention): it survived the first rule, which accepted a name if ANY of its assignments looked rooted, and forced the rule to require EVERY assignment to be safe"
-  [2]="a delete of an absolute string literal (quoted here as `<abs>` so the note itself does not trip lint-evidence-paths: the injected call is os.unlink of a hard-coded path under var-tmp). Caught on the UNVERIFIABLE branch, not the unrooted one: a string literal leaves no name to trace, so the audit refuses to vouch for it at all"
+  # The backticks below are ESCAPED, deliberately. Unescaped, bash reads them as a command substitution
+  # even inside double quotes, tries to run `<abs>` — a redirect from a file named `abs` — prints
+  # "syntax error near unexpected token `newline'" on stderr, and substitutes the empty string. So this
+  # note rendered as "quoted here as  so the note itself…" in every run since it was written, and the
+  # case PASSed regardless. A case whose own evidence text is silently rewritten by the shell cannot be
+  # trusted to say what it did.
+  [2]="a delete of an absolute string literal (quoted here as \`<abs>\` so the note itself does not trip lint-evidence-paths: the injected call is os.unlink of a hard-coded path under var-tmp). Caught on the UNVERIFIABLE branch, not the unrooted one: a string literal leaves no name to trace, so the audit refuses to vouch for it at all"
   [3]="a brand-new delete site the allowlist does not declare — the ceiling itself"
   [4]="a delete target read out of os.environ['HOME']"
 )
