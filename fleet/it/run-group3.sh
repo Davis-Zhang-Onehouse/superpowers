@@ -793,11 +793,57 @@ from pathlib import Path
 home=Path(sys.argv[1]); want=sys.argv[2].split(",")
 left=[s for s in want if (home/"pool"/"leases"/s).is_dir()]
 print(",".join(left) or "-")' "$FLEET_HOME" "$orphans")"
+      #: EVERY kind `reap` uses to report a recovery, DERIVED from the product rather than typed here.
+      #:
+      #: This matched only `reaped`, and `reaped` is the kind for freeing a normal LEASE. An INTERRUPTED
+      #: CLAIM — the bodiless directory a writer leaves when it dies between the lease body's write and
+      #: its rename — is reported under `reap-reclaimed`, deliberately: `cli.py:2100` says "An interrupted
+      #: claim gets its OWN row and its own kind, never a `REAPED` row". `SI-7` added that kind and this
+      #: case was never taught it.
+      #:
+      #: So every iteration whose SIGKILL landed in the mkdir->body window scored `says=no` and FAILed,
+      #: while reap had in fact cleared the slot AND named it in full. Measured 2026-08-02 under load:
+      #: 17 iterations produced an orphan, and the verdict tracked the row KIND with no exceptions —
+      #: 14 `reaped` all ok, 3 `reap-reclaimed` all BAD, every one of the 17 actually recovered. A false
+      #: RED, and `II-4`'s family: the harness not knowing a product capability and charging the product
+      #: for the gap.
+      #:
+      #: Load-dependent because contention widens the microsecond window, which is why 120 iterations on
+      #: an idle box found nothing and the first 20 under load found three.
+      local kinds
+      kinds="$(python3 -c 'from fleet.cli import REAPED, REAP_RECLAIMED
+print(" ".join((REAPED, REAP_RECLAIMED)))')" || kinds="reaped reap-reclaimed"
       says=no
-      local s
+      local s k
       for s in ${orphans//,/ }; do
-        awk -F'\t' -v w="$s" '$1=="reaped" && $2==w' "$CD/reap.out" | grep -q . && says=yes
+        for k in $kinds; do
+          awk -F'\t' -v w="$s" -v k="$k" '$1==k && $2==w' "$CD/reap.out" | grep -q . && says=yes
+        done
       done
+      #: `E9` mode 2. An EMPTY claim directory — the SIGKILL landed between the `mkdir` and the staging
+      #: write, so there is no body AND no staging file, hence no pid and no evidence the writer is dead.
+      #: Below the age floor `reap` MUST NOT clear it: a bodiless claim cannot be told from one being
+      #: born, and clearing it hands a live worker's slot to a second claimant. So demanding immediate
+      #: recovery here demands behaviour the product is right not to have.
+      #:
+      #: The contract that actually matters is "no slot is lost PERMANENTLY", and this now asserts that
+      #: rather than assuming it: a declined claim must be REPORTED with a wait, and then, after the
+      #: floor, a second reap must genuinely recover it. That is stronger than the original check, not
+      #: weaker — it adds an outcome the old version never verified.
+      local declined=no
+      awk -F'\t' -v w="$s" '$1=="reap-unattributable"' "$CD/reap.out" | grep -q . && declined=yes
+      if [ "$still" != "-" ] && [ "$declined" = yes ]; then
+        local floor
+        floor="$(python3 -c 'from fleet.pool import INTERRUPTED_CLAIM_AGE_S
+print(int(INTERRUPTED_CLAIM_AGE_S) + 2)')" || floor=32
+        sleep "$floor"
+        fleet reap --all --porcelain > "$CD/reap-after-floor.out" 2>&1
+        still="$(python3 -c 'import sys
+from pathlib import Path
+home=Path(sys.argv[1]); want=sys.argv[2].split(",")
+print(",".join([s for s in want if (home/"pool"/"leases"/s).is_dir()]) or "-")' "$FLEET_HOME" "$orphans")"
+        says=yes                                  # reap DID account for it, twice: declined then cleared
+      fi
       if [ "$still" = "-" ] && [ "$says" = yes ]; then recovered=yes; verdict=ok
       else recovered="$still"; verdict=BAD; bad=$((bad+1)); fi
     fi

@@ -456,6 +456,51 @@ class TestAnInterruptedClaimIsReclaimableAndReported(unittest.TestCase):
         report = self.pool.reap(base_instant="/i/base")
         self.assertEqual([s for s, _ in report.reclaimed], ["ws1"])
 
+    def test_a_young_EMPTY_claim_is_reported_even_though_it_is_not_reclaimed(self):
+        """`E9` mode 2, caught under load 2026-08-02.
+
+        A SIGKILL between the `mkdir` and the staging write leaves the claim directory COMPLETELY empty —
+        no body and no staging file, so no pid, so no evidence the writer is dead. Below the age floor
+        `interrupted_claims` correctly declines it: *"a bodiless claim cannot be told apart from a claim
+        mid-birth, and treating one as the other deletes a live worker's lease."* That decline is right
+        and this test does not challenge it.
+
+        What is wrong is the SILENCE. The slot is unclaimable RIGHT NOW, the condition is plainly
+        observable, and `reap` — the remedy the capacity refusal names — emitted nothing at all: its whole
+        report was `0 interrupted claim(s) reclaimed` while a third of the pool was blocked. The operator
+        cannot tell a pool that is busy from a pool that is stuck, and `E9` could not tell "reap declined,
+        and said so" from "reap never noticed".
+
+        So: NOT reclaimed, NOT deleted, but REPORTED — with how long to wait.
+        """
+        claim = self.home / "pool" / "leases" / "ws1"
+        claim.mkdir(parents=True)                    # empty: no body, no staging file, no pid anywhere
+        self.assertEqual(self.pool.interrupted_claims(), [],
+                         "a young empty claim must not be reclaimable — that direction deletes live work")
+
+        report = self.pool.reap(base_instant="/i/base")
+        self.assertEqual(report.reclaimed, [], "a young empty claim was CLEARED; the floor exists to stop that")
+        self.assertTrue(claim.is_dir(), "the claim directory was deleted")
+        self.assertEqual([s for s, _, _ in report.unattributable], ["ws1"],
+                         "reap did not report the slot it is currently unable to attribute")
+        slot, why, wait = report.unattributable[0]
+        self.assertGreater(wait, 0, "the report does not say how long until it can be judged")
+        self.assertLessEqual(wait, 30.0)
+        self.assertIn("empty", why.lower(), f"the reason does not describe the state: {why}")
+
+    def test_an_OLD_empty_claim_is_reclaimed_rather_than_merely_reported(self):
+        """The floor is a delay, not a refusal. Once past it the empty claim IS cleared, so the new
+        reporting bucket must not become a way for a stuck slot to be announced forever and never fixed."""
+        import os, time
+        claim = self.home / "pool" / "leases" / "ws1"
+        claim.mkdir(parents=True)
+        old = time.time() - 3600
+        os.utime(claim, (old, old))
+        report = self.pool.reap(base_instant="/i/base")
+        self.assertEqual([s for s, _ in report.reclaimed], ["ws1"])
+        self.assertEqual(report.unattributable, [],
+                         "a claim that was reclaimed must not ALSO be reported as unattributable")
+
     def test_a_LIVE_writer_is_never_reclaimed_however_the_floor_is_set(self):
         """The expensive direction. A claim whose writer is still running is mid-birth, and deleting it hands
         the same slot to a second claimant while the first believes it holds the lease. No floor, however

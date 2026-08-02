@@ -200,6 +200,12 @@ class ReapReport:
     unfreed: list = field(default_factory=list)    # [(slot, why)]
     skipped: list = field(default_factory=list)    # [(slot, owning base)]
     reclaimed: list = field(default_factory=list)  # [(slot, what was cleared)]
+    #: `E9` mode 2. A bodiless claim this call could NOT attribute and therefore did not touch: no lease
+    #: body and no staging file, so no pid, so no evidence its writer is dead — and younger than the age
+    #: floor, which is the only other evidence available. Declining is correct; saying nothing was not.
+    #: The slot is unclaimable right now and `reap` is the remedy the capacity refusal names, so a report
+    #: that omits it lets an operator read a stuck pool as a busy one. Nothing here is deleted.
+    unattributable: list = field(default_factory=list)  # [(slot, why, seconds until it can be judged)]
 
     def __iter__(self):
         """Iterating a report walks the slots it freed, so `for slot in reap(...)` still reads the way it
@@ -324,6 +330,18 @@ class Pool:
         was wrong before `SI-7` is that nothing else reported it either, so the capacity vanished silently.
         """
         return [s for s in self.slots() if not (self.leases / s).is_dir()]
+
+    def _claim_age_s(self, slot: str) -> float:
+        """Seconds since the claim directory for `slot` was last touched, or 0 if it is gone.
+
+        Read from the same `st_mtime` `interrupted_claims` judges by, so the "wait N more seconds" a
+        report gives an operator is derived from the clock the decision was actually made on rather than
+        from a second, independently-drifting one.
+        """
+        try:
+            return max(0.0, time.time() - (self.leases / slot).stat().st_mtime)
+        except OSError:
+            return 0.0
 
     def interrupted_claims(self, min_age_s: float = INTERRUPTED_CLAIM_AGE_S) -> list:
         """Claim directories a `mkdir` won whose lease body never landed: `[(slot, why)]`.
@@ -609,6 +627,16 @@ class Pool:
         # owns it, therefore it is this caller's to clear. That is why `--all` is not required; the operator
         # is told to `reap` by the very refusal they hit, and a remedy that needs a second, undocumented
         # flag is the unclearable alarm again (`FI-30a`).
+        # `E9` mode 2: what this call can SEE but cannot yet judge. Computed before the reclaim loop and
+        # from the same predicate at a zero floor, so the two cannot disagree about which claims exist —
+        # the difference between the lists is exactly the age floor, which is the thing being reported.
+        reclaimable = {slot for slot, _ in self.interrupted_claims(min_age_s=min_claim_age_s)}
+        unattributable = []
+        for slot, why in self.interrupted_claims(min_age_s=0.0):
+            if slot in reclaimable:
+                continue                                # this call is about to clear it; not a report
+            unattributable.append((slot, why, max(0.0, min_claim_age_s - self._claim_age_s(slot))))
+
         for slot, why in self.interrupted_claims(min_age_s=min_claim_age_s):
             try:
                 what = self._reclaim(slot)
@@ -642,9 +670,16 @@ class Pool:
                 unfreed.append((slot, str(exc)))
             except OSError as exc:
                 unfreed.append((slot, f"{type(exc).__name__}: {exc}"))
+        #: Recomputed against what was ACTUALLY reclaimed, not against the pre-loop prediction: a
+        #: concurrent reaper may have cleared one between the two, and reporting a slot as "stuck, wait
+        #: 29s" when it is already free is the same class of lie as omitting it.
+        cleared = {slot for slot, _ in reclaimed}
         report = ReapReport(freed=sorted(freed), unfreed=sorted(unfreed),
                             skipped=sorted((slot, owner) for slot, owner, _ in skipped),
-                            reclaimed=sorted(reclaimed))
+                            reclaimed=sorted(reclaimed),
+                            unattributable=sorted((s, w, r) for s, w, r in unattributable
+                                                  if s not in cleared
+                                                  and (self.leases / s).is_dir()))
         if strict and skipped:
             slot, owner, held = skipped[0]
             others = "".join(f"; {s} is {o}" for s, o, _ in skipped[1:])
