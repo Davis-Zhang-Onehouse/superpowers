@@ -128,6 +128,16 @@ class Proposal:
     status: str
     evidence: list
     at: str
+    #: `I-2`. One line of narrative ABOUT the proposal. Defaulted, and the default matters more than the
+    #: field: every proposal written before this existed has no `note` key, and `proposals()` builds each
+    #: one with `Proposal(**d)` — so a field without a default turns a coordinator's whole existing inbox
+    #: into a TypeError. A new optional field that breaks the inbox is not optional.
+    #:
+    #: It never substitutes for evidence. A worker reported that `--note` did not exist and worked around
+    #: it by writing a file and citing it as `--evidence`, which is exactly the right instinct and exactly
+    #: the wrong ergonomics: it makes every one-line summary a separate artifact. A status claim still
+    #: stands or falls on the paths it cites; this is the sentence that says what to look at first.
+    note: str = ""
 
 
 
@@ -336,13 +346,19 @@ class Roadmap:
     # ------------------------------------------------------------------ propose / apply
 
     def propose(self, instant: Path, milestone: str, status: str,
-                evidence: list) -> Proposal:
+                evidence: list, note: str = "") -> Proposal:
         """The WORKER's verb (UC-3). Writes `proposals.json` and NOTHING else — in particular it never
-        opens `roadmap.json` for writing, which is why a worker cannot move the registry even by mistake."""
+        opens `roadmap.json` for writing, which is why a worker cannot move the registry even by mistake.
+
+        `note` is optional narrative (`I-2`) and is checked by nothing, deliberately: it is prose, and
+        prose is not proof. `_check_evidence` still refuses an empty evidence list below, so a note
+        cannot become the way to make an unevidenced claim.
+        """
         self.milestone(milestone)          # an unknown milestone is refused at the producer
         proposal = Proposal(instant=str(Path(instant)), milestone=milestone,
                             status=_check_status(status),
-                            evidence=_check_evidence(evidence, milestone), at=_now())
+                            evidence=_check_evidence(evidence, milestone), at=_now(),
+                            note=" ".join(str(note or "").split()))
         with held_for_update(self.proposals_path):        # FI-30c
             data = self._load_proposals()
             data["pending"].append(asdict(proposal))
@@ -408,7 +424,13 @@ class Roadmap:
         for p in pending:
             rows.append(Row(
                 kind=PENDING_PROPOSAL, subject=p.milestone,
-                detail=(f"{_proposer(p.instant)} proposes {p.milestone} -> {p.status} at {p.at} with "
+                #: The note goes FIRST when there is one (`I-2`). It is the proposer's one line about
+                #: why this proposal exists, and a coordinator scanning an inbox reads the front of the
+                #: row. Omitted entirely when empty rather than rendered as `""` — every proposal
+                #: written before the field existed has none, and empty quotes on every existing row is
+                #: noise added to the view this was meant to improve.
+                detail=((f'"{p.note}" — ' if p.note else "")
+                        + f"{_proposer(p.instant)} proposes {p.milestone} -> {p.status} at {p.at} with "
                         f"{len(p.evidence)} evidence item(s); the roadmap is UNCHANGED until the "
                         "coordinator applies it"),
                 severity=ATTENTION,

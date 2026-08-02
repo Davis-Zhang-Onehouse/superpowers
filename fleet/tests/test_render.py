@@ -150,8 +150,37 @@ class TestBoard(unittest.TestCase):
 
         self.assertEqual(count([DEAD]), 0, "a dead session is counted as needing a human")
         self.assertEqual(count([DEAD, BLOCKED]), 1, "the banner does not count an actionable state")
-        self.assertEqual(ACTIONABLE_STATES, ("BLOCKED",),
+        self.assertEqual(set(ACTIONABLE_STATES), {"BLOCKED", "IDLE"},
                          "the needs-you population is reconcile's, not render's")
+
+    def test_a_stalled_worker_is_counted_as_needing_a_human(self):
+        """`FI-14`, reported by a coordinator driving real workers.
+
+        `fleet` DETECTS a stalled worker: `IDLE` is a first-class state on a 30-minute threshold
+        (`reconcile.reconcile(..., idle_after_s=1800)`), and it renders exactly the right sentence —
+        *"live, but nothing has changed in the instant for more than 1800s and the pane is not working."*
+        Then it threw the signal away: `ACTIONABLE_STATES = (BLOCKED,)`, so a worker stopped for over
+        half an hour never appeared in the "N needs you" count. The operator was personally noticing
+        stalled workers and restarting them — the thing the banner exists to do.
+
+        The inversion is the sharp part, and it is why this is a defect rather than a preference:
+        `BLOCKED` IS actionable, and per `FI-9` `BLOCKED` is the state that fires when a human is
+        attached and mid-sentence. So the banner called for attention on a human who was already there,
+        and stayed silent on a worker that had stopped.
+        """
+        def count(subjects):
+            match = re.search(r"(\d+) needs you", render.board(subjects))
+            self.assertIsNotNone(match)
+            return int(match.group(1))
+
+        idle = worker("stalled-07310400", "IDLE",
+                      note="live, but nothing has changed in the instant for more than 1800s")
+        self.assertEqual(count([idle]), 1, "a worker stalled past the idle threshold is not counted")
+        # Not a blanket widening: the states that need a REAP or nothing at all must stay out, or the
+        # banner goes back to crying for attention on sessions nobody can answer (`W2-14`/`OBS-57`).
+        self.assertEqual(count([DEAD, idle, BLOCKED]), 2)
+        self.assertEqual(count([worker("running-07310400", "RUNNING")]), 0,
+                         "a working worker needs nobody")
 
     def test_every_row_carries_the_subject_identity_in_the_porcelain_form(self):
         # OBS-62: the shipped assertion anchored to a human summary line and COULD NEVER MATCH.
