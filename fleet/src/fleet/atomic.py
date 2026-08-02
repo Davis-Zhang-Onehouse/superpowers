@@ -46,7 +46,7 @@ import time
 from pathlib import Path
 from contextlib import contextmanager
 
-__all__ = ["atomic_write", "atomic_update", "held_for_update", "tmp_name"]
+__all__ = ["atomic_symlink", "atomic_write", "atomic_update", "held_for_update", "tmp_name"]
 
 #: The tail every staged file carries. Named here so the structural test and the writer agree by
 #: construction rather than by two people remembering the same string.
@@ -92,6 +92,43 @@ def atomic_write(path, text: str, encoding: str = "utf-8") -> Path:
             pass                           # a staging file that is already gone needs no removing
         raise
     return path
+
+
+def atomic_symlink(target, link) -> Path:
+    """Publish `link` as a symlink to `target` in one indivisible step.
+
+    The sibling of `atomic_write`, for the one thing that primitive cannot carry. `atomic_write` publishes
+    TEXT at a path; a pointer that selects which tree is live is a symlink, and there is no way to move a
+    symlink in place — `os.symlink` refuses an existing name, so the obvious `unlink` then `symlink` leaves
+    a window in which the link does not exist at all. For a pointer that every shell's `PATH` resolves
+    through, that window is the outage.
+
+    It lives HERE, beside `atomic_write`, rather than in the module that needs it, because "there is
+    exactly one implementation of atomic publish in this package" is the `FI-20` invariant, and a second
+    publish sitting in a caller makes that invariant nearly-true instead of true. `test_structure`'s
+    ninth-copy guard skips this module for precisely that reason: the exemption is for the primitive, not
+    for whoever fancies writing one.
+
+    The staging name is `tmp_name`, never derived from the link — same rule and the same reason as
+    `atomic_write`. A pid-derived staging name would be shared by every writer inside one process, so two
+    threads flipping at once would race on one path: the first `os.replace` publishes the second's target,
+    and the second raises `FileNotFoundError` finding its staging gone.
+
+    A reader resolving `link` sees the old target or the new one, never a missing path. Returns `link`.
+    """
+    link = Path(link)
+    link.parent.mkdir(parents=True, exist_ok=True)
+    staging = link.parent / tmp_name(link.name)
+    try:
+        os.symlink(str(target), staging)
+        os.replace(staging, link)          # atomic rename, even over an existing symlink
+    except BaseException:
+        try:
+            os.unlink(staging)
+        except OSError:
+            pass                           # a staging link that is already gone needs no removing
+        raise
+    return link
 
 
 def _lock_dir(path: Path) -> Path:
