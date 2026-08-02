@@ -2297,11 +2297,32 @@ unset _fleet_bin
 
 Verify in a fresh shell: `. /home/ubuntu/davis_root/superpowers/scripts/fleet-env.sh && command -v fleet && fleet release-status`
 
-- [ ] **Step 4: Repoint the plugin marketplace**
+- [ ] **Step 4: Repoint the plugin marketplace — by direct file edit, NEVER the CLI**
 
-Edit `/home/ubuntu/davis_root/.claude/settings.json`, changing `extraKnownMarketplaces.superpowers-dev.source.path` from `/home/ubuntu/davis_root/superpowers` to `/home/ubuntu/davis_root/fleet-releases/current`.
+**Do not use `claude plugin marketplace remove` / `add`.** `remove` rewrites `settings.json` and strips
+`enabledPlugins`; `add` does not restore it. The box ends up with no plugin enabled and no skills in any
+new session. Separately, `plugin marketplace update` does **not** re-read `settings.json`, so editing the
+declared path alone repoints nothing — `known_marketplaces.json` is sticky materialized state. All of this
+was established the hard way; see `SI-37` in the effort's ISSUES.md.
 
-Verify by opening a **fresh** Claude session and confirming the skills still load — the plugin cache is a copy, so this only takes effect in a new session. If they do not, revert the one line; nothing else depends on it.
+Back both files up, then edit **both**, leaving `enabledPlugins` untouched:
+
+- `~/davis_root/.claude/settings.json` → `extraKnownMarketplaces.superpowers-dev.source.path`
+- `~/davis_root/.claude/plugins/known_marketplaces.json` → `superpowers-dev.source.path` **and**
+  `superpowers-dev.installLocation`
+
+Both become `/home/ubuntu/davis_root/fleet-releases/current`. Assert `enabledPlugins` still equals
+`{"superpowers@superpowers-dev": true}` before writing.
+
+Verify **behaviourally** — a fresh process must load the skills, which reading the files back cannot tell
+you:
+
+```bash
+cd /home/ubuntu/davis_root && claude -p 'Without using any tools, answer in one line: is a skill named superpowers:brainstorming available to you right now? Reply exactly YES or NO.'
+```
+
+Expected `YES`. If not, restore both backups and re-run the probe before doing anything else. Confirmed
+working: with both files pointing at `current` — itself a symlink — a fresh headless session answers YES.
 
 - [ ] **Step 5: Confirm the sync cron audit (already performed — verify, don't repeat)**
 
