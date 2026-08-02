@@ -46,6 +46,8 @@ directory copy.
 | Live editing | `deploy --dev` points `current` at the git checkout, through the same one mechanism |
 | Version scheme | Manual semver; tags `fleet/vX.Y.Z`; `fleet.__version__` is the single source of truth |
 | Delta computation | `git cherry -v` (patch-id), so a rebase cannot corrupt a changelog |
+| IT isolation | Classify the live-session delta on this box; do not containerise and lose the real-box assertions |
+| IT coverage | Two tiers: the 11-runner gate set every release, all 19 for a minor or major bump |
 
 ## Architecture
 
@@ -107,6 +109,8 @@ one-writer-per-file rule has clean boundaries.
 | `fleet/src/fleet/cli.py` | The `release` verb group: argument parsing, refusals, exit codes. | all three |
 | `bin/fleet-view` | A `releases` view. Rendering only — reads `--porcelain`, computes nothing. | — |
 | `scripts/fleet-env.sh` | Defaults `FLEET_RELEASES`; `PATH` via `current`. | — |
+| `fleet/it/lib.sh` | `it_assert_isolation` classifies the live-session delta instead of comparing it. | — |
+| `fleet/it/run-all.sh` | Two rosters — the gate set and `--full` — and a header that states the one it runs. | — |
 
 ## The release lifecycle
 
@@ -160,20 +164,64 @@ rather than procedurally discouraged: nothing can edit the tree underneath the r
   scratch directory, runs there, and copies `RESULTS*.tsv` and the full-run log back into
   `evidence/`. It recomputes the scratch copy's `tree_sha` and compares it to `MANIFEST.tsv`, so the claim
   "what was tested is what shipped" is asserted rather than assumed.
-- **Isolation baseline:** the IT suite asserts isolation against this box's live dispatch stores and tmux
-  session set, so a coordinator finishing mid-run can fail it for reasons unrelated to the release.
-  `verify` captures `fleet board --porcelain` before and after into `live-subjects-{before,after}.tsv`.
+### Two IT tiers
 
-**Verdicts** are written to `evidence/VERDICT.tsv` as `suite<TAB>verdict<TAB>evidence<TAB>note`:
+`run-all.sh`'s header says *"ONE validation run: every runner, sequentially"*, but its `RUNNERS` array
+holds 11 of the 19 runners on disk — F, G, H, I, J, O, P and lineage are absent, with no comment saying
+why. Prose and behaviour must agree before either can gate a release, so `run-all.sh` gains an explicit
+second roster and a corrected header:
+
+- **`run-all.sh`** — the 11-runner gate set. Run by `verify` for every release.
+- **`run-all.sh --full`** — all 19. Required by `promote` for a **minor or major** version bump; optional
+  for a patch.
+
+The `--full` roster cannot be assembled by assumption. The plan's first step here is to determine, per
+excluded runner, why it is excluded and whether it is unattended-safe. **§P is the real-`claude` tier**: it
+spends the account's usage allowance and depends on the identity pinning established in
+`fleet-dispatch-launcher.sh`. Any runner that invokes real `claude` sits behind an explicit opt-in within
+`--full` rather than running by default, because a release gate that silently consumes a weekly limit is a
+gate nobody will keep using. Whatever the answer per runner, it gets written into the header — an
+undocumented exclusion is how this discrepancy arose in the first place.
+
+### Isolation, and why the baseline is fixed rather than escaped
+
+The IT suite asserts against the **real box** on purpose: `lib.sh` hashes the operator's
+`~/.claude-dispatch-board` and `~/.claude-ws-pool`, lists the **default** tmux server's sessions, and
+`run-A.sh`'s `A1c` asserts that the operator's real `~/.fleet` is unchanged across the probe. Running the
+suite in a container would make every one of those pass against an empty box — green for the wrong reason,
+wearing the release gate's badge. So the baseline is made precise instead of being escaped.
+
+Of the two baselines, only the tmux session list moves under normal operation; the store hashes change
+only if something writes those legacy stores, which is a genuine finding rather than noise.
+`it_assert_isolation` therefore **classifies** the session delta instead of comparing it for equality:
+
+| Observation | Treatment |
+|---|---|
+| A session appeared whose name matches an IT prefix (`$TMUX_PREFIX`, `itfleet-*`) | **LEAK — hard FAIL** |
+| A `dt-` session the suite itself created is missing | **hard FAIL** (the suite killed live work) |
+| A `dt-` session the suite never named appeared or disappeared | operator activity — recorded as a note |
+| A store hash changed | **hard FAIL** |
+
+The suite already writes `dt-sessions-seen*.txt`, so it knows which names were its own. This is strictly
+stronger than what it replaces: today "your coordinator finished normally" and "the suite killed a live
+session" produce the identical signal, and the second is the event the check exists to catch.
+
+`verify` also captures `fleet board --porcelain` before and after into `live-subjects-{before,after}.tsv`.
+
+**Verdicts** are written to `evidence/VERDICT.tsv` as `suite<TAB>verdict<TAB>evidence<TAB>note`, with the
+exact roster of sections run recorded alongside, so a release states its own coverage rather than implying
+it:
 
 | Verdict | Meaning |
 |---|---|
 | GREEN | Both suites passed. |
-| RED | A suite failed and the isolation baseline was unchanged across the run. |
-| INCONCLUSIVE | A suite failed *and* the live-subject set changed during the run. |
+| RED | A suite failed with no concurrent operator activity recorded. |
+| INCONCLUSIVE | A suite failed *and* operator activity was recorded during the run. |
 
-INCONCLUSIVE is the source-pin doctrine applied to the one other baseline the suite depends on: a changed
-pin is contamination, never a verdict. It costs a re-run and never a false record.
+With classification in place the isolation assertion itself no longer fires spuriously, so INCONCLUSIVE
+becomes rare rather than routine — but it stays, because a functional section that fails while the box was
+busy is still not attributable to HEAD with confidence. That is the source-pin doctrine applied to the one
+baseline the suite cannot own: contamination is never a verdict. It costs a re-run and never a false record.
 
 `verify` **warns** on a busy box; it does not refuse. Refusing would make releases impossible during normal
 operation, which here is most of the time. Exit code is 0 for GREEN, 1 for RED or INCONCLUSIVE.
@@ -182,6 +230,11 @@ operation, which here is most of the time. Exit code is 0 for GREEN, 1 for RED o
 
 Refuses (exit 4) unless `evidence/VERDICT.tsv` exists and records GREEN for both suites. On success writes
 `STATE=RELEASED`. `promote` never runs tests — it only reads the evidence `verify` left.
+
+It additionally compares the version being promoted with the previous release: a **minor or major** bump
+requires evidence from a `--full` run, and `promote` refuses a minor or major whose recorded roster is the
+gate set. A patch bump promotes on the gate set. This is the one place the two tiers are enforced, so the
+tier policy lives in exactly one function rather than in an operator's memory.
 
 ### `fleet release deploy <version>` / `fleet release deploy --dev` `[--reason <text>]`
 
@@ -298,9 +351,22 @@ with `FLEET_RELEASES` pointed at a temp directory:
 - a mutating verb refuses with exit 4 when the lock is held, and names the holder;
 - the flip never leaves `current` absent (assert by racing a reader against the flip);
 - concurrent history appends produce two well-formed lines, not one interleaved line;
-- `verify` returns INCONCLUSIVE, not RED, when a suite fails and the live-subject set changed.
+- `verify` returns INCONCLUSIVE, not RED, when a suite fails and operator activity was recorded;
+- `promote` refuses a minor or major bump whose evidence records only the gate roster, and accepts the same
+  evidence for a patch bump.
 
 Every one of these must be shown to fail with the implementation reverted before it counts.
+
+**The IT harness change needs its own tests, with a negative control.** `it_assert_isolation` is the thing
+every other section's verdict rests on, and loosening it is exactly the change that could quietly stop
+protecting anything. Against a scratch tmux server:
+
+- a session appearing that matches an IT prefix still produces a hard FAIL — this is the negative control,
+  and without it the whole classification change is unfalsifiable;
+- a `dt-` session the suite created and then lost still produces a hard FAIL;
+- a `dt-` session the suite never named, appearing or disappearing, produces a note and not a failure;
+- a changed store hash still produces a hard FAIL;
+- the establishing (first) call still reports SKIP, not PASS, because it compared nothing.
 
 **Integration** — one new section, `fleet/it/run-Q.sh`, added to `run-all.sh`: a real
 cut → verify → promote → deploy → rollback against a throwaway git clone and a throwaway releases root,
@@ -330,6 +396,16 @@ Pruning old releases; multi-machine distribution; artifact signing; extracting `
 repository or publishing it to PyPI; automatic cutting on a schedule or from a hook. Each is a separate
 project, and none is needed for the pipeline to be useful.
 
+**Containerising the IT suite** is deliberately deferred rather than rejected. It would give deterministic
+isolation, but it cannot host the real-box assertions — those would need a seeded synthetic dispatch board,
+ws-pool and decoy `dt-` sessions to guard anything at all, and a fixture that drifts from the real thing
+fails silently. It also needs an image carrying an authenticated `claude` for the sections that invoke it,
+and the `/proc` cwd-holder probe (OBS-48) that guards `reap` and `harvest` behaves differently under a PID
+namespace. On this box the docker daemon is not running and neither podman nor bwrap is installed, though
+`unshare` and unprivileged user namespaces are available. Revisit if classification proves insufficient;
+the right shape would be containerised functional sections with the real-box assertions kept outside, on
+the host.
+
 ## Acceptance criteria
 
 1. `fleet release cut <v>` on a clean tree produces a read-only export, an annotated `fleet/v<v>` tag, a
@@ -344,5 +420,9 @@ project, and none is needed for the pipeline to be useful.
 6. `fleet release deploy --dev` restores live editing, and `status` then reports the checkout's HEAD and
    dirty state.
 7. A mutating verb invoked from inside `$FLEET_RELEASES` refuses with exit 4.
-8. The hermetic suite and `run-Q.sh` both pass, and each new hermetic test has been shown to fail with its
-   implementation reverted.
+8. `it_assert_isolation` classifies the session delta: an IT-prefixed session appearing is still a hard
+   FAIL (shown by a negative control), while a `dt-` session the suite never named is a note.
+9. `run-all.sh` runs a documented roster, `run-all.sh --full` runs all 19 with any real-`claude` runner
+   behind an explicit opt-in, and `promote` refuses a minor or major bump that has only gate-set evidence.
+10. The hermetic suite and `run-Q.sh` both pass, and each new hermetic test has been shown to fail with its
+    implementation reverted.
