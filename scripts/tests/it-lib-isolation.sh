@@ -26,8 +26,12 @@ classify() {   # classify <baseline-lines> <after-lines> -> prints "verdict|deta
 # --- THE NEGATIVE CONTROL: a leaked harness session must still be a hard failure ---------------------
 out="$(classify $'dt-live\nzsh' $'dt-live\nitfleet-B-worker\nzsh')"
 check "an IT-prefixed session appearing is a LEAK" "FAIL" "${out%%|*}"
-case "$out" in *itfleet-B-worker*) note "ok   the leak names the session" ;;
-               *) note "FAIL the leak does not name the session: $out"; fails=1 ;; esac
+# Matched against the FAIL verdict AND the name, not the name alone. As first written this checked only
+# `*itfleet-B-worker*` over the whole output — which the NOTE branch also prints, in its `appeared=[…]`
+# list. So it passed with the leak branch disabled and discriminated nothing: a vacuous check sitting
+# inside the negative control that exists to prove the rest is not vacuous.
+case "$out" in 'FAIL|'*itfleet-B-worker*) note "ok   the leak FAILs and names the session" ;;
+               *) note "FAIL the leak is not reported as a FAIL naming the session: $out"; fails=1 ;; esac
 
 # --- the observed false RED: another operator's session appearing is a note --------------------------
 out="$(classify $'dt-live\nzsh' $'claude_mor_design_chinmay\ndt-live\nzsh')"
