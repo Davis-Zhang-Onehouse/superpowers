@@ -155,7 +155,10 @@ a_run() {                 # a_run <logbase> <cmd...> -> A_RC, stdout $A_OUT, std
 # diagnostic is inspected: a refusal that never names `FLEET_HOME` or `--home` is not the refusal Plan 6
 # asks for, and is recorded as INCONCLUSIVE rather than counted as a pass.
 a1_fixture() {
-  local d="$EV/A1"; mkdir -p "$d/wd" "$d/ctlhome" "$d/inst" "$d/slotsrc"
+  #: `rel` and `relrepo` are the release verbs' sandbox — see the note in `a1_args`. They are created
+  #: empty and stay empty: every release verb is expected to refuse before reaching them, and if one
+  #: stops refusing, this is where the damage lands instead of in the operator's release area.
+  local d="$EV/A1"; mkdir -p "$d/wd" "$d/ctlhome" "$d/inst" "$d/slotsrc" "$d/rel" "$d/relrepo"
   #: One real instant, created through a valid FLEET_HOME, then addressed by ABSOLUTE path — so no A1
   #: probe can exit 2 merely because its `--instant` did not resolve in an empty fallback store.
   A1_MK() { timeout 60 python3 -m fleet.cli init --home "$d/ctlhome" --instants-dir "$d/inst" \
@@ -207,6 +210,23 @@ a1_args() {               # every required flag supplied; no value contains a sp
     unenroll)   echo "--slot slotsrc" ;;
     reap)       echo "--base 00000000" ;;
     set-golden) echo "--path $DUMMY/alpha" ;;
+    clone)      echo "--slot $d/slotsrc" ;;
+    #: The release verbs. `--releases` is passed to EVERY one of them and always points inside the
+    #: section tree. It is not optional care: without it the verb resolves $FLEET_RELEASES or its
+    #: built-in default, which on this box is the operator's real release area — and A1's whole premise
+    #: is that a verb might NOT refuse, in which case an unsandboxed probe would deploy or roll back the
+    #: live fleet to find that out. The refusal is what is under test; the sandbox is what makes it safe
+    #: to be wrong about.
+    #:
+    #: `release-cut` also needs `--repo`. Without it the verb refuses for a MISSING FLAG rather than for
+    #: the missing home, which is exit 2 for an unrelated reason — measured, and exactly what A1b's
+    #: `inconclusive` bucket is for. A fixture that produces the right exit code for the wrong reason is
+    #: not a fixture.
+    release-cut)      echo "--version 9.9.9 --repo $d/relrepo --releases $d/rel" ;;
+    release-verify)   echo "--version 9.9.9 --releases $d/rel" ;;
+    release-promote)  echo "--version 9.9.9 --releases $d/rel" ;;
+    release-deploy)   echo "--version 9.9.9 --releases $d/rel --reason a1reason --force" ;;
+    release-rollback) echo "--to 9.9.9 --releases $d/rel --reason a1reason" ;;
     *)          echo "A1-UNMAPPED" ;;
   esac
 }
@@ -214,15 +234,21 @@ a1_args() {               # every required flag supplied; no value contains a sp
 a1_no_fallback() {
   a1_fixture
   local log="$OUT/A1-per-verb.txt"; : > "$log"
-  local n=0 wrote=0 nonrefusing=0 attributed=0 inconclusive=0
-  local wrote_list="" nonref_list="" inconc_list=""
+  local n=0 wrote=0 nonrefusing=0 attributed=0 inconclusive=0 unmapped=0
+  local wrote_list="" nonref_list="" inconc_list="" unmapped_list=""
   for v in $A_MUTATING; do
     n=$((n+1))
     local fh="$A1_D/fakehome-$v"; rm -rf "$fh"; mkdir -p "$fh"
     local args; args="$(a1_args "$v")"
     if [ "$args" = "A1-UNMAPPED" ]; then
-      printf '%-12s UNMAPPED\n' "$v" >> "$log"; nonrefusing=$((nonrefusing+1))
-      nonref_list="$nonref_list $v(unmapped)"; continue
+      #: `II-4`. A verb with no argv recipe used to be counted as NON-REFUSING, so the register read
+      #: "N of M mutating verbs did NOT refuse: clone(unmapped) …" — an accusation pointed at the
+      #: product, in the same column and the same words as a real admission-control defect, when the
+      #: truth is that this harness does not know how to call the verb. Its own count, its own case
+      #: (`A1d`), and no bearing on `A1b`'s verdict about the verbs it CAN call.
+      printf '%-12s UNMAPPED (no argv recipe in a1_args — harness gap, not a product verdict)\n' \
+             "$v" >> "$log"
+      unmapped=$((unmapped+1)); unmapped_list="$unmapped_list $v"; continue
     fi
     local out rc created names_home
     # shellcheck disable=SC2086
@@ -230,8 +256,15 @@ a1_no_fallback() {
            timeout 120 python3 -m fleet.cli "$v" $args 2>&1)"; rc=$?
     printf '%s\n' "$out" > "$OUT/A1-$v.out"
     created=no; [ -e "$fh/.fleet" ] && created=yes
+    #: `II-10`. Anchored on the SENTENCE `SI-15` emits, not on the flag name. It was
+    #: `grep -qE 'FLEET_HOME|--home'`, and `--home` is a COMMON_FLAG that appears in the usage block
+    #: every verb prints on ANY parse error — measured at 39 of 39 verbs. So a verb that never
+    #: implemented the store refusal, but exited 2 because its argv was wrong, was counted as an
+    #: attributable refusal, and the `inconclusive` bucket that exists to catch exactly that could
+    #: never fire. A check that cannot tell the refusal it wants from an error it does not want is
+    #: not a check.
     names_home=no
-    printf '%s' "$out" | grep -qE 'FLEET_HOME|--home' && names_home=yes
+    printf '%s' "$out" | grep -qF 'writes to a store and no store was named' && names_home=yes
     printf '%-12s rc=%-3s created_HOME_dot_fleet=%-3s names_home=%-3s\n' \
            "$v" "$rc" "$created" "$names_home" >> "$log"
     [ "$created" = yes ] && { wrote=$((wrote+1)); wrote_list="$wrote_list $v"; }
@@ -253,12 +286,27 @@ a1_no_fallback() {
     a_fail A1a "$OUT/A1-fallback-artefacts.txt" "$(sq "$wrote of $n mutating verbs FELL BACK and WROTE a store under \$HOME/.fleet with FLEET_HOME unset:$wrote_list — cli.default_context resolves 'parsed --home or \$FLEET_HOME or Path.home()/\".fleet\"', so an unset FLEET_HOME writes shared state instead of refusing. Artefacts listed in the evidence file; the sandbox HOME kept them out of the operator's tree")"
   fi
 
+  #: A1b judges the verbs this harness can actually invoke. `$probed`, not `$n` — reporting a verdict
+  #: over a population that includes verbs never run is how the unmapped ones got counted as failures
+  #: in the first place.
+  local probed=$((n - unmapped))
   if [ "$nonrefusing" = 0 ] && [ "$inconclusive" = 0 ]; then
-    a_pass A1b "$log" "$(sq "all $n mutating verbs exited 2 with a diagnostic naming FLEET_HOME/--home")"
+    a_pass A1b "$log" "$(sq "all $probed probed mutating verbs exited 2 with the SI-15 store refusal ('writes to a store and no store was named'), matched on that sentence rather than on the flag name --home, which every verb's usage block also contains (II-10). $unmapped verb(s) had no argv recipe and are A1d's business, not this case's")"
   elif [ "$nonrefusing" = 0 ]; then
-    a_fail A1b "$log" "$(sq "$attributed of $n mutating verbs refused with exit 2 naming the home; $inconclusive exited 2 for an unrelated reason ($inconc_list) so their refusal is NOT attributable to the missing home — the fallback is latent for them, not absent")"
+    a_fail A1b "$log" "$(sq "$attributed of $probed probed mutating verbs refused with exit 2 carrying the SI-15 store refusal; $inconclusive exited 2 for an unrelated reason ($inconc_list) so their refusal is NOT attributable to the missing home — the fallback is latent for them, not absent")"
   else
-    a_fail A1b "$log" "$(sq "$nonrefusing of $n mutating verbs did NOT refuse:$nonref_list. Attributable refusals: $attributed; exit-2-for-another-reason: $inconclusive ($inconc_list). Plan 6 A1 requires exit 2 from every mutating verb")"
+    a_fail A1b "$log" "$(sq "$nonrefusing of $probed probed mutating verbs did NOT refuse:$nonref_list. Attributable refusals: $attributed; exit-2-for-another-reason: $inconclusive ($inconc_list). Plan 6 A1 requires exit 2 from every mutating verb")"
+  fi
+
+  #: A1d — the coverage case. `II-4`. §A derives its verb population from `cli.VERBS` on purpose, so a
+  #: new verb cannot escape coverage; the argv recipes are hand-written, so a new verb CAN escape a
+  #: fixture. That gap is real and must be loud — but it is a debt owed by whoever added the verb, not
+  #: a defect in the verb. Naming it separately is what makes the next person's message read "you owe a
+  #: fixture" instead of "the product failed to refuse".
+  if [ "$unmapped" = 0 ]; then
+    a_pass A1d "$log" "$(sq "every one of the $n mutating verbs in cli.VERBS has an argv recipe in a1_args, so A1a/A1b judge the whole population and not a subset of it")"
+  else
+    a_fail A1d "$log" "$(sq "$unmapped of $n mutating verbs have NO argv recipe in a1_args:$unmapped_list. This is a HARNESS gap, not a product verdict: these verbs were never invoked, so A1a and A1b say nothing about them. Add a recipe to a1_args in run-A.sh — every required flag supplied, no value containing a space, and any release verb given --releases inside the section tree")"
   fi
 }
 
@@ -293,6 +341,10 @@ a1_detail() {
       A1a) out="$out A1a (a store was written under \$HOME/.fleet)" ;;
       A1b) out="$out A1b (a mutating verb did not refuse)" ;;
       A1c) out="$out A1c (the operator's store moved)" ;;
+      #: No other case id appears in this text. Naming one here would put "A1b" into a message about
+      #: A1d and re-create the exact misreading `II-8` exists to prevent — the control in
+      #: bin/a1-detail-control.sh asserts the absence of the ids that passed, and it catches this.
+      A1d) out="$out A1d (a mutating verb has no argv recipe, so it was never invoked)" ;;
       *)   out="$out $id (no description registered — add one to a1_detail)" ;;
     esac
   done
@@ -302,13 +354,13 @@ a1_detail() {
 a1() {
   a1_no_fallback
   a1_real_store_untouched
-  local failed; failed="$(awk -F'\t' '$1 ~ /^A1[abc]$/ && $2=="FAIL" {printf "%s ", $1}' "$RESULTS")"
+  local failed; failed="$(awk -F'\t' '$1 ~ /^A1[abcd]$/ && $2=="FAIL" {printf "%s ", $1}' "$RESULTS")"
   local bad; bad="$(printf '%s' "$failed" | wc -w | tr -d ' ')"
   if [ "$bad" = 0 ]; then
-    a_pass A1 "$OUT/A1-per-verb.txt" "$(sq "FLEET_HOME unset ⇒ every mutating verb refuses exit 2, nothing falls back to ~/.fleet, and the operator's store is untouched (A1a+A1b+A1c)")"
+    a_pass A1 "$OUT/A1-per-verb.txt" "$(sq "FLEET_HOME unset ⇒ every mutating verb refuses exit 2 with the SI-15 store refusal, nothing falls back to ~/.fleet, the operator's store is untouched, and every mutating verb had an argv recipe so the population judged is the whole one (A1a+A1b+A1c+A1d)")"
   else
     # shellcheck disable=SC2086
-    a_fail A1 "$OUT/A1-per-verb.txt" "$(sq "$bad of 3 sub-assertions failed:$(a1_detail $failed). The sub-assertions not named here PASSED — read this row as a list of failures, not as an index of the three")"
+    a_fail A1 "$OUT/A1-per-verb.txt" "$(sq "$bad of 4 sub-assertions failed:$(a1_detail $failed). The sub-assertions not named here PASSED — read this row as a list of failures, not as an index of the four")"
   fi
 }
 
