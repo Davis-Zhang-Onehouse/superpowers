@@ -134,6 +134,53 @@ class Repo:
             with tarfile.open(archive) as bundle:
                 bundle.extractall(dest)
 
+    # --- worktrees: the export's bytes, with a working `.git` (`II-7`) -------------------------------
+
+    def worktree_add(self, tag: str, dest) -> Path:
+        """A detached worktree at `tag`, for the IT suite to run in.
+
+        The suite cannot judge an export. Several cases assume they are inside a git working copy and
+        nothing declares the dependency, so each discovers it separately and fails in a way that looks
+        like a product defect: `M13` asks `selftest` to notice a dirty path under `tests/`, which is a
+        `git status --porcelain`, and `git archive` writes no `.git` by construction. `source-pin.sh`
+        had the identical shape one layer down (`II-5`) and disabled the whole gate until it was fixed.
+
+        A worktree is the same bytes with a working repository attached. `release.tree_sha` excludes the
+        root `.git` precisely so a caller can prove that, and `Verify` does prove it against the
+        MANIFEST before running anything -- so a release still certifies exactly what it ships. The only
+        thing that changes is that the suite can run at all.
+
+        DETACHED. Without `--detach` git creates a branch named after the tag's last path segment, and a
+        second worktree at the same tag then collides with it: a re-verify would fail on repository
+        bookkeeping, which reads as a defect in the release.
+        """
+        dest = Path(dest)
+        code, out = self.git(["worktree", "add", "--detach", str(dest), tag], self.path)
+        if code != 0:
+            raise BadInput(
+                f"creating a worktree for {tag} at {dest} failed: `git worktree add` exited {code} in "
+                f"{self.path}." + (f" Output: {out.strip()}" if out.strip() else "") +
+                " Verification runs the IT suite from a worktree because the suite cannot judge an "
+                "export, so without one there is nothing to verify in.")
+        return dest
+
+    def worktree_remove(self, dest) -> None:
+        """Remove the worktree and prune its registration.
+
+        `--force` because the suite writes `RESULTS*.tsv` and its evidence into the tree it runs in, and
+        `git worktree remove` refuses a dirty one. Everything worth keeping is copied into the release's
+        evidence before this is called; what remains is litter by definition.
+
+        The `prune` is not belt-and-braces. `remove` fails outright on a tree already gone from disk and
+        leaves the registration behind either way, so without it the NEXT verify of the same version
+        meets a path git still believes it owns -- and fails on bookkeeping, which again reads as a
+        defect in the release. Neither call is checked: this is cleanup, and cleanup that raises turns a
+        finished verification into an error.
+        """
+        dest = Path(dest)
+        self.git(["worktree", "remove", "--force", str(dest)], self.path)
+        self.git(["worktree", "prune"], self.path)
+
 
 def changelog_section(version: Version, *, head: str, branch: str, upstream_base: str,
                       prev_tag, commits, rebased: bool, when: str) -> str:

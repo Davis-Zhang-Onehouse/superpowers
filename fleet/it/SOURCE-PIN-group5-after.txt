@@ -1,116 +1,30 @@
-pinned at 2026-07-31T00:36:37+00:00
-git HEAD: 4a842f98fd449b28041dd08f2edc0971ed7d513a
+pinned at 2026-08-02T16:57:59+00:00
+git HEAD: 17b8c83c4610bb24be26b82bcb1a2ea432f91ae4
 git status --porcelain:
- M fleet/it/L/L6.out
- M fleet/it/L/L7-abort.stdout
- M fleet/it/L/L7-apply.stdout
- M fleet/it/L/L7-base-check.stdout
- M fleet/it/L/L7-board.stdout
- M fleet/it/L/L7-brief.stdout
- M fleet/it/L/L7-close.stdout
- M fleet/it/L/L7-complete.stdout
- M fleet/it/L/L7-dispatch.stdout
- M fleet/it/L/L7-harvest.stdout
- M fleet/it/L/L7-init.stdout
- M fleet/it/L/L7-leases.stdout
- M fleet/it/L/L7-lint.stdout
- M fleet/it/L/L7-milestone.stdout
- M fleet/it/L/L7-per-verb.txt
- M fleet/it/L/L7-propose.stdout
- M fleet/it/L/L7-reap.stdout
- M fleet/it/L/L7-reconcile.stdout
- M fleet/it/L/L7-resume.stdout
- M fleet/it/L/L7-review.stdout
- M fleet/it/L/L7-roadmap.stdout
- M fleet/it/L/L7-selftest.stdout
- M fleet/it/L/L7-setup-init.out
- M fleet/it/L/L7-setup.out
- M fleet/it/L/L7-status.stdout
- M fleet/it/L/L7-unenroll.stdout
- M fleet/it/L/L7-verify.stdout
- M fleet/it/L/L8-first.stdout
- M fleet/it/L/L8-first.tsv
- M fleet/it/L/L8-second.stdout
- M fleet/it/L/L8-second.tsv
- M fleet/it/L/home-l1/harvest/sources.json
- M fleet/it/L/home-l2/harvest/sources.json
- M fleet/it/L/home-l3/harvest/sources.json
- M fleet/it/L/home-l4/harvest/sources.json
- M fleet/it/L/home-l5c/harvest/sources.json
- M fleet/it/L/home-l6/harvest/sources.json
- M fleet/it/L/home-l8/harvest/sources.json
- M fleet/it/M/M-setup.out
- M fleet/it/M/M1-abort.stdout
- M fleet/it/M/M1-apply.stdout
- M fleet/it/M/M1-base-check.stdout
- M fleet/it/M/M1-board.stdout
- M fleet/it/M/M1-brief.stdout
- M fleet/it/M/M1-close.stdout
- M fleet/it/M/M1-complete.stdout
- M fleet/it/M/M1-dispatch.stdout
- M fleet/it/M/M1-harvest.stdout
- M fleet/it/M/M1-init.stdout
- M fleet/it/M/M1-leases.stdout
- M fleet/it/M/M1-lint.stdout
- M fleet/it/M/M1-milestone.stdout
- M fleet/it/M/M1-per-verb.txt
- M fleet/it/M/M1-propose.stdout
- M fleet/it/M/M1-reap.stdout
- M fleet/it/M/M1-reconcile.stdout
- M fleet/it/M/M1-resume.stdout
- M fleet/it/M/M1-review.stdout
- M fleet/it/M/M1-roadmap.stdout
- M fleet/it/M/M1-selftest.stdout
- M fleet/it/M/M1-status.stdout
- M fleet/it/M/M1-unenroll.stdout
- M fleet/it/M/M1-verify.stdout
- M fleet/it/M/M10-verdicts.txt
- M fleet/it/M/M12-setup.out
- M fleet/it/M/M12.stdout
- M fleet/it/M/M13-git-after.txt
- M fleet/it/M/M13-git-before.txt
- M fleet/it/M/M13-git-dirty.txt
- M fleet/it/M/M13-inside.stdout
- M fleet/it/M/M13-inside.tsv
- M fleet/it/M/M13-outside.stdout
- M fleet/it/M/M13-outside.tsv
- M fleet/it/M/M13-suite-with-guard.txt
- M fleet/it/M/M13-suite-without-guard.txt
- M fleet/it/M/M5-per-flag.txt
- M fleet/it/M/M7.out
- M fleet/it/N/N-setup.out
- M fleet/it/N/N1.stdout
- M fleet/it/N/N3-status.stdout
- M fleet/it/N/N4-status.stdout
- M fleet/it/N/N5-close.stderr
- M fleet/it/N/N6-leases-before.stdout
- M fleet/it/N/N6-reap-foreign.stdout
- M fleet/it/N/N6-reap.stdout
- M fleet/it/N/N6-status.stdout
- M fleet/it/N/N7-sessions.txt
- M fleet/it/N/N7.out
- M fleet/it/N/N9-sessions-after.txt
- M fleet/it/N/N9-setup.out
- M fleet/it/N/N9.stdout
- M fleet/it/RESULTS-move-group5.tsv
+ M fleet/it/RESULTS.tsv
  M fleet/it/SOURCE-PIN-group5-after.txt
  M fleet/it/SOURCE-PIN-group5-before.txt
+ M fleet/it/run-A.sh
+ M fleet/it/run-group5.sh
 sha256 of the package under test:
-4930abb9f7ccc5d1ee717307f87b15c02a05ab8ac898504e5e4fffc87c5dd451  src/fleet/__init__.py
-c462241255a8f0062d6e8a4997847e8bb0c1705fd3b27f1c29b79f69a87ee660  src/fleet/atomic.py
-d7df3039a66c82b96baab8b6a5a30e5af4a543054ac17ed8a401f3466e6ace51  src/fleet/cli.py
+e687c9cee1abd9dfd0c2be66b19f1e6ef5ea8bbeb55b0bca68f13c4906f970fc  src/fleet/__init__.py
+da788fe0c3a0b8a392d2409faf63353ef6c8591eff5366fd8a66b627008149b5  src/fleet/atomic.py
+08db2e9b82b06f3135d683e6d5d245490c73672d10968b55fa06194a72b076b6  src/fleet/cli.py
 863d30099166ba260c23770215046d18e6dcaab2dcc018dd08503a2df944e827  src/fleet/errors.py
 04e5f1e6a507d1561b763c3bbacd22b7a6e9e5d9851ce5c2674d0b4a64081a3c  src/fleet/guards.py
 e61086d9c10896c0d05024d2b1f4c5d6f8337855079abcf0839a443543b0e00f  src/fleet/harvest.py
 18509ebcf303893a4c31e59a503c0061ef6ef205af0bd7cc90bef9a8753fda25  src/fleet/identity.py
 6f953a747facc5b753c3f2d5c62661c518c0898053dcbb51e7aac982f10ab91c  src/fleet/layout.py
 c5458319a7816e14d009f10ad5eac0646cb2d54a69d78747ca8fc40aadb78fa1  src/fleet/origin.py
-760ce9f0d15389bf23a024a30c5911245a4faba399a0d1d54c6fb61ffdc54b3c  src/fleet/pool.py
+453ee30209a9d65837a1582e3db59b485486907b0f244111d347eea55c685ca5  src/fleet/pool.py
 05a3404b9586469075c23474e900e6763eff0c07f99f0620f9af40b5f9c1b0e8  src/fleet/profiles.py
-9a0b2516854b3b5833b4d4014d36a0d6f087520bfa1c4eb7a3826ce307fe1b8c  src/fleet/reconcile.py
+f75db58ff06f66da640915a96abc8edc91f8d5b3e4fd84460f02610fba62d0c1  src/fleet/reconcile.py
+0dda0e2f22651cddf6c96b2647e85e4647991a9ae798ac15fbb4bbde18ce2c31  src/fleet/release.py
+f8826931bd4ea0c42f666bf8532c3d2dcd9f9e95abc19088dfb1a34091b254d0  src/fleet/release_git.py
+fb92ee8c3dddf21fec40b137727617a3d885f4850a609f1fb204c61f6fdb058e  src/fleet/release_verify.py
 4e0f905d3f728e9eab0785a8b40ee146cc4181538e073884c56ab91711fd0551  src/fleet/render.py
-e06952c0c82cfc9cedd38ec3ab4a7f03e6233b500bea02283419e4bf6eef0146  src/fleet/review.py
-5dd96de53dfa36dcefe6be1fb5969f5d51a55525d0c2b6d42a86b846fdbbeae8  src/fleet/roadmap.py
-20a94a421edaf6ba3d0903d01c51c01d578ab6223a9436648335d2ef12f3a39f  src/fleet/session.py
-b9efe937286aee460eed680dddfd76b4a4a0fbdbb664ebce127e6f4f7b86a57d  src/fleet/store.py
-0572e9c58fed266dbc554e3cf8b38c32f4bc78e853095bfd7c29ac0cf165f43d  src/fleet/workspace.py
+31290b96a92ad36a7154bc3c3c57b4c0e5cff77342983a61c603ff85ce4610fc  src/fleet/review.py
+77224a0df0e990f1dc37a23e6c133e08928a868c3e724220a678ec75e5b73adf  src/fleet/roadmap.py
+8dcc7127f0a36daa59ecbb583d6ca0ecf56893167658bf5831ac2a1a18834cd7  src/fleet/session.py
+61c140bac4856f300db4af4c856190c20b5f2e534c854b490f235ce56f1cd835  src/fleet/store.py
+8cf581a306ed48cf81812f1bee4a77c006720a7af13d47739362e348d4fb5f73  src/fleet/workspace.py

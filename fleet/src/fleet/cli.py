@@ -2881,6 +2881,12 @@ def _do_release_cut(ctx: Ctx, parsed: Parsed) -> int:
         rel.write_manifest(version, {
             "version": str(version), "tag": version.tag, "source_commit": repo.head(),
             "source_branch": repo.branch(), "upstream_base": repo.upstream_base(),
+            # `II-7`. WHERE it was cut from, not just what. `release-verify` runs the IT suite in a
+            # worktree at this release's tag, because the suite cannot judge an export, and a worktree
+            # needs a repository. Recording it here means verifying is one command; without it the
+            # operator has to remember months later which checkout a tag lives in, and `--repo` is the
+            # only way to say so.
+            "source_repo": str(repo.path),
             "tree_sha": tree_sha(export), "cut_at": when, "cut_by": actor(),
             "notes": parsed.get("notes") or "-"})
         rel.set_state(version, CANDIDATE)
@@ -2914,7 +2920,12 @@ def _do_release_verify(ctx: Ctx, parsed: Parsed) -> int:
               file=ctx.err)
     # `ctx.runner` is the seam every handler is handed, and `Verify` REQUIRES it: a `subprocess` default
     # inside `release_verify` would be a fourth spawn site in the package (`FI-27a`).
-    result = Verify(rel, version, ctx.runner).run(full=parsed.on("full"))
+    #
+    # `--repo` is optional and overrides the MANIFEST's `source_repo` (`II-7`). The suite runs in a
+    # worktree at the release's tag because it cannot judge an export, so a repository is needed; a
+    # release cut after that field existed carries its own, and one cut before it must be told.
+    repo = Repo(parsed.get("repo"), git=ctx.git) if parsed.get("repo") else None
+    result = Verify(rel, version, ctx.runner, repo=repo).run(full=parsed.on("full"))
     _emit(ctx, "release-verify", [
         ("version", str(version)), ("verdict", result), ("roster", roster),
         ("evidence", str(export / META_DIR / "evidence"))])
@@ -3290,6 +3301,8 @@ VERBS = {spec.name: spec for spec in (
           "run both suites against a release's frozen export and record the verdict", (
         Flag("--version", True, True, "the release to verify"),
         Flag(RELEASES, True, False, RELEASES_HELP),
+        Flag("--repo", True, False,
+             "the checkout holding this release's tag; defaults to the MANIFEST's source_repo"),
         Flag("--full", False, False, "run every IT runner, not just the gate roster"),
     )),
     _verb("release-promote", _do_release_promote, False,
