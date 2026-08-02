@@ -11,12 +11,14 @@ assertion about atomic write, byte for byte. It fails only when two writers meet
 """
 import json
 import multiprocessing as mp
+import os
 import pathlib
 import shutil
 import tempfile
+import threading
 import unittest
 
-from fleet.atomic import atomic_update, atomic_write, tmp_name
+from fleet.atomic import TMP_SUFFIX, atomic_update, atomic_write, tmp_name
 
 #: Big enough that a partial write is not one page and therefore not accidentally atomic. A 40-byte
 #: document lands in a single write(2) whatever the code does, so a torn read is unobservable and the case
@@ -146,3 +148,85 @@ class TestAtomicWriteIsUniquePerWriter(unittest.TestCase):
         self.assertEqual(result, "done")
         self.assertEqual(json.loads(target.read_text())["entries"], ["after"],
                          "a lock nobody may break turns one dead writer into a permanently wedged file")
+
+
+class AtomicSymlinkCase(unittest.TestCase):
+    """`atomic_symlink` — the publish for a pointer rather than for text.
+
+    The property is not "the link ends up right", which unlink-then-symlink also satisfies. It is that the
+    link is NEVER ABSENT, and that is only observable from another thread while a flip is in progress: by
+    the time the call returns, the broken implementation has already put the link back. A single-threaded
+    sampler passes against the defect — measured, not assumed.
+    """
+
+    def setUp(self):
+        self.tmp = pathlib.Path(tempfile.mkdtemp())
+        self.addCleanup(shutil.rmtree, self.tmp, True)
+        self.a = self.tmp / "a"
+        self.b = self.tmp / "b"
+        self.a.mkdir()
+        self.b.mkdir()
+        self.link = self.tmp / "current"
+
+    def test_it_publishes_the_target(self):
+        from fleet.atomic import atomic_symlink
+        atomic_symlink(self.a, self.link)
+        self.assertEqual(pathlib.Path(os.readlink(self.link)), self.a)
+
+    def test_it_replaces_an_existing_link(self):
+        from fleet.atomic import atomic_symlink
+        atomic_symlink(self.a, self.link)
+        atomic_symlink(self.b, self.link)
+        self.assertEqual(pathlib.Path(os.readlink(self.link)), self.b)
+
+    def test_the_link_is_never_absent_while_flipping(self):
+        from fleet.atomic import atomic_symlink
+        atomic_symlink(self.a, self.link)
+        # A COUNTER, not a list. Against the defect this fires ~240k times, and asserting on the list
+        # rendered a 1.4 MB unittest diff that buried the one number a reader needs.
+        misses = [0]
+        stop = threading.Event()
+
+        def observe():
+            while not stop.is_set():
+                if not self.link.is_symlink():
+                    misses[0] += 1
+
+        watcher = threading.Thread(target=observe, daemon=True)
+        watcher.start()
+        try:
+            for _ in range(300):
+                atomic_symlink(self.b, self.link)
+                atomic_symlink(self.a, self.link)
+        finally:
+            stop.set()
+            watcher.join(timeout=5)
+        self.assertEqual(misses[0], 0, f"the link was absent {misses[0]} time(s) during a flip")
+
+    def test_concurrent_flippers_do_not_share_a_staging_name(self):
+        """Two threads flipping at once must both succeed. A pid-derived staging name — the obvious
+        choice — is shared by every writer inside one process, so one publishes the other's target and the
+        other raises FileNotFoundError. That is `FI-20` with a different receiver."""
+        from fleet.atomic import atomic_symlink
+        errors = []
+
+        def flip(target):
+            for _ in range(200):
+                try:
+                    atomic_symlink(target, self.link)
+                except Exception as exc:                       # noqa: BLE001 - recording, not handling
+                    errors.append(f"{type(exc).__name__}: {exc}")
+
+        threads = [threading.Thread(target=flip, args=(t,)) for t in (self.a, self.b)]
+        for thread in threads:
+            thread.start()
+        for thread in threads:
+            thread.join()
+        self.assertEqual(errors, [], f"concurrent flips raised: {errors[:3]}")
+        self.assertTrue(self.link.is_symlink())
+
+    def test_no_staging_link_is_left_behind(self):
+        from fleet.atomic import atomic_symlink
+        atomic_symlink(self.a, self.link)
+        litter = [p.name for p in self.tmp.iterdir() if p.name.endswith(TMP_SUFFIX)]
+        self.assertEqual(litter, [], "a staging symlink survived the publish")

@@ -701,6 +701,15 @@ OUTWARD_CALL_SITES = {
         "os.unlink of its OWN uniquely-named tmp, on the failure path only. Removing the litter of a "
         "write that published nothing is the third property of FI-20's contract; not removing it leaves "
         "a partial file for the next reader"),
+    ("atomic", "atomic_symlink"): (
+        "os.unlink of its OWN uniquely-named staging symlink, on the failure path only — the same "
+        "contract as atomic_write one entry above, for the one thing that primitive cannot publish. A "
+        "pointer selecting which release is live is a symlink, and os.symlink refuses an existing name, "
+        "so the alternatives were unlink-then-symlink (which leaves a window with no `current` at all, on "
+        "the path every davis_root shell resolves through — measured at 238160 sightings by a concurrent "
+        "reader over 300 flips) or a second publish implementation in a caller, which is FI-20's ninth "
+        "copy. Neither the link nor its target is touched on the success path: os.replace renames the "
+        "staging link over the old one"),
     ("atomic", "_break"): (
         "rmdir of the package's OWN advisory lock directory, and only after the holder has been shown "
         "dead. Not breaking a dead holder's lock is a permanent hang; the OSError is swallowed because "
