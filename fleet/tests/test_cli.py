@@ -802,16 +802,6 @@ OUTWARD_CALL_SITES = {
         "names matching atomic.tmp_name's shape are removed, and ANY other entry makes the whole reclaim "
         "raise Refused naming that entry rather than sweeping it, so a recovery cannot become a data loss. "
         "The rmdir then fails safe, because rmdir cannot empty a directory"),
-    ("release_verify", "run"): (
-        "rmtree of the WORKING COPY this method made itself, moments earlier, at a name from "
-        "atomic.tmp_name under $FLEET_RELEASES — nothing else can be reached by that path, because "
-        "nothing else can produce that name. The copy exists because the IT orchestrator writes "
-        "RESULTS*.tsv beside itself and the export it is verifying is `chmod -R a-w`; the alternative "
-        "was teaching twenty runner scripts an output directory. Not removing it leaves a full copy of "
-        "every version ever verified sitting in the releases root beside the release itself, which is "
-        "the artifact store filling its own disk. It is in a `finally` deliberately: the refusal path — "
-        "a copy whose tree_sha disagrees with the MANIFEST — is the path that fires when something is "
-        "actually wrong, and leaking the copy exactly then is the worst available moment"),
     ("roadmap", "_consume"): (
         "list.remove of a dict from a LOCAL list built by `list(data['pending'])` — an in-memory element, "
         "not a path. Nothing is deleted; the list is then written back through atomic_write"),
