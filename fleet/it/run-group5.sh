@@ -1555,4 +1555,14 @@ it_assert_no_new_claude "CLAUDE-COUNT" "$CLAUDE_PIDS_BEFORE" "§L/§M/§N launch
 sed -i "s|$INSTANT/||g" "$RESULTS"
 
 printf '\n== group 5 done; failures flagged: %s ==\n' "${IT_FAILED:-0}"
-exit 0
+# `II-6`. This was `exit 0`, unconditionally, while the line above printed a non-zero failure count. Of
+# the 19 runners in this directory it was the ONLY one that did not propagate — the other eighteen all
+# end `exit "$IT_FAILED"` — so a consumer summing per-runner exit codes missed §L/§M/§N's failures
+# specifically, and only those.
+#
+# 1 rather than the count, deliberately. `exit` truncates modulo 256, so `exit "$IT_FAILED"` reports
+# success for exactly 256 failures. That trap is still armed in the other eighteen runners and is
+# recorded as `II-11`; it is not fixed here because nothing should be reading these codes as counts
+# anyway — `run-all.sh` now derives its verdict from the FAIL rows in this run's registers.
+[ "${IT_FAILED:-0}" -eq 0 ] && exit 0
+exit 1
