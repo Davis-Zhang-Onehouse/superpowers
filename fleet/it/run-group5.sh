@@ -869,12 +869,42 @@ def owner_of(tree):
     walk(tree, ())
     return out
 
-IN_PACKAGE = set()
+IN_PACKAGE, PACKAGE_CLASSES = set(), set()
 for path in sorted(pkg.glob("*.py")):
     for node in ast.walk(ast.parse(path.read_text())):
         if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
             IN_PACKAGE.add(node.name)
+        elif isinstance(node, ast.ClassDef):
+            PACKAGE_CLASSES.add(node.name)
 SELF_LIKE = {"self", "ctx", "store", "pool", "sessions", "harvest", "roadmap", "review", "profile"}
+
+def receiver_in_package(value):
+    """Whether the thing being called ON is something this package defines.
+
+    Two shapes, and only two:
+      · a BARE NAME on `SELF_LIKE` — `ctx.runner`, `self.pool` — how a handler has always reached
+        another module;
+      · a CONSTRUCTOR CALL to a class this package defines — `Verify(...).run()` — the same in-package
+        call written without binding a local first.
+
+    `II-9`. This was `getattr(node.func.value, "id", "")`, which is `""` for every receiver that is not a
+    bare name. A chained call therefore had no receiver, matched nothing, and fell through to FORBIDDEN
+    CALL — so `release_verify.Verify(...).run()` was reported as a spawn behind a handler's back, in the
+    same words and the same register column as a real one. The audit was not too strict; it was unable to
+    tell the two apart, which is worse, and it voided `run-m9-mutation.sh` entirely for as long as it
+    stood (the mutation run is gated on this audit passing unmutated).
+
+    Deliberately NOT recursive, and deliberately not "anything with a dot". `subprocess.run` is a bare
+    name that is not `SELF_LIKE`; `Unknown().run()` is a constructor call to a class this package does not
+    define. Both must stay forbidden, so an unrecognised receiver is NOT in the package. Widening an audit
+    is how coverage disappears quietly — this widens by exactly one construct and the controls in
+    `operations/tasks/fleetItStabilisation/.../bin/m9-controls.sh` pin all three refusals.
+    """
+    if isinstance(value, ast.Name):
+        return value.id in SELF_LIKE
+    if isinstance(value, ast.Call):
+        return getattr(value.func, "id", "") in PACKAGE_CLASSES
+    return False
 bad, spawn_sites, examined, in_pkg_sites, deletes, delete_sites = [], [], 0, [], set(), []
 for path in sorted(pkg.glob("*.py")):
     text = path.read_text()
@@ -890,6 +920,11 @@ for path in sorted(pkg.glob("*.py")):
         attribute = isinstance(node.func, ast.Attribute)
         name = node.func.attr if attribute else getattr(node.func, "id", "")
         receiver = getattr(node.func.value, "id", "") if attribute else ""
+        if attribute and not receiver and isinstance(node.func.value, ast.Call):
+            #: So the printed site reads `Verify(…).run()` rather than a bare `run()` with no subject.
+            #: A site nobody can locate is a site nobody checks.
+            constructed = getattr(node.func.value.func, "id", "")
+            receiver = f"{constructed}(…)" if constructed else ""
         if name not in FORBIDDEN_CALLS:
             continue
         chain = owners.get(id(node), ())
@@ -901,7 +936,7 @@ for path in sorted(pkg.glob("*.py")):
         elif name in DELETERS:
             deletes.add((path.name, owner, name))
             delete_sites.append(site)
-        elif receiver in SELF_LIKE and name in IN_PACKAGE:
+        elif attribute and receiver_in_package(node.func.value) and name in IN_PACKAGE:
             in_pkg_sites.append(site)
         else:
             bad.append(f"FORBIDDEN CALL {site}")
