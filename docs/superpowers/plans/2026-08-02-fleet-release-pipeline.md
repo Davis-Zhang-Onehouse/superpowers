@@ -24,6 +24,45 @@
 
 ---
 
+## IT failure triage — read this before "fixing" a red section
+
+Tasks 6 and 8 run real IT sections, and some will fail. **Sort every failure into one of two buckets
+before touching anything**, because the cost of getting this wrong is asymmetric: a hasty fix to a harness
+assertion is how a suite stops protecting anything, and P-C (green for the wrong reason) already has six
+recorded sightings, one of which shipped.
+
+**Bucket 1 — a trivial glitch: just fix it.** A path that moved, a missing `mkdir -p`, a `bash`-ism run
+under `zsh`, a stale fixture filename, an evidence file written to the wrong relative path. Small, local,
+obvious, and the fix does not change what any case asserts. Fix it, note it in the commit body, move on.
+
+**Bucket 2 — anything else: do NOT fix it. Diagnose and propose.** Specifically, anything that is tricky,
+that would change or reduce what a case measures, or that has a wide blast radius (`lib.sh`, the isolation
+contract, a shared fixture, anything touching more than one section). For these:
+
+1. **Use the `superpowers:systematic-debugging` skill.** Capture raw artifacts — the failing rows, the
+   evidence files, the exact commands — and cite them. Do not assert a cause from memory or from reading
+   the code; this codebase's own rule is that an RCA without raw artifacts is not an RCA.
+2. Write the RCA and **proposals**, not a patch.
+3. Record it in the IT-stabilisation instant (below), not in this plan and not in the fleet repo.
+
+**Where that work lives.** IT stabilisation is a separate effort with its own lifecycle, so it gets its own
+instant, created with the `superpowers:maintain-workspace` skill:
+
+```
+superpowers:maintain-workspace  new  --base /home/ubuntu/davis_root/operations/tasks/fleetItStabilisation
+```
+
+A new base folder, sibling to `metaOpt/`, because this is not a sub-task of the release pipeline — it is
+follow-up work the operator intends to run as its own story. Create it at the moment the first Bucket-2
+failure appears, not before: an instant created in advance of anything to put in it is the same
+inventing-work failure recorded as **F-10**.
+
+**Never** weaken an assertion to get a green. If a case cannot pass, it is reported as a case that cannot
+pass, with its reason — the same rule `K6` already follows by SKIPping with a stated reason rather than
+certifying a contract nothing enforces.
+
+---
+
 ## Surface correction the spec did not anticipate
 
 The spec writes the CLI as `fleet release cut <version>`. **That surface cannot exist.** `parse()` refuses positionals with a documented rationale, and `main()` dispatches on `argv[0]` against a flat `VERBS` dict with no sub-verb mechanism. Teaching the parser sub-verbs would also mean teaching §A5's and §M's generated matrices a second dimension — those derive their population from `cli.VERBS` and drive every verb through a real invocation.
