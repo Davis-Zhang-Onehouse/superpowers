@@ -17,7 +17,7 @@ from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
 
-from fleet.atomic import atomic_write, held_for_update, tmp_name
+from fleet.atomic import atomic_symlink, atomic_write, held_for_update, tmp_name
 from fleet.errors import BadInput
 
 __all__ = ["CANDIDATE", "DEV", "HISTORY_COLUMNS", "RELEASED", "Releases", "Version",
@@ -195,23 +195,15 @@ class Releases:
         return DEV
 
     def point_current_at(self, target) -> None:
-        """Flip atomically. `os.replace` renames over the existing symlink in one step; unlink-then-symlink
-        would leave a window in which `current` does not exist, and every davis_root shell's PATH resolves
-        through it.
+        """Flip the pointer atomically.
 
-        The staging name comes from `atomic.tmp_name`, not from the pid. A pid-derived name is shared by
-        every writer INSIDE one process, which is `FI-20`'s defect with a different receiver: two threads
-        flipping at once both write one staging path, the first `os.replace` publishes the second's target
-        and the second raises `FileNotFoundError` finding its staging gone. `tmp_name` is pid ∧
-        monotonic_ns ∧ 48 random bits, so no two writers can produce it and no pre-clean is needed.
-
-        This cannot go through `atomic_write`: that primitive publishes TEXT at a path, and what is being
-        published here is a symlink. The `os.replace` is the same publish step for a different object.
+        Delegated to `atomic.atomic_symlink`, which is the package's ONE atomic publish for a symlink, for
+        the same reason `atomic_write` is its one atomic publish for text. Doing it inline here would have
+        been a second implementation of the primitive `FI-20` exists to keep singular — and it tripped
+        `test_structure`'s ninth-copy guard, which was right to fire.
         """
         self.root.mkdir(parents=True, exist_ok=True)
-        staging = self.root / tmp_name("current")
-        os.symlink(str(target), staging)
-        os.replace(staging, self.current_link)
+        atomic_symlink(target, self.current_link)
 
     # --- the register ------------------------------------------------------------------------------
     @property
