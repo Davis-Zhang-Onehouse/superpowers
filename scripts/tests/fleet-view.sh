@@ -96,8 +96,64 @@ case "$el" in
   *) note "FAIL path elision lost the tail: $el"; fails=1 ;;
 esac
 
+# --- the releases view renders, and never truncates a reason -----------------------------------------
+# `reason` is operator free text — the one field somebody typed BECAUSE it would otherwise be lost. Every
+# table in `fleet-view` elides a value to fit (35% of the width per column, or the note budget), so the
+# history is deliberately rendered as a LIST instead, where a long value wraps rather than being cut.
+#
+# Two things this assertion has to get right, or it certifies nothing:
+#
+#  * WRAPPED IS NOT TRUNCATED. A grep for a phrase inside the reason fails the moment the wrap lands
+#    between its two words, which says nothing about whether anything was lost. So the rendering is
+#    flattened to one whitespace-collapsed line first, and the WHOLE reason must survive in it.
+#  * IT MUST BE A REASON ONLY THE HISTORY CARRIES. `release-status` re-reports the most recent reason, so
+#    checking that one would pass even if the history section cut every row it drew. The older row's
+#    reason appears in the history and nowhere else, which is why the fixture has two rows.
+RELDIR="$TMP/releases"
+mkdir -p "$RELDIR/fleet-v0.1.0/.release"
+printf 'version\t0.1.0\ncut_at\t2026-08-02T10:00:00Z\n' > "$RELDIR/fleet-v0.1.0/.release/MANIFEST.tsv"
+printf 'RELEASED\n' > "$RELDIR/fleet-v0.1.0/.release/STATE"
+OLD_LONG="promoted after the full suite went green on the export, and after the two flake reruns that C4 asks for"
+LONG="harvest wedged on a leased slot and the coordinator could not clear it without a manual reap, so we went back"
+printf 'ts\taction\tversion\tfrom_version\tactor\thost\treason\tevidence\n' > "$RELDIR/RELEASE-HISTORY.tsv"
+printf '2026-08-02T10:30:00Z\tDEPLOY\t0.2.0\t0.1.0\tdavis@onehouse.ai\tbox\t%s\t-\n' "$OLD_LONG" \
+  >> "$RELDIR/RELEASE-HISTORY.tsv"
+printf '2026-08-02T11:00:00Z\tROLLBACK\t0.1.0\t0.2.0\tdavis@onehouse.ai\tbox\t%s\t-\n' "$LONG" \
+  >> "$RELDIR/RELEASE-HISTORY.tsv"
+
+rv="$(FLEET_RELEASES="$RELDIR" FLEET_VIEW_WIDTH=100 NO_COLOR=1 python3 "$VIEW" releases 2>&1)"; rc=$?
+check "the releases view renders" "0" "$rc"
+printf '%s' "$rv" | grep -q "0.1.0" || { note "FAIL the releases view omits the release"; fails=1; }
+printf '%s' "$rv" | grep -q "ROLLBACK" \
+  || { note "FAIL the releases view omits the history"; fails=1; }
+flat="$(printf '%s' "$rv" | tr '\n' ' ' | tr -s ' ')"
+case "$flat" in
+  *"$OLD_LONG"*) note "ok   a long history reason reaches the reader whole, wrapped and not cut" ;;
+  *) note "FAIL a long reason was truncated — list form exists so it is not"; fails=1 ;;
+esac
+
+# The releases view must not disagree with the product either: every version `release-list --porcelain`
+# reports has to appear. Same property as the board check above, applied to the surface that just landed.
+while IFS=$'\t' read -r ver state rest; do
+  [ -n "${ver:-}" ] || continue
+  printf '%s' "$rv" | grep -q -- "$ver" \
+    || { note "FAIL release $ver is in porcelain but not in the view"; fails=1; }
+done < <(FLEET_RELEASES="$RELDIR" "$FLEET" release-list --porcelain 2>/dev/null)
+note "ok   every release in porcelain appears in the releases view"
+
+# Colour cannot skew the releases layout any more than it may skew the leases table.
+rplain="$(FLEET_RELEASES="$RELDIR" FLEET_VIEW_WIDTH=100 NO_COLOR=1 python3 "$VIEW" releases 2>/dev/null)"
+rcolored="$(FLEET_RELEASES="$RELDIR" FLEET_VIEW_WIDTH=100 python3 - <<PY 2>/dev/null
+import runpy, sys
+sys.argv = ["fleet-view", "releases"]
+runpy.run_path("$VIEW", run_name="__main__")
+PY
+)"
+rstripped="$(printf '%s' "$rcolored" | sed 's/\x1b\[[0-9;]*m//g')"
+check "colour does not change the releases layout" "$rplain" "$rstripped"
+
 if [ "$fails" = 0 ]; then
-  echo "PASS: fleet-view renders every subject porcelain reports with the same state, writes nothing, lays out identically with and without colour, keeps every WRAPPABLE line inside the terminal width (an unbreakable path is allowed to run long, because cutting it makes it un-copy-pasteable), and elides long paths from the left so the identifying tail survives"
+  echo "PASS: fleet-view renders every subject porcelain reports with the same state, writes nothing, lays out identically with and without colour, keeps every WRAPPABLE line inside the terminal width (an unbreakable path is allowed to run long, because cutting it makes it un-copy-pasteable), elides long paths from the left so the identifying tail survives, and renders the release history in list form so a long reason reaches the reader whole"
   exit 0
 fi
 echo FAIL
