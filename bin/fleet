@@ -26,7 +26,11 @@ while [ -L "$_fleet_self" ]; do
     *)  _fleet_self="$(dirname "$_fleet_self")/$_fleet_link" ;;
   esac
 done
-_fleet_repo="$(cd "$(dirname "$_fleet_self")/.." && pwd)"
+# `-P`, not a logical pwd. With a release deployed, this launcher lives at `<releases>/current/bin/fleet`
+# and a logical `pwd` yields `…/current` — a path re-resolved on every file open, so a symlink flip
+# mid-invocation could hand ONE python process modules from two different releases. Resolving the link
+# once pins each invocation to one physical release for its whole life.
+_fleet_repo="$(cd -P "$(dirname "$_fleet_self")/.." && pwd)"
 _fleet_src="$_fleet_repo/fleet/src"
 
 if [ ! -d "$_fleet_src/fleet" ]; then
