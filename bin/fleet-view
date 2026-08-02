@@ -56,6 +56,10 @@ GREEN  = lambda t: _c("32", t)
 YELLOW = lambda t: _c("33", t)
 BLUE   = lambda t: _c("36", t)
 
+#: Every view this tool knows. Declared as data so the refusal in `main` and the usage text above cannot
+#: drift apart — the same reason `cli.VERBS` is the one registry the product's unknown-verb message reads.
+VIEWS = ("all", "board", "leases", "roadmap", "releases")
+
 #: How each state reads at a glance. The mapping is deliberately coarse — the point of a dashboard is
 #: "is anything wrong", and a palette with ten shades answers that no faster than one with three.
 STATE_STYLE = {
@@ -416,6 +420,16 @@ def main():
     # overflowing header is the first thing a reader sees go wrong.
     print(DIM("\n".join(wrap(head, width(), 0))))
 
+    # A view nobody declares is refused, exit 2, the same answer `fleet` gives an unknown verb. Before
+    # this, every unrecognised word fell through all four branches, printed the header and exited 0 — so
+    # `fleet-view releases` exited 0 for the whole time before the releases view existed, and every
+    # `check "the … view renders" "0" "$rc"` assertion in the test file passed vacuously. A viewer that
+    # answers "fine" to a word it does not know teaches you to trust a blank screen.
+    if verb not in VIEWS:
+        print(f"{verb!r} is not a fleet-view view. The views are: " + ", ".join(sorted(VIEWS)) + ".",
+              file=sys.stderr)
+        return 2
+
     errs = []
     if verb in ("all", "board"):
         print(BOLD("\nSUBJECTS"))
@@ -444,6 +458,6 @@ def main():
 
 if __name__ == "__main__":
     try:
-        main()
+        sys.exit(main() or 0)
     except BrokenPipeError:
         pass
