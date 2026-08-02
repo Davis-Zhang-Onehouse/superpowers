@@ -74,6 +74,26 @@ three, and forces edits to two more files. Task 2 hit this and solved it correct
 calls `ctx.runner`, never a spawner"* — which is exactly what lets the outward-state audit hold while
 `verify` still runs real commands.
 
+**8. TASK 4 — two landmines from Task 3, both measured.**
+
+- **`Verify` takes the runner as a required third argument.** Task 4's snippet writes
+  `Verify(rel, version).run(full=…)`, which now raises `TypeError`. Call
+  `Verify(rel, version, ctx.runner).run(full=parsed.on("full"))`.
+- **`ctx.runner`'s contract is `(command: str, cwd=None, env=None) -> (rc, stdout, stderr)`**, running
+  through `bash -c` — NOT `subprocess.run`'s argv list with `capture_output=`/`.returncode`. The plan got
+  this wrong everywhere it appears. Build command strings with `shlex.quote`.
+- **`_do_release_cut`'s `chmod -R a-w` freezes `.release/` too, and then `promote` and every deploy have
+  to write inside it.** `set_state` writes `.release/STATE`; `verify` writes `.release/evidence/`. Task 3
+  hit this and added `_evidence_dir()`, which widens `META_DIR` before writing. Task 4 must do one of:
+  exclude `.release` from the freeze (`chmod -R a-w` the payload only), or widen it the same way before
+  `set_state`. Excluding is cleaner — `META_DIR` is already excluded from `tree_sha` precisely because it
+  is the mutable half of the artifact.
+
+**9. A staging path variable may not be called `scratch`, `tmp`, or anything in `test_structure._TMP_NAMES`,
+and its name may not derive from the target.** Task 3's plan code had `scratch = self.export.parent /
+f".verify-{self.version}"` — which trips the ninth-copy guard on the variable name AND is FI-20's actual
+defect (a name that is a function of the target alone, so two writers collide). Use `atomic.tmp_name`.
+
 **7. Task 2's rebase fixture is the correct one; the plan's did not rebase anything.** The plan branched
 `upstream` from the tag, so the tagged commit stayed an ancestor of HEAD — `cherry` and `log` returned the
 identical set, and the test failed under both implementations for a reason unrelated to patch-id. The
