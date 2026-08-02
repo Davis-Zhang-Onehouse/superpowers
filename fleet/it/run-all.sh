@@ -168,3 +168,38 @@ say "FAIL rows: $(grep -P '\tFAIL\t' "$IT_ROOT/RESULTS.tsv" | cut -f1 | tr '\n' 
 say ""
 say "per-runner exit codes:"
 for name in "${!RC[@]}"; do say "  $name=${RC[$name]}"; done
+
+# --- the batch verdict ----------------------------------------------------------------------------
+# `II-6`. This script used to end at the line above and fall off the end, so its status was whatever the
+# last `say` returned — 0, always, over any number of failures. It COLLECTED `RC[$name]` for every runner
+# and never acted on it. As a report for a human reading tallies that is defensible; as something a
+# machine can gate on it is worse than useless, because it answers "fine". The release gate asked it, was
+# told 0, and recorded GREEN over a suite with 7 FAIL rows.
+#
+# Derived from THIS RUN's registers. NOT from `RESULTS.tsv`: that file is MERGED and keeps rows from
+# earlier runs of sections this run did not execute, so a count over it reports failures that did not
+# happen now — and it would go green the moment a stale FAIL was replaced by a fresh PASS elsewhere.
+#
+# NOT from the per-runner exit codes either, and that is the sharper reason: every runner ends
+# `exit "$IT_FAILED"`, which is a COUNT, so a section with exactly 256 failures exits 0. The codes are
+# still consulted, but only for the one thing a row count cannot see — a runner that DIED before writing
+# its rows. A crash with an empty register is a runner that never reached its cases, not one that passed
+# them, and the source-pin contamination path produces exactly that shape.
+fail_rows=0
+for name in "${!RC[@]}" all; do
+  reg="$IT_ROOT/RESULTS-closeout-$name.tsv"
+  [ -f "$reg" ] || continue
+  fail_rows=$(( fail_rows + $(grep -cP '\tFAIL\t' "$reg" || true) ))
+done
+crashed=""
+for name in "${!RC[@]}"; do
+  [ "${RC[$name]}" = 0 ] || crashed="$crashed $name(exit${RC[$name]})"
+done
+
+say ""
+if [ "$fail_rows" = 0 ] && [ -z "$crashed" ]; then
+  say "BATCH VERDICT: ok — 0 FAIL rows and no non-zero runner exit across the ${#RUNNERS[@]} runner(s) this run executed"
+  exit 0
+fi
+say "BATCH VERDICT: attention — $fail_rows FAIL row(s) across the ${#RUNNERS[@]} runner(s) this run executed; runners exiting non-zero:${crashed:- none}"
+exit 1
