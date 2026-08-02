@@ -1,5 +1,17 @@
 # fleet — changelog
 
+## fleet/v0.2.0 — 2026-08-02T17:50:04Z
+Cut from 1944d67 on `live` (upstream base pre-merge-fleet-skills-20260731). 8 commit(s) since fleet/v0.1.1.
+
+- 6f047c5 verify: the IT verdict comes from FAIL rows, not from an exit code
+- b7b18a5 it: M9 resolves a call's receiver structurally, not by bare name
+- 17b8c83 it: A1's aggregate names the sub-assertions that failed
+- 80153b2 it: a missing argv fixture is a coverage gap, not a product defect
+- b7c92c5 it: run-all.sh ends with a verdict, and group5 propagates its failures
+- b3c9dde it: one implementation of the isolation contract, plus the part it cannot see
+- dfb44de it: M9 reads the hermetic registry instead of restating it
+- 1944d67 release: verify from a git worktree at the tag, not from the export
+
 ## fleet/v0.1.1 — 2026-08-02T08:22:50Z
 Cut from f757d00 on `live` (upstream base pre-merge-fleet-skills-20260731). 2 commit(s) since fleet/v0.1.0.
 
