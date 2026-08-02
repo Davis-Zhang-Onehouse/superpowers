@@ -1381,7 +1381,7 @@ def _do_propose(ctx: Ctx, parsed: Parsed) -> int:
                                ("roadmap", str(destination)), ("destination-chosen", chosen),
                                ("evidence", ", ".join(evidence))] + extra)
         return EXIT_OK
-    proposal = roadmap.propose(proposer, milestone, status, evidence)
+    proposal = roadmap.propose(proposer, milestone, status, evidence, note=parsed.get("note") or "")
     _emit(ctx, "propose", [("milestone", proposal.milestone), ("status", proposal.status),
                            ("at", proposal.at), ("proposer", proposal.instant),
                            ("roadmap", str(destination)), ("destination-chosen", chosen),
@@ -3190,6 +3190,10 @@ VERBS = {spec.name: spec for spec in (
         Flag("--milestone", True, True, "the milestone id"),
         Flag("--status", True, True, "blocked|ready|running|awaiting-ci|done|dropped"),
         Flag("--evidence", True, True, "an evidence path; repeatable, and at least one is required"),
+        #: `I-2`. One line ABOUT the proposal, never instead of the evidence — a worker reported
+        #: that evidence paths were its only narrative channel, and worked around it by writing a
+        #: file purely to cite it. Optional, and matches `abort --reason` / `park --question`.
+        Flag("--note", True, False, "one line of narrative about the proposal; never replaces --evidence"),
     )),
     _verb("apply", _do_apply, False, "the COORDINATOR applies a proposal; the single writer", (
         Flag("--instant", True, True, "the instant holding the roadmap"),
