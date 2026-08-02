@@ -837,6 +837,22 @@ DELETE_ALLOWLIST = {
                                               # names matching atomic.tmp_name's shape: anything else raises
                                               # Refused naming it rather than being swept (SI-7).
     ("pool.py", "_reclaim", "rmdir"),         # <home>/pool/leases/<slot> once emptied of that litter.
+    # The release pipeline. Both arguments are also written out in test_cli.py's OUTWARD_CALL_SITES —
+    # which is itself a finding: this build now audits its delete sites in TWO registries that nothing
+    # keeps in step, so a site can be declared in one and undeclared in the other. Tracked as `II-3` in
+    # operations/tasks/fleetItStabilisation.
+    ("atomic.py", "atomic_symlink", "unlink"),  # its OWN staging symlink, link.parent/tmp_name(link.name),
+                                                # on the failure path only. The sibling of atomic_write's
+                                                # entry above, for the one thing that primitive cannot
+                                                # publish: os.symlink refuses an existing name, so the
+                                                # alternative leaves `current` absent — measured at 238160
+                                                # sightings by a concurrent reader over 300 flips.
+    ("release_verify.py", "run", "rmtree"),     # the WRITABLE COPY it made moments earlier, at a name only
+                                                # atomic.tmp_name can produce, under $FLEET_RELEASES. The
+                                                # copy exists because run-all.sh writes RESULTS*.tsv beside
+                                                # itself and the export is chmod -R a-w. In a `finally`, so
+                                                # the refusal path does not leave a full copy of every
+                                                # verified release on disk.
 }
 NOT_A_FILE_DELETE = {("roadmap.py", "_consume", "remove")}
 
