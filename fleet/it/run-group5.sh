@@ -1412,6 +1412,10 @@ for want in "${WANTED[@]}"; do
     *) printf 'unknown section %s\n' "$want" >&2 ;;
   esac
 done
+# SOURCE-STABLE — GIVEN a pin of `src/fleet/*.py` taken before the sections ran, WHEN they have all
+# finished, THEN the pin is byte-identical. This is a run-level row, not a section's: it says whether every
+# verdict above is attributable to ONE tree state. A drifted pin does not make those verdicts false, it
+# makes them unattributable — which is why the failure text names the rewrite rather than any section.
 printf 'source pinned: %s\n' "$(it_pin "after")"
 pin_drift="$(diff <(grep 'src/fleet' "$HERE/SOURCE-PIN-group5-before.txt") \
                   <(grep 'src/fleet' "$HERE/SOURCE-PIN-group5-after.txt") | grep '^[<>]' | head -6)"

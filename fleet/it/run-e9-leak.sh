@@ -64,7 +64,8 @@ print("claim dir:", sorted(p.name for p in d.iterdir()))
 PY
 cat "$OUT/plant.txt"
 
-# --- a · every reader says FREE -------------------------------------------------------------------
+# --- E9-leak-a · GIVEN the planted interrupted claim, WHEN `leases` is read, ------------------------
+# THEN s2 reads INTERRUPTED and not free.
 fleet leases --porcelain > "$OUT/leases-after-plant.tsv" 2>/dev/null
 # WAS: asserted 'leases' reports s2 FREE. NOW: it must report `interrupted` -- an unclaimable slot described
 # as free is an answer that gets you NoCapacity, and it was half of the two-authorities disagreement.
@@ -79,7 +80,8 @@ else
     "s2 is in neither expected state: $(tr '\n' ' ' < "$OUT/leases-after-plant.tsv")"
 fi
 
-# --- b · reap RECLAIMS it and SAYS SO -------------------------------------------------------------
+# --- E9-leak-b · GIVEN that claim aged past INTERRUPTED_CLAIM_AGE_S, WHEN `reap --all` runs, --------
+# THEN it RECLAIMS s2 and says so under its own row kind.
 # WAS: asserted `reap --all` exits 0 reporting "0 of them leased; 0 freed, 0 could not be freed" -- absence
 # presented as success, with even the "could not be freed" counter at zero.
 # NOW: it must reclaim the claim and name it under its own row kind.
@@ -97,7 +99,8 @@ else
     "REGRESSION: reap did not reclaim it or did not name it (rc=$reap_rc): $(tr '\n' ' ' < "$OUT/reap.tsv" | head -c 300)"
 fi
 
-# --- c · the slot is claimable again, and the two readers now AGREE ------------------------------
+# --- E9-leak-c · GIVEN the reap has run, WHEN free_slots(), lease() and the claim path are each asked, ---
+# THEN all three agree s2 is claimable — the point being agreement between readers, not any one verdict.
 # WAS: asserted `claim` refuses forever while free_slots() excluded it and every body-reader called it free
 # -- two disagreeing notions of "free" in one pool, reconcilable by no verb.
 python3 - "$FLEET_HOME" > "$OUT/claim.txt" 2>&1 <<'PY'
@@ -122,7 +125,8 @@ else
     "REGRESSION: the slot did not come back: $(tr '\n' ' ' < "$OUT/claim.txt" | head -c 300)"
 fi
 
-# --- d · the exhausted-pool refusal NAMES the interrupted claim ----------------------------------
+# --- E9-leak-d · GIVEN a pool exhausted by an interrupted claim, WHEN a dispatch is refused, --------
+# THEN the refusal NAMES s3, says it is a dead writer rather than work in progress, and points at the fix.
 # WAS: asserted the refusal counts the leaked slot as leased and sends the operator to `reap`, which was
 # inert on exactly that -- `FI-30a`'s unclearable alarm, in the component a coordinator depends on for
 # workspaces.
