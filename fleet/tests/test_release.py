@@ -745,3 +745,633 @@ class VerifyCase(unittest.TestCase):
         self.assertEqual(Verify(rel, v, Moving(codes=[("run-all.sh", 1)],
                                                watcher=self._emit_results)).run(), INCONCLUSIVE)
         self.assertEqual(len(board), 2, "the live-subject set must be sampled before AND after the run")
+
+
+class CliCase(unittest.TestCase):
+    """The eight release verbs, driven through `main` so the exit code asserted is the one an operator sees.
+
+    The context is INJECTED, like every other suite in this package: the session probes are stubs and the
+    command runner is a fake that records what it was handed, so nothing here starts a tmux, a suite or a
+    `claude`. `git` is the real seam and the repository is a real temporary checkout, because `git archive`
+    is what a cut exports and no fake can produce a tar -- the same reasoning `GitCase` gives.
+
+    Nothing in this class runs a mutating git command anywhere but in the throwaway checkout it built.
+    """
+
+    #: A checkout a cut will accept: the file whose `__version__` the cut rewrites has to be there, and the
+    #: export has to carry something executable so a mode change would be visible in `tree_sha`.
+    SEED_INIT = '"""fixture."""\n__version__ = "0.0.1"\n'
+
+    def setUp(self):
+        import io
+        import shutil
+        self.tmp = pathlib.Path(tempfile.mkdtemp(prefix="fleet-clicase-"))
+        # LIFO: the thaw runs BEFORE the removal. A cut freezes its export, and `rmtree` cannot empty a
+        # directory it may not write -- `ignore_errors=True` would then leave the tree in /tmp in silence.
+        self.addCleanup(shutil.rmtree, self.tmp, True)
+        self.addCleanup(self._thaw)
+        self.releases = self.tmp / "releases"
+        self.releases.mkdir()
+        self.home = self.tmp / "home"
+        self.out, self.err = io.StringIO(), io.StringIO()
+        #: `_releases` reads `FLEET_RELEASES`, so an operator's own export would otherwise aim these cases
+        #: at the live release area. Removed for every case and put back on teardown.
+        self._saved_releases_env = os.environ.pop("FLEET_RELEASES", None)
+        self.addCleanup(self._restore_env)
+        self.calls = []
+        self.rc = 0
+
+    # --- the fixture -----------------------------------------------------------------------------
+
+    def _restore_env(self):
+        if self._saved_releases_env is None:
+            os.environ.pop("FLEET_RELEASES", None)
+        else:
+            os.environ["FLEET_RELEASES"] = self._saved_releases_env
+
+    def _thaw(self):
+        for path in sorted(self.tmp.rglob("*"), reverse=True) + [self.tmp]:
+            if path.is_symlink() or not path.exists():
+                continue
+            path.chmod(path.stat().st_mode | 0o700)
+
+    def _runner(self, command, cwd=None, env=None):
+        """`(command, cwd, env) -> (rc, stdout, stderr)` -- `ctx.runner`'s contract, recorded."""
+        self.calls.append((str(command), None if cwd is None else str(cwd)))
+        return self.rc, f"ran {command}\n", ""
+
+    def _context(self, parsed, out, err):
+        from fleet.cli import Ctx
+        from fleet.harvest import Harvest
+        from fleet.pool import Pool
+        from fleet.session import Probes, SessionLayer
+        from fleet.store import Store
+        from fleet.workspace import default_git
+        sessions = SessionLayer(Probes(list_processes=lambda: [], capture_pane=lambda name: "",
+                                       has_session=lambda name: False,
+                                       start_session=lambda name, cwd, cmd: None,
+                                       kill_session=lambda name: None))
+        return Ctx(home=self.home, instants_dir=self.home / "instants", store=Store(self.home),
+                   pool=Pool(self.home, cwd_probe=lambda path: [], alive=sessions.alive),
+                   sessions=sessions, harvest=Harvest(self.home), out=out, err=err,
+                   dry_run=parsed.on("dry-run"), porcelain=parsed.on("porcelain"),
+                   git=default_git(), runner=self._runner, live_work=False)
+
+    def run_verb(self, *argv):
+        from fleet.cli import main
+        return main(list(argv), stdout=self.out, stderr=self.err, context=self._context)
+
+    def _git(self, repo, *args):
+        import subprocess
+        return subprocess.run(["git", "-C", str(repo), *args], check=True, capture_output=True,
+                              text=True).stdout
+
+    def repo(self) -> pathlib.Path:
+        """A real checkout shaped like this one, committed clean."""
+        repo = self.tmp / "checkout"
+        (repo / "fleet" / "src" / "fleet").mkdir(parents=True)
+        (repo / "fleet" / "src" / "fleet" / "__init__.py").write_text(self.SEED_INIT)
+        (repo / "fleet" / "bin").mkdir()
+        launcher = repo / "fleet" / "bin" / "fleet"
+        launcher.write_text("#!/bin/sh\nexit 0\n")
+        launcher.chmod(0o755)
+        self._git(repo, "init", "-q", "-b", "live")
+        self._git(repo, "config", "user.email", "t@example.com")
+        self._git(repo, "config", "user.name", "T")
+        self._git(repo, "config", "commit.gpgsign", "false")
+        self._git(repo, "add", "-A")
+        self._git(repo, "commit", "-q", "-m", "the seed commit")
+        return repo
+
+    def seed(self, version, state=None, verdict=None, roster=None):
+        """One release directory, with an optional STATE and an optional recorded verdict."""
+        from fleet.release import CANDIDATE, Releases, Version
+        from fleet.release_verify import GATE_ROSTER, GREEN, write_verdict
+        rel = Releases(self.releases)
+        parsed = Version.parse(version)
+        meta = rel.dir_for(parsed) / ".release"
+        meta.mkdir(parents=True, exist_ok=True)
+        rel.write_manifest(parsed, {"version": version, "cut_at": "2026-08-02T00:00:00Z"})
+        rel.set_state(parsed, state or CANDIDATE)
+        if verdict is not None:
+            write_verdict(meta, [("hermetic", verdict, "e", "n"), ("it", verdict, "e", "n")],
+                          roster or GATE_ROSTER)
+        elif verdict is None and roster is not None:
+            write_verdict(meta, [("hermetic", GREEN, "e", "n"), ("it", GREEN, "e", "n")], roster)
+        return rel, parsed
+
+    def snapshot(self) -> dict:
+        """Every path under the fixture with its kind, mtime and size -- mtimes included, because a
+        claim-then-tidy-up leaves a tree byte-identical and moves a directory's mtime.
+
+        `.git`'s own bookkeeping is excluded, and only that: `git status` refreshes the index stat cache,
+        so a READ of the checkout rewrites `.git/index`. That is git's file, written by a command that
+        changed nothing about the repository -- while the working tree, the release area and every path
+        a cut would create stay fully covered.
+        """
+        out = {}
+        for path in sorted(self.tmp.rglob("*")):
+            if ".git" in path.parts:
+                continue
+            if path.is_symlink():
+                out[str(path)] = ("link", os.readlink(path), 0)
+                continue
+            stat = path.stat()
+            out[str(path)] = (path.is_dir(), stat.st_mtime_ns, stat.st_size if path.is_file() else 0)
+        return out
+
+    # --- the registry ----------------------------------------------------------------------------
+
+    def test_every_release_verb_is_in_the_registry_with_a_help_string(self):
+        from fleet.cli import PORCELAIN_COLUMNS, VERBS
+        for name in ("release-cut", "release-verify", "release-promote", "release-deploy",
+                     "release-rollback", "release-status", "release-list", "release-history"):
+            self.assertIn(name, VERBS)
+            self.assertTrue(VERBS[name].help.strip(), f"{name} has no help text")
+            # Every verb's stdout is porcelain-parseable, and the schema is declared beside the others.
+            # `TestCadence` reads this table for every verb in `VERBS` and fails with a KeyError without it.
+            self.assertIn(name, PORCELAIN_COLUMNS, f"{name} declares no porcelain schema")
+
+    def test_the_read_only_release_verbs_are_the_three_that_only_report(self):
+        from fleet.cli import VERBS
+        read_only = sorted(name for name, spec in VERBS.items()
+                           if name.startswith("release-") and spec.read_only)
+        self.assertEqual(read_only, ["release-history", "release-list", "release-status"])
+
+    # --- the two refusals that carry the design ----------------------------------------------------
+
+    def test_a_mutating_release_verb_refuses_when_no_release_area_is_named(self):
+        from fleet import EXIT_BAD_INPUT
+        code = self.run_verb("release-promote", "--version", "0.1.0", "--home", str(self.home))
+        self.assertEqual(code, EXIT_BAD_INPUT)
+        self.assertIn("FLEET_RELEASES", self.err.getvalue())
+        self.assertEqual(sorted(p.name for p in self.releases.iterdir()), [],
+                         "a refused promote still touched the release area")
+
+    def test_the_release_area_may_come_from_the_environment(self):
+        # The same rule as FLEET_HOME: `--releases` overrides the environment, and the environment is a
+        # naming, not a default. A verb that refuses an exported FLEET_RELEASES would be unusable.
+        from fleet import EXIT_OK
+        from fleet.release import RELEASED
+        self.seed("0.1.0", RELEASED, roster="gate")
+        os.environ["FLEET_RELEASES"] = str(self.releases)
+        code = self.run_verb("release-promote", "--porcelain", "--version", "0.1.0",
+                             "--home", str(self.home))
+        self.assertEqual(code, EXIT_OK, self.err.getvalue())
+
+    def test_a_mutating_verb_refuses_when_its_own_package_is_inside_the_release_area(self):
+        # The tool that manages `current` must not be the thing `current` points at. Pointed at the
+        # directory this very module lives in, which is what a self-deployed package looks like.
+        from fleet import EXIT_REFUSED
+        from fleet import cli as cli_module
+        inside = pathlib.Path(cli_module.__file__).resolve().parent
+        code = self.run_verb("release-promote", "--version", "0.1.0", "--releases", str(inside),
+                             "--home", str(self.home))
+        self.assertEqual(code, EXIT_REFUSED)
+        self.assertIn(str(inside), self.err.getvalue())
+        self.assertRegex(self.err.getvalue(), r"inside the release area")
+
+    def test_a_read_only_verb_still_answers_from_inside_the_release_area(self):
+        # The other half, and the reason the guard reads `spec.read_only`: `status` is how an operator
+        # finds out what is deployed, and it has to work from the deployed copy itself.
+        from fleet import EXIT_OK
+        from fleet import cli as cli_module
+        inside = pathlib.Path(cli_module.__file__).resolve().parent
+        self.assertEqual(self.run_verb("release-status", "--releases", str(inside)), EXIT_OK,
+                         self.err.getvalue())
+
+    # --- cut ---------------------------------------------------------------------------------------
+
+    def test_a_cut_exports_the_tag_and_records_a_candidate(self):
+        from fleet import EXIT_OK
+        from fleet.release import CANDIDATE, Releases, Version, tree_sha
+        repo = self.repo()
+        code = self.run_verb("release-cut", "--version", "0.1.0", "--repo", str(repo),
+                             "--releases", str(self.releases), "--home", str(self.home),
+                             "--notes", "the first one")
+        self.assertEqual(code, EXIT_OK, self.err.getvalue())
+        rel, version = Releases(self.releases), Version.parse("0.1.0")
+        export = rel.dir_for(version)
+        self.assertTrue((export / "fleet" / "src" / "fleet" / "__init__.py").is_file(),
+                        f"the export carries no payload: {sorted(p.name for p in export.iterdir())}")
+        self.assertEqual(rel.state(version), CANDIDATE)
+        manifest = rel.manifest(version)
+        self.assertEqual(manifest["tag"], "fleet/v0.1.0")
+        self.assertEqual(manifest["notes"], "the first one")
+        self.assertEqual(manifest["tree_sha"], tree_sha(export),
+                         "the recorded tree_sha is not the hash of the tree that was exported")
+        self.assertIn("fleet/v0.1.0", self._git(repo, "tag", "-l"))
+        # The export comes from the TAG, so the version bump has to be in the tag.
+        self.assertIn('__version__ = "0.1.0"',
+                      (export / "fleet" / "src" / "fleet" / "__init__.py").read_text())
+
+    def test_a_cut_freezes_the_payload_and_leaves_the_release_metadata_writable(self):
+        """The freeze may not cover `.release`, or nothing can ever be promoted.
+
+        `chmod -R a-w` over the whole release directory is the obvious implementation and it is wrong:
+        `promote` writes `.release/STATE` and `verify` writes `.release/evidence/`, so a release frozen
+        whole is a release stuck in CANDIDATE for good. `META_DIR` is already excluded from `tree_sha`
+        because it is the mutable half of the artifact; the freeze excludes it for the same reason.
+        """
+        from fleet import EXIT_OK
+        from fleet.release import RELEASED, Releases, Version
+        from fleet.release_verify import GATE_ROSTER, GREEN, write_verdict
+        repo = self.repo()
+        self.assertEqual(self.run_verb("release-cut", "--version", "0.1.0", "--repo", str(repo),
+                                       "--releases", str(self.releases), "--home", str(self.home)),
+                         EXIT_OK, self.err.getvalue())
+        rel, version = Releases(self.releases), Version.parse("0.1.0")
+        export = rel.dir_for(version)
+
+        payload = export / "fleet" / "src" / "fleet" / "__init__.py"
+        self.assertEqual(payload.stat().st_mode & 0o222, 0, "the payload file is still writable")
+        self.assertEqual((export / "fleet").stat().st_mode & 0o222, 0,
+                         "a payload DIRECTORY is still writable, so files can be added beside the payload")
+        self.assertEqual(export.stat().st_mode & 0o222, 0, "the release directory itself is writable")
+        self.assertTrue((export / ".release").stat().st_mode & 0o200,
+                        "`.release` was frozen with the payload: nothing can ever be promoted")
+
+        # …and the two writers that come after a cut really do still work.
+        write_verdict(export / ".release", [("hermetic", GREEN, "e", "n"), ("it", GREEN, "e", "n")],
+                      GATE_ROSTER)
+        self.assertEqual(self.run_verb("release-promote", "--version", "0.1.0",
+                                       "--releases", str(self.releases), "--home", str(self.home)),
+                         EXIT_OK, self.err.getvalue())
+        self.assertEqual(rel.state(version), RELEASED)
+
+    def test_a_cut_writes_the_changelog_section_into_the_export(self):
+        # §Q6 reads `<export>/.release/CHANGELOG.md`. The payload does carry the running
+        # `fleet/CHANGELOG.md` — the tag is made after the commit — but that is the whole history, and a
+        # release has to be able to say what changed in IT without the reader diffing two artifacts.
+        from fleet import EXIT_OK
+        from fleet.release import Releases, Version
+        repo = self.repo()
+        self.assertEqual(self.run_verb("release-cut", "--version", "0.1.0", "--repo", str(repo),
+                                       "--releases", str(self.releases), "--home", str(self.home)),
+                         EXIT_OK, self.err.getvalue())
+        export = Releases(self.releases).dir_for(Version.parse("0.1.0"))
+        carried = (export / ".release" / "CHANGELOG.md").read_text()
+        self.assertIn("fleet/v0.1.0", carried)
+        # …and it is the same section the checkout keeps, which is the copy a reader browsing the repo
+        # finds. Two renderings of one release is how the artifact and the repo end up disagreeing.
+        self.assertEqual(carried.strip(),
+                         (repo / "fleet" / "CHANGELOG.md").read_text().partition("\n")[2].strip(),
+                         "the section in the artifact is not the section committed to the checkout")
+        # The artifact's copy is THE SECTION and not the whole file. §Q6 greps the first release's copy
+        # for `^- ` and requires none: a release whose notes are the entire history says nothing about
+        # what changed in it.
+        self.assertNotIn("\n- ", carried)
+        self.assertGreater(len((repo / "fleet" / "CHANGELOG.md").read_text()), len(carried),
+                           "the artifact carries the whole changelog rather than its own section")
+
+    def test_a_cut_refuses_a_dirty_tree_and_names_the_paths(self):
+        from fleet import EXIT_REFUSED
+        from fleet.release import Releases, Version
+        repo = self.repo()
+        (repo / "fleet" / "uncommitted.txt").write_text("edited\n")
+        code = self.run_verb("release-cut", "--version", "0.1.0", "--repo", str(repo),
+                             "--releases", str(self.releases), "--home", str(self.home))
+        self.assertEqual(code, EXIT_REFUSED)
+        self.assertIn("uncommitted.txt", self.err.getvalue())
+        self.assertFalse(Releases(self.releases).dir_for(Version.parse("0.1.0")).exists())
+        self.assertEqual(self._git(repo, "tag", "-l").strip(), "", "a refused cut still tagged the repo")
+
+    def test_a_cut_refuses_a_version_that_already_exists(self):
+        from fleet import EXIT_REFUSED
+        repo = self.repo()
+        self.seed("0.1.0")
+        code = self.run_verb("release-cut", "--version", "0.1.0", "--repo", str(repo),
+                             "--releases", str(self.releases), "--home", str(self.home))
+        self.assertEqual(code, EXIT_REFUSED)
+        self.assertIn("immutable", self.err.getvalue())
+
+    def test_a_cut_refuses_when_the_predecessors_tag_is_not_in_the_checkout(self):
+        # The delta is computed AGAINST that tag. A missing one is not "no predecessor": treated as one,
+        # the changelog silently re-lists every commit the previous release already shipped — which is
+        # the exact corruption the patch-id delta exists to prevent, arriving through the other door.
+        from fleet import EXIT_REFUSED
+        repo = self.repo()
+        self.seed("0.1.0")
+        code = self.run_verb("release-cut", "--version", "0.2.0", "--repo", str(repo),
+                             "--releases", str(self.releases), "--home", str(self.home))
+        self.assertEqual(code, EXIT_REFUSED)
+        self.assertIn("fleet/v0.1.0", self.err.getvalue())
+        self.assertEqual(self._git(repo, "tag", "-l").strip(), "",
+                         "a cut refused for a missing predecessor still tagged the repository")
+
+    def test_a_cut_refuses_a_repository_that_is_not_the_fleet_checkout(self):
+        # A cut rewrites `__version__` in the checkout it is given. Refused at the edge, by name: the
+        # alternative is a FileNotFoundError raised half way through, after the changelog has been written.
+        from fleet import EXIT_BAD_INPUT
+        repo = self.repo()
+        (repo / "fleet" / "src" / "fleet" / "__init__.py").unlink()
+        self._git(repo, "add", "-A")
+        self._git(repo, "commit", "-q", "-m", "not the fleet checkout any more")
+        code = self.run_verb("release-cut", "--version", "0.1.0", "--repo", str(repo),
+                             "--releases", str(self.releases), "--home", str(self.home))
+        self.assertEqual(code, EXIT_BAD_INPUT)
+        self.assertIn("__init__.py", self.err.getvalue())
+
+    # --- verify ------------------------------------------------------------------------------------
+
+    def test_verify_runs_both_suites_through_the_context_runner(self):
+        # `Verify` takes the runner as a REQUIRED third argument, and the handler hands it `ctx.runner`.
+        # A `Verify(rel, version)` raises TypeError; a `Verify` with a subprocess default would be a
+        # fourth spawn seam in the package.
+        from fleet import EXIT_OK
+        from fleet.release_verify import GREEN, read_verdict
+        rel, version = self.seed("0.1.0")
+        (rel.dir_for(version) / "fleet" / "it").mkdir(parents=True)
+        code = self.run_verb("release-verify", "--version", "0.1.0", "--releases", str(self.releases),
+                             "--home", str(self.home))
+        self.assertEqual(code, EXIT_OK, self.err.getvalue())
+        commands = [command for command, _ in self.calls]
+        self.assertTrue(any("unittest discover" in c for c in commands),
+                        f"the hermetic suite was never run: {commands}")
+        self.assertTrue(any("run-all.sh" in c for c in commands),
+                        f"the IT roster was never run: {commands}")
+        self.assertEqual(read_verdict(rel.dir_for(version) / ".release")["suites"],
+                         {"hermetic": GREEN, "it": GREEN})
+
+    def test_verify_answers_attention_when_the_verdict_is_not_green(self):
+        from fleet import EXIT_ATTENTION
+        rel, version = self.seed("0.1.0")
+        (rel.dir_for(version) / "fleet" / "it").mkdir(parents=True)
+        self.rc = 1
+        code = self.run_verb("release-verify", "--version", "0.1.0", "--releases", str(self.releases),
+                             "--home", str(self.home))
+        self.assertEqual(code, EXIT_ATTENTION, self.err.getvalue())
+
+    def test_verify_refuses_a_version_that_was_never_cut(self):
+        from fleet import EXIT_BAD_INPUT
+        code = self.run_verb("release-verify", "--version", "9.9.9", "--releases", str(self.releases),
+                             "--home", str(self.home))
+        self.assertEqual(code, EXIT_BAD_INPUT)
+
+    # --- promote -----------------------------------------------------------------------------------
+
+    def test_promote_refuses_without_green_evidence(self):
+        from fleet import EXIT_REFUSED
+        from fleet.release_verify import GATE_ROSTER, RED, write_verdict
+        rel, version = self.seed("0.1.0")
+        write_verdict(rel.dir_for(version) / ".release",
+                      [("hermetic", RED, "e", "n"), ("it", "GREEN", "e", "n")], GATE_ROSTER)
+        code = self.run_verb("release-promote", "--version", "0.1.0", "--releases", str(self.releases),
+                             "--home", str(self.home))
+        self.assertEqual(code, EXIT_REFUSED)
+        self.assertIn("release-verify", self.err.getvalue(),
+                      "the refusal does not name the command that clears it")
+
+    def test_promote_refuses_a_release_with_no_verdict_at_all(self):
+        from fleet import EXIT_REFUSED
+        self.seed("0.1.0")
+        code = self.run_verb("release-promote", "--version", "0.1.0", "--releases", str(self.releases),
+                             "--home", str(self.home))
+        self.assertEqual(code, EXIT_REFUSED)
+
+    def test_promote_refuses_a_minor_bump_that_only_has_gate_evidence(self):
+        from fleet import EXIT_REFUSED
+        from fleet.release_verify import GATE_ROSTER
+        self.seed("0.1.0")
+        self.seed("0.2.0", roster=GATE_ROSTER)
+        code = self.run_verb("release-promote", "--version", "0.2.0", "--releases", str(self.releases),
+                             "--home", str(self.home))
+        self.assertEqual(code, EXIT_REFUSED)
+        self.assertIn("--full", self.err.getvalue())
+
+    def test_promote_accepts_a_minor_bump_on_full_evidence(self):
+        from fleet import EXIT_OK
+        from fleet.release import RELEASED, Version
+        from fleet.release_verify import FULL_ROSTER
+        self.seed("0.1.0")
+        rel, version = self.seed("0.2.0", roster=FULL_ROSTER)
+        code = self.run_verb("release-promote", "--version", "0.2.0", "--releases", str(self.releases),
+                             "--home", str(self.home))
+        self.assertEqual(code, EXIT_OK, self.err.getvalue())
+        self.assertEqual(rel.state(Version.parse("0.2.0")), RELEASED)
+
+    def test_promote_accepts_a_patch_bump_on_gate_evidence(self):
+        from fleet import EXIT_OK
+        from fleet.release import RELEASED, Version
+        from fleet.release_verify import GATE_ROSTER
+        self.seed("0.1.0")
+        rel, _ = self.seed("0.1.1", roster=GATE_ROSTER)
+        code = self.run_verb("release-promote", "--version", "0.1.1", "--releases", str(self.releases),
+                             "--home", str(self.home))
+        self.assertEqual(code, EXIT_OK, self.err.getvalue())
+        self.assertEqual(rel.state(Version.parse("0.1.1")), RELEASED)
+
+    # --- deploy and rollback -------------------------------------------------------------------------
+
+    def test_deploy_refuses_a_candidate_without_force(self):
+        from fleet import EXIT_REFUSED
+        from fleet.release import CANDIDATE
+        self.seed("0.1.0", CANDIDATE)
+        code = self.run_verb("release-deploy", "--version", "0.1.0", "--releases", str(self.releases),
+                             "--home", str(self.home))
+        self.assertEqual(code, EXIT_REFUSED)
+        self.assertIn("CANDIDATE", self.err.getvalue())
+
+    def test_force_without_a_reason_is_refused(self):
+        from fleet import EXIT_REFUSED
+        from fleet.release import CANDIDATE, Releases
+        self.seed("0.1.0", CANDIDATE)
+        code = self.run_verb("release-deploy", "--version", "0.1.0", "--releases", str(self.releases),
+                             "--force", "--home", str(self.home))
+        self.assertEqual(code, EXIT_REFUSED)
+        self.assertIn("--reason", self.err.getvalue())
+        self.assertEqual(Releases(self.releases).current_label(), "none",
+                         "a refused force still moved `current`")
+
+    def test_force_with_a_reason_deploys_a_candidate_and_records_why(self):
+        from fleet import EXIT_OK
+        from fleet.release import CANDIDATE, Releases
+        self.seed("0.1.0", CANDIDATE)
+        code = self.run_verb("release-deploy", "--version", "0.1.0", "--releases", str(self.releases),
+                             "--force", "--reason", "the harvest loop is wedged and 0.1.0 is what ran",
+                             "--home", str(self.home))
+        self.assertEqual(code, EXIT_OK, self.err.getvalue())
+        rel = Releases(self.releases)
+        self.assertEqual(rel.current_label(), "0.1.0")
+        self.assertEqual(rel.history()[-1]["reason"],
+                         "the harvest loop is wedged and 0.1.0 is what ran")
+
+    def test_deploy_points_current_at_a_released_version(self):
+        from fleet import EXIT_OK
+        from fleet.release import RELEASED, Releases
+        self.seed("0.1.0", RELEASED)
+        code = self.run_verb("release-deploy", "--version", "0.1.0", "--releases", str(self.releases),
+                             "--home", str(self.home))
+        self.assertEqual(code, EXIT_OK, self.err.getvalue())
+        rel = Releases(self.releases)
+        self.assertEqual(rel.current_label(), "0.1.0")
+        last = rel.history()[-1]
+        self.assertEqual((last["action"], last["version"], last["from_version"]),
+                         ("DEPLOY", "0.1.0", "none"))
+
+    def test_dev_points_current_at_the_checkout_this_package_came_from(self):
+        # `--dev` is how live editing comes back, and it has to aim at a tree shaped like an export:
+        # both ends of the symlink hold `fleet/` at the top, so every consumer resolves them the same way.
+        from fleet import EXIT_OK
+        from fleet import cli as cli_module
+        from fleet.release import DEV, Releases
+        code = self.run_verb("release-deploy", "--dev", "--releases", str(self.releases),
+                             "--home", str(self.home))
+        self.assertEqual(code, EXIT_OK, self.err.getvalue())
+        rel = Releases(self.releases)
+        self.assertEqual(rel.current_label(), DEV)
+        self.assertEqual(rel.current_target(),
+                         pathlib.Path(cli_module.__file__).resolve().parents[3])
+        self.assertEqual(rel.history()[-1]["action"], DEV)
+
+    def test_status_asks_git_through_the_context_runner_and_never_a_subprocess(self):
+        """In dev mode `DEV` is true about the pointer and misleading about the code, so `status` reports
+        the checkout's head and dirtiness — and it asks through `ctx.runner`, the seam every handler is
+        handed. A `subprocess.run` here would be a fourth spawn site in the package (`FI-27a`)."""
+        from fleet import EXIT_OK
+        from fleet.release import DEV
+        self.run_verb("release-deploy", "--dev", "--releases", str(self.releases),
+                      "--home", str(self.home))
+        self.calls.clear()
+        self.out.truncate(0), self.out.seek(0)
+        code = self.run_verb("release-status", "--porcelain", "--releases", str(self.releases))
+        self.assertEqual(code, EXIT_OK, self.err.getvalue())
+        printed = dict(line.split("\t", 1) for line in self.out.getvalue().splitlines())
+        self.assertEqual(printed["current"], DEV)
+        self.assertIn("checkout", printed)
+        commands = [command for command, _ in self.calls]
+        self.assertTrue(any("rev-parse --short HEAD" in command for command in commands),
+                        f"status never asked for the checkout's head: {commands}")
+        self.assertTrue(any("status --porcelain" in command for command in commands),
+                        f"status never asked whether the checkout is dirty: {commands}")
+
+    def test_rollback_defaults_its_target_to_the_previously_deployed_version(self):
+        from fleet import EXIT_OK
+        from fleet.release import RELEASED, Releases, Version
+        rel = Releases(self.releases)
+        for name in ("0.1.0", "0.2.0"):
+            self.seed(name, RELEASED)
+        rel.append_history(action="DEPLOY", version="0.2.0", from_version="0.1.0",
+                           actor="a", host="b", reason="r", evidence="-")
+        rel.point_current_at(rel.dir_for(Version.parse("0.2.0")))
+        code = self.run_verb("release-rollback", "--reason", "harvest wedged",
+                             "--releases", str(self.releases), "--home", str(self.home))
+        self.assertEqual(code, EXIT_OK, self.err.getvalue())
+        self.assertEqual(rel.current_label(), "0.1.0")
+        last = rel.history()[-1]
+        self.assertEqual(last["action"], "ROLLBACK")
+        self.assertEqual(last["from_version"], "0.2.0")
+        self.assertEqual(last["reason"], "harvest wedged")
+
+    def test_rollback_refuses_when_no_deployment_has_ever_been_recorded(self):
+        # Including the case where the only recorded deploy came from nothing: "none" is what
+        # `current_label` answers when the pointer is absent, and it is not a version to return to.
+        from fleet import EXIT_BAD_INPUT
+        from fleet.release import RELEASED, Releases
+        self.seed("0.1.0", RELEASED)
+        code = self.run_verb("release-rollback", "--reason", "no way back",
+                             "--releases", str(self.releases), "--home", str(self.home))
+        self.assertEqual(code, EXIT_BAD_INPUT)
+        self.assertIn("--to", self.err.getvalue())
+        rel = Releases(self.releases)
+        rel.append_history(action="DEPLOY", version="0.1.0", from_version="none", reason="first")
+        self.assertEqual(self.run_verb("release-rollback", "--reason", "still no way back",
+                                       "--releases", str(self.releases), "--home", str(self.home)),
+                         EXIT_BAD_INPUT)
+
+    # --- the read-only three ---------------------------------------------------------------------
+
+    def test_status_answers_for_an_empty_release_area(self):
+        from fleet import EXIT_OK
+        self.assertEqual(self.run_verb("release-status", "--releases", str(self.releases)), EXIT_OK)
+        self.assertIn("none", self.out.getvalue())
+
+    def test_the_read_only_verbs_print_their_declared_columns(self):
+        from fleet import EXIT_OK
+        from fleet.cli import PORCELAIN_COLUMNS
+        from fleet.release import RELEASED
+        self.seed("0.1.0", RELEASED)
+        self.seed("0.1.1", RELEASED)
+        self.assertEqual(self.run_verb("release-deploy", "--version", "0.1.0",
+                                       "--releases", str(self.releases), "--home", str(self.home)),
+                         EXIT_OK, self.err.getvalue())
+        for verb in ("release-status", "release-list", "release-history"):
+            with self.subTest(verb=verb):
+                self.out.truncate(0), self.out.seek(0)
+                code = self.run_verb(verb, "--porcelain", "--releases", str(self.releases))
+                self.assertEqual(code, EXIT_OK, self.err.getvalue())
+                printed = self.out.getvalue().splitlines()
+                self.assertTrue(printed, f"{verb} printed nothing at all")
+                for line in printed:
+                    self.assertEqual(len(line.split("\t")), len(PORCELAIN_COLUMNS[verb]),
+                                     f"{verb}'s porcelain line {line!r} is not its declared width")
+
+    def test_history_honours_its_limit(self):
+        from fleet import EXIT_OK
+        from fleet.release import Releases
+        rel = Releases(self.releases)
+        for index in range(4):
+            rel.append_history(action="DEPLOY", version=f"0.1.{index}", from_version="-",
+                               reason=f"row {index}")
+        code = self.run_verb("release-history", "--porcelain", "--limit", "2",
+                             "--releases", str(self.releases))
+        self.assertEqual(code, EXIT_OK, self.err.getvalue())
+        self.assertEqual(len(self.out.getvalue().splitlines()), 2)
+        self.assertIn("row 3", self.out.getvalue())
+
+    def test_a_limit_that_is_not_a_number_is_bad_input(self):
+        from fleet import EXIT_BAD_INPUT
+        self.assertEqual(self.run_verb("release-history", "--limit", "lots",
+                                       "--releases", str(self.releases)), EXIT_BAD_INPUT)
+
+    def test_list_marks_the_deployed_version(self):
+        from fleet import EXIT_OK
+        from fleet.release import RELEASED
+        self.seed("0.1.0", RELEASED)
+        self.seed("0.2.0", RELEASED)
+        self.run_verb("release-deploy", "--version", "0.2.0", "--releases", str(self.releases),
+                      "--home", str(self.home))
+        self.out.truncate(0), self.out.seek(0)
+        self.assertEqual(self.run_verb("release-list", "--porcelain",
+                                       "--releases", str(self.releases)), EXIT_OK)
+        rows = [line.split("\t") for line in self.out.getvalue().splitlines()]
+        self.assertEqual([(row[0], row[3]) for row in rows], [("0.1.0", ""), ("0.2.0", "*")])
+
+    # --- the dry run -------------------------------------------------------------------------------
+
+    def test_no_mutating_release_verb_touches_anything_under_dry_run(self):
+        """`RI-32`/`OBS-70`: a guard you cannot interrogate non-destructively gets interrogated
+        destructively. Every row here is ADMISSIBLE — each verb would really perform its side effect —
+        so the zero delta is a withheld mutation and not a refusal arriving first."""
+        from fleet import EXIT_OK
+        from fleet.release import CANDIDATE, RELEASED, Releases
+        from fleet.release_verify import GATE_ROSTER
+        repo = self.repo()
+        self.seed("0.1.0", RELEASED)
+        rel, version = self.seed("0.1.1", CANDIDATE, roster=GATE_ROSTER)
+        (rel.dir_for(version) / "fleet" / "it").mkdir(parents=True)
+        # The predecessor's tag is in the checkout, as it would be for a release cut from it: the cut
+        # computes its delta against that tag, and a row missing it would refuse before mutating anything.
+        self._git(repo, "tag", "-a", "fleet/v0.1.1", "-m", "the seeded predecessor")
+        Releases(self.releases).append_history(action="DEPLOY", version="0.1.1",
+                                               from_version="0.1.0", reason="seeded")
+        rows = {
+            "release-cut": ["--version", "0.2.0", "--repo", str(repo)],
+            "release-verify": ["--version", "0.1.1"],
+            "release-promote": ["--version", "0.1.1"],
+            "release-deploy": ["--version", "0.1.0"],
+            "release-rollback": ["--reason", "the pipeline is the thing under test"],
+        }
+        for verb, argv in sorted(rows.items()):
+            with self.subTest(verb=verb):
+                self.out.truncate(0), self.out.seek(0)
+                self.err.truncate(0), self.err.seek(0)
+                before = self.snapshot()
+                code = self.run_verb(verb, "--dry-run", *argv, "--releases", str(self.releases),
+                                     "--home", str(self.home))
+                self.assertEqual(code, EXIT_OK, self.err.getvalue())
+                self.assertTrue(self.out.getvalue().strip(),
+                                f"{verb} --dry-run said nothing: an uninterrogable guard")
+                self.assertEqual(self.snapshot(), before,
+                                 f"{verb} --dry-run touched the tree (mtimes included)")
+                self.assertEqual(self.calls, [], f"{verb} --dry-run ran a command")

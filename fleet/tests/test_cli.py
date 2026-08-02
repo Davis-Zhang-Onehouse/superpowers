@@ -44,6 +44,8 @@ from fleet.harvest import NO_ISSUES_FILED, REGISTER_NAME, UNREADABLE, VACUOUS, H
 from fleet.identity import InstantName
 from fleet.layout import validate as layout_validate
 from fleet.pool import Pool
+from fleet.release import CANDIDATE, RELEASED, Releases, Version
+from fleet.release_verify import GATE_ROSTER, GREEN, write_verdict
 from fleet.review import Finding, Review
 from fleet import origin as origin_mod
 from fleet.origin import Origin
@@ -112,6 +114,49 @@ PROSE_PHASE_LINE = "Phase: AWAITING-CI"
 PROSE_HANDOFF = f"# HANDOFF\n\n## Current state\n{PROSE_PHASE_LINE}\n\nstill working.\n"
 
 
+#: The release area the eight release verbs' argv rows are driven against: one RELEASED version, one
+#: CANDIDATE with gate evidence, and the version a cut would add. Named, because the fixture's tags, its
+#: seeded directories and the argv rows all have to agree — and `0.2.0` over `0.1.1` is a MINOR bump, so
+#: the promote row deliberately targets the patch bump, which gate evidence is allowed to carry.
+DEPLOYED_RELEASE = "0.1.0"
+SEEDED_CANDIDATE = "0.1.1"
+SEEDED_TAG = f"fleet/v{SEEDED_CANDIDATE}"
+CUT_VERSION = "0.2.0"
+
+
+def release_fixture(fleet) -> tuple:
+    """`(repo, releases)` for the release verbs' rows. Idempotent: `argv_for` is called per test, and in
+    the dry-run cases it is called BEFORE the snapshot, so it may create fixture state but must not
+    change any of it on a second call.
+
+    The checkout is shaped like the real one — `Repo` refuses a directory with no `.git` at the edge, and
+    a cut refuses one with no `fleet/src/fleet/__init__.py`, because that is the file whose `__version__`
+    it stamps. No git runs here: `FakeGit` answers every query, which is what keeps this file's promise
+    that nothing in it starts a process, a tmux or a repository.
+    """
+    repo = fleet.tmp / "checkout"
+    (repo / ".git").mkdir(parents=True, exist_ok=True)
+    (repo / "fleet" / "src" / "fleet").mkdir(parents=True, exist_ok=True)
+    stamped = repo / "fleet" / "src" / "fleet" / "__init__.py"
+    if not stamped.is_file():
+        stamped.write_text('__version__ = "0.0.1"\n')
+    releases = Releases(fleet.tmp / "releases")
+    if not releases.versions():
+        for name, state in ((DEPLOYED_RELEASE, RELEASED), (SEEDED_CANDIDATE, CANDIDATE)):
+            version = Version.parse(name)
+            (releases.dir_for(version) / ".release").mkdir(parents=True)
+            releases.write_manifest(version, {"version": name, "cut_at": NOW})
+            releases.set_state(version, state)
+            write_verdict(releases.dir_for(version) / ".release",
+                          [("hermetic", GREEN, "e", "n"), ("it", GREEN, "e", "n")], GATE_ROSTER)
+        # …so `release-rollback` with no `--to` has somewhere to return to. Without it that row refuses
+        # before touching anything and its zero-delta case asserts nothing.
+        releases.append_history(action="DEPLOY", version=SEEDED_CANDIDATE,
+                                from_version=DEPLOYED_RELEASE, actor="fixture", host="fixture",
+                                ts=NOW, reason="seeded so the rollback row has a target")
+    return repo, releases.root
+
+
 def snapshot(root: pathlib.Path) -> dict:
     """Every path under `root` with its kind, mtime and size.
 
@@ -146,10 +191,16 @@ class FakeRunner:
 
 
 class FakeGit:
-    """`(args, cwd) -> (rc, stdout)`; `selftest` stamps the tree state through this and nothing else."""
+    """`(args, cwd) -> (rc, stdout)`; `selftest` stamps the tree state through this and nothing else.
 
-    def __init__(self, dirty=()):
+    `tags` and `archive` are answered for the release verbs. A cut asks whether its own tag exists (it
+    must not) and whether its predecessor's does (it must), so one blanket "" would refuse every cut for
+    a missing predecessor and never reach the destructive path a `--dry-run` row has to withhold.
+    """
+
+    def __init__(self, dirty=(), tags=()):
         self.dirty = list(dirty)
+        self.tags = set(tags)
         self.calls = []
 
     def __call__(self, args, cwd=None):
@@ -159,6 +210,15 @@ class FakeGit:
             return 0, "0123456789abcdef0123456789abcdef01234567\n"
         if args[0] == "status":
             return 0, "".join(f" M {path}\n" for path in self.dirty)
+        if args[:2] == ["tag", "-l"]:
+            return 0, "".join(f"{name}\n" for name in sorted(self.tags) if name in args[2:])
+        if args[0] == "archive":
+            # This fake DESCRIBES a repository; it cannot produce a tar, and it says so the way git says
+            # it — non-zero with a message. `Repo.export` then raises its own BadInput naming the tag, so
+            # a real cut over the argv row stops at exit 2 with a sentence instead of dying on a missing
+            # file. Everything before the export really runs, which is what makes the `--dry-run` row's
+            # zero delta a withheld mutation rather than a refusal that arrived first.
+            return 128, "this fixture describes a repository without being one; it has no object database"
         return 0, ""
 
 
@@ -190,7 +250,8 @@ class Fleet:
                          alive=self.sessions.alive)
         self.harvest = Harvest(self.home, now=lambda: NOW)
         self.runner = FakeRunner()
-        self.git = FakeGit()
+        #: The predecessor of the version `release-cut`'s argv row cuts. See `release_fixture`.
+        self.git = FakeGit(tags=[SEEDED_TAG])
         for index in range(slots):
             slot = f"ws{index + 1}"
             (self.slots_dir / slot).mkdir()
@@ -364,6 +425,7 @@ class CliCase(unittest.TestCase):
         ready = str(fleet.paths["readyWorker"])
         orphan = str(fleet.paths["orphanWork"])
         profile = str(fleet.profile("worker"))
+        repo, releases = release_fixture(fleet)
         return {
             "init": ["--name", "freshOne", "--base", "00000000"],
             "dispatch": ["--profile", profile, "--title", "a fresh worker",
@@ -404,6 +466,18 @@ class CliCase(unittest.TestCase):
             "pane-guard": ["--pane", "dt-solo"],
             "compaction-status": [],
             "selftest": [],
+            #: `--repo` and `--releases` are on every row that needs them, and that is the point rather
+            #: than a convenience: these rows are driven for REAL by the matrices below, and a release
+            #: verb that inferred either from the working directory would tag this checkout.
+            "release-cut": ["--version", CUT_VERSION, "--repo", str(repo), "--releases", str(releases)],
+            "release-verify": ["--version", SEEDED_CANDIDATE, "--releases", str(releases)],
+            "release-promote": ["--version", SEEDED_CANDIDATE, "--releases", str(releases)],
+            "release-deploy": ["--version", DEPLOYED_RELEASE, "--releases", str(releases)],
+            "release-rollback": ["--reason", "the matrix drives this row for real",
+                                 "--releases", str(releases)],
+            "release-status": ["--releases", str(releases)],
+            "release-list": ["--releases", str(releases)],
+            "release-history": ["--releases", str(releases)],
         }
 
 
@@ -748,6 +822,13 @@ OUTWARD_CALL_SITES = {
     ("harvest", "report"): (
         "`self.run(src)` is `Harvest.run`, a method of this package that runs a harvest SOURCE. It shares "
         "its tail with subprocess.run and spawns nothing"),
+    ("cli", "_do_release_verify"): (
+        "`Verify(rel, version, ctx.runner).run(full=…)` is `release_verify.Verify.run`, a method of this "
+        "package, sharing its tail with subprocess.run exactly as `harvest.report`'s `self.run` does — "
+        "OBS-44's family, a marker two things share. It spawns nothing of its own: `Verify` takes the "
+        "command runner as a REQUIRED constructor argument and this handler hands it `ctx.runner`, the "
+        "seam the CLI already owns and the suite already injects. That is what lets `release-verify` run "
+        "both suites for real while the package's injectable spawn seams stay three"),
 }
 
 #: The three entries above that really do spawn a process. Kept separate so the count is derived from the
@@ -755,6 +836,12 @@ OUTWARD_CALL_SITES = {
 #: (`FI-27a`: the docstring used to claim `default_probes` was the ONLY one, which was false the day it
 #: was written).
 SPAWN_SEAMS = {("cli", "_default_runner"), ("session", "default_probes"), ("workspace", "default_git")}
+
+#: Sites whose ONLY match on the spawn vocabulary is a tail name: a method of this package called `run`.
+#: Enumerated one by one and deliberately NOT derived from `OUTWARD_CALL_SITES` — deriving it would excuse
+#: every future site the moment somebody wrote a sentence about it, and the point of the count below is
+#: that a fourth real seam cannot be added without being argued for HERE, in the file that counts them.
+TAIL_ONLY_RUN = {("harvest", "report"), ("cli", "_do_release_verify")}
 
 
 def package_functions() -> dict:
@@ -944,9 +1031,10 @@ class TestOutwardState(CliCase):
         spawning = {site for site in self.functions
                     if any(call.rsplit(".", 1)[-1] in cli.SPAWN_CALLS
                            for call in self.forbidden_calls_in(site))}
-        # `harvest.report` matches the vocabulary on `self.run` and spawns nothing; OUTWARD_CALL_SITES
-        # says so, and SPAWN_SEAMS is what remains.
-        self.assertEqual(spawning - {("harvest", "report")}, SPAWN_SEAMS,
+        # `harvest.report` and `cli._do_release_verify` match the vocabulary on a `.run` whose receiver is
+        # a class in this package, and spawn nothing; OUTWARD_CALL_SITES argues each one and
+        # `TAIL_ONLY_RUN` names them, so SPAWN_SEAMS is what remains.
+        self.assertEqual(spawning - TAIL_ONLY_RUN, SPAWN_SEAMS,
                          f"the package's spawn seams are {sorted(spawning)}, not the three that are "
                          "documented and injected")
         import fleet.session as session_module

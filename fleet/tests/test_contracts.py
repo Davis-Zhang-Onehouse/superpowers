@@ -38,6 +38,8 @@ from fleet.harvest import Harvest
 from fleet.layout import validate as layout_validate
 from fleet.pool import Pool
 from fleet.profiles import Profile, lint as profiles_lint
+from fleet.release import CANDIDATE, RELEASED, Releases, Version
+from fleet.release_verify import GATE_ROSTER, GREEN, write_verdict
 from fleet.review import Finding, Review
 from fleet.roadmap import Milestone, Roadmap
 from fleet.session import LiveSession, Probes, SessionLayer
@@ -62,6 +64,14 @@ BUSY_PANE = "\n".join(["working", "  esc to interrupt"])
 #: refusal and nothing else.
 IDLE_PANE = "\n".join(["done", "", '❯ try "fix the failing test"', "  ? for shortcuts"])
 RUNBOOK = "# RUNBOOK\n\n```bash\necho verified\n```\n"
+
+#: The release area every release verb's argv row is driven against: one RELEASED version, one CANDIDATE
+#: carrying gate evidence, and the version a cut would add. `0.1.1` is what the promote row targets
+#: because a patch bump is the one gate evidence alone may carry.
+DEPLOYED_RELEASE = "0.1.0"
+SEEDED_CANDIDATE = "0.1.1"
+SEEDED_TAG = f"fleet/v{SEEDED_CANDIDATE}"
+CUT_VERSION = "0.2.0"
 
 #: A marker, for the purposes of the uniqueness property: a lowercase dashed token bound to an
 #: UPPER_SNAKE module constant. Values with spaces, dots, slashes or capitals are prose, filenames or
@@ -208,11 +218,52 @@ class _Runner:
 
 
 class _Git:
+    """`(args, cwd) -> (rc, stdout)`. `tags` and `archive` are answered for the release verbs: a cut asks
+    whether its predecessor's tag exists (it must) and whether its own does (it must not), and it cannot
+    export from a fake — which is said with a non-zero code, the way git says it, so `Repo.export` raises
+    its own diagnostic instead of the verb dying on a missing file."""
+
+    def __init__(self, tags=(SEEDED_TAG,)):
+        self.tags = set(tags)
+
     def __call__(self, args, cwd=None):
         args = list(args)
         if args[:2] == ["rev-parse", "HEAD"]:
             return 0, "0" * 40 + "\n"
+        if args[:2] == ["tag", "-l"]:
+            return 0, "".join(f"{name}\n" for name in sorted(self.tags) if name in args[2:])
+        if args[0] == "archive":
+            return 128, "this fixture describes a repository without being one"
         return 0, ""
+
+
+def release_fixture(fleet) -> tuple:
+    """`(repo, releases)` for the release verbs' rows, built once per fixture and never changed on a
+    second call — `argv_for` runs before the dry-run snapshot is taken.
+
+    The checkout carries the two things a cut checks at the edge: a `.git`, and the
+    `fleet/src/fleet/__init__.py` whose `__version__` it stamps.
+    """
+    repo = fleet.tmp / "checkout"
+    (repo / ".git").mkdir(parents=True, exist_ok=True)
+    (repo / "fleet" / "src" / "fleet").mkdir(parents=True, exist_ok=True)
+    stamped = repo / "fleet" / "src" / "fleet" / "__init__.py"
+    if not stamped.is_file():
+        stamped.write_text('__version__ = "0.0.1"\n')
+    releases = Releases(fleet.tmp / "releases")
+    if not releases.versions():
+        for name, state in ((DEPLOYED_RELEASE, RELEASED), (SEEDED_CANDIDATE, CANDIDATE)):
+            version = Version.parse(name)
+            (releases.dir_for(version) / ".release").mkdir(parents=True)
+            releases.write_manifest(version, {"version": name, "cut_at": NOW})
+            releases.set_state(version, state)
+            write_verdict(releases.dir_for(version) / ".release",
+                          [("hermetic", GREEN, "e", "n"), ("it", GREEN, "e", "n")], GATE_ROSTER)
+        # …so the rollback row has a target and its zero-delta case is a withheld mutation.
+        releases.append_history(action="DEPLOY", version=SEEDED_CANDIDATE,
+                                from_version=DEPLOYED_RELEASE, actor="fixture", host="fixture",
+                                ts=NOW, reason="seeded so the rollback row has a target")
+    return repo, releases.root
 
 
 class Loaded(unittest.TestCase):
@@ -250,6 +301,7 @@ class Loaded(unittest.TestCase):
 
     def argv_for(self, fleet: Fleet) -> dict:
         ready = str(fleet.paths["readyWorker"])
+        repo, releases = release_fixture(fleet)
         return {
             "init": ["--name", "freshOne", "--base", "00000000"],
             "dispatch": ["--profile", str(fleet.profile()), "--title", "a fresh worker",
@@ -290,6 +342,18 @@ class Loaded(unittest.TestCase):
             "pane-guard": ["--pane", "dt-solo"],
             "compaction-status": [],
             "selftest": [],
+            #: Every row names its repository and its release area. The generated cases drive these for
+            #: REAL, and a release verb that inferred either from the working directory would tag the
+            #: checkout the suite is running from.
+            "release-cut": ["--version", CUT_VERSION, "--repo", str(repo), "--releases", str(releases)],
+            "release-verify": ["--version", SEEDED_CANDIDATE, "--releases", str(releases)],
+            "release-promote": ["--version", SEEDED_CANDIDATE, "--releases", str(releases)],
+            "release-deploy": ["--version", DEPLOYED_RELEASE, "--releases", str(releases)],
+            "release-rollback": ["--reason", "the generated matrix drives this row for real",
+                                 "--releases", str(releases)],
+            "release-status": ["--releases", str(releases)],
+            "release-list": ["--releases", str(releases)],
+            "release-history": ["--releases", str(releases)],
         }
 
 

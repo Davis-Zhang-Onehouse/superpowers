@@ -56,6 +56,7 @@ for `charter.md`) and takes the phase itself from `.fleet/declare.json`; `verify
 import json
 import os
 import re
+import shlex
 import sys
 import tempfile
 from dataclasses import dataclass, field
@@ -64,13 +65,18 @@ from typing import Callable
 
 from fleet import EXIT_ATTENTION, EXIT_BAD_INPUT, EXIT_CODES, EXIT_OK, EXIT_REFUSED, __version__
 from fleet import guards, layout, render
+from fleet.atomic import atomic_write
 from fleet.errors import BadInput, FleetError, Refused
 from fleet.harvest import DEFAULT_MAX_AGE_S, REGISTER_NAME, Harvest
 from fleet.identity import ROOT_BASE, InstantName, resolve
 from fleet.layout import INFO, VIOLATION
 from fleet.pool import Pool, ReapReport
 from fleet.profiles import Profile
-from fleet.reconcile import COMPLETE, KIND_WORKER, reconcile
+from fleet.reconcile import COMPLETE, KIND_WORKER, RUNNING, reconcile
+from fleet.release import (CANDIDATE, DEV, HISTORY_COLUMNS, META_DIR, RELEASED, Releases, Version,
+                           actor, tree_sha, utc_now)
+from fleet.release_git import Repo, changelog_section
+from fleet.release_verify import FULL_ROSTER, GATE_ROSTER, GREEN, Verify, read_verdict
 from fleet.review import Finding, Review, exit_code_for
 from fleet import origin as origin_mod
 from fleet.origin import Origin
@@ -212,8 +218,16 @@ ABORT_FILE = "abort.json"
 FORCE = "--force"
 ALL_EFFORTS = "--all"
 
+#: The release area, named on every release verb. Declared once with its help text, because eight verbs
+#: repeating one flag by hand is eight chances for the help to disagree with itself (`W2-20`).
+RELEASES = "--releases"
+RELEASES_HELP = "the release area; overrides $FLEET_RELEASES"
+
 KV_COLUMNS = ("field", "value")
 ROW_COLUMNS = ("kind", "subject", "severity", "detail", "clears_when", "clears_who")
+#: `release-list`'s schema. Its own tuple rather than a reuse: the columns describe releases, and
+#: `OBS-44` is what borrowing a tuple because it happens to be the right length costs.
+RELEASE_COLUMNS = ("version", "state", "cut_at", "current")
 
 
 @dataclass(frozen=True)
@@ -2708,6 +2722,387 @@ def _do_selftest(ctx: Ctx, parsed: Parsed) -> int:
     return EXIT_ATTENTION if (code != 0 or inside) else EXIT_OK
 
 
+# --- releases ---------------------------------------------------------------------------------------
+#
+# Flat verbs rather than `release <subverb>`: `parse` declares no positionals (`FI-19d`) and `main`
+# dispatches on argv[0] against one flat table. Flat also means each of these enrols automatically into
+# §A5's exit-code matrix and §M's flag matrices, which derive their population from `VERBS`.
+#
+# `--repo` is REQUIRED on every verb that touches git, and never inferred from the working directory.
+# §A5 and §M drive every verb in this table through a REAL invocation; a verb that guessed its repository
+# would tag the live one during an IT run. For the same reason `FLEET_RELEASES` is refused-if-unset for
+# every mutating verb here: driven with no flags, these verbs exit 2 and mutate nothing.
+
+
+def _releases(ctx: Ctx, parsed: Parsed) -> Releases:
+    """The release area, named or refused. Same rule as `FLEET_HOME` (`SI-15`): a mutating verb that
+    invents a destination is how shared state gets written by a command aimed somewhere else.
+
+    A READ-ONLY verb keeps the default for the same reason `default_context` does — "nothing is released"
+    is a real answer to a real question, and a read of an area that does not exist costs nothing.
+    """
+    named = parsed.get("releases") or os.environ.get("FLEET_RELEASES")
+    spec = VERBS.get(parsed.verb)
+    if not named and spec is not None and not spec.read_only:
+        raise BadInput(
+            f"{parsed.verb!r} writes to a release area and none was named: pass `--releases <path>` or "
+            f"export FLEET_RELEASES. There is no default for a write.")
+    return Releases(Path(named or (Path.home() / ".fleet-releases")))
+
+
+def _refuse_if_self_deployed(rel: Releases, parsed: Parsed) -> None:
+    """A mutating release verb must not run from inside the release area it manages.
+
+    Otherwise rolling back to a version whose release code has a bug also rolls back the ability to roll
+    forward — the tool that moves `current` cannot be the thing `current` points at. Read-only verbs are
+    exempt deliberately: `status` is how an operator finds out what is deployed, and it has to answer from
+    the deployed copy itself.
+    """
+    spec = VERBS.get(parsed.verb)
+    if spec is not None and spec.read_only:
+        return
+    here = Path(__file__).resolve()
+    root = rel.root.resolve()
+    if root in here.parents:
+        raise Refused(
+            f"{parsed.verb!r} is running from {here}, which is inside the release area {root}. Run it "
+            f"from the git checkout instead. The tool that manages `current` must not be the thing "
+            f"`current` points at: a bad release would otherwise take the fix path down with it.",
+            clears_when="the verb is run from a checkout outside the release area",
+            clears_who="whoever is running it")
+
+
+def _refuse_an_existing_release(rel: Releases, version: Version) -> None:
+    """Checked before the changelog is written AND again under the lock, because those are two different
+    guarantees: the first refuses without touching the operator's checkout, the second is the one two
+    concurrent cuts of one version actually collide on."""
+    if rel.dir_for(version).exists():
+        raise Refused(
+            f"{version} already exists at {rel.dir_for(version)}. A release is immutable — cut the next "
+            f"version instead.",
+            clears_when="a version nothing has been cut for is named",
+            clears_who="whoever is cutting")
+
+
+def _freeze_payload(export: Path) -> None:
+    """Drop every write bit on the release — the PAYLOAD only, never `META_DIR`.
+
+    Freezing the whole directory is the obvious implementation and it is wrong: `promote` writes
+    `.release/STATE` and `verify` writes `.release/evidence/`, so a release frozen whole is a release
+    that can never be promoted or verified. `META_DIR` is already excluded from `tree_sha` for exactly
+    this reason — it describes the release rather than being part of it — so it is the mutable half of
+    the artifact and the freeze leaves it alone.
+
+    Directories are frozen too, and that is the load-bearing half: a read-only file in a writable
+    directory can still be replaced. Symlinks are skipped because `chmod` would follow them to a target
+    that may not be ours.
+    """
+    frozen = [export] + [path for path in export.rglob("*")
+                         if not path.is_symlink() and path.relative_to(export).parts[0] != META_DIR]
+    for path in sorted(frozen, reverse=True):
+        path.chmod(path.stat().st_mode & ~0o222)
+
+
+def _do_release_cut(ctx: Ctx, parsed: Parsed) -> int:
+    rel = _releases(ctx, parsed)
+    _refuse_if_self_deployed(rel, parsed)
+    version = Version.parse(parsed.get("version"))
+    repo = Repo(parsed.get("repo"), git=ctx.git)
+    stamped = repo.path / "fleet" / "src" / "fleet" / "__init__.py"
+    if not stamped.is_file():
+        raise BadInput(
+            f"{repo.path} is a git repository but not the fleet checkout: {stamped} is not there, and a "
+            f"cut rewrites that file's `__version__` before it tags. Refused at the edge and by name — "
+            f"the alternative is a failure half way through, after the changelog has been written.")
+    _refuse_an_existing_release(rel, version)
+    if repo.tag_exists(version.tag):
+        raise Refused(
+            f"the tag {version.tag} already exists in {repo.path}. A release tag is never moved: it is "
+            f"what keeps the exact tree recoverable after the nightly rebase rewrites its commits off "
+            f"the branch. Choose the next version instead.",
+            clears_when="an untagged version is named", clears_who="whoever is cutting")
+    dirty = repo.dirty()
+    if dirty:
+        raise Refused(
+            f"the tree at {repo.path} has {len(dirty)} uncommitted path(s): "
+            f"{', '.join(dirty[:5])}{' …' if len(dirty) > 5 else ''}. An export carries committed "
+            f"content only, so a dirty tree means the thing tested is not the thing you edited.",
+            clears_when="the listed paths are committed or reverted",
+            clears_who="whoever is mid-edit")
+
+    prev = rel.previous(version)
+    prev_tag = prev.tag if prev else None
+    if prev_tag is not None and not repo.tag_exists(prev_tag):
+        # Refused rather than treated as "no predecessor". The delta is computed against this tag, so a
+        # missing one does not mean "nothing shipped before" — it means the range cannot be computed, and
+        # the changelog would silently re-list everything the previous release already carried.
+        raise Refused(
+            f"the release area's predecessor of {version} is {prev}, and its tag {prev_tag} is not in "
+            f"{repo.path}. The delta is computed against that tag, so cutting now would write a "
+            f"changelog covering commits {prev} already shipped.",
+            clears_when=f"{prev_tag} is back in the checkout (`git fetch --tags`, or the repo the "
+                        f"release area was cut from is the one named)",
+            clears_who="whoever is cutting")
+    rebased = bool(prev_tag) and not repo.is_ancestor(prev_tag, "HEAD")
+    commits = repo.delta(prev_tag)
+    when, head = utc_now(), repo.head()
+    section = changelog_section(version, head=head, branch=repo.branch(),
+                                upstream_base=repo.upstream_base(), prev_tag=prev_tag,
+                                commits=commits, rebased=rebased, when=when)
+    since = prev_tag or "(no predecessor)"
+
+    if ctx.dry_run:
+        _emit(ctx, "release-cut", [
+            ("dry-run", "nothing was written, committed, tagged or exported"),
+            ("would-cut", f"{version} from {head[:7]} on {repo.branch()}"),
+            ("would-tag", version.tag),
+            ("would-export", str(rel.dir_for(version))),
+            ("commits", f"{len(commits)} since {since}")])
+        return EXIT_OK
+
+    with rel.lock():
+        _refuse_an_existing_release(rel, version)
+        changelog = repo.path / "fleet" / "CHANGELOG.md"
+        existing = changelog.read_text() if changelog.is_file() else "# fleet — changelog\n"
+        head_line, _, rest = existing.partition("\n")
+        changelog.write_text(f"{head_line}\n\n{section}\n{rest.lstrip()}")
+        stamped.write_text(re.sub(r'__version__ = "[^"]*"', f'__version__ = "{version}"',
+                                  stamped.read_text()))
+        repo.commit([changelog, stamped], f"fleet v{version}")
+        repo.annotated_tag(version.tag, section)
+
+        export = rel.dir_for(version)
+        repo.export(version.tag, export)
+        # THIS release's section, in the release's own metadata. The payload does carry the running
+        # `fleet/CHANGELOG.md` — the tag is made after the commit, so the export has it — but that file
+        # is the whole history, and "what changed in the version I am holding" is a different question
+        # that the holder of one artifact should not have to answer by diffing two of them.
+        atomic_write(export / META_DIR / "CHANGELOG.md", section)
+        rel.write_manifest(version, {
+            "version": str(version), "tag": version.tag, "source_commit": repo.head(),
+            "source_branch": repo.branch(), "upstream_base": repo.upstream_base(),
+            "tree_sha": tree_sha(export), "cut_at": when, "cut_by": actor(),
+            "notes": parsed.get("notes") or "-"})
+        rel.set_state(version, CANDIDATE)
+        _freeze_payload(export)
+
+    _emit(ctx, "release-cut", [
+        ("version", str(version)), ("state", CANDIDATE), ("tag", version.tag),
+        ("path", str(rel.dir_for(version))), ("commits", f"{len(commits)} since {since}")])
+    return EXIT_OK
+
+
+def _do_release_verify(ctx: Ctx, parsed: Parsed) -> int:
+    rel = _releases(ctx, parsed)
+    _refuse_if_self_deployed(rel, parsed)
+    version = Version.parse(parsed.get("version"))
+    export = rel.dir_for(version)
+    if not export.is_dir():
+        raise BadInput(f"no release {version} at {export}. `release-list` shows what has been cut.")
+    roster = FULL_ROSTER if parsed.on("full") else GATE_ROSTER
+
+    if ctx.dry_run:
+        _emit(ctx, "release-verify", [
+            ("dry-run", "no suite was run and no evidence was written"),
+            ("would-verify", f"{version} at {export}"),
+            ("would-run", f"the {roster} roster")])
+        return EXIT_OK
+
+    if ctx.live_work_now():
+        print("note: this box has live fleet work. The IT suite baselines the live session set, so a "
+              "failure may be contamination rather than a defect — that is what INCONCLUSIVE records.",
+              file=ctx.err)
+    # `ctx.runner` is the seam every handler is handed, and `Verify` REQUIRES it: a `subprocess` default
+    # inside `release_verify` would be a fourth spawn site in the package (`FI-27a`).
+    result = Verify(rel, version, ctx.runner).run(full=parsed.on("full"))
+    _emit(ctx, "release-verify", [
+        ("version", str(version)), ("verdict", result), ("roster", roster),
+        ("evidence", str(export / META_DIR / "evidence"))])
+    return EXIT_OK if result == GREEN else EXIT_ATTENTION
+
+
+def _do_release_promote(ctx: Ctx, parsed: Parsed) -> int:
+    rel = _releases(ctx, parsed)
+    _refuse_if_self_deployed(rel, parsed)
+    version = Version.parse(parsed.get("version"))
+    verdict = read_verdict(rel.dir_for(version) / META_DIR)
+    suites = verdict.get("suites") or {}
+    if not suites or any(value != GREEN for value in suites.values()):
+        raise Refused(
+            f"{version} has no GREEN evidence: {suites or 'no VERDICT.tsv at all'}. Run "
+            f"`fleet release-verify --version {version}` first. `promote` never runs tests — it reads "
+            f"what `verify` left, so a promotion always cites a measurement someone can go and look at.",
+            clears_when=f"`fleet release-verify --version {version}` records a GREEN verdict",
+            clears_who="whoever is releasing")
+    prev = rel.previous(version)
+    if prev is not None and version.bump_kind(prev) in ("minor", "major") \
+            and verdict.get("roster") != FULL_ROSTER:
+        raise Refused(
+            f"{version} is a {version.bump_kind(prev)} bump over {prev}, and its evidence covers only "
+            f"the {verdict.get('roster')} roster. Re-run with "
+            f"`fleet release-verify --version {version} --full`.",
+            clears_when=f"a --full verify of {version} records a GREEN verdict",
+            clears_who="whoever is releasing")
+
+    if ctx.dry_run:
+        _emit(ctx, "release-promote", [
+            ("dry-run", "the state file was not written"),
+            ("would-promote", f"{version}: {rel.state(version)} -> {RELEASED}"),
+            ("evidence", f"{verdict.get('roster')} roster, {len(suites)} suite(s) GREEN")])
+        return EXIT_OK
+
+    with rel.lock():
+        rel.set_state(version, RELEASED)
+    _emit(ctx, "release-promote", [
+        ("version", str(version)), ("state", RELEASED),
+        ("evidence", str(rel.dir_for(version) / META_DIR / "evidence" / "VERDICT.tsv"))])
+    return EXIT_OK
+
+
+def _deploy(ctx: Ctx, parsed: Parsed, rel: Releases, target_label: str, target_path: Path,
+            action: str, reason: str) -> int:
+    """The one place `current` moves. `deploy` and `rollback` differ in how they choose their target and
+    in the row they leave behind, and in nothing else — two copies of a symlink flip is how the two of
+    them would end up disagreeing about what gets recorded."""
+    before = rel.current_label()
+    if ctx.dry_run:
+        _emit(ctx, parsed.verb, [
+            ("dry-run", "`current` was not moved and no history row was written"),
+            ("would-point", f"{before} -> {target_label}"),
+            ("would-target", str(target_path)),
+            ("would-record", f"{action}: {reason}")])
+        return EXIT_OK
+
+    with rel.lock():
+        before = rel.current_label()
+        running = [subject for subject in ctx.subjects() if subject.state == RUNNING]
+        if running:
+            print(f"note: {len(running)} subject(s) are RUNNING. Their next `fleet` call gets "
+                  f"{target_label}; the one in flight keeps the release it started on.", file=ctx.err)
+        rel.point_current_at(target_path)
+        evidence = "-" if target_label == DEV else f"{Path(target_path).name}/{META_DIR}/evidence"
+        rel.append_history(action=action, version=target_label, from_version=before,
+                           reason=reason, evidence=evidence)
+    _emit(ctx, parsed.verb, [
+        ("action", action), ("from", before), ("current", target_label),
+        ("path", str(target_path)), ("reason", reason)])
+    return EXIT_OK
+
+
+def _checkout_of_this_package() -> Path:
+    """The git checkout this module was loaded from — what `--dev` points `current` at.
+
+    `parents[3]` is `<checkout>` for `<checkout>/fleet/src/fleet/cli.py`, which is the same shape an
+    export has: the release directory holds `fleet/` at its top, so both ends of the symlink are resolved
+    the same way by every consumer.
+    """
+    return Path(__file__).resolve().parents[3]
+
+
+def _do_release_deploy(ctx: Ctx, parsed: Parsed) -> int:
+    rel = _releases(ctx, parsed)
+    _refuse_if_self_deployed(rel, parsed)
+    reason = parsed.get("reason")
+    if parsed.on("dev"):
+        return _deploy(ctx, parsed, rel, DEV, _checkout_of_this_package(), DEV,
+                       reason or "developer mode")
+    version = Version.parse(parsed.get("version"))
+    if not rel.dir_for(version).is_dir():
+        raise BadInput(f"no release {version} at {rel.dir_for(version)}. `release-list` shows what has "
+                       f"been cut.")
+    if rel.state(version) != RELEASED:
+        if not parsed.on(FORCE):
+            raise Refused(
+                f"{version} is {rel.state(version)}, not {RELEASED}. Promote it, or pass `{FORCE}` WITH "
+                f"a `--reason`.",
+                clears_when=f"`fleet release-promote --version {version}` succeeds, or {FORCE} is passed "
+                            f"with a reason",
+                clears_who="whoever is deploying")
+        if not reason:
+            raise Refused(
+                f"`{FORCE}` requires `--reason`. Deploying an unverified candidate is exactly the event "
+                f"the history file exists to explain.",
+                clears_when="a reason is supplied", clears_who="whoever is deploying")
+    return _deploy(ctx, parsed, rel, str(version), rel.dir_for(version), "DEPLOY",
+                   reason or f"deploy {version}")
+
+
+def _do_release_rollback(ctx: Ctx, parsed: Parsed) -> int:
+    rel = _releases(ctx, parsed)
+    _refuse_if_self_deployed(rel, parsed)
+    reason = parsed.get("reason")
+    target = parsed.get("to")
+    if target is None:
+        rows = [row for row in rel.history() if row["action"] in ("DEPLOY", "ROLLBACK")]
+        # `"none"` is what `Releases.current_label` answers when nothing is deployed, so it is what the
+        # FIRST deploy records as the thing it came from — a label, and not a version to return to.
+        if not rows or rows[-1]["from_version"] in ("-", "", "none"):
+            raise BadInput(
+                "no previous deployment is recorded, so there is nothing to roll back to. Name one with "
+                "`--to <version>`.")
+        target = rows[-1]["from_version"]
+    if target == DEV:
+        return _deploy(ctx, parsed, rel, DEV, _checkout_of_this_package(), "ROLLBACK", reason)
+    version = Version.parse(target)
+    if not rel.dir_for(version).is_dir():
+        raise BadInput(f"no release {version} at {rel.dir_for(version)}. `release-list` shows what has "
+                       f"been cut.")
+    return _deploy(ctx, parsed, rel, str(version), rel.dir_for(version), "ROLLBACK", reason)
+
+
+def _do_release_status(ctx: Ctx, parsed: Parsed) -> int:
+    rel = _releases(ctx, parsed)
+    label = rel.current_label()
+    rows = [row for row in rel.history() if row["action"] in ("DEPLOY", "ROLLBACK", DEV)]
+    last = rows[-1] if rows else None
+    out = [("current", label)]
+    if label == DEV:
+        # `DEV` alone is true about the pointer and misleading about the code: in dev mode what is live is
+        # whatever the checkout says right now. Asked through `ctx.runner` — the injected seam every
+        # handler gets — because a handler calls the runner and never a spawner.
+        checkout = rel.current_target()
+        where = shlex.quote(str(checkout))
+        head_code, head_out, _ = ctx.runner(f"git -C {where} rev-parse --short HEAD")
+        dirty_code, dirty_out, _ = ctx.runner(f"git -C {where} status --porcelain")
+        out.append(("checkout", str(checkout)))
+        out.append(("head", head_out.strip() if head_code == 0 and head_out.strip() else "unknown"))
+        out.append(("dirty", "yes" if (dirty_code == 0 and dirty_out.strip()) else "no"))
+    elif label != "none":
+        out.append(("state", rel.state(Version.parse(label))))
+    if last:
+        out.append(("since", last["ts"]))
+        out.append(("by", last["actor"]))
+        out.append(("reason", last["reason"]))
+    _emit(ctx, "release-status", out)
+    return EXIT_OK
+
+
+def _do_release_list(ctx: Ctx, parsed: Parsed) -> int:
+    rel = _releases(ctx, parsed)
+    current = rel.current_label()
+    _emit(ctx, "release-list", [
+        (str(version), rel.state(version), rel.manifest(version).get("cut_at", "-"),
+         "*" if str(version) == current else "")
+        for version in rel.versions()])
+    return EXIT_OK
+
+
+def _do_release_history(ctx: Ctx, parsed: Parsed) -> int:
+    rel = _releases(ctx, parsed)
+    rows = rel.history()
+    limit = parsed.get("limit")
+    if limit is not None:
+        try:
+            count = int(limit)
+        except (TypeError, ValueError):
+            raise BadInput(f"--limit takes an integer number of rows; got {limit!r}")
+        if count < 0:
+            raise BadInput(f"--limit takes a number of rows to show; got {limit!r}")
+        rows = rows[len(rows) - count:] if count else []
+    _emit(ctx, "release-history", [tuple(row[name] for name in HISTORY_COLUMNS) for row in rows])
+    return EXIT_OK
+
+
 # --- the registry ---------------------------------------------------------------------------------
 
 
@@ -2884,6 +3279,49 @@ VERBS = {spec.name: spec for spec in (
     )),
     _verb("selftest", _do_selftest, True,
           "discover and run every suite; the tree state is ALWAYS stamped (AC-10)", checker=True),
+    _verb("release-cut", _do_release_cut, False,
+          "export an immutable release from a tag and write its changelog", (
+        Flag("--version", True, True, "the new version, X.Y.Z; the tag becomes fleet/vX.Y.Z"),
+        Flag("--repo", True, True, "the git checkout to cut from; never inferred from the cwd"),
+        Flag(RELEASES, True, False, RELEASES_HELP),
+        Flag("--notes", True, False, "a one-line note recorded in MANIFEST.tsv"),
+    )),
+    _verb("release-verify", _do_release_verify, False,
+          "run both suites against a release's frozen export and record the verdict", (
+        Flag("--version", True, True, "the release to verify"),
+        Flag(RELEASES, True, False, RELEASES_HELP),
+        Flag("--full", False, False, "run every IT runner, not just the gate roster"),
+    )),
+    _verb("release-promote", _do_release_promote, False,
+          "mark a CANDIDATE as RELEASED; refuses without GREEN evidence", (
+        Flag("--version", True, True, "the release to promote"),
+        Flag(RELEASES, True, False, RELEASES_HELP),
+    )),
+    _verb("release-deploy", _do_release_deploy, False,
+          "point `current` at a release, or at the checkout with --dev", (
+        Flag("--version", True, False, "the release to deploy"),
+        Flag("--dev", False, False, "point `current` at the git checkout, restoring live editing"),
+        Flag(RELEASES, True, False, RELEASES_HELP),
+        Flag("--reason", True, False, "recorded in the history; REQUIRED with --force"),
+        Flag(FORCE, False, False, "deploy a CANDIDATE anyway; requires --reason"),
+    )),
+    _verb("release-rollback", _do_release_rollback, False,
+          "point `current` back, recording why", (
+        Flag("--to", True, False, "the version to return to; defaults to the previously deployed one"),
+        Flag("--reason", True, True, "why — the reason is the whole point of the history file"),
+        Flag(RELEASES, True, False, RELEASES_HELP),
+    )),
+    _verb("release-status", _do_release_status, True,
+          "what is deployed right now, since when, by whom and why", (
+        Flag(RELEASES, True, False, RELEASES_HELP),
+    )),
+    _verb("release-list", _do_release_list, True, "every release, its state and its cut time", (
+        Flag(RELEASES, True, False, RELEASES_HELP),
+    )),
+    _verb("release-history", _do_release_history, True, "the deploy/rollback register", (
+        Flag(RELEASES, True, False, RELEASES_HELP),
+        Flag("--limit", True, False, "show only the last N rows"),
+    )),
 )}
 
 #: The porcelain schema per verb, declared as data so a consumer and a test read the column count off the
@@ -2920,6 +3358,14 @@ PORCELAIN_COLUMNS = {
     "status": render.STATUS_COLUMNS,
     "leases": render.LEASE_COLUMNS,
     "roadmap": render.ROADMAP_COLUMNS,
+    "release-cut": KV_COLUMNS,
+    "release-verify": KV_COLUMNS,
+    "release-promote": KV_COLUMNS,
+    "release-deploy": KV_COLUMNS,
+    "release-rollback": KV_COLUMNS,
+    "release-status": KV_COLUMNS,
+    "release-list": RELEASE_COLUMNS,
+    "release-history": HISTORY_COLUMNS,
 }
 
 def checker_verbs(verbs: dict = None) -> tuple:
