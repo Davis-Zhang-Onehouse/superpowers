@@ -188,3 +188,216 @@ class ReleasesCase(unittest.TestCase):
         f.chmod(0o755)
         self.assertNotEqual(before, tree_sha(src),
                             "an executable bit is part of the artifact; a launcher that lost +x is broken")
+
+
+class GitCase(unittest.TestCase):
+    """Against a real temporary repository. `git` is the thing under test here -- mocking it would assert
+    that this module can spell the flags it was written with, which is not a property anyone needs."""
+
+    def setUp(self):
+        import shutil
+        import subprocess
+        self.tmp = pathlib.Path(tempfile.mkdtemp())
+        self.addCleanup(shutil.rmtree, self.tmp, True)
+        self.repo = self.tmp / "repo"
+        self.repo.mkdir()
+        self.run = lambda *a: subprocess.run(["git", "-C", str(self.repo), *a], check=True,
+                                             capture_output=True, text=True)
+        self.run("init", "-q", "-b", "live")
+        self.run("config", "user.email", "t@example.com")
+        self.run("config", "user.name", "T")
+        self.run("config", "commit.gpgsign", "false")
+
+    def _commit(self, name, body="x"):
+        (self.repo / name).write_text(body)
+        self.run("add", name)
+        self.run("commit", "-q", "-m", f"add {name}")
+        return self.run("rev-parse", "HEAD").stdout.strip()
+
+    def test_a_dirty_tree_is_reported_with_the_offending_paths(self):
+        from fleet.release_git import Repo
+        self._commit("a.txt")
+        self.assertEqual(Repo(self.repo).dirty(), [])
+        (self.repo / "a.txt").write_text("changed")
+        self.assertTrue(any("a.txt" in p for p in Repo(self.repo).dirty()))
+
+    def test_an_untracked_file_counts_as_dirty(self):
+        # An export contains only committed content, so an untracked file is content the operator can see
+        # and the artifact cannot. Silently excluding it is how you ship a version nobody can reproduce.
+        from fleet.release_git import Repo
+        self._commit("a.txt")
+        (self.repo / "new.txt").write_text("hi")
+        self.assertTrue(any("new.txt" in p for p in Repo(self.repo).dirty()))
+
+    def test_a_directory_that_is_not_a_repository_is_refused_by_name(self):
+        # The repo is a required flag on every git-touching verb precisely so this can be answered at the
+        # edge. A Repo built over a non-repository must say so, not fail later inside a tag.
+        from fleet.release_git import Repo
+        with self.assertRaises(BadInput) as caught:
+            Repo(self.tmp / "not-a-repo")
+        self.assertIn("not a git repository", str(caught.exception))
+
+    def test_head_and_branch_report_the_checkout(self):
+        from fleet.release_git import Repo
+        sha = self._commit("a.txt")
+        self.assertEqual(Repo(self.repo).head(), sha)
+        self.assertEqual(Repo(self.repo).branch(), "live")
+
+    def test_a_release_tag_is_never_moved(self):
+        from fleet.errors import Refused
+        from fleet.release_git import Repo
+        self._commit("a.txt")
+        repo = Repo(self.repo)
+        self.assertFalse(repo.tag_exists("fleet/v0.1.0"))
+        repo.annotated_tag("fleet/v0.1.0", "r1")
+        self.assertTrue(repo.tag_exists("fleet/v0.1.0"))
+        self._commit("b.txt")
+        with self.assertRaises(Refused):
+            repo.annotated_tag("fleet/v0.1.0", "r1 again")
+        # And it still names the tree it named before, which is the whole point of refusing.
+        self.assertEqual(self.run("rev-list", "-n1", "fleet/v0.1.0").stdout.strip(),
+                         self.run("rev-list", "-n1", "HEAD~1").stdout.strip())
+
+    def test_the_upstream_base_is_the_nearest_non_fleet_tag(self):
+        from fleet.release_git import Repo
+        self._commit("a.txt")
+        self.assertEqual(Repo(self.repo).upstream_base(), "(none)")
+        self.run("tag", "-a", "v6.2.0", "-m", "upstream")
+        self._commit("b.txt")
+        self.run("tag", "-a", "fleet/v0.1.0", "-m", "r1")
+        self.assertEqual(Repo(self.repo).upstream_base(), "v6.2.0")
+
+    def test_the_first_release_has_no_predecessor_and_no_commit_list(self):
+        from fleet.release_git import Repo
+        self._commit("a.txt")
+        self.assertEqual(Repo(self.repo).delta(None), [])
+
+    def test_delta_lists_only_commits_after_the_previous_tag(self):
+        from fleet.release_git import Repo
+        self._commit("a.txt")
+        self.run("tag", "-a", "fleet/v0.1.0", "-m", "r1")
+        self._commit("b.txt")
+        self._commit("c.txt")
+        subjects = [s for _, s in Repo(self.repo).delta("fleet/v0.1.0")]
+        self.assertEqual(sorted(subjects), ["add b.txt", "add c.txt"])
+
+    def test_delta_survives_a_rebase_that_rewrites_every_hash(self):
+        # THE case. `git log prev..HEAD` is wrong here in a way that is not empty and not obviously wrong,
+        # which is why it has to be measured rather than reasoned about.
+        #
+        # The fixture matters more than the assertion. The plan's version branched `upstream` FROM
+        # `fleet/v0.1.0`, which leaves the tagged commit in HEAD's history after the rebase -- the tag is
+        # still an ancestor, nothing was rewritten off the branch, and `cherry` and `log` return the same
+        # three commits. Measured: `merge-base --is-ancestor` said TRUE, so the guard below failed and the
+        # delta comparison was never reached. `upstream` has to fork from BEFORE the tagged commit, the
+        # way the real fork does -- our commits sit on top of an upstream release, and the 03:30 cron
+        # replays them onto the next one.
+        from fleet.release_git import Repo
+        self._commit("base.txt")                    # the upstream release both lines share
+        self.run("branch", "upstream")
+        self._commit("a.txt")                       # ours, and shipped in v0.1.0
+        self.run("tag", "-a", "fleet/v0.1.0", "-m", "r1")
+        self._commit("b.txt")
+        self._commit("c.txt")
+        before = sorted(s for _, s in Repo(self.repo).delta("fleet/v0.1.0"))
+        self.assertEqual(before, ["add b.txt", "add c.txt"])
+
+        # An upstream release lands under our commits and `live` is rebased onto it, exactly as sync.sh
+        # does. Every commit of ours -- including the one the tag points at -- is rewritten.
+        self.run("checkout", "-q", "upstream")
+        self._commit("upstream.txt")
+        self.run("checkout", "-q", "live")
+        self.run("rebase", "-q", "upstream")
+
+        self.assertFalse(Repo(self.repo).is_ancestor("fleet/v0.1.0", "HEAD"),
+                         "fixture is wrong: the rebase must have moved the tag off the branch")
+        after = sorted(s for _, s in Repo(self.repo).delta("fleet/v0.1.0"))
+        # The defect, stated as the thing that must not happen: `add a.txt` shipped in v0.1.0, its hash
+        # was rewritten, and an ancestry delta re-lists it in v0.2.0's changelog. A patch-id delta does
+        # not, because a rebase preserves the patch-id.
+        self.assertNotIn("add a.txt", after,
+                         "a commit already shipped in fleet/v0.1.0 reappeared in the next delta after "
+                         "its hash was rewritten -- this is the ancestry answer, not the patch-id one")
+        # And nothing our side lost or gained: the two unreleased commits, plus the upstream commit the
+        # rebase genuinely brought under us, which IS new between the two releases.
+        self.assertEqual(after, sorted(before + ["add upstream.txt"]),
+                         "the patch-id delta must carry exactly the unreleased commits, whatever the "
+                         "rebase did to their hashes")
+
+    def test_the_changelog_names_the_rebase_when_the_tag_left_the_branch(self):
+        from fleet.release_git import changelog_section
+        text = changelog_section(Version.parse("0.2.0"), head="abc1234", branch="live",
+                                 upstream_base="v6.2.0", prev_tag="fleet/v0.1.0",
+                                 commits=[("deadbee", "did a thing")], rebased=True,
+                                 when="2026-08-02T00:00:00Z")
+        self.assertIn("patch-id", text)
+        self.assertIn("no longer an ancestor", text)
+        self.assertIn("- deadbee did a thing", text)
+
+    def test_the_changelog_stays_quiet_about_a_rebase_that_did_not_happen(self):
+        # Without this the note above could be unconditional, which would make every changelog claim a
+        # rewrite and the claim would stop meaning anything.
+        from fleet.release_git import changelog_section
+        text = changelog_section(Version.parse("0.2.0"), head="abc1234", branch="live",
+                                 upstream_base="v6.2.0", prev_tag="fleet/v0.1.0",
+                                 commits=[("deadbee", "did a thing")], rebased=False,
+                                 when="2026-08-02T00:00:00Z")
+        self.assertNotIn("no longer an ancestor", text)
+        self.assertIn("- deadbee did a thing", text)
+        self.assertIn("1 commit(s) since fleet/v0.1.0", text)
+
+    def test_the_changelog_of_a_first_release_records_the_commit_and_omits_the_list(self):
+        from fleet.release_git import changelog_section
+        text = changelog_section(Version.parse("0.1.0"), head="abc1234", branch="live",
+                                 upstream_base="v6.2.0", prev_tag=None, commits=[], rebased=False,
+                                 when="2026-08-02T00:00:00Z")
+        self.assertIn("abc1234", text)
+        self.assertIn("no predecessor", text)
+        self.assertNotIn("\n- ", text)
+
+    def test_export_writes_committed_content_only(self):
+        from fleet.release_git import Repo
+        self._commit("a.txt", "committed")
+        self.run("tag", "-a", "fleet/v0.1.0", "-m", "r1")
+        (self.repo / "untracked.txt").write_text("must not ship")
+        dest = self.tmp / "out"
+        Repo(self.repo).export("fleet/v0.1.0", dest)
+        self.assertEqual((dest / "a.txt").read_text(), "committed")
+        self.assertFalse((dest / "untracked.txt").exists())
+
+    def test_export_carries_the_tagged_tree_not_the_working_tree(self):
+        # An export named by tag must be the tag's bytes even when the branch has moved on, or a promoted
+        # release would not be the thing that was verified.
+        from fleet.release_git import Repo
+        self._commit("a.txt", "at the tag")
+        self.run("tag", "-a", "fleet/v0.1.0", "-m", "r1")
+        (self.repo / "a.txt").write_text("after the tag")
+        self.run("add", "a.txt")
+        self.run("commit", "-q", "-m", "move on")
+        dest = self.tmp / "out2"
+        Repo(self.repo).export("fleet/v0.1.0", dest)
+        self.assertEqual((dest / "a.txt").read_text(), "at the tag")
+
+    def test_export_preserves_the_executable_bit(self):
+        # `tree_sha` hashes the mode, and `bin/fleet` is only a launcher while it is +x. An extraction
+        # that flattens modes ships a release nobody can run.
+        from fleet.release_git import Repo
+        (self.repo / "run.sh").write_text("#!/bin/sh\n")
+        (self.repo / "run.sh").chmod(0o755)
+        self.run("add", "run.sh")
+        self.run("commit", "-q", "-m", "add run.sh")
+        self.run("tag", "-a", "fleet/v0.1.0", "-m", "r1")
+        dest = self.tmp / "out3"
+        Repo(self.repo).export("fleet/v0.1.0", dest)
+        self.assertTrue(os.access(dest / "run.sh", os.X_OK))
+
+    def test_a_failing_git_command_names_the_command_and_the_repository(self):
+        # The injected runner hands back `(rc, stdout)` and no stderr, so the refusal has to be
+        # actionable on its own: it names what was run and where, which the operator can re-run.
+        from fleet.release_git import Repo
+        self._commit("a.txt")
+        with self.assertRaises(BadInput) as caught:
+            Repo(self.repo).delta("fleet/v9.9.9")
+        message = str(caught.exception)
+        self.assertIn("cherry", message)
+        self.assertIn(str(self.repo), message)
