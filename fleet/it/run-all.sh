@@ -1,6 +1,17 @@
 #!/usr/bin/env bash
-# ONE validation run: every runner, sequentially, each into its own results file, then merged by this
-# script as the single writer.
+# ONE validation run over a DECLARED roster, sequentially, each runner into its own results file, then
+# merged by this script as the single writer.
+#
+# TWO rosters, because "every runner" was a claim this file did not keep: it ran 11 of the 19 on disk, and
+# F, G, H, I, J, O, P and LB were absent with no comment saying why. They are later work — their headers
+# say `COMPLETE: F1-F11`, `COMPLETE: J1-J9`, `Not in Plan 6` — each run standalone and never added here.
+#
+#   (default)  the GATE roster: everything that is safe and quick enough to run for every release.
+#   --full     every runner, EXCEPT §P unless FLEET_IT_ALLOW_CLAUDE=1.
+#
+# §P is excluded from `--full` by default for BUDGET, not capability: it dispatches a real `claude` and
+# spends the account's weekly allowance. A release gate that silently consumes that is a gate that gets
+# switched off.
 #
 # Why sequential and not parallel: `source-pin.sh` pins `src/*.py` and `tests/*.py` GLOBALLY, so two
 # sections measuring at once are fine only while nobody edits those trees — but a run that finds a defect
@@ -55,6 +66,36 @@ RUNNERS=(
   "group5:bash $IT_ROOT/run-group5.sh L M N"
   "E:bash $IT_ROOT/run-group3.sh E"
 )
+
+# The sections added after this orchestrator was written. No prerequisites — checked per runner: each
+# carries the same plain `Run: bash fleet/it/run-X.sh` line as the eleven above.
+FULL_EXTRA=(
+  "F:bash $IT_ROOT/run-F.sh"
+  "G:bash $IT_ROOT/run-G.sh"
+  "H:bash $IT_ROOT/run-H.sh"
+  "I:bash $IT_ROOT/run-I.sh"
+  "J:bash $IT_ROOT/run-J.sh"
+  "O:bash $IT_ROOT/run-O.sh"
+  "LB:bash $IT_ROOT/run-lineage.sh"
+)
+
+IT_FULL=no
+for arg in "$@"; do
+  case "$arg" in
+    --full) IT_FULL=yes ;;
+    *) echo "run-all.sh: unknown argument '$arg' (only --full is declared)" >&2; exit 2 ;;
+  esac
+done
+
+if [ "$IT_FULL" = yes ]; then
+  RUNNERS+=("${FULL_EXTRA[@]}")
+  if [ "${FLEET_IT_ALLOW_CLAUDE:-0}" = 1 ]; then
+    RUNNERS+=("P:bash $IT_ROOT/run-P.sh")
+  else
+    say "§P SKIPPED: it dispatches a real claude and spends the weekly allowance. Set FLEET_IT_ALLOW_CLAUDE=1 to include it."
+  fi
+fi
+say "roster: $IT_FULL full; ${#RUNNERS[@]} runner(s)"
 
 declare -A RC
 for entry in "${RUNNERS[@]}"; do
