@@ -1,5 +1,10 @@
 # fleet — changelog
 
+## fleet/v0.2.4 — 2026-08-02T22:06:08Z
+Cut from 4ab0270 on `live` (upstream base pre-merge-fleet-skills-20260731). 1 commit(s) since fleet/v0.2.3.
+
+- 4ab0270 fleet: reap reports the claim it cannot yet judge (E9, both modes)
+
 ## fleet/v0.2.3 — 2026-08-02T19:31:09Z
 Cut from 8fd20d9 on `live` (upstream base pre-merge-fleet-skills-20260731). 3 commit(s) since fleet/v0.2.2.
 
