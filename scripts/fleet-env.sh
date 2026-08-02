@@ -28,10 +28,21 @@ export FLEET_HOME="${FLEET_HOME:-$HOME/.fleet}"
 # Attaching still works, it just needs the flag:  tmux -L "$FLEET_TMUX_SOCKET" attach -t dt-<name>
 export FLEET_TMUX_SOCKET="${FLEET_TMUX_SOCKET:-fleet}"
 
+# The release area. `current` is a symlink to the deployed export — or to the git checkout itself in dev
+# mode (`fleet release-deploy --dev`), which is the same one mechanism rather than a second one.
+export FLEET_RELEASES="${FLEET_RELEASES:-/home/ubuntu/davis_root/fleet-releases}"
+
+# Through `current`, never the checkout directly: that pointer IS the deployment, and a shell that
+# bypassed it would run a different version from every other shell on this box — which is the whole
+# problem the release pipeline exists to fix. Falls back to the checkout when no release area has been
+# created yet, so a fresh clone still has a working `fleet`.
+_fleet_bin="$FLEET_RELEASES/current/bin"
+[ -d "$_fleet_bin" ] || _fleet_bin="/home/ubuntu/davis_root/superpowers/bin"
 case ":$PATH:" in
-  *":/home/ubuntu/davis_root/superpowers/bin:"*) ;;
-  *) export PATH="/home/ubuntu/davis_root/superpowers/bin:$PATH" ;;
+  *":$_fleet_bin:"*) ;;
+  *) export PATH="$_fleet_bin:$PATH" ;;
 esac
+unset _fleet_bin
 
 # Only when you are going to create instants. An argument, so no effort's path is baked into this file.
 #
