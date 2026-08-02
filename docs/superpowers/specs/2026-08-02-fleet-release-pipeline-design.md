@@ -175,13 +175,19 @@ second roster and a corrected header:
 - **`run-all.sh --full`** — all 19. Required by `promote` for a **minor or major** version bump; optional
   for a patch.
 
-The `--full` roster cannot be assembled by assumption. The plan's first step here is to determine, per
-excluded runner, why it is excluded and whether it is unattended-safe. **§P is the real-`claude` tier**: it
-spends the account's usage allowance and depends on the identity pinning established in
-`fleet-dispatch-launcher.sh`. Any runner that invokes real `claude` sits behind an explicit opt-in within
-`--full` rather than running by default, because a release gate that silently consumes a weekly limit is a
-gate nobody will keep using. Whatever the answer per runner, it gets written into the header — an
-undocumented exclusion is how this discrepancy arose in the first place.
+**Why the eight are excluded has been established** (see `investigations/it-coverage-review.md`): it is
+drift, not design. The eleven in the roster are exactly Plan 6's original groups; all eight absentees are
+later work — their headers say `COMPLETE: F1-F11`, `COMPLETE: J1-J9`, `COMPLETE: O1-O9`, and §LB says *"Not
+in Plan 6"* — each run standalone, each with its own `RESULTS-*.tsv`, none ever added to the orchestrator.
+Prerequisites were checked per runner: **seven of the eight have none**, carrying the same plain
+`Run: bash fleet/it/run-X.sh` line as the eleven that are in.
+
+**§P is the single genuine exclusion**, and for budget rather than capability: it needs a real `claude`,
+already degrades with `it_skip P1 "" "no real claude at $REAL_CLAUDE…"`, and its own header states the cost
+— *"Budget: one real claude, one task, polled to completion."* It therefore sits behind an explicit opt-in
+within `--full`, because a release gate that silently consumes the weekly allowance is a gate that gets
+switched off. The other seven are simply added to the roster, and the exclusion of §P is written into the
+header — an undocumented exclusion is how this discrepancy arose in the first place.
 
 ### Isolation, and why the baseline is fixed rather than escaped
 
@@ -217,6 +223,12 @@ it:
 | GREEN | Both suites passed. |
 | RED | A suite failed with no concurrent operator activity recorded. |
 | INCONCLUSIVE | A suite failed *and* operator activity was recorded during the run. |
+
+The spurious failure this replaces is not hypothetical. Running §B's `B3` — the cheapest case in the suite,
+dispatching nothing — while writing this spec produced `B3 PASS` alongside `ISOLATION-B-enter FAIL` and
+`ISOLATION-B-leave FAIL`, both reading *"THE LIVE TMUX SERVER'S SESSION SET CHANGED: >
+claude_mor_design_chinmay"*: another operator's session, not a `dt-` name, appearing mid-run. The same run's
+own checks reported that §B *"launches no process at all"*. Under today's check that run blocks a promote.
 
 With classification in place the isolation assertion itself no longer fires spuriously, so INCONCLUSIVE
 becomes rare rather than routine — but it stays, because a functional section that fails while the box was
