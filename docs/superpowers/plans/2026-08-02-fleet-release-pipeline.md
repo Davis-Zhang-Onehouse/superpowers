@@ -24,6 +24,43 @@
 
 ---
 
+## Corrections learned during execution — READ BEFORE STARTING ANY TASK
+
+Written as tasks completed. The plan below is not amended in place, so where this section and a task
+disagree, **this section wins.**
+
+**Task 1 is DONE** (`ec523c3`) and so is the follow-up `atomic_symlink` (`1805ad1`). Task 5 is DONE
+(`fb1a47d`, `5bcaf58`). Do not redo them.
+
+**1. The plan's flip test was vacuous, and the corrected one is in the tree.** As written,
+`test_the_flip_never_leaves_current_absent` sampled `current` only *between* flips, single-threaded — and
+the absent window closes before `point_current_at` returns, so it PASSED against the very defect it was
+written to catch. The observer must run in a second thread. Measured after the rewrite: broken
+implementation caught in 20/20 runs; atomic implementation 0 sightings in 20/20. **Any test in this plan
+asserting "X never happens during Y" has the same flaw if it samples after Y returns.** Tasks 3 and 8: check
+yours.
+
+**2. `atomic.atomic_symlink(target, link)` now exists** — use it, never hand-roll a symlink flip.
+`release.point_current_at` delegates to it. `test_structure`'s ninth-copy guard skips `atomic.py` precisely
+because that module is the one place a publish may be implemented; implementing one in a caller is what the
+guard exists to catch, and it caught it.
+
+**3. A staging name must come from `atomic.tmp_name`, never from the pid.** The plan's
+`f".current.{os.getpid()}.tmp"` is shared by every writer *inside one process*, which is `FI-20`'s defect
+with a different receiver: two threads flipping at once race on one path, one publishes the other's target,
+the other raises `FileNotFoundError`.
+
+**4. `fleet/tests/test_cli.py` holds `OUTWARD_CALL_SITES`, and the File Structure table does not mention
+it.** It is an exact registry of every delete / publish / merge / spawn call site in the package, and the
+suite fails if you add one without a written justification. **Task 3 will hit this**: `release_verify.py`
+calls `shutil.rmtree(scratch)` twice. Register it — the argument is that the scratch tree is one this
+module created itself, under `$FLEET_RELEASES`, and that not removing it leaves a full copy of every
+verified release on disk. Do not work around the audit; writing the argument IS the audit.
+
+**5. The suite is 908 tests, not 864.** Any task quoting a count should quote the current one.
+
+---
+
 ## IT failure triage — read this before "fixing" a red section
 
 Tasks 6 and 8 run real IT sections, and some will fail. **Sort every failure into one of two buckets
