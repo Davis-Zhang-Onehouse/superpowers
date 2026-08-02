@@ -401,3 +401,347 @@ class GitCase(unittest.TestCase):
         message = str(caught.exception)
         self.assertIn("cherry", message)
         self.assertIn(str(self.repo), message)
+
+
+class VerifyCase(unittest.TestCase):
+    """`verify`, driven end to end by a FAKE runner.
+
+    Nothing here executes a suite. The real thing spawns an 11-runner IT roster; a unit test that waited
+    for it would take minutes and would be measuring `run-all.sh`, not this module. The runner is INJECTED
+    and REQUIRED (`Verify(releases, version, runner)`), so the seam that would otherwise be a fourth
+    `subprocess` call site in the package is the same seam every handler already gets from `ctx.runner` --
+    `(command, cwd, env) -> (rc, stdout, stderr)`.
+
+    Two cases below observe the run FROM INSIDE the runner rather than from the end state. That is
+    deliberate: the copy `verify` tests in is deleted before `run` returns, so anything sampling afterwards
+    cannot tell a run that used the copy from a run that used the export, and would pass against the very
+    defect it names. Both were measured against a deliberately broken implementation before being trusted.
+    """
+
+    class Runner:
+        """`(command, cwd, env) -> (rc, stdout, stderr)`, recording every call as it happens.
+
+        `codes` is `[(needle, rc)]`: the first needle found in the command decides the exit code, so a
+        case can fail one suite and pass the other without knowing how either is spelled.
+        """
+
+        def __init__(self, codes=(), watcher=None):
+            self.calls = []
+            self.codes = list(codes)
+            self.watcher = watcher
+
+        def __call__(self, command, cwd=None, env=None):
+            command = str(command)
+            where = None if cwd is None else str(cwd)
+            self.calls.append((command, where, dict(env or {})))
+            if self.watcher is not None:
+                self.watcher(command, where)
+            for needle, code in self.codes:
+                if needle in command:
+                    return code, f"stdout of {needle}", f"stderr of {needle}"
+            return 0, "stdout", ""
+
+        def commands(self):
+            return [command for command, _, _ in self.calls]
+
+        def call_matching(self, needle):
+            for call in self.calls:
+                if needle in call[0]:
+                    return call
+            raise AssertionError(f"the runner was never handed a command containing {needle!r}; it saw "
+                                 f"{self.commands()}")
+
+    def setUp(self):
+        self.tmp = pathlib.Path(tempfile.mkdtemp(prefix="fleet-verifycase-"))
+        self.addCleanup(__import__("shutil").rmtree, self.tmp, True)
+
+    # --- fixtures ------------------------------------------------------------------------------------
+
+    def _export(self, version="0.1.0", recorded_sha=None):
+        """A release directory shaped like a real export, with a MANIFEST that agrees with it."""
+        from fleet.release import META_DIR, Releases, Version, tree_sha
+        rel = Releases(self.tmp / "releases")
+        v = Version.parse(version)
+        root = rel.dir_for(v)
+        (root / "fleet" / "it").mkdir(parents=True)
+        (root / "fleet" / "tests").mkdir(parents=True)
+        (root / "fleet" / "src" / "fleet").mkdir(parents=True)
+        (root / "fleet" / "it" / "run-all.sh").write_text("#!/usr/bin/env bash\nexit 0\n")
+        (root / "fleet" / "src" / "fleet" / "__init__.py").write_text('__version__ = "0.1.0"\n')
+        (root / META_DIR).mkdir(parents=True)
+        rel.write_manifest(v, {"version": version, "tree_sha": recorded_sha or tree_sha(root)})
+        return rel, v
+
+    def _freeze(self, root):
+        """`chmod -R a-w`, which is what a cut leaves behind. Restored on teardown so the temp tree can
+        be removed -- and so a failure here does not litter /tmp with unreadable directories."""
+        paths = [root] + sorted(p for p in root.rglob("*") if not p.is_symlink())
+        def thaw():
+            for path in paths:
+                if path.exists():
+                    path.chmod(path.stat().st_mode | 0o700)
+        self.addCleanup(thaw)
+        for path in reversed(paths):
+            path.chmod(path.stat().st_mode & ~0o222)
+
+    @staticmethod
+    def _emit_results(command, where):
+        """Stand in for `run-all.sh`: write the merged results file beside itself, which is the whole
+        reason the suite cannot run inside a read-only export."""
+        if "run-all.sh" in command and where:
+            out = pathlib.Path(where) / "fleet" / "it" / "RESULTS-closeout-all.tsv"
+            out.write_text("section\tid\tverdict\nQ\tQ1\tPASS\n")
+
+    def _copies_under(self, rel):
+        """Every directory in the releases root that is not a release. `verify`'s working copy lives
+        here, so this is how a case sees whether one was left behind."""
+        return sorted(p.name for p in rel.root.iterdir()
+                      if p.is_dir() and not p.name.startswith("fleet-v"))
+
+    # --- the verdict rule, which is a pure function --------------------------------------------------
+
+    def test_green_only_when_both_suites_pass(self):
+        from fleet.release_verify import GREEN, verdict_for
+        self.assertEqual(verdict_for(True, True, False), GREEN)
+
+    def test_a_failure_on_a_quiet_box_is_red(self):
+        from fleet.release_verify import RED, verdict_for
+        self.assertEqual(verdict_for(False, True, False), RED)
+        self.assertEqual(verdict_for(True, False, False), RED)
+
+    def test_a_failure_while_the_box_was_busy_is_inconclusive_not_red(self):
+        # Contamination is never a verdict. This is the source-pin doctrine applied to the one baseline
+        # the suite cannot own, and it is what stops a coordinator finishing mid-run from writing a
+        # permanent false RED into a release's evidence.
+        from fleet.release_verify import INCONCLUSIVE, verdict_for
+        self.assertEqual(verdict_for(False, True, True), INCONCLUSIVE)
+        self.assertEqual(verdict_for(True, False, True), INCONCLUSIVE)
+
+    def test_activity_during_a_passing_run_is_still_green(self):
+        # Without this, INCONCLUSIVE would swallow every busy-box run and nothing could ever promote.
+        from fleet.release_verify import GREEN, verdict_for
+        self.assertEqual(verdict_for(True, True, True), GREEN)
+
+    # --- the verdict file ----------------------------------------------------------------------------
+
+    def test_the_verdict_file_records_the_roster_that_actually_ran(self):
+        from fleet.release_verify import GATE_ROSTER, read_verdict, write_verdict
+        tmp = pathlib.Path(tempfile.mkdtemp())
+        self.addCleanup(__import__("shutil").rmtree, tmp, True)
+        write_verdict(tmp, [("hermetic", "GREEN", "hermetic.log", "927 tests"),
+                            ("it", "GREEN", "it-RESULTS.tsv", "11 runners")], GATE_ROSTER)
+        got = read_verdict(tmp)
+        self.assertEqual(got["roster"], GATE_ROSTER)
+        self.assertEqual(got["suites"]["hermetic"], "GREEN")
+        self.assertEqual(got["suites"]["it"], "GREEN")
+
+    def test_the_two_rosters_are_told_apart_in_the_file(self):
+        # Without this, `roster` could be a constant and a gate-roster verdict would read as full
+        # coverage -- a scope that narrowed in silence, which reads as a pass (OBS-49).
+        from fleet.release_verify import FULL_ROSTER, GATE_ROSTER, read_verdict, write_verdict
+        tmp = pathlib.Path(tempfile.mkdtemp())
+        self.addCleanup(__import__("shutil").rmtree, tmp, True)
+        write_verdict(tmp, [("it", "GREEN", "it-RESULTS.tsv", "-")], FULL_ROSTER)
+        self.assertEqual(read_verdict(tmp)["roster"], FULL_ROSTER)
+        self.assertNotEqual(FULL_ROSTER, GATE_ROSTER)
+
+    def test_a_missing_verdict_file_reads_as_empty_rather_than_raising(self):
+        from fleet.release_verify import read_verdict
+        tmp = pathlib.Path(tempfile.mkdtemp())
+        self.addCleanup(__import__("shutil").rmtree, tmp, True)
+        self.assertEqual(read_verdict(tmp), {})
+
+    def test_a_note_containing_a_tab_cannot_shift_the_verdict_columns(self):
+        # Same defect the history register was hardened against: the file still parses, into the wrong
+        # fields. A note here quotes a suite's own output, which is not this module's to trust.
+        from fleet.release_verify import GATE_ROSTER, read_verdict, write_verdict
+        tmp = pathlib.Path(tempfile.mkdtemp())
+        self.addCleanup(__import__("shutil").rmtree, tmp, True)
+        write_verdict(tmp, [("hermetic", "RED", "hermetic.log", "exit 1\tFAILED\n(errors=2)")],
+                      GATE_ROSTER)
+        got = read_verdict(tmp)
+        self.assertEqual(got["suites"]["hermetic"], "RED")
+        self.assertEqual(got["roster"], GATE_ROSTER)
+
+    # --- the runner is a required seam ---------------------------------------------------------------
+
+    def test_the_runner_is_required_and_has_no_subprocess_default(self):
+        # Correction 6 of the plan, asserted here as well as by test_cli's AST scan: a defaulted
+        # `subprocess.run` in this module would be a FOURTH spawn seam in a package whose audit asserts
+        # there are exactly three. Required means a caller must hand over `ctx.runner`, which is the one
+        # the audit already allows.
+        from fleet.release_verify import Verify
+        rel, v = self._export()
+        with self.assertRaises(TypeError):
+            Verify(rel, v)
+
+    # --- the copy, and the claim that what was tested is what shipped --------------------------------
+
+    def test_verify_refuses_when_the_copy_does_not_match_the_manifest(self):
+        # The claim "what was tested is what shipped" is ASSERTED, not assumed. If the copy diverges the
+        # run is meaningless, and reporting RED would blame the code for a harness fault.
+        from fleet.errors import Refused
+        from fleet.release_verify import Verify
+        rel, v = self._export(recorded_sha="0" * 64)          # deliberately wrong
+        with self.assertRaises(Refused):
+            Verify(rel, v, self.Runner()).check_copy_matches(rel.dir_for(v))
+
+    def test_a_copy_that_does_match_the_manifest_is_accepted(self):
+        # Without this the refusal above passes for a check_copy_matches that raises unconditionally.
+        from fleet.release_verify import Verify
+        rel, v = self._export()
+        Verify(rel, v, self.Runner()).check_copy_matches(rel.dir_for(v))
+
+    def test_the_it_suite_runs_in_a_writable_copy_and_never_in_the_export(self):
+        # OBSERVED DURING THE RUN, from inside the runner, and that is the whole case. The copy is deleted
+        # before `run` returns, so a case sampling the end state passes just as happily against an
+        # implementation that ran the suite in the export itself -- plan correction 1's vacuity, exactly.
+        #
+        # Measured before being trusted: against an implementation handed `cwd=str(self.export)` this
+        # case fails on the writability probe (the export is a-w) and on the prefix assertion; against
+        # the copy it passes. The end-state cases in this class do NOT fail against that break.
+        from fleet.release import tree_sha
+        from fleet.release_verify import Verify
+        rel, v = self._export()
+        export = rel.dir_for(v)
+        frozen = tree_sha(export)
+        self._freeze(export)
+        seen = []
+
+        def watch(command, where):
+            if "run-all.sh" not in command:
+                return
+            here = pathlib.Path(where)
+            # Writable AT THIS INSTANT: `run-all.sh` writes RESULTS beside itself, and this is the one
+            # moment at which that either works or does not.
+            (here / "fleet" / "it" / "RESULTS-closeout-all.tsv").write_text("section\tid\tverdict\n")
+            seen.append((command, str(here.resolve())))
+
+        runner = self.Runner(watcher=watch)
+        Verify(rel, v, runner).run()
+
+        self.assertEqual(len(seen), 1, f"the IT suite ran {len(seen)} times, not once")
+        command, where = seen[0]
+        self.assertFalse(where.startswith(str(export.resolve())),
+                         f"the IT suite ran at {where}, inside the read-only export {export} -- the "
+                         f"suite writes RESULTS beside itself and would either fail or mutate the "
+                         f"artifact it is supposed to be measuring")
+        self.assertNotIn(str(export), command,
+                         f"the IT runner invoked was the export's own script: {command}")
+        self.assertEqual(tree_sha(export), frozen,
+                         "the export's payload changed during its own verification")
+
+    def test_the_working_copy_is_gone_when_the_run_ends(self):
+        from fleet.release_verify import Verify
+        rel, v = self._export()
+        Verify(rel, v, self.Runner(watcher=self._emit_results)).run()
+        self.assertEqual(self._copies_under(rel), [],
+                         "a full copy of the release was left in the releases root: at ~5 MB an export "
+                         "and one copy per verified version, this is how a releases root fills a disk")
+
+    def test_the_working_copy_is_gone_even_when_the_run_refuses(self):
+        # The plan's own code leaks here: `check_copy_matches` raises AFTER the copytree and the only
+        # rmtree is on the line below, so the failure path -- the one that fires when something is
+        # actually wrong -- is the path that leaves the copy behind.
+        from fleet.errors import Refused
+        from fleet.release_verify import Verify
+        rel, v = self._export(recorded_sha="0" * 64)
+        with self.assertRaises(Refused):
+            Verify(rel, v, self.Runner()).run()
+        self.assertEqual(self._copies_under(rel), [],
+                         "the refusal path left its working copy behind")
+
+    def test_two_verifies_of_one_version_do_not_share_a_working_copy_name(self):
+        # FI-20's shape: a staging path that is a function of the target alone is shared by every writer
+        # of that target. The plan named the copy `.verify-<version>`, which two concurrent verifies of
+        # one release collide on -- one deletes the tree the other is testing in.
+        from fleet.release_verify import Verify
+        rel, v = self._export()
+        names = []
+        runner = self.Runner(watcher=lambda command, where: (
+            names.append(where) if "run-all.sh" in command else None))
+        Verify(rel, v, runner).run()
+        Verify(rel, v, runner).run()
+        self.assertEqual(len(names), 2)
+        self.assertNotEqual(names[0], names[1],
+                            f"both runs used the working copy {names[0]}, which is a staging path "
+                            f"derived from the target alone -- FI-20 with a different receiver")
+
+    # --- what the run actually drives ----------------------------------------------------------------
+
+    def test_the_hermetic_suite_runs_against_the_export_with_bytecode_writing_off(self):
+        from fleet.release_verify import Verify
+        rel, v = self._export()
+        export = rel.dir_for(v)
+        runner = self.Runner(watcher=self._emit_results)
+        Verify(rel, v, runner).run()
+        command, where, env = runner.call_matching("unittest")
+        self.assertIn("discover -s tests", command)
+        self.assertEqual(where, str(export / "fleet"))
+        self.assertEqual(env.get("PYTHONDONTWRITEBYTECODE"), "1",
+                         "without this, unittest writes __pycache__ into a read-only artifact")
+        self.assertEqual(env.get("PYTHONPATH"), str(export / "fleet" / "src"),
+                         "the hermetic suite must import the EXPORT's fleet, not this checkout's")
+
+    def test_the_it_run_does_not_inherit_this_checkouts_pythonpath(self):
+        # The one contamination the copy does not prevent by itself: an inherited PYTHONPATH aimed at the
+        # git checkout makes `import fleet` resolve to source nobody froze.
+        from fleet.release_verify import Verify
+        rel, v = self._export()
+        runner = self.Runner(watcher=self._emit_results)
+        Verify(rel, v, runner).run()
+        _, where, env = runner.call_matching("run-all.sh")
+        self.assertEqual(env.get("PYTHONPATH"), str(pathlib.Path(where) / "fleet" / "src"))
+
+    def test_the_gate_roster_is_the_default_and_full_is_asked_for(self):
+        from fleet.release_verify import FULL_ROSTER, GATE_ROSTER, Verify, read_verdict
+        rel, v = self._export()
+        gate = self.Runner(watcher=self._emit_results)
+        Verify(rel, v, gate).run()
+        self.assertNotIn("--full", gate.call_matching("run-all.sh")[0])
+        self.assertEqual(read_verdict(rel.dir_for(v) / ".release")["roster"], GATE_ROSTER)
+
+        full = self.Runner(watcher=self._emit_results)
+        Verify(rel, v, full).run(full=True)
+        self.assertIn("--full", full.call_matching("run-all.sh")[0])
+        self.assertEqual(read_verdict(rel.dir_for(v) / ".release")["roster"], FULL_ROSTER)
+
+    def test_a_green_run_writes_a_green_verdict_and_keeps_the_evidence(self):
+        from fleet.release_verify import GREEN, Verify, read_verdict
+        rel, v = self._export()
+        export = rel.dir_for(v)
+        self._freeze(export)
+        self.assertEqual(Verify(rel, v, self.Runner(watcher=self._emit_results)).run(), GREEN)
+        evidence = export / ".release" / "evidence"
+        self.assertEqual(read_verdict(export / ".release")["suites"], {"hermetic": GREEN, "it": GREEN})
+        self.assertTrue((evidence / "hermetic.log").is_file())
+        self.assertTrue((evidence / "it-RESULTS.tsv").is_file(),
+                        "the merged IT results were not copied out of the working copy before it was "
+                        "deleted, so the verdict cites evidence that no longer exists")
+        self.assertIn("Q1", (evidence / "it-RESULTS.tsv").read_text())
+
+    def test_a_failing_it_suite_on_a_quiet_box_is_recorded_red(self):
+        from fleet.release_verify import GREEN, RED, Verify, read_verdict
+        rel, v = self._export()
+        runner = self.Runner(codes=[("run-all.sh", 1)], watcher=self._emit_results)
+        self.assertEqual(Verify(rel, v, runner).run(), RED)
+        suites = read_verdict(rel.dir_for(v) / ".release")["suites"]
+        self.assertEqual(suites, {"hermetic": GREEN, "it": RED})
+
+    def test_a_failure_beside_a_changing_live_subject_set_is_recorded_inconclusive(self):
+        # The live-subject set is sampled by running a command, so the fake runner is what makes it move.
+        from fleet.release_verify import INCONCLUSIVE, Verify
+        rel, v = self._export()
+        board = []
+
+        class Moving(self.Runner):
+            def __call__(self, command, cwd=None, env=None):
+                code, out, err = super().__call__(command, cwd, env)
+                if "board" in command:
+                    board.append(len(board))
+                    return 0, f"subject-{len(board)}\n", ""
+                return code, out, err
+
+        self.assertEqual(Verify(rel, v, Moving(codes=[("run-all.sh", 1)],
+                                               watcher=self._emit_results)).run(), INCONCLUSIVE)
+        self.assertEqual(len(board), 2, "the live-subject set must be sampled before AND after the run")
