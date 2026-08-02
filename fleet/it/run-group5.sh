@@ -872,14 +872,43 @@ The audit runs over the WHOLE package, not over `cli.py`'s intra-module call clo
 another module through an attribute call (`ctx.pool.unenroll`), and a closure that follows only bare-name
 calls inside one module cannot cross that boundary — so the package's own `FORBIDDEN_CALLS` invariant is
 unenforced exactly where the deletes live."""
-import ast, os
+import ast, os, sys
 from pathlib import Path
 from fleet.cli import FORBIDDEN_CALLS, FORBIDDEN_COMMANDS, VERBS
-pkg = Path(os.environ["INSTANT"]) / "src" / "fleet"
+INSTANT = Path(os.environ["INSTANT"])
+pkg = INSTANT / "src" / "fleet"
+
+#: `II-3`. The package's outward call sites are declared in TWO registries that nothing kept in step:
+#: `DELETE_ALLOWLIST` below, keyed `(file.py, owner, callname)`, and `OUTWARD_CALL_SITES` in
+#: `tests/test_cli.py`, keyed `(module, function)` and carrying the written justification. Adding
+#: `atomic.atomic_symlink` needed BOTH; the hermetic suite went green after the first and this section
+#: still failed, 18 minutes later. Their keys are not even the same shape, so nothing mechanical could
+#: have compared them.
+#:
+#: The hermetic registry is now the AUTHORITY for "is this site argued for", because that is where the
+#: prose lives. Imported, never restated. If it cannot be imported the audit FAILS — a cross-check that
+#: silently skips when its input is missing is the shape of control this whole instant exists to remove.
+sys.path.insert(0, str(INSTANT / "tests"))
+try:
+    from test_cli import OUTWARD_CALL_SITES, SPAWN_SEAMS
+except Exception as exc:                                    # noqa: BLE001 - reported, never swallowed
+    raise AssertionError(
+        f"M9 could not import the hermetic registry from {INSTANT}/tests/test_cli.py: {exc!r}. "
+        "That registry is the authority for which outward call sites are declared, so without it this "
+        "audit cannot say whether a delete site is argued for — and passing anyway would be a green "
+        "obtained by not looking.") from exc
+#: `(module, function)` -> `(file.py, function)`, the only difference between the two spellings.
+HERMETIC_SITES = {(f"{m}.py", fn) for (m, fn) in OUTWARD_CALL_SITES}
+
 #: Probe/runner factories: the only functions allowed to spawn. Each is referenced by `default_context`
 #: (or a caller's own injection) and by no handler.
-SEAMS = {("session.py", "default_probes"), ("cli.py", "_default_runner"),
-         ("workspace.py", "default_git")}
+#:
+#: DERIVED from the hermetic `SPAWN_SEAMS` rather than restated — same three facts, previously written
+#: twice in two spellings. This half really is a derivation: the two sets carry identical information, so
+#: nothing is lost by having one of them computed. `DELETE_ALLOWLIST` below is NOT derived, because it is
+#: finer-grained than the hermetic registry (it distinguishes `unlink` from `rmdir` within one function)
+#: and deriving it would widen the ceiling to "any deleter call in a declared function".
+SEAMS = {(f"{m}.py", fn) for (m, fn) in SPAWN_SEAMS}
 DELETERS = {"rmtree", "remove", "removedirs", "unlink", "rmdir"}
 #: Every delete-shaped call in the package, read and accounted for. `pool` deletes its own bookkeeping
 #: under `<FLEET_HOME>`; `roadmap._consume` calls `list.remove` on a python list and touches no file.
@@ -1017,6 +1046,31 @@ if undeclared:
 gone = sorted(DELETE_ALLOWLIST - deletes)
 if gone:
     print("allow-listed delete no longer present (the list is a ceiling):", gone)
+
+#: `II-3`, the cross-check. Compared against the AST rather than against each other, because the two
+#: registries are keyed differently and a direct comparison is not possible — which is precisely why they
+#: drifted. Both directions, because both have failed in practice:
+#:
+#:   found-but-unjustified  a real delete site with no entry in the hermetic registry. This is the
+#:                          direction that fires when someone declares a site HERE and forgets the prose.
+#:   listed-but-unjustified an entry in the local ceiling with no hermetic counterpart. This is the
+#:                          direction that fires when the two lists diverge without any code changing —
+#:                          the silent one, invisible until an 18-minute run says so.
+#:
+#: The reverse (a hermetic entry with no delete here) is NOT a failure: OUTWARD_CALL_SITES also covers the
+#: three spawn seams and the two tail-only `run` methods, which delete nothing.
+found_sites = {(m, f) for (m, f, _c) in deletes}
+listed_sites = {(m, f) for (m, f, _c) in DELETE_ALLOWLIST}
+unjustified = sorted((found_sites | listed_sites) - HERMETIC_SITES)
+if unjustified:
+    bad.append(
+        f"DELETE SITE(S) NOT ARGUED FOR IN THE HERMETIC REGISTRY: {unjustified}. Every delete site must "
+        f"be declared in BOTH tests/test_cli.py's OUTWARD_CALL_SITES (with the reason, in writing) and "
+        f"this file's DELETE_ALLOWLIST (with the call name). Declaring it in one is how the two "
+        f"registries drifted apart in the first place (II-3)")
+print(f"registry cross-check: {len(found_sites)} delete site(s) found, {len(listed_sites)} allow-listed, "
+      f"all present in the hermetic OUTWARD_CALL_SITES ({len(HERMETIC_SITES)} entries, "
+      f"{len(SEAMS)} of them the derived spawn seams)")
 # Every file-deleting site must derive its target from the store root, never from a workspace or $HOME.
 source_of = {}
 for path in sorted(pkg.glob("*.py")):
