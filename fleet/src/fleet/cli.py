@@ -72,7 +72,7 @@ from fleet.identity import ROOT_BASE, InstantName, resolve
 from fleet.layout import INFO, VIOLATION
 from fleet.pool import Pool, ReapReport
 from fleet.profiles import Profile
-from fleet.reconcile import COMPLETE, KIND_WORKER, RUNNING, reconcile
+from fleet.reconcile import COMPLETE, KIND_WORKER, RUNNING, needs_a_human, reconcile
 from fleet.release import (CANDIDATE, DEV, HISTORY_COLUMNS, META_DIR, RELEASED, Releases, Version,
                            actor, tree_sha, utc_now)
 from fleet.release_git import Repo, changelog_section
@@ -80,7 +80,7 @@ from fleet.release_verify import FULL_ROSTER, GATE_ROSTER, GREEN, Verify, read_v
 from fleet.review import Finding, Review, exit_code_for
 from fleet import origin as origin_mod
 from fleet.origin import Origin
-from fleet.roadmap import COORDINATOR, TERMINAL, Milestone, Roadmap
+from fleet.roadmap import ATTENTION, COORDINATOR, TERMINAL, Milestone, Roadmap
 from fleet.session import SessionLayer, default_probes
 from fleet.store import Declarations, Record, Store
 from fleet.workspace import GOLDEN_FILE, Workspace, default_git
@@ -1870,9 +1870,26 @@ def _do_reconcile(ctx: Ctx, parsed: Parsed) -> int:
         why = _arm_refusal(subject)
         if not why:
             armed.append(subject.identity)
+        #: `FI-12`. `severity` was the LITERAL `INFO` on every row, so this verb could not report
+        #: attention for anything — not a stranded lease, not a stalled worker, not anything, ever. The
+        #: finding was "a terminal instant holding a lease raises no alarm"; the truth was that the
+        #: column was a constant and the stranded lease is simply the case that noticed. Measured:
+        #: `reconcile --porcelain | cut -f3 | sort -u` returned exactly one value.
+        #:
+        #: Derived from `reconcile.needs_a_human`, the same predicate the board's banner uses, so the
+        #: verb a coordinator runs and the banner they read first cannot disagree about who is waiting.
+        wants_you = needs_a_human(subject)
+        stranded = subject.state == COMPLETE and subject.holds_slot
         rows.append(Row(
-            kind=UNARMED if why else ARMED, subject=subject.identity, severity=INFO,
+            kind=UNARMED if why else ARMED, subject=subject.identity,
+            severity=ATTENTION if wants_you else INFO,
+            clears_when=("`fleet harvest --id <id>` applies the remaining delta, kills the session and "
+                         "RELEASES the slot — the rename was the worker's transition, this is the "
+                         "coordinator's" if stranded else None),
+            clears_who=("the coordinator that dispatched it" if stranded else None),
             detail=(f"state {subject.state}, session {subject.evidence.get('tmux', '') or '(none)'}, "
+                    + (f"HOLDING {subject.evidence.get('slot') or 'a slot'} while terminal: the work is "
+                       f"over and the workspace is not back. " if stranded else "")
                     + (f"not armed: {why}" if why else
                        f"armed: the monitor MUST call `fleet {PANE_GUARD} --pane "
                        f"{subject.evidence.get('tmux', '') or subject.identity}` and branch on the code "

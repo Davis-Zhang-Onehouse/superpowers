@@ -182,6 +182,32 @@ class TestBoard(unittest.TestCase):
         self.assertEqual(count([worker("running-07310400", "RUNNING")]), 0,
                          "a working worker needs nobody")
 
+    def test_a_terminal_instant_still_holding_a_slot_needs_a_human(self):
+        """`FI-12` — the leak that cost 11 slots.
+
+        `fleet complete` renames the folder, and that rename is the WORKER's transition. Releasing the
+        slot is a separate, coordinator-side act (`harvest --id`). Until it happens the instant is
+        COMPLETE and still holding a workspace — the reporter measured one held for 22 HOURS while every
+        row about it said `info`, including its own, which read *"the work is over"*.
+
+        This is not a pure state predicate, which is why `ACTIONABLE_STATES` alone cannot express it: a
+        COMPLETE instant that has been harvested holds nothing and needs nobody. The pair
+        (terminal, still holding) is the alarm.
+        """
+        def count(subjects):
+            match = re.search(r"(\d+) needs you", render.board(subjects))
+            self.assertIsNotNone(match)
+            return int(match.group(1))
+
+        stranded = worker("done-07310613", "COMPLETE", holds_slot=True, folder_state="complete",
+                          note="the instant folder is `-complete-`; the work is over")
+        harvested = worker("done-07310614", "COMPLETE", holds_slot=False, folder_state="complete")
+        self.assertEqual(count([stranded]), 1,
+                         "a COMPLETE instant still holding a workspace is not counted")
+        self.assertEqual(count([harvested]), 0,
+                         "a COMPLETE instant that released its slot needs nobody — this must stay quiet")
+        self.assertEqual(count([stranded, harvested, BLOCKED]), 2)
+
     def test_every_row_carries_the_subject_identity_in_the_porcelain_form(self):
         # OBS-62: the shipped assertion anchored to a human summary line and COULD NEVER MATCH.
         subjects = [DEAD, BLOCKED, unknown(), stale_lease(), HARVESTED]
