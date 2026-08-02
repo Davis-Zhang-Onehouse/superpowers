@@ -90,7 +90,11 @@ g3_skip() { it_skip "$1" "$(g3_rel "${2:-}")" "${3:-}"; }
 #: private server against a live pre-image and the isolation assertion would become a false compare in
 #: the other direction, i.e. vacuous. `env -u TMUX_TMPDIR` states that intent in the call itself instead
 #: of leaving it to depend on whether the caller happens to run before the export / after the unset.
-g3_live_tmux() { env -u TMUX_TMPDIR tmux ls 2>/dev/null | sort; }
+#: `II-2`. This was a bare `tmux ls`, whose lines carry a window count and an `(attached)` marker, so the
+#: comparison it fed failed when the operator merely attached to an unrelated session. §B had the same
+#: bug; §C and §D did not. `lib.sh` states the rule and the reason in `it_live_tmux_sessions` — the
+#: shared helper these four copies declined to use.
+g3_live_tmux() { env -u TMUX_TMPDIR tmux ls -F '#{session_name}' 2>/dev/null | sort; }
 
 g3_enter() {                    # g3_enter <SECTION>
   it_section "$1"
@@ -117,6 +121,10 @@ g3_enter() {                    # g3_enter <SECTION>
   export PATH="$G3_HERE/bin:$PATH"
   mkdir -p "$EV/out"
   printf '%s\n' "$G3_TMUX_BEFORE" > "$EV/out/live-tmux-before.txt"
+  #: The private-session ledger starts EMPTY for each section. It is appended to by every
+  #: `g3_kill_sessions` sweep and read once at leave; carried over from §E it would make §K's
+  #: `private-leak` row a statement about §E's sessions, attributed to §K.
+  : > "$EV/out/private-tmux-sessions.txt"
 }
 
 #: Every session on the section's PRIVATE server. It cannot be filtered by TMUX_PREFIX the way
@@ -135,10 +143,29 @@ g3_kill_sessions() {
             "This loop kills EVERY session it is shown — refusing to run it against that." >&2
        return 2 ;;
   esac
+  #: The names are RECORDED before they are killed, so `it_assert_no_private_leak` can assert at leave that
+  #: none of them is also on the DEFAULT server. They are `dt-<instant>` — hardcoded by `cli._do_dispatch`
+  #: — which is exactly why no name-shape rule can cover them. See the note in `g3_leave`.
+  #:
+  #: APPENDED to a ledger, not overwritten, and this is the whole difference between a check and a
+  #: decoration. This function runs after nearly every case (sixteen call sites in this file), so a file
+  #: rewritten each sweep holds only what was alive at the LAST one — normally nothing, because §E kills
+  #: its dispatches as it goes. Measured with the first, overwriting version: `ISOLATION-E-private-leak`
+  #: reported "none of the 0 session(s)" and passed, in a section that had just started and killed dozens.
+  #: The ledger is the union of every session this section ever put on its private server.
+  mkdir -p "$EV/out"
+  local ledger="$EV/out/private-tmux-sessions.txt" now
+  now="$(it_tmux ls -F '#{session_name}' 2>/dev/null | sort)"
+  if [ -n "$now" ]; then
+    printf '%s\n' "$now" >> "$ledger"
+    sort -u -o "$ledger" "$ledger"
+  fi
   #: `=$s` — an EXACT target. `kill-session -t itfleet-N-pre-a` resolves BY PREFIX and destroyed a live
   #: `itfleet-N-pre-ab` in N7c; that is `FI-23`/`SI-2` and it must not come back through the harness.
-  it_tmux ls -F '#{session_name}' 2>/dev/null | while read -r s; do
-    it_tmux kill-session -t "=$s" 2>/dev/null
+  #: Killed from the CURRENT listing, not from the ledger: the ledger holds names already reaped by an
+  #: earlier sweep, and re-targeting those is noise at best.
+  printf '%s\n' "$now" | while read -r s; do
+    [ -n "$s" ] && it_tmux kill-session -t "=$s" 2>/dev/null
   done
   true
 }
@@ -154,14 +181,24 @@ g3_leave() {                    # g3_leave <SECTION>
   local after_tmux
   after_tmux="$(g3_live_tmux)"                       # the LIVE server, deliberately: see g3_live_tmux
   printf '%s\n' "$after_tmux" > "$EV/out/live-tmux-after.txt"
-  if [ "$after_tmux" = "$G3_TMUX_BEFORE" ]; then
-    g3_pass "ISOLATION-$1-live-tmux" "$EV/out/live-tmux-after.txt" \
-            "live tmux server session list byte-identical; no dt- session created or killed"
+  #: `II-1`. Was a private byte-comparison — the FOURTH copy of the isolation contract, and the one the
+  #: original RCA missed entirely because it read `run-B/C/D.sh` and stopped. §group3 runs more sections
+  #: than any of those three, so it was the widest exposure of the defect.
+  #:
+  #: Split into the two questions it conflated, each with one implementation. The classifier decides the
+  #: general contract, where operator churn on a shared box is a NOTE rather than a failure.
+  #: `it_assert_no_private_leak` decides the part the classifier cannot: the sessions this section starts
+  #: are `dt-<instant>` (hardcoded by `cli._do_dispatch`), so they carry no harness prefix, and a leaked
+  #: one is indistinguishable BY SHAPE from another operator's dispatch. The exact names can tell.
+  local g3_classified
+  g3_classified="$(it_classify_session_delta "$G3_TMUX_BEFORE" "$after_tmux")"
+  if [ "${g3_classified%%|*}" = FAIL ]; then
+    g3_fail "ISOLATION-$1-live-tmux" "$EV/out/live-tmux-after.txt" "${g3_classified#*|}"
   else
-    g3_fail "ISOLATION-$1-live-tmux" "$EV/out/live-tmux-after.txt" \
-            "THE LIVE TMUX SERVER CHANGED: $(diff <(printf '%s' "$G3_TMUX_BEFORE") \
-             <(printf '%s' "$after_tmux") | tr '\n' ' ')"
+    g3_pass "ISOLATION-$1-live-tmux" "$EV/out/live-tmux-after.txt" "${g3_classified#*|}"
   fi
+  it_assert_no_private_leak "ISOLATION-$1-private-leak" "$EV/out/private-tmux-sessions.txt" \
+    "dt-* dispatch sessions: no name-shape rule can catch these, only the exact names"
   if [ "$after_claude" = "$G3_CLAUDE_BEFORE" ]; then
     g3_pass "ISOLATION-$1-claude-count" "" "pgrep -x claude: $after_claude before and after (A6)"
   else
@@ -1105,8 +1142,10 @@ run_K() {
 #: re-introduce NOT-RUN cases (AC-3) by the very mechanism meant to eliminate them.
 G3_ARG="${1:-all}"
 g3_owned_cases() {
-  local e_iso='ISOLATION-E-(enter|leave|live-tmux|claude-count)'
-  local k_iso='ISOLATION-K-(enter|leave|live-tmux|claude-count)'
+  #: `private-leak` added with `II-1`: a section must OWN every row it writes, or the merge keeps a stale
+  #: copy of it alongside the fresh one.
+  local e_iso='ISOLATION-E-(enter|leave|live-tmux|claude-count|private-leak)'
+  local k_iso='ISOLATION-K-(enter|leave|live-tmux|claude-count|private-leak)'
   local e_all='E[1-9]' k_all='K([1-9]|10)|K3[ab]'
   case "$1" in
     E)      printf '%s|%s' "$e_all" "$e_iso" ;;
