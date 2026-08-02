@@ -138,7 +138,10 @@ section_L() {
   it_fresh_fixture
   export EV SLOTS DUMMY INSTANT SECTION
   PY_DIR="$EV/py"
-  mkdir -p "$EV/reg" "$SLOTS" "$PY_DIR"
+  #: `relarea`/`relrepo` are the release verbs' sandbox — see the note in `verb_args`. Empty on purpose:
+  #: L7 asks whether every verb emits its cadence line and well-formed porcelain, not whether a release
+  #: can be cut. §Q owns the lifecycle.
+  mkdir -p "$EV/reg" "$SLOTS" "$PY_DIR" "$EV/relarea" "$EV/relrepo"
 
   # ---- L1 ---------------------------------------------------------------------------------------
   cat > "$PY_DIR/l1.py" <<'PY'
@@ -385,6 +388,22 @@ PY
       base-check) echo "--id $TODO" ;;
       milestone) echo "--instant $INSTP --id l7m --title l7milestone --dry-run" ;;
       pane-guard) echo "--pane itfleet-L-absent-zzz" ;;
+      clone) echo "--slot $SLOTS/s1 --dry-run" ;;
+      #: The release verbs. `--releases` points inside the section tree for EVERY one of them, with no
+      #: exception and no reliance on the mutating ones carrying --dry-run. Omitting it makes the verb
+      #: resolve $FLEET_RELEASES or its built-in default, which on this box is the operator's live
+      #: release area — and L7 exists to catch verbs behaving unexpectedly, so "it would have been fine
+      #: if the verb worked" is not a safety argument. `release-cut` also takes `--repo`, pointed at an
+      #: empty directory: L7 asserts the cadence line and the porcelain shape, not that a cut succeeds,
+      #: and §Q already owns the real lifecycle.
+      release-cut)      echo "--version 9.9.9 --repo $EV/relrepo --releases $EV/relarea --dry-run" ;;
+      release-verify)   echo "--version 9.9.9 --releases $EV/relarea --dry-run" ;;
+      release-promote)  echo "--version 9.9.9 --releases $EV/relarea --dry-run" ;;
+      release-deploy)   echo "--version 9.9.9 --releases $EV/relarea --reason l7reason --force --dry-run" ;;
+      release-rollback) echo "--to 9.9.9 --releases $EV/relarea --reason l7reason --dry-run" ;;
+      release-status)   echo "--releases $EV/relarea" ;;
+      release-list)     echo "--releases $EV/relarea" ;;
+      release-history)  echo "--releases $EV/relarea" ;;
       *) echo "UNMAPPED" ;;
     esac
   }
@@ -392,11 +411,17 @@ PY
   VERB_LIST="$(python3 -c 'from fleet.cli import VERBS; print(" ".join(sorted(VERBS)))')"
   COLS_MAP="$(python3 -c 'from fleet.cli import PORCELAIN_COLUMNS as P; print("\n".join(f"{k} {len(v)}" for k,v in P.items()))')"
   L7LOG="$EV/L7-per-verb.txt"; : > "$L7LOG"
-  l7_bad=0; l7_nostdout=0; l7_verbs=0; l7_leak=0
+  l7_bad=0; l7_nostdout=0; l7_verbs=0; l7_leak=0; l7_unmapped=0; l7_unmapped_list=""
   for v in $VERB_LIST; do
     args="$(verb_args "$v")"
     if [ "$args" = "UNMAPPED" ]; then
-      printf '%s UNMAPPED\n' "$v" >> "$L7LOG"; l7_bad=$((l7_bad+1)); continue
+      #: `II-4`. Counted separately and reported as `L7-coverage`, never folded into L7's failure count.
+      #: Folded in, the register read "verbs=30, failures=9 :: clone UNMAPPED release-cut UNMAPPED …",
+      #: which is the harness admitting it cannot call a verb, written in the column where the product's
+      #: defects go and indistinguishable from one.
+      printf '%s UNMAPPED (no argv recipe in verb_args — harness gap, not a product verdict)\n' \
+             "$v" >> "$L7LOG"
+      l7_unmapped=$((l7_unmapped+1)); l7_unmapped_list="$l7_unmapped_list $v"; continue
     fi
     l7_verbs=$((l7_verbs+1))
     # shellcheck disable=SC2086
@@ -416,12 +441,21 @@ PY
     [ "$leak" = "0" ] || l7_leak=$((l7_leak+1))
     [ "$lines" -gt 0 ] || l7_nostdout=$((l7_nostdout+1))
   done
-  note="verbs=$l7_verbs, failures=$l7_bad, cadence-on-stdout=$l7_leak, empty-stdout=$l7_nostdout"
+  note="verbs=$l7_verbs, failures=$l7_bad, cadence-on-stdout=$l7_leak, empty-stdout=$l7_nostdout, unmapped=$l7_unmapped"
   if [ "$l7_bad" = "0" ] && [ "$l7_leak" = "0" ]; then
-    it_pass L7 "$L7LOG" "every verb printed a stale-cadence line to stderr naming the stale source; \
-every porcelain stdout parsed at its declared column count; $note"
+    it_pass L7 "$L7LOG" "every one of the $l7_verbs INVOKED verbs printed a stale-cadence line to stderr \
+naming the stale source; every porcelain stdout parsed at its declared column count; $note"
   else
-    it_fail L7 "$L7LOG" "$note :: $(grep -v 'cadence=1 names_stale=1' "$L7LOG" | grep -v 'malformed=0 leak=0' | head -3 | tr '\n' ' ')"
+    it_fail L7 "$L7LOG" "$note :: $(grep -v 'cadence=1 names_stale=1' "$L7LOG" | grep -v 'malformed=0 leak=0' | grep -v UNMAPPED | head -3 | tr '\n' ' ')"
+  fi
+
+  #: L7-coverage — `II-4`. §L derives its verb population from `cli.VERBS` so a new verb cannot escape
+  #: coverage; the argv recipes are hand-written, so a new verb can escape a fixture. The gap is real and
+  #: stays loud, but it is named as what it is.
+  if [ "$l7_unmapped" = 0 ]; then
+    it_pass L7-coverage "$L7LOG" "every verb in cli.VERBS has an argv recipe in verb_args, so L7's verdict covers the whole verb set and not a subset of it"
+  else
+    it_fail L7-coverage "$L7LOG" "$(sq "$l7_unmapped verb(s) have NO argv recipe in verb_args:$l7_unmapped_list. This is a HARNESS gap, not a product verdict: these verbs were never invoked, so L7 says nothing about them. Add a recipe to verb_args in run-group5.sh; any release verb needs --releases inside the section tree")"
   fi
 
   # ---- L8 ---------------------------------------------------------------------------------------
@@ -513,7 +547,8 @@ section_M() {
   it_fresh_fixture
   export EV SLOTS DUMMY INSTANT SECTION
   PY_DIR="$EV/py"
-  mkdir -p "$SLOTS/ms1" "$EV/profile" "$PY_DIR"
+  #: See §L. The release verbs' sandbox, kept inside the section tree.
+  mkdir -p "$SLOTS/ms1" "$EV/profile" "$PY_DIR" "$EV/relarea" "$EV/relrepo"
   printf '{"kind": "worker"}\n' > "$EV/profile/profile.json"
   printf 'A charter for {{TITLE}} at {{PATH}}.\n' > "$EV/profile/charter.md"
   printf 'seed for {{INSTANT}}\n' > "$EV/profile/seed.txt"
@@ -573,6 +608,18 @@ PY
       base-check) echo "--id $TODO" ;;
       milestone) echo "--instant $INSTP --id m5m --title m5milestone --dry-run" ;;
       pane-guard) echo "--pane itfleet-M-absent-zzz" ;;
+      clone) echo "--slot $SLOTS/ms1 --dry-run" ;;
+      #: The release verbs — see the identical note in §L's `verb_args`. §M appends one extra flag to
+      #: this argv per probe, so these run many times over: `--releases` inside the section tree is what
+      #: keeps every one of those invocations away from the operator's release area.
+      release-cut)      echo "--version 9.9.9 --repo $EV/relrepo --releases $EV/relarea --dry-run" ;;
+      release-verify)   echo "--version 9.9.9 --releases $EV/relarea --dry-run" ;;
+      release-promote)  echo "--version 9.9.9 --releases $EV/relarea --dry-run" ;;
+      release-deploy)   echo "--version 9.9.9 --releases $EV/relarea --reason m5reason --force --dry-run" ;;
+      release-rollback) echo "--to 9.9.9 --releases $EV/relarea --reason m5reason --dry-run" ;;
+      release-status)   echo "--releases $EV/relarea" ;;
+      release-list)     echo "--releases $EV/relarea" ;;
+      release-history)  echo "--releases $EV/relarea" ;;
       *) echo "UNMAPPED" ;;
     esac
   }
@@ -662,7 +709,7 @@ for name, spec in sorted(VERBS.items()):
         print(name, flag.name, "value" if flag.takes_value else "switch")
 PY
   M5LOG="$EV/M5-per-flag.txt"; : > "$M5LOG"
-  m5_bad=0; m5_hang=0; m5_value=0; m5_switch=0; m5_slow=""
+  m5_bad=0; m5_hang=0; m5_value=0; m5_switch=0; m5_slow=""; m5_unmapped=0; m5_unmapped_list=""
   while read -r v f kind; do
     if [ "$kind" = value ]; then
       m5_value=$((m5_value+1))
@@ -673,8 +720,13 @@ PY
       args="$(m_args "$v")"
       # shellcheck disable=SC2086
       if [ "$args" = "UNMAPPED" ]; then
-        printf '%-20s %-18s UNMAPPED — add it to m_args\n' "$v" "$f" >> "$M5LOG"
-        m5_bad=$((m5_bad+1)); continue
+        #: `II-4`. Its own count, not a value-flag failure. Folded in, one verb with no fixture
+        #: produced one row per flag — the release verbs took `M5` from 7 failures to 65 — all of them
+        #: reading as the product mishandling a flag it in fact handles correctly.
+        printf '%-20s %-18s UNMAPPED — no argv recipe in m_args (harness gap, not a product verdict)\n' "$v" "$f" >> "$M5LOG"
+        m5_unmapped=$((m5_unmapped+1))
+        case " $m5_unmapped_list " in *" $v "*) ;; *) m5_unmapped_list="$m5_unmapped_list $v" ;; esac
+        continue
       fi
       timeout 5 python3 -m fleet.cli "$v" $args "$f" > /dev/null 2> "$EV/M5-b.stderr"; rcb=$?
       diagb=$(grep -c 'needs a value' "$EV/M5-b.stderr")
@@ -686,8 +738,11 @@ PY
       m5_switch=$((m5_switch+1))
       args="$(m_args "$v")"
       if [ "$args" = "UNMAPPED" ]; then
-        printf '%-20s %-18s UNMAPPED — add it to m_args\n' "$v" "$f" >> "$M5LOG"
-        m5_bad=$((m5_bad+1)); continue
+        #: `II-4`, switch-flag half. Same reasoning as the value-flag branch above.
+        printf '%-20s %-18s UNMAPPED — no argv recipe in m_args (harness gap, not a product verdict)\n' "$v" "$f" >> "$M5LOG"
+        m5_unmapped=$((m5_unmapped+1))
+        case " $m5_unmapped_list " in *" $v "*) ;; *) m5_unmapped_list="$m5_unmapped_list $v" ;; esac
+        continue
       fi
       # shellcheck disable=SC2086
       timeout 5 python3 -m fleet.cli "$v" $args "$f" > /dev/null 2>&1; rcs=$?
@@ -703,9 +758,18 @@ PY
     fi
   done < "$EV/M5-matrix.txt"
   if [ "$m5_bad" = 0 ] && [ "$m5_hang" = 0 ]; then
-    it_pass M5 "$M5LOG" "every value-taking flag of every verb ($m5_value flag/verb pairs × 2 shapes) exited 2 with the 'needs a value' diagnostic inside timeout 5; NO flag hung ($m5_switch switch flags also checked for hang-freedom;${m5_slow:- none} exceeded 5s)"
+    it_pass M5 "$M5LOG" "every value-taking flag of every INVOKED verb ($m5_value flag/verb pairs × 2 shapes) exited 2 with the 'needs a value' diagnostic inside timeout 5; NO flag hung ($m5_switch switch flags also checked for hang-freedom;${m5_slow:- none} exceeded 5s); $m5_unmapped flag/verb pair(s) skipped for want of a recipe — see M5-coverage"
   else
-    it_fail M5 "$M5LOG" "value-flag failures=$m5_bad, hangs=$m5_hang, slow=${m5_slow:-none}"
+    it_fail M5 "$M5LOG" "value-flag failures=$m5_bad, hangs=$m5_hang, slow=${m5_slow:-none}, unmapped=$m5_unmapped"
+  fi
+
+  #: M5-coverage — `II-4`. One verb without a recipe used to produce one FAIL per flag, so the count
+  #: read like a widespread product defect rather than a single missing map entry. Counted here as
+  #: flag/verb PAIRS skipped, and named by VERB, because the verb is the unit of the fix.
+  if [ "$m5_unmapped" = 0 ]; then
+    it_pass M5-coverage "$M5LOG" "every verb in cli.VERBS has an argv recipe in m_args, so M5's verdict covers every flag of every verb"
+  else
+    it_fail M5-coverage "$M5LOG" "$(sq "$m5_unmapped flag/verb pair(s) were skipped because these verb(s) have NO argv recipe in m_args:$m5_unmapped_list. This is a HARNESS gap, not a product verdict: those flags were never exercised, so M5 says nothing about them. One map entry per verb fixes all of its flags at once")"
   fi
 
   # ---- M7 ---------------------------------------------------------------------------------------
