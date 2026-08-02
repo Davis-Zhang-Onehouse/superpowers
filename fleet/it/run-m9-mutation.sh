@@ -68,6 +68,16 @@ fi
 # --- the four mutations ---------------------------------------------------------------------------
 for n in 1 2 3 4; do
   rm -rf "$EV/mut$n"; mkdir -p "$EV/mut$n"; cp -r "$INSTANT/src" "$EV/mut$n/"
+  #: `tests/` as well as `src/`, since `II-3`: the audit imports OUTWARD_CALL_SITES from
+  #: `$INSTANT/tests/test_cli.py` as the authority for which delete sites are argued for. A mutant tree
+  #: with no `tests/` makes every mutant die of ModuleNotFoundError, which is a kill for the wrong
+  #: reason and proves nothing about the audit.
+  #:
+  #: Caught by this runner itself, on release 0.2.0, reporting exactly that: "died for the WRONG reason
+  #: — a kill that is really an import failure proves nothing". The `II-3` change was checked against
+  #: the extracted audit and against the real package, and not against a mutant tree; the case that
+  #: exists to notice a kill arriving for the wrong reason is what noticed.
+  cp -r "$INSTANT/tests" "$EV/mut$n/"
 done
 
 python3 - "$EV" <<'PY'
