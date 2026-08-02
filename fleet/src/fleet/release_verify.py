@@ -51,7 +51,10 @@ BOARD_COMMAND = "fleet board --porcelain"
 #: The two suites, as the working copy sees them.
 HERMETIC_COMMAND = "python3 -m unittest discover -s tests -q"
 IT_SCRIPT = ("fleet", "it", "run-all.sh")
-IT_RESULTS = ("fleet", "it", "RESULTS-closeout-all.tsv")
+#: The MERGED register — what a reader wants when a release cites "the IT evidence".
+#: `RESULTS-closeout-all.tsv` holds ONLY the batch's own two ISOLATION rows, so citing that file shipped a
+#: release whose proof was two lines about tmux and nothing about the 180 cases that ran.
+IT_RESULTS = ("fleet", "it", "RESULTS.tsv")
 
 #: Files the IT orchestrator leaves in the working copy that are worth keeping. Copied out BEFORE the copy
 #: is removed, or the verdict cites evidence that no longer exists.
@@ -199,8 +202,34 @@ class Verify:
         (evidence / "hermetic.log").write_text((out or "") + (err or ""))
         return code
 
+    @staticmethod
+    def it_failures(copy_root: Path) -> list:
+        """Every FAIL row THIS run produced, read from the per-runner registers.
+
+        Not from `run-all.sh`'s exit status. That script has no final `exit`: it prints its tallies and
+        then falls off the end, so its status is whatever the last `say` returned — 0, always, however
+        many sections failed. It is a REPORTING orchestrator, and a gate wired to its status reads GREEN
+        over a suite with failures. Measured, on this pipeline's first real use: release 0.1.1 recorded
+        GREEN while §A had 2 FAIL, group5 had 4 and m9mut had 1.
+
+        Not from the merged `RESULTS.tsv` either, which KEEPS rows from the committed baseline for
+        sections this roster did not run. Counting those would charge a release with another run's
+        history. The `RESULTS-closeout-*.tsv` files are exactly what this invocation produced.
+        """
+        it_dir = copy_root / IT_SCRIPT[0] / IT_SCRIPT[1]
+        failures = []
+        for path in sorted(it_dir.glob("RESULTS-closeout-*.tsv")):
+            for line in path.read_text(errors="replace").splitlines()[1:]:
+                cells = line.split("\t")
+                if len(cells) >= 2 and cells[1] == "FAIL":
+                    failures.append(f"{cells[0]}[{path.stem.replace('RESULTS-closeout-', '')}]")
+        return failures
+
     def _run_it(self, copy_root: Path, evidence: Path, full: bool) -> int:
-        """The IT roster, in the working copy, with everything it produces copied back."""
+        """The IT roster, in the working copy, with everything it produces copied back.
+
+        Returns 0 only when the orchestrator exited 0 AND the run produced no FAIL row.
+        """
         script = copy_root.joinpath(*IT_SCRIPT)
         command = f"bash {shlex.quote(str(script))}" + (" --full" if full else "")
         code, out, err = self.runner(
@@ -218,6 +247,16 @@ class Verify:
             candidate = copy_root / IT_SCRIPT[0] / IT_SCRIPT[1] / name
             if candidate.is_file():
                 shutil.copy(candidate, evidence / f"it-{name}")
+        # Every per-runner register, so a reader can see WHICH section failed without re-running anything.
+        for path in sorted((copy_root / IT_SCRIPT[0] / IT_SCRIPT[1]).glob("RESULTS-closeout-*.tsv")):
+            shutil.copy(path, evidence / f"it-{path.name}")
+
+        failures = self.it_failures(copy_root)
+        if failures:
+            (evidence / "it-FAILURES.txt").write_text("\n".join(failures) + "\n")
+            self._it_failures_seen = failures
+            return code or 1
+        self._it_failures_seen = []
         return code
 
     # --- the run -------------------------------------------------------------------------------------
@@ -252,7 +291,12 @@ class Verify:
             ("hermetic", GREEN if hermetic_code == 0 else RED, "evidence/hermetic.log",
              f"exit {hermetic_code}"),
             ("it", GREEN if it_code == 0 else RED, "evidence/it-RESULTS.tsv",
-             f"exit {it_code}; live-subject set "
+             f"exit {it_code}; "
+             + (f"{len(self._it_failures_seen)} FAIL row(s): "
+                f"{', '.join(self._it_failures_seen[:8])}"
+                f"{' …' if len(self._it_failures_seen) > 8 else ''}; "
+                if getattr(self, "_it_failures_seen", None) else "0 FAIL rows; ")
+             + f"live-subject set "
              f"{'CHANGED during the run' if activity_changed else 'unchanged'}"),
         ], roster)
         return result
