@@ -940,12 +940,6 @@ DELETE_ALLOWLIST = {
                                                 # publish: os.symlink refuses an existing name, so the
                                                 # alternative leaves `current` absent — measured at 238160
                                                 # sightings by a concurrent reader over 300 flips.
-    ("release_verify.py", "run", "rmtree"),     # the WRITABLE COPY it made moments earlier, at a name only
-                                                # atomic.tmp_name can produce, under $FLEET_RELEASES. The
-                                                # copy exists because run-all.sh writes RESULTS*.tsv beside
-                                                # itself and the export is chmod -R a-w. In a `finally`, so
-                                                # the refusal path does not leave a full copy of every
-                                                # verified release on disk.
 }
 NOT_A_FILE_DELETE = {("roadmap.py", "_consume", "remove")}
 

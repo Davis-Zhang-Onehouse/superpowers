@@ -656,9 +656,12 @@ class TestEveryAlarmNamesItsClearingConditionAndActor(Loaded):
                 bearing.add(path.stem)
         self.assertTrue({"guards", "roadmap", "review"} <= bearing)
         # `errors`, `pool`, `harvest` raise or report their own alarms and are covered by their own
-        # suites; `render` and `cli` only TRANSPORT the two fields. The three producers of a `Verdict`
-        # or an attention `Row` are the population this file generates over.
-        carriers = {"errors", "pool", "harvest", "render", "cli"}
+        # suites; `render` and `cli` only TRANSPORT the two fields. `release_verify` raises exactly one
+        # `Refused` with both fields — the release that records no `source_repo`, so there is no
+        # repository to take a verification worktree from (`II-7`) — and it is covered by
+        # `test_release.VerifyCase`. The three producers of a `Verdict` or an attention `Row` are the
+        # population this file generates over.
+        carriers = {"errors", "pool", "harvest", "render", "cli", "release_verify"}
         self.assertEqual(bearing - {"guards", "roadmap", "review"} - carriers, set(),
                          "a module carries clears_when and is not covered by this file's table")
 

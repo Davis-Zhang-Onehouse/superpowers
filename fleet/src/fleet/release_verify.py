@@ -15,10 +15,17 @@ Two invariants are worth stating out loud because they are easy to lose:
 to write `__pycache__` into our own read-only artifact and the hermetic run fails for a reason that has
 nothing to do with the code.
 
-*The IT suite cannot run inside a read-only export* -- the orchestrator writes `RESULTS*.tsv` beside
-itself. Rather than teach twenty runner scripts an output directory, the suite runs in a WORKING COPY, the
-results are copied back into the artifact's evidence, and `tree_sha` is recomputed on the copy so that
-"what was tested is what shipped" is asserted rather than assumed.
+*The IT suite cannot run inside the export at all* -- and for two reasons, only one of which was obvious.
+The export is read-only while the orchestrator writes `RESULTS*.tsv` beside itself; and, `II-7`, several
+cases assume they are inside a git working copy, which an export is not by construction. `M13` asks
+`selftest` to notice a dirty path under `tests/`, which is a `git status --porcelain`. Nothing declared
+that dependency, so each case discovered it separately and failed in a way indistinguishable from a
+product defect.
+
+So the suite runs in a `git worktree` at the release's tag: the same bytes, with a working repository.
+`tree_sha` is recomputed there and compared with the MANIFEST, so "what was tested is what shipped" stays
+asserted rather than assumed -- it is the same guarantee the writable copy carried, over a tree that can
+actually run the suite. The hermetic suite still runs in the export itself, read-only, because it can.
 """
 import os
 import shlex
@@ -125,10 +132,43 @@ class Verify:
     from inside the package, which is the thing the injection exists to prevent.
     """
 
-    def __init__(self, releases: Releases, version: Version, runner):
+    def __init__(self, releases: Releases, version: Version, runner, repo=None):
         self.releases = releases
         self.version = version
         self.runner = runner
+        self._repo_obj = repo
+
+    # --- the repository the worktree comes from -------------------------------------------------------
+
+    def repo(self):
+        """The checkout to take the verification worktree from.
+
+        `II-7`. The IT suite cannot judge an export: several cases assume a git working copy and nothing
+        declares the dependency, so each discovers it separately and fails in a way indistinguishable
+        from a product defect. `M13` asks `selftest` to notice a dirty path under `tests/`, which is a
+        `git status --porcelain`; `git archive` writes no `.git`. So the suite runs in a worktree at the
+        release's tag, and `check_copy_matches` proves that worktree is the artifact byte for byte.
+
+        Resolution: whatever the caller injected, else `source_repo` from the MANIFEST. There is no
+        fallback to the export and no inference from the working directory -- a release cut on this box
+        records where it came from, and one cut before that field existed has to be told. REFUSED rather
+        than quietly verified against the export, because verifying the export is exactly the state that
+        produced a red `M13` and looked like a defect in `selftest`.
+        """
+        if self._repo_obj is None:
+            from fleet.release_git import Repo
+            recorded = self.releases.manifest(self.version).get("source_repo")
+            if not recorded:
+                raise Refused(
+                    f"{self.version} does not record the checkout it was cut from, so there is nothing "
+                    f"to take a verification worktree from. The IT suite cannot run against the export "
+                    f"itself — several cases need a real `.git` — so verifying without a repository "
+                    f"would certify a run that could never pass.",
+                    clears_when="`release-verify --repo <checkout>` names the repository the tag lives "
+                                "in, or the release is re-cut (a cut now records `source_repo`)",
+                    clears_who="whoever is verifying")
+            self._repo_obj = Repo(recorded)
+        return self._repo_obj
 
     @property
     def export(self) -> Path:
@@ -173,23 +213,26 @@ class Verify:
         code, out, _ = self.runner(BOARD_COMMAND)
         return out if code == 0 else ""
 
-    def _working_copy(self) -> Path:
-        """A writable copy of the export, under the releases root, at a name no other writer can produce.
+    def _worktree(self) -> Path:
+        """A git worktree at the release's tag, under the releases root, at a name no other writer can
+        produce.
+
+        `II-7`. This replaced a writable `copytree` of the export. The copy had the right bytes and no
+        `.git`, so every case that needs a working repository failed inside it and the failures were
+        reported against the product. A worktree has both, and `check_copy_matches` proves the bytes.
 
         The name comes from `atomic.tmp_name` and NOT from the version. A staging path that is a function
-        of the target alone is shared by every concurrent writer of that target, which is `FI-20` exactly:
-        two verifies of one release would collide, and the first to finish would delete the tree the
-        second is still testing in.
+        of the target alone is shared by every concurrent writer of that target, which is `FI-20`
+        exactly: two verifies of one release would collide on the same worktree path, and git would
+        refuse the second for a reason that reads as a defect in the release.
+
+        The tag comes from the MANIFEST rather than from `version.tag`, so a release verifies against the
+        tag it actually recorded even if the naming scheme changes later.
         """
-        copy_root = self.releases.root / tmp_name(self.version.dirname)
-        shutil.copytree(self.export, copy_root, symlinks=True)
-        # The export is a-w, and `copytree` preserves that — including on DIRECTORIES, which is what
-        # actually stops the orchestrator writing RESULTS beside itself. Owner-write is added back to
-        # every entry; the executable bit is untouched, so `tree_sha` still agrees with the manifest.
-        for path in [copy_root] + sorted(copy_root.rglob("*")):
-            if not path.is_symlink():
-                path.chmod(path.stat().st_mode | 0o200)
-        return copy_root
+        dest = self.releases.root / tmp_name(self.version.dirname)
+        tag = self.releases.manifest(self.version).get("tag") or self.version.tag
+        self.repo().worktree_add(tag, dest)
+        return dest
 
     def _run_hermetic(self, evidence: Path) -> int:
         """The hermetic suite, in the export itself. Read-only is fine here and is the point: the suite
@@ -271,16 +314,20 @@ class Verify:
 
         hermetic_code = self._run_hermetic(evidence)
 
-        copy_root = self._working_copy()
+        worktree = self._worktree()
         try:
-            self.check_copy_matches(copy_root)
-            it_code = self._run_it(copy_root, evidence, full)
+            self.check_copy_matches(worktree)
+            it_code = self._run_it(worktree, evidence, full)
         finally:
-            # The one delete in this module, registered in test_cli's OUTWARD_CALL_SITES. It is in a
-            # `finally` because the failure path — a copy that does not match the manifest — is the path
-            # that fires when something is actually wrong, and leaving a full copy of the release behind
-            # exactly then is how a releases root fills a disk.
-            shutil.rmtree(copy_root, ignore_errors=True)
+            # In a `finally` because the failure path — a tree that does not match the manifest — is the
+            # path that fires when something is actually wrong, and leaving a registered worktree behind
+            # exactly then blocks the NEXT verify of this version on git bookkeeping.
+            #
+            # This module no longer deletes anything itself: `git worktree remove` does the removal,
+            # through the declared git seam. The `release_verify.run` entries in test_cli's
+            # OUTWARD_CALL_SITES and run-group5.sh's DELETE_ALLOWLIST were removed with the copytree,
+            # and §M9 now cross-checks both registries so dropping only one of them would fail (`II-3`).
+            self.repo().worktree_remove(worktree)
 
         after = self._live_subjects()
         (evidence / "live-subjects-after.tsv").write_text(after)

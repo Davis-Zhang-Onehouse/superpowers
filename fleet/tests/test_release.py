@@ -189,6 +189,63 @@ class ReleasesCase(unittest.TestCase):
         self.assertNotEqual(before, tree_sha(src),
                             "an executable bit is part of the artifact; a launcher that lost +x is broken")
 
+    def test_tree_sha_ignores_git_metadata(self):
+        """A worktree hashes the same as the export of the same tag.
+
+        `II-7`. The IT suite needs a git working copy — `M13` asks `selftest` to notice a dirty covered
+        path, which is a `git status`, and an export has no `.git` by construction. So verification runs
+        from `git worktree add <scratch> <tag>`, and `tree_sha` is what proves that worktree is the
+        artifact. A worktree's `.git` is a FILE pointing at the parent repo, so without this exclusion the
+        comparison against the MANIFEST could never succeed and the whole approach is unavailable.
+
+        Safe for exports too: `git archive` never writes `.git`, so excluding it is a no-op there.
+        """
+        export = self.tmp / "as-exported"
+        (export / "bin").mkdir(parents=True)
+        (export / "bin" / "fleet").write_text("#!/bin/sh\n")
+
+        worktree = self.tmp / "as-worktree"
+        (worktree / "bin").mkdir(parents=True)
+        (worktree / "bin" / "fleet").write_text("#!/bin/sh\n")
+        (worktree / ".git").write_text("gitdir: /somewhere/.git/worktrees/scratch\n")
+
+        self.assertEqual(tree_sha(export), tree_sha(worktree),
+                         "a worktree at the tag must hash to the export of that tag, or `verify` cannot "
+                         "prove it is testing the artifact")
+
+    def test_tree_sha_ignores_a_git_directory_too(self):
+        """Not only the worktree's `.git` FILE — a full clone's `.git` DIRECTORY as well.
+
+        Separate from the test above because the two are different filesystem shapes and an exclusion
+        written for one can easily miss the other; a `.git` directory would otherwise contribute hundreds
+        of object files to the hash.
+        """
+        plain = self.tmp / "plain"
+        (plain / "bin").mkdir(parents=True)
+        (plain / "bin" / "fleet").write_text("#!/bin/sh\n")
+        before = tree_sha(plain)
+        (plain / ".git" / "objects").mkdir(parents=True)
+        (plain / ".git" / "HEAD").write_text("ref: refs/heads/live\n")
+        (plain / ".git" / "objects" / "blob").write_text("whatever")
+        self.assertEqual(before, tree_sha(plain))
+
+    def test_tree_sha_still_hashes_a_file_merely_named_like_git(self):
+        """The exclusion is the `.git` ENTRY at the root, not anything containing 'git'.
+
+        Without this, "ignore git metadata" is one sloppy `in` away from dropping `bin/git-helper` or a
+        `.gitignore` that really is part of the payload out of the artifact's hash.
+        """
+        src = self.tmp / "gitnamed"
+        (src / "bin").mkdir(parents=True)
+        (src / "bin" / "fleet").write_text("#!/bin/sh\n")
+        before = tree_sha(src)
+        (src / ".gitignore").write_text("__pycache__\n")
+        self.assertNotEqual(before, tree_sha(src),
+                            ".gitignore is shipped content, not repository metadata")
+        after_ignore = tree_sha(src)
+        (src / "bin" / "git-helper").write_text("#!/bin/sh\n")
+        self.assertNotEqual(after_ignore, tree_sha(src))
+
 
 class GitCase(unittest.TestCase):
     """Against a real temporary repository. `git` is the thing under test here -- mocking it would assert
@@ -391,6 +448,98 @@ class GitCase(unittest.TestCase):
         Repo(self.repo).export("fleet/v0.1.0", dest)
         self.assertTrue(os.access(dest / "run.sh", os.X_OK))
 
+    # --- II-7: a worktree at the tag, which is the export plus a working `.git` ---------------------
+
+    def _tagged_tree(self):
+        """A commit with a payload and a mode bit, tagged. The shared fixture for the worktree tests."""
+        (self.repo / "bin").mkdir(exist_ok=True)
+        (self.repo / "bin" / "fleet").write_text("#!/bin/sh\necho fleet\n")
+        (self.repo / "bin" / "fleet").chmod(0o755)
+        (self.repo / "readme.md").write_text("hello\n")
+        self.run("add", "-A")
+        self.run("commit", "-q", "-m", "the payload")
+        self.run("tag", "-a", "fleet/v0.2.0", "-m", "r2")
+
+    def test_a_worktree_at_the_tag_hashes_identically_to_the_export_of_that_tag(self):
+        """The whole of `II-7` in one assertion.
+
+        Verification moved off the export and onto a worktree because several IT cases need a real
+        working copy — `M13` asks `selftest` to notice a dirty covered path, which is a `git status`,
+        and an export has no `.git` by construction. That is only sound if the worktree IS the artifact,
+        byte for byte. This is the test that says so, against real git rather than a mock: if it ever
+        fails, `verify` is testing something other than what shipped and the pipeline's central claim
+        is void.
+        """
+        from fleet.release import tree_sha
+        from fleet.release_git import Repo
+        self._tagged_tree()
+        repo = Repo(self.repo)
+        export = self.tmp / "as-exported"
+        repo.export("fleet/v0.2.0", export)
+        worktree = self.tmp / "as-worktree"
+        repo.worktree_add("fleet/v0.2.0", worktree)
+        self.addCleanup(repo.worktree_remove, worktree)
+        self.assertEqual(tree_sha(export), tree_sha(worktree))
+
+    def test_a_worktree_is_a_real_working_copy_git_can_answer_status_in(self):
+        """Not merely the right bytes — the property the export could not provide.
+
+        Without this the test above passes for a `worktree_add` implemented as a plain copy, which would
+        leave `M13` exactly as broken as it was while looking fixed.
+        """
+        import subprocess
+        from fleet.release_git import Repo
+        self._tagged_tree()
+        repo = Repo(self.repo)
+        worktree = self.tmp / "wt-status"
+        repo.worktree_add("fleet/v0.2.0", worktree)
+        self.addCleanup(repo.worktree_remove, worktree)
+        clean = subprocess.run(["git", "-C", str(worktree), "status", "--porcelain"],
+                               capture_output=True, text=True)
+        self.assertEqual(clean.returncode, 0, "git cannot answer status inside the worktree")
+        self.assertEqual(clean.stdout.strip(), "", "a fresh worktree at a tag is clean")
+        # And it must NOTICE dirt, which is precisely what M13 needs and the export cannot do.
+        (worktree / "readme.md").write_text("edited\n")
+        dirty = subprocess.run(["git", "-C", str(worktree), "status", "--porcelain"],
+                               capture_output=True, text=True)
+        self.assertIn("readme.md", dirty.stdout)
+
+    def test_a_worktree_is_writable_so_the_orchestrator_can_write_its_registers(self):
+        """The export is `chmod -R a-w` and `run-all.sh` writes `RESULTS*.tsv` beside itself. That is
+        what forced the writable-copy dance the worktree replaces, so it has to actually be writable."""
+        from fleet.release_git import Repo
+        self._tagged_tree()
+        repo = Repo(self.repo)
+        worktree = self.tmp / "wt-write"
+        repo.worktree_add("fleet/v0.2.0", worktree)
+        self.addCleanup(repo.worktree_remove, worktree)
+        (worktree / "RESULTS.tsv").write_text("case\tverdict\n")
+        self.assertTrue((worktree / "RESULTS.tsv").is_file())
+
+    def test_removing_a_worktree_leaves_no_registration_behind(self):
+        """`git worktree remove` plus a prune. A worktree left registered makes the NEXT verify of the
+        same version fail on a path that already exists, which reads as a release defect."""
+        from fleet.release_git import Repo
+        self._tagged_tree()
+        repo = Repo(self.repo)
+        worktree = self.tmp / "wt-gone"
+        repo.worktree_add("fleet/v0.2.0", worktree)
+        repo.worktree_remove(worktree)
+        self.assertFalse(worktree.exists())
+        listed = self.run("worktree", "list").stdout
+        self.assertNotIn("wt-gone", listed)
+
+    def test_a_worktree_can_be_taken_twice_in_a_row_at_the_same_tag(self):
+        """Two verifies of one release, sequentially. The first must leave nothing that blocks the
+        second — the failure mode a bare `worktree remove` without `prune` produces."""
+        from fleet.release_git import Repo
+        self._tagged_tree()
+        repo = Repo(self.repo)
+        for _ in range(2):
+            worktree = self.tmp / "wt-twice"
+            repo.worktree_add("fleet/v0.2.0", worktree)
+            repo.worktree_remove(worktree)
+
     def test_a_failing_git_command_names_the_command_and_the_repository(self):
         # The injected runner hands back `(rc, stdout)` and no stderr, so the refusal has to be
         # actionable on its own: it names what was run and where, which the operator can re-run.
@@ -457,6 +606,40 @@ class VerifyCase(unittest.TestCase):
 
     # --- fixtures ------------------------------------------------------------------------------------
 
+    class FakeRepo:
+        """Stands in for `release_git.Repo`'s worktree half.
+
+        `II-7`. The suite now runs in a `git worktree` at the release's tag rather than in a copy of the
+        export, because several cases need a real `.git`. Real git is exercised against a real repository
+        in `GitCase` — including the assertion that a worktree hashes identically to the export of the
+        same tag, which is the claim the whole approach rests on. Here the interesting behaviour is what
+        `Verify` does with the tree it is handed, so the worktree is simulated by a copy: same shape, same
+        lifecycle, no 100ms of git per case.
+        """
+
+        def __init__(self, source):
+            self.source = pathlib.Path(source)
+            self.added, self.removed = [], []
+
+        def worktree_add(self, tag, dest):
+            import shutil
+            dest = pathlib.Path(dest)
+            self.added.append((tag, dest))
+            shutil.copytree(self.source, dest, symlinks=True)
+            # A real worktree is writable and carries a `.git`. Both matter: the orchestrator writes its
+            # registers into the tree, and `tree_sha` must ignore the `.git` for the manifest check to
+            # pass. Reproduced here so a case cannot pass against a `tree_sha` that stopped excluding it.
+            for path in [dest] + sorted(dest.rglob("*")):
+                if not path.is_symlink():
+                    path.chmod(path.stat().st_mode | 0o200)
+            (dest / ".git").write_text("gitdir: /fake/.git/worktrees/scratch\n")
+            return dest
+
+        def worktree_remove(self, dest):
+            import shutil
+            self.removed.append(pathlib.Path(dest))
+            shutil.rmtree(dest, ignore_errors=True)
+
     def _export(self, version="0.1.0", recorded_sha=None):
         """A release directory shaped like a real export, with a MANIFEST that agrees with it."""
         from fleet.release import META_DIR, Releases, Version, tree_sha
@@ -469,8 +652,65 @@ class VerifyCase(unittest.TestCase):
         (root / "fleet" / "it" / "run-all.sh").write_text("#!/usr/bin/env bash\nexit 0\n")
         (root / "fleet" / "src" / "fleet" / "__init__.py").write_text('__version__ = "0.1.0"\n')
         (root / META_DIR).mkdir(parents=True)
-        rel.write_manifest(v, {"version": version, "tree_sha": recorded_sha or tree_sha(root)})
+        rel.write_manifest(v, {"version": version, "tag": f"fleet/v{version}",
+                               "tree_sha": recorded_sha or tree_sha(root)})
         return rel, v
+
+    def _repo_for(self, rel, v):
+        """The fake repository a verification worktree comes from, sourced from the export itself so the
+        worktree's `tree_sha` matches the MANIFEST exactly as a real one does."""
+        return self.FakeRepo(rel.dir_for(v))
+
+    # --- II-7: a release that cannot be verified says so, rather than verifying the wrong thing -------
+
+    def test_a_release_recording_no_source_repo_is_refused_not_verified(self):
+        """The refusal that makes the worktree approach safe.
+
+        With no repository there is nowhere to take a worktree from, and the tempting fallback is to run
+        the suite against the export "just this once". That is exactly the state that produced a red
+        `M13` and made it look like a defect in `selftest`. A release cut before `source_repo` existed
+        must be TOLD where its tag lives; it is not quietly verified against a tree the suite cannot
+        judge.
+        """
+        from fleet.errors import Refused
+        from fleet.release_verify import Verify
+        rel, v = self._export()
+        rel.write_manifest(v, {"version": "0.1.0"})          # no source_repo, as an older cut has none
+        with self.assertRaises(Refused) as caught:
+            Verify(rel, v, self.Runner()).run()
+        # The two structured fields, not the prose: every alarm in this package carries the action that
+        # clears it and who takes it, and asserting them separately is what stops the message drifting
+        # into "refused" with the remedy left in someone's head.
+        self.assertIn("--repo", caught.exception.clears_when,
+                      "the refusal must name the flag that clears it")
+        self.assertIn("source_repo", caught.exception.clears_when)
+        self.assertTrue(caught.exception.clears_who)
+        self.assertIn("worktree", str(caught.exception))
+
+    def test_an_injected_repo_overrides_what_the_manifest_records(self):
+        """`--repo` wins. A tag outlives the path it was cut from — the checkout moves, the box is
+        rebuilt — so the recorded path is a fact about history, not about this filesystem."""
+        from fleet.release_verify import Verify
+        rel, v = self._export()
+        rel.write_manifest(v, {"version": "0.1.0", "tag": "fleet/v0.1.0",
+                               "source_repo": "/gone/nowhere"})
+        repo = self._repo_for(rel, v)
+        Verify(rel, v, self.Runner(watcher=self._emit_results), repo=repo).run()
+        self.assertEqual([tag for tag, _ in repo.added], ["fleet/v0.1.0"],
+                         "the injected repo was not the one the worktree came from")
+
+    def test_the_worktree_is_removed_even_when_the_tree_does_not_match_the_manifest(self):
+        """The refusal path is the one that fires when something is actually wrong, and it is the worst
+        moment to leave a worktree registered: the NEXT verify of this version would then fail on git
+        bookkeeping rather than on the mismatch, and read as a defect in the release."""
+        from fleet.errors import Refused
+        from fleet.release_verify import Verify
+        rel, v = self._export(recorded_sha="deadbeef" * 8)
+        repo = self._repo_for(rel, v)
+        with self.assertRaises(Refused):
+            Verify(rel, v, self.Runner(), repo=repo).run()
+        self.assertEqual(len(repo.removed), 1, "the worktree was left behind on the refusal path")
+        self.assertFalse(repo.removed[0].exists())
 
     def _freeze(self, root):
         """`chmod -R a-w`, which is what a cut leaves behind. Restored on teardown so the temp tree can
@@ -625,7 +865,7 @@ class VerifyCase(unittest.TestCase):
             seen.append((command, str(here.resolve())))
 
         runner = self.Runner(watcher=watch)
-        Verify(rel, v, runner).run()
+        Verify(rel, v, runner, repo=self._repo_for(rel, v)).run()
 
         self.assertEqual(len(seen), 1, f"the IT suite ran {len(seen)} times, not once")
         command, where = seen[0]
@@ -641,7 +881,7 @@ class VerifyCase(unittest.TestCase):
     def test_the_working_copy_is_gone_when_the_run_ends(self):
         from fleet.release_verify import Verify
         rel, v = self._export()
-        Verify(rel, v, self.Runner(watcher=self._emit_results)).run()
+        Verify(rel, v, self.Runner(watcher=self._emit_results), repo=self._repo_for(rel, v)).run()
         self.assertEqual(self._copies_under(rel), [],
                          "a full copy of the release was left in the releases root: at ~5 MB an export "
                          "and one copy per verified version, this is how a releases root fills a disk")
@@ -667,8 +907,8 @@ class VerifyCase(unittest.TestCase):
         names = []
         runner = self.Runner(watcher=lambda command, where: (
             names.append(where) if "run-all.sh" in command else None))
-        Verify(rel, v, runner).run()
-        Verify(rel, v, runner).run()
+        Verify(rel, v, runner, repo=self._repo_for(rel, v)).run()
+        Verify(rel, v, runner, repo=self._repo_for(rel, v)).run()
         self.assertEqual(len(names), 2)
         self.assertNotEqual(names[0], names[1],
                             f"both runs used the working copy {names[0]}, which is a staging path "
@@ -681,7 +921,7 @@ class VerifyCase(unittest.TestCase):
         rel, v = self._export()
         export = rel.dir_for(v)
         runner = self.Runner(watcher=self._emit_results)
-        Verify(rel, v, runner).run()
+        Verify(rel, v, runner, repo=self._repo_for(rel, v)).run()
         command, where, env = runner.call_matching("unittest")
         self.assertIn("discover -s tests", command)
         self.assertEqual(where, str(export / "fleet"))
@@ -696,7 +936,7 @@ class VerifyCase(unittest.TestCase):
         from fleet.release_verify import Verify
         rel, v = self._export()
         runner = self.Runner(watcher=self._emit_results)
-        Verify(rel, v, runner).run()
+        Verify(rel, v, runner, repo=self._repo_for(rel, v)).run()
         _, where, env = runner.call_matching("run-all.sh")
         self.assertEqual(env.get("PYTHONPATH"), str(pathlib.Path(where) / "fleet" / "src"))
 
@@ -704,12 +944,12 @@ class VerifyCase(unittest.TestCase):
         from fleet.release_verify import FULL_ROSTER, GATE_ROSTER, Verify, read_verdict
         rel, v = self._export()
         gate = self.Runner(watcher=self._emit_results)
-        Verify(rel, v, gate).run()
+        Verify(rel, v, gate, repo=self._repo_for(rel, v)).run()
         self.assertNotIn("--full", gate.call_matching("run-all.sh")[0])
         self.assertEqual(read_verdict(rel.dir_for(v) / ".release")["roster"], GATE_ROSTER)
 
         full = self.Runner(watcher=self._emit_results)
-        Verify(rel, v, full).run(full=True)
+        Verify(rel, v, full, repo=self._repo_for(rel, v)).run(full=True)
         self.assertIn("--full", full.call_matching("run-all.sh")[0])
         self.assertEqual(read_verdict(rel.dir_for(v) / ".release")["roster"], FULL_ROSTER)
 
@@ -718,7 +958,7 @@ class VerifyCase(unittest.TestCase):
         rel, v = self._export()
         export = rel.dir_for(v)
         self._freeze(export)
-        self.assertEqual(Verify(rel, v, self.Runner(watcher=self._emit_results)).run(), GREEN)
+        self.assertEqual(Verify(rel, v, self.Runner(watcher=self._emit_results), repo=self._repo_for(rel, v)).run(), GREEN)
         evidence = export / ".release" / "evidence"
         self.assertEqual(read_verdict(export / ".release")["suites"], {"hermetic": GREEN, "it": GREEN})
         self.assertTrue((evidence / "hermetic.log").is_file())
@@ -749,7 +989,7 @@ class VerifyCase(unittest.TestCase):
         rel, v = self._export()
         export = rel.dir_for(v)
         # The orchestrator exits 0 — the defect's precondition.
-        self.assertEqual(Verify(rel, v, self.Runner(watcher=emit_a_failure)).run(), RED)
+        self.assertEqual(Verify(rel, v, self.Runner(watcher=emit_a_failure), repo=self._repo_for(rel, v)).run(), RED)
         self.assertEqual(read_verdict(export / ".release")["suites"]["it"], RED)
         failures = (export / ".release" / "evidence" / "it-FAILURES.txt").read_text()
         self.assertIn("A1b[A]", failures)
@@ -758,7 +998,7 @@ class VerifyCase(unittest.TestCase):
         from fleet.release_verify import GREEN, RED, Verify, read_verdict
         rel, v = self._export()
         runner = self.Runner(codes=[("run-all.sh", 1)], watcher=self._emit_results)
-        self.assertEqual(Verify(rel, v, runner).run(), RED)
+        self.assertEqual(Verify(rel, v, runner, repo=self._repo_for(rel, v)).run(), RED)
         suites = read_verdict(rel.dir_for(v) / ".release")["suites"]
         self.assertEqual(suites, {"hermetic": GREEN, "it": RED})
 
@@ -777,7 +1017,8 @@ class VerifyCase(unittest.TestCase):
                 return code, out, err
 
         self.assertEqual(Verify(rel, v, Moving(codes=[("run-all.sh", 1)],
-                                               watcher=self._emit_results)).run(), INCONCLUSIVE)
+                                               watcher=self._emit_results),
+                                repo=self._repo_for(rel, v)).run(), INCONCLUSIVE)
         self.assertEqual(len(board), 2, "the live-subject set must be sampled before AND after the run")
 
 
@@ -877,7 +1118,18 @@ class CliCase(unittest.TestCase):
         self._git(repo, "commit", "-q", "-m", "the seed commit")
         return repo
 
-    def seed(self, version, state=None, verdict=None, roster=None):
+    def verifiable(self, version):
+        """A seeded release that `release-verify` can actually take a worktree from.
+
+        `II-7`. Verification runs the IT suite in a `git worktree` at the release's tag, because the suite
+        cannot judge an export. So a release that records no `source_repo` is REFUSED rather than verified
+        against the export — a real repository with the real tag is part of the fixture now, not scenery.
+        """
+        repo = self.repo()
+        self._git(repo, "tag", "-a", f"fleet/v{version}", "-m", f"r{version}")
+        return self.seed(version, source_repo=str(repo))
+
+    def seed(self, version, state=None, verdict=None, roster=None, source_repo=None):
         """One release directory, with an optional STATE and an optional recorded verdict."""
         from fleet.release import CANDIDATE, Releases, Version
         from fleet.release_verify import GATE_ROSTER, GREEN, write_verdict
@@ -885,7 +1137,10 @@ class CliCase(unittest.TestCase):
         parsed = Version.parse(version)
         meta = rel.dir_for(parsed) / ".release"
         meta.mkdir(parents=True, exist_ok=True)
-        rel.write_manifest(parsed, {"version": version, "cut_at": "2026-08-02T00:00:00Z"})
+        manifest = {"version": version, "cut_at": "2026-08-02T00:00:00Z"}
+        if source_repo is not None:
+            manifest.update({"source_repo": source_repo, "tag": f"fleet/v{version}"})
+        rel.write_manifest(parsed, manifest)
         rel.set_state(parsed, state or CANDIDATE)
         if verdict is not None:
             write_verdict(meta, [("hermetic", verdict, "e", "n"), ("it", verdict, "e", "n")],
@@ -1114,7 +1369,7 @@ class CliCase(unittest.TestCase):
         # fourth spawn seam in the package.
         from fleet import EXIT_OK
         from fleet.release_verify import GREEN, read_verdict
-        rel, version = self.seed("0.1.0")
+        rel, version = self.verifiable("0.1.0")
         (rel.dir_for(version) / "fleet" / "it").mkdir(parents=True)
         code = self.run_verb("release-verify", "--version", "0.1.0", "--releases", str(self.releases),
                              "--home", str(self.home))
@@ -1129,7 +1384,7 @@ class CliCase(unittest.TestCase):
 
     def test_verify_answers_attention_when_the_verdict_is_not_green(self):
         from fleet import EXIT_ATTENTION
-        rel, version = self.seed("0.1.0")
+        rel, version = self.verifiable("0.1.0")
         (rel.dir_for(version) / "fleet" / "it").mkdir(parents=True)
         self.rc = 1
         code = self.run_verb("release-verify", "--version", "0.1.0", "--releases", str(self.releases),

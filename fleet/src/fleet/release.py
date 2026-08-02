@@ -90,18 +90,30 @@ def _clean(value) -> str:
 
 
 def tree_sha(root) -> str:
-    """A hash of the payload: sorted `mode path sha256`, one line per file, `META_DIR` excluded.
+    """A hash of the payload: sorted `mode path sha256`, one line per file.
 
-    Computed from the FILESYSTEM rather than from git, because `verify` recomputes it on a copy of the
-    export to prove that what was tested is what shipped -- and a copy has no git object database.
-    The executable bit is included: a launcher that lost `+x` is a broken artifact that hashes identically
-    if you only hash content.
+    Two entries are excluded, and only at the ROOT: `META_DIR`, which describes the release rather than
+    being part of it, and `.git`, which is repository metadata and never shipped content.
+
+    Computed from the FILESYSTEM rather than from git, because `verify` recomputes it on a tree that may
+    have no git object database at all. The executable bit is included: a launcher that lost `+x` is a
+    broken artifact that hashes identically if you only hash content.
+
+    `.git` is excluded for `II-7`. Verification runs the IT suite from `git worktree add <scratch> <tag>`
+    rather than from the export, because several cases need a real working copy -- `M13` asks `selftest`
+    to notice a dirty covered path, which is a `git status`, and an export has no `.git` by construction.
+    This hash is what proves the worktree IS the artifact, and a worktree carries a `.git` FILE at its
+    root pointing back at the parent repository. Without the exclusion the comparison could never
+    succeed and the approach is unavailable. It is a no-op for an export: `git archive` writes no `.git`.
+
+    The exclusion is the root entry named exactly `.git`, NOT any path containing "git". `.gitignore`,
+    `.gitattributes` and `bin/git-helper` are shipped content and stay in the hash.
     """
     root = Path(root)
     lines = []
     for path in sorted(root.rglob("*")):
         rel = path.relative_to(root)
-        if rel.parts and rel.parts[0] == META_DIR:
+        if rel.parts and rel.parts[0] in (META_DIR, ".git"):
             continue
         if path.is_symlink():
             lines.append(f"120000 {rel} {hashlib.sha256(os.readlink(path).encode()).hexdigest()}")
