@@ -1,5 +1,12 @@
 # fleet — changelog
 
+## fleet/v0.2.3 — 2026-08-02T19:31:09Z
+Cut from 8fd20d9 on `live` (upstream base pre-merge-fleet-skills-20260731). 3 commit(s) since fleet/v0.2.2.
+
+- 9767679 fleet: reconcile derives a severity, and a stranded slot is one
+- ecae22c release: a release carries the evidence its FAIL rows cite
+- 8fd20d9 fleet: the send contract is a condition, not a delay (FI-15 refuted and fixed)
+
 ## fleet/v0.2.2 — 2026-08-02T18:45:51Z
 Cut from 956d168 on `live` (upstream base pre-merge-fleet-skills-20260731). 1 commit(s) since fleet/v0.2.1.
 
