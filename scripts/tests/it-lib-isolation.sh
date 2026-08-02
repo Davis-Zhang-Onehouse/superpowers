@@ -37,6 +37,15 @@ case "$out" in 'FAIL|'*itfleet-B-worker*) note "ok   the leak FAILs and names th
 out="$(classify $'dt-live\nzsh' $'claude_mor_design_chinmay\ndt-live\nzsh')"
 check "a foreign session appearing is a NOTE" "NOTE" "${out%%|*}"
 
+# --- a harness-prefixed session VANISHING is a hard failure too --------------------------------------
+# The direction W1-7's negative control actually injects: it doctors the baseline by ADDING an itfleet-
+# name, which surfaces as vanished. The first version of the classifier checked only `appeared`, so this
+# fell through to NOTE and W1-7 passed while asserting nothing.
+out="$(classify $'dt-live\nitfleet-W1-ghost\nzsh' $'dt-live\nzsh')"
+check "a harness-prefixed session vanishing is a FAIL" "FAIL" "${out%%|*}"
+case "$out" in 'FAIL|'*itfleet-W1-ghost*) note "ok   the vanished harness session is named" ;;
+               *) note "FAIL the vanished harness session is not named: $out"; fails=1 ;; esac
+
 # --- a dt- session disappearing is still a hard failure ----------------------------------------------
 out="$(classify $'dt-live\nzsh' $'zsh')"
 check "a dt- session disappearing is a FAIL" "FAIL" "${out%%|*}"
