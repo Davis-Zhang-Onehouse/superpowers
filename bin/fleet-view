@@ -5,6 +5,7 @@
     fleet-view board
     fleet-view leases
     fleet-view roadmap         needs --instant, or infers the coordinator
+    fleet-view releases        what is deployed, what has been cut, and why it moved
     fleet-view --wide          do not truncate long notes
     fleet-view --cadence       show the cadence banner (hidden by default)
     fleet-view --no-color
@@ -62,6 +63,13 @@ STATE_STYLE = {
     "PARKED": (YELLOW, "?"), "AWAITING-CI": (BLUE, "⋯"), "COMPLETE": (DIM, "✓"),
     "DEAD": (RED, "✗"), "UNREACHABLE": (YELLOW, "~"), "PENDING-LAUNCH": (DIM, "·"),
     "UNKNOWN-SESSION": (DIM, "·"), "STALE-LEASE": (YELLOW, "~"),
+}
+
+#: The same idea for the release register's `action` column. Coarse for the same reason: the question a
+#: reader brings to a deploy history is "did something go backwards", and one glyph answers it.
+ACTION_STYLE = {
+    "DEPLOY": (GREEN, "↑"), "ROLLBACK": (RED, "↓"), "CUT": (DIM, "·"),
+    "VERIFY": (BLUE, "⋯"), "PROMOTE": (GREEN, "✓"), "DEV": (YELLOW, "~"),
 }
 
 def width():
@@ -330,6 +338,59 @@ def view_roadmap(wide, extra):
     return blocks(entries), err
 
 
+def view_releases(wide):
+    """What is deployed, what has been cut, and why the pointer last moved.
+
+    Three porcelain reads, laid out. Nothing here decides anything: `current`, every state and every
+    history row are read as FIELDS off `release-status`, `release-list` and `release-history`. Porcelain
+    emits no header row, so every row returned is data — slicing the first one off would silently hide the
+    oldest release and the oldest history entry.
+
+    The history is a LIST, not a table. `reason` is operator free text, written down at the moment of a
+    rollback precisely so it would not be lost, and every table in this file elides a value to fit — one
+    column cap away from cutting the sentence in half. The releases and the deployed pointer stay tabular
+    and key/value: those fields are short, uniform, and nothing in them is prose.
+    """
+    status, err, _ = run("release-status")
+    listing, listing_err, _ = run("release-list")
+    history, history_err, _ = run("release-history", ("--limit", "10"))
+    w = width()
+
+    out = []
+    if status:
+        kw = max(len(r.get("field", "")) for r in status)
+        for r in status:
+            value = (r.get("value") or "").strip() or "-"
+            head = "  " + DIM(r.get("field", "").ljust(kw)) + "  "
+            for i, line in enumerate(wrap(value, max(20, w - kw - 4), kw + 4)):
+                out.append(head + line if i == 0 else line)
+    else:
+        out.append("  " + DIM("(nothing deployed)"))
+
+    out.append(BOLD("\nRELEASES"))
+    if listing:
+        out.extend(table([{"version": r.get("version", ""), "state": r.get("state", ""),
+                           "cut_at": r.get("cut_at", ""), "current": r.get("current", ""),
+                           "_style": GREEN, "_style_col": "current"} for r in listing],
+                         ("version", "state", "cut_at", "current"), None, wide))
+    else:
+        out.append("  " + DIM("(nothing cut)"))
+
+    out.append(BOLD("\nHISTORY (most recent last)"))
+    entries = []
+    for r in history:
+        action = r.get("action", "")
+        style, glyph = ACTION_STYLE.get(action, (lambda t: t, " "))
+        was, now = r.get("from_version", "") or "-", r.get("version", "") or "-"
+        evidence = (r.get("evidence") or "").strip()
+        entries.append({"state": action, "subject": f"{was} → {now}", "style": style, "glyph": glyph,
+                        "meta": [r.get("ts", ""), r.get("actor", ""), r.get("host", ""),
+                                 evidence if evidence not in ("", "-") else ""],
+                        "note": r.get("reason", "")})
+    out.extend(blocks(entries) if entries else ["  " + DIM("(nothing deployed yet)")])
+    return out, err or listing_err or history_err
+
+
 def main():
     args = [a for a in sys.argv[1:]]
     wide = "--wide" in args;      args = [a for a in args if a != "--wide"]
@@ -365,6 +426,9 @@ def main():
     if verb == "roadmap":
         print(BOLD("\nROADMAP"))
         lines, err = view_roadmap(wide, extra); errs.append(err); print("\n".join(lines))
+    if verb == "releases":
+        print(BOLD("\nDEPLOYED"))
+        lines, err = view_releases(wide); errs.append(err); print("\n".join(lines))
 
     if show_cadence:
         for err in errs:
