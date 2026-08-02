@@ -156,6 +156,46 @@ it_zero_delta() {         # it_zero_delta <case> <cmd...>   over FLEET_HOME + sl
 # DISAPPEARING is the thing that must never happen.
 it_live_tmux_sessions() { tmux ls -F '#{session_name}' 2>/dev/null | sort; }
 
+# it_assert_no_private_leak <case-id> <private-names-file> [<note-suffix>]
+#
+# Every session name this section created on its PRIVATE server, asserted ABSENT from the default one.
+#
+# `II-1`. This is the one thing the byte-comparisons in §B/§C/§D/§group3 were catching that
+# `it_classify_session_delta` cannot, and the reason they could not simply be deleted. The classifier
+# decides by NAME SHAPE: an `itfleet-*` name appearing on the live server is a leak, anything else
+# appearing is the operator using a shared box. But `cli._do_dispatch` hardcodes `dt-{name}` for the
+# session it starts, so the sessions §D and §group3 create do NOT carry a harness prefix — a leaked one
+# looks exactly like another operator's dispatch and is downgraded to NOTE.
+#
+# Byte-comparing the whole live list did catch that, at the price of failing on any unrelated session
+# appearing or vanishing mid-section, which on this box happens constantly. This asserts the EXACT names
+# instead: no false positive from operator churn, and strictly stronger than byte-equality for the leak
+# itself, because it names the leaked session rather than printing a diff of everything that moved.
+#
+# Called AFTER the section's private-server cleanup, deliberately: killing a session on the private
+# socket cannot remove a copy that leaked to the default server, so a name still present here after the
+# kill is a leak and not a race.
+it_assert_no_private_leak() {
+  local case_id="$1" names_file="$2" note="${3:-}"
+  local live leaked="" n=0
+  live="$(it_live_tmux_sessions)"
+  if [ -s "$names_file" ]; then
+    while read -r s; do
+      [ -n "$s" ] || continue
+      n=$((n+1))
+      printf '%s\n' "$live" | grep -qxF -- "$s" && leaked="$leaked $s"
+    done < "$names_file"
+  fi
+  if [ -n "${leaked// /}" ]; then
+    it_fail "$case_id" "$names_file" \
+      "session(s) this section created on its private server are ALSO on the DEFAULT server:$leaked. The harness works on socket ${IT_TMUX_SOCKET:-?} and nothing it starts may reach the default one. These names are dispatch sessions (\`dt-*\`, hardcoded by cli._do_dispatch), so they carry no harness prefix and the shape-based classifier reads them as another operator's work — this case is what tells the difference."
+    return 1
+  fi
+  it_pass "$case_id" "$names_file" \
+    "none of the $n session(s) this section created on socket ${IT_TMUX_SOCKET:-?} appears on the default server${note:+ ($note)}"
+  return 0
+}
+
 # The live `claude` PID SET, sorted. Not a count.
 #
 # §D's first run failed its claude-count assertion on 9 -> 8 — a DECREASE, caused by the operator's own
