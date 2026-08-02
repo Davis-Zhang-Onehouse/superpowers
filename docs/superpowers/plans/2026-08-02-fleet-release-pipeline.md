@@ -89,6 +89,26 @@ calls `ctx.runner`, never a spawner"* — which is exactly what lets the outward
   `set_state`. Excluding is cleaner — `META_DIR` is already excluded from `tree_sha` precisely because it
   is the mutable half of the artifact.
 
+**10. TASKS 7 AND 8 — what Task 4 actually shipped.** Task 4 is DONE (`7920296`), suite at **1115 tests OK**.
+
+- **The porcelain schemas are declared, so Task 7 must read them rather than invent a layout.**
+  `cli.PORCELAIN_COLUMNS` now carries: `release-cut/verify/promote/deploy/rollback/status` →
+  `KV_COLUMNS = ("field", "value")`; `release-list` → `RELEASE_COLUMNS = ("version", "state", "cut_at",
+  "current")`; `release-history` → `release.HISTORY_COLUMNS`. `TestCadence` asserts every porcelain line
+  has exactly the declared field count, so the view can rely on the shape — and must not assume a header
+  row where there is none.
+- **`release-status` emits `field<TAB>value` pairs**, not a bespoke block. In `--dev` it additionally
+  emits `checkout`, `head` and `dirty` rows.
+- **Task 8's Q6 rationale in the plan is wrong, though the assertion is right.** The plan says the export
+  cannot contain the changelog because it comes from the tag; in fact the tag is cut *after* the changelog
+  commit, so the payload does carry `fleet/CHANGELOG.md`. The real reason `<export>/.release/CHANGELOG.md`
+  exists is that the artifact must carry **its own section** — which is exactly what Q6 checks by grepping
+  0.1.0's copy for `^- ` and requiring none.
+- **Every mutating release verb honours `--dry-run`** and returns before the first write, including before
+  `rel.lock()` (which mkdirs). §Q may rely on that.
+- **`release-cut` now gates on the repo being a fleet checkout** and on the predecessor's tag being present
+  in that checkout. §Q's fixture already creates `fleet/src/fleet/__init__.py`, so it satisfies the first.
+
 **9. A staging path variable may not be called `scratch`, `tmp`, or anything in `test_structure._TMP_NAMES`,
 and its name may not derive from the target.** Task 3's plan code had `scratch = self.export.parent /
 f".verify-{self.version}"` — which trips the ninth-copy guard on the variable name AND is FI-20's actual
