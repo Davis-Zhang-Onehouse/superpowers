@@ -77,7 +77,11 @@ b_skip() { it_skip "$1" "$(b_rel "${2:-}")" "${3:-}"; }
 #: The ONE bare-tmux reader in this file, used twice: the live-server pre-image and post-image. `env -u
 #: TMUX_TMPDIR` states in the call itself that this must reach the DEFAULT server, instead of leaving it
 #: to depend on whether the caller happens to run before the export or after the unset.
-b_live_tmux() { env -u TMUX_TMPDIR tmux ls 2>/dev/null | sort; }
+#: `II-2`. This was a bare `tmux ls`, whose lines carry a window count and an `(attached)` marker — so the
+#: comparison below failed when the operator merely attached to an unrelated session. `lib.sh` had already
+#: learned that and says so in `it_live_tmux_sessions`; §B declined the shared helper and so did not get
+#: the lesson. Names only now, exactly what the shared reader returns.
+b_live_tmux() { env -u TMUX_TMPDIR tmux ls -F '#{session_name}' 2>/dev/null | sort; }
 
 b_enter() {
   it_section B                                       # own FLEET_HOME, own slots, own socket; isolation asserted
@@ -110,13 +114,22 @@ b_leave() {
   after_tmux="$(b_live_tmux)"
   printf '%s\n' "$after_tmux" > "$OUT/live-tmux-after.txt"
   printf '%s\n' "$after_claude" > "$OUT/claude-count-after.txt"
-  if [ "$after_tmux" = "$B_TMUX_BEFORE" ]; then
-    b_pass "ISOLATION-B-live-tmux" "$OUT/live-tmux-after.txt" \
-      "live tmux server session list byte-identical; no dt- session created, killed or written to; §B's own private server ($IT_TMUX_SOCKET) held: ${private:-nothing — it was never started}"
+  #: `II-1`. This was a private byte-comparison — one of four copies of the isolation contract, so the fix
+  #: that taught `lib.sh` to CLASSIFY the delta rather than compare it reached `lib.sh` and stopped there.
+  #: Measured before the collapse: `B3`, a case that dispatches nothing and whose own sibling row states
+  #: "§B launches no process at all", FAILED because `claude_mor_design_chinmay` appeared on the default
+  #: server mid-run.
+  #:
+  #: The case id stays, so the register still carries a per-section isolation row; what is gone is the
+  #: second implementation of the rule. §B creates no session at all, so there is nothing for
+  #: `it_assert_no_private_leak` to check here and the classifier is this section's whole contract.
+  local b_classified
+  b_classified="$(it_classify_session_delta "$B_TMUX_BEFORE" "$after_tmux")"
+  if [ "${b_classified%%|*}" = FAIL ]; then
+    b_fail "ISOLATION-B-live-tmux" "$OUT/live-tmux-after.txt" "${b_classified#*|}"
   else
-    b_fail "ISOLATION-B-live-tmux" "$OUT/live-tmux-after.txt" \
-      "THE LIVE TMUX SERVER CHANGED: $(diff <(printf '%s' "$B_TMUX_BEFORE") \
-        <(printf '%s' "$after_tmux") | tr '\n' ' ')"
+    b_pass "ISOLATION-B-live-tmux" "$OUT/live-tmux-after.txt" \
+      "${b_classified#*|} §B's own private server ($IT_TMUX_SOCKET) held: ${private:-nothing — it was never started}"
   fi
   if [ "$after_claude" = "$B_CLAUDE_BEFORE" ]; then
     b_pass "ISOLATION-B-claude-count" "$OUT/claude-count-after.txt" \

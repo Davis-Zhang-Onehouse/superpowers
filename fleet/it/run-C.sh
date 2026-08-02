@@ -153,12 +153,20 @@ c_leave() {
   after_tmux="$(c_live_tmux)"
   printf '%s\n' "$after_tmux" > "$EV/out/live-tmux-after.txt"
   printf '%s\n' "$after_claude" > "$EV/out/claude-count-after.txt"
-  if [ "$after_tmux" = "$C_TMUX_BEFORE" ]; then
-    c_pass "ISOLATION-C-live-tmux" "$EV/out/live-tmux-after.txt" \
-           "live tmux session-name list byte-identical ($(printf '%s' "$after_tmux" | grep -c .) sessions, incl. $(printf '%s' "$after_tmux" | grep -c '^dt-') dt-); no dt- session created, killed or attached"
+  #: `II-1`. Was a private byte-comparison; now the shared classifier, so the isolation contract has one
+  #: implementation instead of four. The case id stays so the register keeps a per-section row.
+  #:
+  #: §C needs nothing beyond the classifier: every session it starts is named `$TMUX_PREFIX-*`, i.e.
+  #: `itfleet-C-*` (see `c_kill_sessions`), and a name of that shape appearing on the default server is
+  #: precisely what the classifier FAILs on. That is not true of §D and §group3, whose sessions the
+  #: product names `dt-*` — they carry `it_assert_no_private_leak` as well.
+  local c_classified
+  c_classified="$(it_classify_session_delta "$C_TMUX_BEFORE" "$after_tmux")"
+  if [ "${c_classified%%|*}" = FAIL ]; then
+    c_fail "ISOLATION-C-live-tmux" "$EV/out/live-tmux-after.txt" "${c_classified#*|}"
   else
-    c_fail "ISOLATION-C-live-tmux" "$EV/out/live-tmux-after.txt" \
-           "THE LIVE TMUX SERVER CHANGED: $(diff <(printf '%s\n' "$C_TMUX_BEFORE") <(printf '%s\n' "$after_tmux") | grep '^[<>]' | tr '\n' ' ')"
+    c_pass "ISOLATION-C-live-tmux" "$EV/out/live-tmux-after.txt" \
+           "${c_classified#*|} ($(printf '%s' "$after_tmux" | grep -c .) sessions, incl. $(printf '%s' "$after_tmux" | grep -c '^dt-') dt-); §C starts only ${TMUX_PREFIX}-* sessions and only on socket $IT_TMUX_SOCKET"
   fi
   if [ "$after_claude" = "$C_CLAUDE_BEFORE" ]; then
     c_pass "ISOLATION-C-claude-count" "$EV/out/claude-count-after.txt" \

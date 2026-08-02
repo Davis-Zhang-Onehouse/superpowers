@@ -128,7 +128,7 @@ d_skip() { it_skip "$1" "$(d_san "${2:-}")" "$(d_san "${3:-}")"; }
 #: This runner OWNS these rows: a re-run REPLACES them rather than appending a second opinion (SI-4).
 #: `enter|leave` are `it_assert_isolation`'s; `live-tmux|claude-count` are this file's own two. Every id
 #: is D-scoped, so §C's rows in a shared file could not be touched even if one were used.
-it_own_cases 'D[0-9]+[a-z]?|ISOLATION-D-(enter|leave|live-tmux|claude-count)'
+it_own_cases 'D[0-9]+[a-z]?|ISOLATION-D-(enter|leave|live-tmux|claude-count|private-leak)'
 
 # --- enter / leave --------------------------------------------------------------------------------
 
@@ -198,13 +198,32 @@ d_leave() {
   after_claude="$(d_claude_pids)"
   after_tmux="$(d_live_tmux)"
   printf '%s\n' "$after_tmux" > "$EV/out/live-tmux-after.txt"
-  if [ "$after_tmux" = "$D_LIVE_BEFORE" ]; then
-    d_pass ISOLATION-D-live-tmux "$EV/out/live-tmux-after.txt" \
-      "live tmux session-name set byte-identical across the section ($(printf '%s' "$after_tmux" | grep -c .) sessions, $(printf '%s' "$after_tmux" | grep -c '^dt-') of them dt-); every session this section created was on socket itfleet-D and is listed in D/out/private-tmux-sessions.txt"
+  #: `II-1`. Was a private byte-comparison — the copy that mattered most, because it is the one that
+  #: caught something the shared classifier cannot. Split into the two questions it was conflating, each
+  #: with a single implementation:
+  #:
+  #:   ISOLATION-D-live-tmux     the general contract, via `it_classify_session_delta`. Operator churn on
+  #:                             a shared box becomes a NOTE instead of a failure — the point of the fix.
+  #:   ISOLATION-D-private-leak  what the classifier CANNOT decide, and the reason this comparison could
+  #:                             not simply be deleted. The classifier judges by NAME SHAPE, and §D's
+  #:                             sessions are named `dt-<instant>` by `cli._do_dispatch`, not `itfleet-*`
+  #:                             — so a leaked one carries no harness prefix and reads as another
+  #:                             operator's dispatch. Asserting this section's EXACT session names is
+  #:                             free of false positives and strictly stronger than byte-equality for
+  #:                             the leak itself: it names the session instead of diffing everything.
+  #:
+  #: The old PASS note cited `private-tmux-sessions.txt` as evidence while asserting nothing whatever
+  #: about it. It is now an assertion rather than a citation.
+  local d_classified
+  d_classified="$(it_classify_session_delta "$D_LIVE_BEFORE" "$after_tmux")"
+  if [ "${d_classified%%|*}" = FAIL ]; then
+    d_fail ISOLATION-D-live-tmux "$EV/out/live-tmux-after.txt" "${d_classified#*|}"
   else
-    d_fail ISOLATION-D-live-tmux "$EV/out/live-tmux-after.txt" \
-      "THE LIVE TMUX SERVER CHANGED: $(diff <(printf '%s\n' "$D_LIVE_BEFORE") <(printf '%s\n' "$after_tmux") | grep '^[<>]' | tr '\n' ' ')"
+    d_pass ISOLATION-D-live-tmux "$EV/out/live-tmux-after.txt" \
+      "${d_classified#*|} ($(printf '%s' "$after_tmux" | grep -c .) sessions, $(printf '%s' "$after_tmux" | grep -c '^dt-') of them dt-)"
   fi
+  it_assert_no_private_leak ISOLATION-D-private-leak "$EV/out/private-tmux-sessions.txt" \
+    "dt-* dispatch sessions: no name-shape rule can catch these, only the exact names"
   printf '%s\n' "$after_claude" > "$EV/out/claude-pids-after.txt"
   added="$(comm -13 <(printf '%s\n' "$D_CLAUDE_BEFORE") <(printf '%s\n' "$after_claude") | tr '\n' ' ')"
   removed="$(comm -23 <(printf '%s\n' "$D_CLAUDE_BEFORE") <(printf '%s\n' "$after_claude") | tr '\n' ' ')"
