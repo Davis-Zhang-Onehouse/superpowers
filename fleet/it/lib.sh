@@ -249,12 +249,30 @@ it_classify_session_delta() {   # it_classify_session_delta <baseline> <after>
   appeared="$(comm -13 <(printf '%s\n' "$baseline" | sort) <(printf '%s\n' "$after" | sort) | grep -v '^$')"
   vanished="$(comm -23 <(printf '%s\n' "$baseline" | sort) <(printf '%s\n' "$after" | sort) | grep -v '^$')"
 
-  leaked="$(printf '%s\n' "$appeared" | grep -E "^(${TMUX_PREFIX:-itfleet-}|itfleet-)" | tr '\n' ' ')"
+  # A harness-prefixed name is a failure in EITHER direction, and the first version of this function only
+  # checked one. The harness never puts an `itfleet-*` session on the DEFAULT server at all, so such a name
+  # appearing means it leaked there, and such a name VANISHING from the baseline means either it leaked and
+  # was cleaned up, or the baseline is a fiction. Neither is ever legitimate.
+  #
+  # Checking only `appeared` silently disabled `W1-7`, the suite's own negative control: it doctors the
+  # baseline by ADDING `itfleet-W1-a-session-that-does-not-exist`, which surfaces as VANISHED, fell through
+  # to the NOTE branch, and passed. W1-7's failure text is the correct reading — "every isolation PASS in
+  # this file is unfalsifiable". A control that no longer controls is worse than no control, and this one
+  # was broken by the very change that was supposed to make the check more honest.
+  local prefix="^(${TMUX_PREFIX:-itfleet-}|itfleet-)"
+  leaked="$(printf '%s\n' "$appeared" | grep -E "$prefix" | tr '\n' ' ')"
+  local stray
+  stray="$(printf '%s\n' "$vanished" | grep -E "$prefix" | tr '\n' ' ')"
   killed="$(printf '%s\n' "$vanished" | grep -E '^dt-' | tr '\n' ' ')"
 
   if [ -n "${leaked// /}" ]; then
     printf 'FAIL|a session THIS HARNESS could have created appeared on the LIVE server: %s. The harness works on socket %s and must never reach the default one.\n' \
       "$leaked" "${IT_TMUX_SOCKET:-?}"
+    return 0
+  fi
+  if [ -n "${stray// /}" ]; then
+    printf 'FAIL|a harness-prefixed session was in the live baseline and is now gone: %s. The harness never creates one on the default server, so either it leaked there and was cleaned up, or the baseline is a fiction — both are failures.\n' \
+      "$stray"
     return 0
   fi
   if [ -n "${killed// /}" ]; then
