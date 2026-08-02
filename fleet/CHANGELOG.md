@@ -1,5 +1,10 @@
 # fleet — changelog
 
+## fleet/v0.2.1 — 2026-08-02T18:14:30Z
+Cut from b836240 on `live` (upstream base pre-merge-fleet-skills-20260731). 1 commit(s) since fleet/v0.2.0.
+
+- b836240 it: mutant trees carry tests/, which the II-3 registry import needs
+
 ## fleet/v0.2.0 — 2026-08-02T17:50:04Z
 Cut from 1944d67 on `live` (upstream base pre-merge-fleet-skills-20260731). 8 commit(s) since fleet/v0.1.1.
 
