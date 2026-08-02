@@ -276,4 +276,9 @@ it_assert_isolation P-leave
 bash "$IT_ROOT/bin/source-pin.sh" after "$OUT" || { echo "CONTAMINATED — no verdict" >&2; exit 3; }
 sed -i "s|$INSTANT/||g" "$RESULTS"
 echo "§P done: IT_FAILED=$IT_FAILED"
-exit "$IT_FAILED"
+#: `II-11`. Was `exit "$IT_FAILED"` — a COUNT. `exit` truncates modulo 256, so a section with
+#: exactly 256 failures reported SUCCESS, and one with 300 reported 44, a number meaning nothing
+#: to any reader. An exit status is a one-byte verdict, not a tally: the count is already printed
+#: on the line above and is in the register, which is where a consumer should read it anyway.
+if [ "${IT_FAILED:-0}" -eq 0 ]; then exit 0; fi
+exit 1

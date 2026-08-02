@@ -1612,5 +1612,7 @@ printf '\n== group 5 done; failures flagged: %s ==\n' "${IT_FAILED:-0}"
 # success for exactly 256 failures. That trap is still armed in the other eighteen runners and is
 # recorded as `II-11`; it is not fixed here because nothing should be reading these codes as counts
 # anyway — `run-all.sh` now derives its verdict from the FAIL rows in this run's registers.
-[ "${IT_FAILED:-0}" -eq 0 ] && exit 0
+#: Spelled exactly as the other eighteen runners spell it (`II-11`), so a reader comparing two runners
+#: sees one convention and a control can lift the same block from every file.
+if [ "${IT_FAILED:-0}" -eq 0 ]; then exit 0; fi
 exit 1
