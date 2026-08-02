@@ -2165,14 +2165,32 @@ Edit `/home/ubuntu/davis_root/.claude/settings.json`, changing `extraKnownMarket
 
 Verify by opening a **fresh** Claude session and confirming the skills still load — the plugin cache is a copy, so this only takes effect in a new session. If they do not, revert the one line; nothing else depends on it.
 
-- [ ] **Step 5: Audit the sync cron for a hard-coded marketplace path**
+- [ ] **Step 5: Confirm the sync cron audit (already performed — verify, don't repeat)**
+
+**Audited 2026-08-02; conclusion: no change needed.** Recorded here so it is not re-investigated:
+
+- Nothing in `sync.sh`, `lib.sh`, `apply.sh`, `finish.sh` or `bootstrap.sh` writes `settings.json` or
+  `extraKnownMarketplaces`. Step 4's edit will **not** be reverted overnight.
+- The refresh is `SPSYNC_REFRESH_CMD` in `.superpowers-sync/config`, and it is
+  `claude plugin marketplace update superpowers-dev` followed by uninstall/install. It re-reads whatever
+  path `settings.json` declares, so after Step 4 it pulls from `current` on its own.
+- `config:4` exports `CLAUDE_CONFIG_DIR=/home/ubuntu/davis_root/.claude`, so the 03:30 refresh targets the
+  right config dir despite the cron line not setting it.
+
+**One thing genuinely unverified, and it is the reason this step still exists.** `claude plugin marketplace
+update` has never been pointed at a `directory` source that is a **symlink**. If it resolves and caches the
+physical target rather than following the link on each refresh, a later `release-deploy` would not reach
+Claude sessions until the next refresh. Verify during Step 4:
 
 ```bash
-grep -n "superpowers\|marketplace\|plugin" /home/ubuntu/davis_root/.superpowers-sync/sync.sh \
-  /home/ubuntu/davis_root/.superpowers-sync/bootstrap.sh | head -30
+readlink /home/ubuntu/davis_root/fleet-releases/current
+CLAUDE_CONFIG_DIR=/home/ubuntu/davis_root/.claude claude plugin marketplace update superpowers-dev
+grep -rn "path" /home/ubuntu/davis_root/.claude/plugins/known_marketplaces.json
 ```
 
-The daily rebase refreshes the plugin. If it writes the marketplace path, it will undo Step 4 at 03:30. Adjust it to point at `current`, or record in `ISSUES.md` exactly what it does and why no change was needed. **Do not skip this step** — its failure mode is a silent overnight revert.
+If the recorded path is the resolved physical directory rather than `…/fleet-releases/current`, that is a
+finding: record it in the effort's `ISSUES.md` and keep `settings.json` pointing at `current` anyway — the
+next refresh still re-reads it, so the worst case is a one-cycle delay, not a broken deploy.
 
 - [ ] **Step 6: Cut, verify, promote and deploy the first real release**
 
