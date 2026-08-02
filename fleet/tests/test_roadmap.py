@@ -269,3 +269,79 @@ class TestProposalCitesTheCurrentFolder(unittest.TestCase):
         self.assertIn("-inflight-append-w", detail, "the recorded path is still shown")
         self.assertIn("no longer on disk", detail,
                       "a resolver that silently substitutes its input is worse than one that admits it failed")
+
+
+class TestProposalNote(unittest.TestCase):
+    """`I-2` — a worker can attach one line of narrative to a proposal.
+
+    Reported by a real worker: `fleet propose --note …` exited 2, `'--note' is not a flag propose
+    declares`, and nothing was written. Their workaround was to write a file and cite it as `--evidence`,
+    which works and is recorded in their RUNBOOK — but it makes every one-line summary a separate
+    artifact, and evidence paths were the ONLY narrative channel a worker had.
+
+    `--note` matches what the rest of the surface already does: `abort --reason`, `park --question`,
+    `milestone --title`. It is one line ABOUT the proposal, and it never replaces evidence — a status
+    claim still stands or falls on the paths it cites.
+    """
+
+    def setUp(self):
+        self.tmp = pathlib.Path(tempfile.mkdtemp())
+        self.addCleanup(shutil.rmtree, self.tmp, True)
+        self.road = Roadmap(self.tmp)
+        self.road.add(Milestone(id="M1", title="m", status="ready", deps=[], evidence=[]))
+        self.ev = self.tmp / "e.txt"
+        self.ev.write_text("x")
+
+    def test_a_proposal_carries_its_note_through_the_round_trip(self):
+        self.road.propose(self.tmp, "M1", "done", [str(self.ev)], note="the split landed; see §3")
+        [back] = self.road.proposals()
+        self.assertEqual(back.note, "the split landed; see §3",
+                         "the note did not survive being written and read back")
+
+    def test_a_proposal_without_a_note_is_still_valid(self):
+        """Every proposal written before this field existed has no `note` key. Loading one must not
+        raise — a new optional field that breaks the existing inbox is not an optional field."""
+        self.road.propose(self.tmp, "M1", "done", [str(self.ev)])
+        [back] = self.road.proposals()
+        self.assertEqual(back.note, "")
+
+    def test_an_old_proposal_on_disk_loads_without_the_key(self):
+        """The migration case, asserted against a file rather than against a model: a `proposals.json`
+        written by the previous version has no `note` key at all."""
+        import json
+        self.road.propose(self.tmp, "M1", "done", [str(self.ev)])
+        data = json.loads(self.road.proposals_path.read_text())
+        for entry in data["pending"]:
+            entry.pop("note", None)
+        self.road.proposals_path.write_text(json.dumps(data))
+        [back] = self.road.proposals()
+        self.assertEqual(back.note, "")
+        self.assertEqual(back.milestone, "M1")
+
+    def test_a_note_does_not_substitute_for_evidence(self):
+        """A note is prose and prose is not proof. `_check_evidence` must still refuse an empty
+        evidence list, or `--note` becomes the way to make an unevidenced claim."""
+        with self.assertRaises(BadInput):
+            self.road.propose(self.tmp, "M1", "done", [], note="trust me")
+
+    def test_the_note_reaches_the_coordinators_inbox(self):
+        """A note nobody reads is a note that does not exist.
+
+        This is `FI-14`'s lesson applied to `I-2` before it can become the same defect: fleet already
+        had one field it DETECTED and then dropped because nothing consumed it. Adding `--note` and not
+        rendering it would have shipped a second. The pending-proposal row is the coordinator's only
+        view of an unapplied proposal, so that is where the note has to appear.
+        """
+        self.road.propose(self.tmp, "M1", "done", [str(self.ev)], note="the split landed; see §3")
+        rows = [r for r in self.road.report() if r.kind == PENDING_PROPOSAL]
+        self.assertEqual(len(rows), 1)
+        self.assertIn("the split landed; see §3", rows[0].detail)
+
+    def test_a_proposal_without_a_note_renders_no_empty_quotes(self):
+        """The absence has to be invisible, not rendered as `""`. Every proposal on disk today has no
+        note, and a row that ends in empty quotes is noise on every existing inbox."""
+        self.road.propose(self.tmp, "M1", "done", [str(self.ev)])
+        [row] = [r for r in self.road.report() if r.kind == PENDING_PROPOSAL]
+        self.assertNotIn('""', row.detail)
+        self.assertNotIn("''", row.detail)
+        self.assertIn("evidence item(s)", row.detail, "the row lost its normal content")
