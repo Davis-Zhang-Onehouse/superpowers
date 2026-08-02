@@ -36,6 +36,7 @@
 #   live-pane.sh start <purpose> [--shell]   start a pane; prints the session name on stdout
 #   live-pane.sh type  <session> <text>      type text WITHOUT submitting (send-keys -l)
 #   live-pane.sh key   <session> <key>...    send raw key name(s), e.g. Enter
+#   live-pane.sh submit <session> <text>     type AND submit, waiting for the box to have it first
 #   live-pane.sh cap   <session>             capture the pane
 #   live-pane.sh guard <session>             `fleet pane-guard` against it; prints and returns its code
 #   live-pane.sh list                        every probe session on the private socket
@@ -103,6 +104,38 @@ cmd_start() {
 
 cmd_type()  { check_name "$1"; ptmux send-keys -t "=$1:" -l "$2"; }
 cmd_key()   { local s="$1"; check_name "$s"; shift; ptmux send-keys -t "=$s:" "$@"; }
+
+# submit <session> <text> — type it and press Enter, WITHOUT losing the Enter.
+#
+# `FI-15`. `send-keys <text>` immediately followed by `send-keys Enter` DROPS the Enter: the TUI has not
+# processed the text yet and the keystroke reaches a widget that is not ready for it. Measured on a real
+# pane (investigations/fi-15/timing.txt): at gap=0 `pane-guard` read 0 straight after the type — the text
+# had not even landed — and 10 after the Enter, meaning still queued, not submitted. At 50ms and above it
+# submits every time.
+#
+# The reporter's workaround was to send a printable character before Enter, which works and works for the
+# wrong reason: the extra round-trip buys the milliseconds. A leading space is a charm, not a mechanism,
+# and believing it leaves the channel one scheduling hiccup from silently dropping instructions again.
+#
+# So this waits for a CONDITION, not a duration. `pane-guard` already answers exactly the right question
+# — rc 10 is "there is text in the box" — so the contract is: type, poll until the box has it, then
+# Enter. A fixed `sleep` would be the same bug with a bigger constant, wrong on a loaded box.
+cmd_submit() {
+  local session="$1" text="$2" i g
+  check_name "$session"
+  cmd_type "$session" "$text"
+  for i in $(seq 1 50); do                      # 50 x 0.2s = 10s, generous for a keystroke to land
+    g="$(cmd_guard "$session")" || true
+    [ "$g" = 10 ] && break
+    sleep 0.2
+  done
+  if [ "${g:-}" != 10 ]; then
+    echo "live-pane: the text never reached the box (pane-guard=${g:-?} after 10s); NOT sending Enter, " \
+         "because an Enter into an empty box submits nothing and looks like it worked" >&2
+    return 1
+  fi
+  ptmux send-keys -t "=$session:" Enter
+}
 cmd_cap()   { check_name "$1"; ptmux capture-pane -p -t "=$1:"; }
 
 cmd_guard() {
@@ -178,6 +211,7 @@ case "${1:-}" in
   start)    shift; cmd_start "$@" ;;
   type)     shift; cmd_type "$@" ;;
   key)      shift; cmd_key "$@" ;;
+  submit)   shift; cmd_submit "$@" ;;
   cap)      shift; cmd_cap "$@" ;;
   guard)    shift; cmd_guard "$@" ;;
   list)     cmd_list ;;

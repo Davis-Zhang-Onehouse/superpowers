@@ -106,6 +106,35 @@ names the blocker, what clears it, and who clears it. `1` means a checker found 
 `fleet pane-guard` has its own codes because it is a contract for an external monitor: `0` safe, `10`
 queued-text, `11` mid-turn, `12` not-claude, `13` unknown-pane. Branch on the code before any send.
 
+### Delivering text to a pane: type, WAIT, then Enter
+
+`tmux send-keys <text>` immediately followed by `send-keys Enter` **loses the Enter**. The TUI has not
+processed the text yet, so the keystroke reaches a widget that is not ready for it and is discarded. The
+text then sits in the box unsubmitted and the worker looks like it simply stopped — which is exactly how
+it looks to an operator, and why this went undiagnosed for days (`FI-15`).
+
+Measured on a real pane, one session, varying only the gap:
+
+| gap between text and Enter | result |
+|---|---|
+| none | **Enter dropped** — `pane-guard` still `10`, text queued, nothing submitted |
+| 50ms and above | submitted |
+
+The rule is therefore a **condition, not a delay**:
+
+```bash
+tmux -L "$SOCKET" send-keys -t "=$SESSION:" -l "$TEXT"
+until fleet pane-guard --pane "$SESSION"; [ $? = 10 ]; do sleep 0.2; done   # the box HAS the text
+tmux -L "$SOCKET" send-keys -t "=$SESSION:" Enter
+```
+
+`pane-guard`'s `10` means precisely *"there is text in the box"*, so it is the gate. No `sleep` constant
+is right on a box under load. Reference implementation: `fleet/it/bin/live-pane.sh submit`.
+
+You will see the advice *"send a space before Enter"*. It works, and it works for the wrong reason — the
+extra round-trip buys the milliseconds. Treating that as the mechanism leaves the channel one scheduling
+hiccup from dropping instructions again, with a space keystroke as the charm that was meant to prevent it.
+
 ## Porcelain
 
 Every observation verb takes `--porcelain` and emits tab-separated fields whose column schema is declared
