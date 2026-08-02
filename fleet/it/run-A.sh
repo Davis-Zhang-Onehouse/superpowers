@@ -274,14 +274,41 @@ a1_real_store_untouched() {
   fi
 }
 
+# a1_detail <id>...  — what each NAMED sub-assertion asserts, and nothing about the others.
+#
+# `II-8`. The A1 aggregate used to recite all three descriptions whatever failed:
+#   "1 of 3 sub-assertions failed — see A1a (a store was written under $HOME/.fleet) / A1b (a verb did
+#    not refuse) / A1c (the operator's store moved)"
+# It was written as a reader's index into the other three rows. It reads as a report of them. A reader
+# took "a store was written under $HOME/.fleet" from a run where A1a had PASSED, put it in an RCA's
+# root-cause table as a second instance of a git-dependency class, and it survived into a handoff's
+# next-action list. The awk below always knew which ids failed; only the count was kept.
+#
+# EXTRACTION MARKER: bin/a1-detail-control.sh lifts this function out by name. Keep the `a1_detail() {`
+# opening and the lone `}` closing on their own lines.
+a1_detail() {
+  local id out=""
+  for id in "$@"; do
+    case "$id" in
+      A1a) out="$out A1a (a store was written under \$HOME/.fleet)" ;;
+      A1b) out="$out A1b (a mutating verb did not refuse)" ;;
+      A1c) out="$out A1c (the operator's store moved)" ;;
+      *)   out="$out $id (no description registered — add one to a1_detail)" ;;
+    esac
+  done
+  printf '%s' "$out"
+}
+
 a1() {
   a1_no_fallback
   a1_real_store_untouched
-  local bad; bad="$(awk -F'\t' '$1 ~ /^A1[abc]$/ && $2=="FAIL"' "$RESULTS" | wc -l | tr -d ' ')"
+  local failed; failed="$(awk -F'\t' '$1 ~ /^A1[abc]$/ && $2=="FAIL" {printf "%s ", $1}' "$RESULTS")"
+  local bad; bad="$(printf '%s' "$failed" | wc -w | tr -d ' ')"
   if [ "$bad" = 0 ]; then
     a_pass A1 "$OUT/A1-per-verb.txt" "$(sq "FLEET_HOME unset ⇒ every mutating verb refuses exit 2, nothing falls back to ~/.fleet, and the operator's store is untouched (A1a+A1b+A1c)")"
   else
-    a_fail A1 "$OUT/A1-per-verb.txt" "$(sq "$bad of 3 sub-assertions failed — see A1a (a store was written under \$HOME/.fleet) / A1b (a verb did not refuse) / A1c (the operator's store moved)")"
+    # shellcheck disable=SC2086
+    a_fail A1 "$OUT/A1-per-verb.txt" "$(sq "$bad of 3 sub-assertions failed:$(a1_detail $failed). The sub-assertions not named here PASSED — read this row as a list of failures, not as an index of the three")"
   fi
 }
 
