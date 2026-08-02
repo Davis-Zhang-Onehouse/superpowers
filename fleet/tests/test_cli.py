@@ -1461,6 +1461,38 @@ class TestReconcile(CliCase):
                       "send (FD-10): a contract in a prose row is the family this loop removes")
         self.assertEqual(snapshot(fleet.tmp), before, "reconcile mutated the tree")
 
+    def test_a_terminal_instant_still_holding_a_slot_is_reported_at_attention(self):
+        """`FI-12` — the row half. The banner half is in `test_render`.
+
+        Measured by the reporter: an instant whose own row said *"the work is over"* held `ws6` for
+        twenty-two hours, and `reconcile --porcelain | cut -f3 | sort -u` returned exactly one value,
+        `info`. Eleven slots leaked this way once.
+
+        The root cause was wider than the finding: `severity` was the LITERAL `INFO` on every row, so
+        this verb could not report attention for anything, ever. The stranded lease is simply the case
+        that noticed a column that was a constant.
+
+        `loaded()` already contains the subject — `harvestable` is `complete` and holds `ws3` — which is
+        why this can be asserted against the ordinary fixture rather than a special one.
+        """
+        fleet = self.loaded()
+        code, out, err = fleet.run(["reconcile", "--porcelain"])
+        self.assertEqual(code, EXIT_OK, err)
+        rows = [line.split("\t") for line in out.splitlines()]
+        by_subject = {row[1]: row for row in rows}
+        stranded = by_subject.get(fleet.ids["harvestable"])
+        self.assertIsNotNone(stranded, f"the harvestable worker is not in the arm set: {rows}")
+        self.assertEqual(stranded[2], "attention",
+                         "a COMPLETE instant still holding a workspace is reported at info")
+        self.assertIn("harvest", " ".join(stranded).lower(),
+                      "the row does not name the verb that releases the slot")
+
+        # And the column is DERIVED, not flipped to attention wholesale: an ordinary live worker with
+        # nothing wrong must still be info, or the fix trades one useless constant for another.
+        live = by_subject.get(fleet.ids["solo"])
+        self.assertIsNotNone(live)
+        self.assertEqual(live[2], "info", "an ordinary live worker is reported at attention")
+
     def test_a_session_no_record_claims_is_never_armed(self):
         # D-6: *"a tool that can kill a session it does not understand is a tool nobody will leave armed,
         # and some of those sessions are people's."* An unknown is REPORTED, never armed.
