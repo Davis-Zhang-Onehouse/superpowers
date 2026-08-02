@@ -231,6 +231,45 @@ it_rebaseline_live_tmux() {     # it_rebaseline_live_tmux <reason>
          "$(printf '%s' "$after" | grep -c .)" "${removed:-none}" "${added:-none}"
 }
 
+# Classify a live-session delta instead of comparing it for equality. Prints "<verdict>|<detail>", where
+# verdict is OK, NOTE or FAIL.
+#
+# `it_assert_no_new_claude` already does exactly this for the OTHER baseline, and says why (`SI-25`): do
+# not make the check cleverer about WHETHER a change is acceptable — attribute it mechanically and report
+# what cannot be attributed. The tmux half never got that treatment, so a coordinator of the operator's
+# finishing normally produced the same signal as this harness killing live work. Measured: §B's `B3`, a
+# case that dispatches nothing and whose own checks report "§B launches no process at all", failed on
+# `claude_mor_design_chinmay` appearing mid-run.
+#
+# The asymmetry is INVERTED from the claude check, and deliberately. There, an ADDITION is the violation
+# (a section spawned a process). Here, a REMOVAL is (the product killed live work), while an addition can
+# only be ours if it carries our own prefix.
+it_classify_session_delta() {   # it_classify_session_delta <baseline> <after>
+  local baseline="$1" after="$2" appeared vanished leaked killed
+  appeared="$(comm -13 <(printf '%s\n' "$baseline" | sort) <(printf '%s\n' "$after" | sort) | grep -v '^$')"
+  vanished="$(comm -23 <(printf '%s\n' "$baseline" | sort) <(printf '%s\n' "$after" | sort) | grep -v '^$')"
+
+  leaked="$(printf '%s\n' "$appeared" | grep -E "^(${TMUX_PREFIX:-itfleet-}|itfleet-)" | tr '\n' ' ')"
+  killed="$(printf '%s\n' "$vanished" | grep -E '^dt-' | tr '\n' ' ')"
+
+  if [ -n "${leaked// /}" ]; then
+    printf 'FAIL|a session THIS HARNESS could have created appeared on the LIVE server: %s. The harness works on socket %s and must never reach the default one.\n' \
+      "$leaked" "${IT_TMUX_SOCKET:-?}"
+    return 0
+  fi
+  if [ -n "${killed// /}" ]; then
+    printf 'FAIL|a dt- session DISAPPEARED from the live server during this section: %s. Live work vanishing mid-run cannot be attributed to anyone else, so it is charged here.\n' \
+      "$killed"
+    return 0
+  fi
+  if [ -n "${appeared// /}" ] || [ -n "${vanished// /}" ]; then
+    printf 'NOTE|operator activity, not this section: appeared=[%s] vanished=[%s]. Neither carries a harness prefix and no dt- session was lost, so this is the box being used while the suite ran.\n' \
+      "$(printf '%s' "$appeared" | tr '\n' ' ')" "$(printf '%s' "$vanished" | tr '\n' ' ')"
+    return 0
+  fi
+  printf 'OK|live tmux session set byte-identical\n'
+}
+
 # The contract. Called on entering and leaving every section.
 #
 # `SI-1`: the tmux half of this check used to be `grep -q '^dt-'` — it asked only whether a `dt-` session
@@ -275,10 +314,18 @@ it_assert_isolation() {
             "${stores_note}live-session baseline ESTABLISHED on this call ($(printf '%s' "$sessions" | grep -c . ) sessions), so the tmux comparison is vacuous here; it binds from the next call on"
     return 0
   fi
-  if [ "$sessions" != "$(cat "$LIVE_TMUX_SNAPSHOT")" ]; then
-    it_fail "ISOLATION-$tag" "fleet/it/live-tmux-sessions.txt" \
-            "${stores_note}THE LIVE TMUX SERVER'S SESSION SET CHANGED: $(diff <(cat "$LIVE_TMUX_SNAPSHOT") <(printf '%s\n' "$sessions") | grep '^[<>]' | tr '\n' ' ')"
+  local classified verdict detail
+  classified="$(it_classify_session_delta "$(cat "$LIVE_TMUX_SNAPSHOT")" "$sessions")"
+  verdict="${classified%%|*}"; detail="${classified#*|}"
+  if [ "$verdict" = FAIL ]; then
+    it_fail "ISOLATION-$tag" "fleet/it/live-tmux-sessions.txt" "${stores_note}${detail}"
     return 1
+  fi
+  if [ "$verdict" = NOTE ]; then
+    # Recorded on the PASS row rather than swallowed: the run stays attributable, and `verify` reads this
+    # to decide between RED and INCONCLUSIVE.
+    it_pass "ISOLATION-$tag" "fleet/it/live-tmux-sessions.txt" "${stores_note}${detail}"
+    return 0
   fi
   it_pass "ISOLATION-$tag" "" \
           "${stores_note}live stores byte-identical; live tmux session set byte-identical ($(printf '%s' "$sessions" | grep -c . ) sessions, incl. $(printf '%s' "$sessions" | grep -c '^dt-') dt-); section work is on socket $IT_TMUX_SOCKET"
