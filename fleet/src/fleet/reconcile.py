@@ -65,7 +65,25 @@ KINDS = (KIND_WORKER, KIND_UNKNOWN, KIND_STALE_LEASE)
 #: States a human can act on right now. A standing declaration may annotate one of these and may never
 #: replace it: masking an actionable state "sends you to the wrong problem, and the wrong problem is one
 #: you cannot fix" (`OBS-7`).
-ACTIONABLE_STATES = (BLOCKED,)
+#:
+#: `IDLE` added for `FI-14`, reported by a coordinator driving real workers. This package DETECTS a
+#: stalled worker — `IDLE` is a first-class state on a 30-minute threshold (`idle_after_s`) and it
+#: renders exactly the right sentence, *"live, but nothing has changed in the instant for more than
+#: 1800s and the pane is not working"* — and then threw the judgement away, because the only consumer of
+#: it is this tuple and `IDLE` was not in it. A worker stopped for over half an hour never appeared in
+#: the "N needs you" count, so the OPERATOR was the thing noticing stalled workers and restarting them.
+#: The detector, the threshold and the wording all existed; nothing read them.
+#:
+#: The inversion is what makes this a defect rather than a preference. `BLOCKED` was already here, and
+#: per `FI-9` `BLOCKED` is the state that fires when a human is attached and mid-sentence — so the banner
+#: called for attention on a human who was already present, and stayed silent on a worker that had
+#: stopped. Exactly backwards.
+#:
+#: Deliberately still narrow. `DEAD` needs a reap, not a keystroke, and counting it here is the defect
+#: `W2-14`/`OBS-57` recorded: a banner that cries for attention on a session nobody can answer trains
+#: people to ignore the banner. That is the same failure this fix is curing, so widening past what a
+#: human can actually DO would trade one silence for one more thing to tune out.
+ACTIONABLE_STATES = (BLOCKED, IDLE)
 
 #: Folder states that mean the work is over. The instant's own rename is the completion signal, so disk
 #: outranks the record here — the record's path is what goes stale, never the folder.
