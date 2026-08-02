@@ -1287,4 +1287,9 @@ fi
 
 printf '\n--- %s ---\n' "$(basename "$RESULTS")"
 column -t -s "$(printf '\t')" "$RESULTS" 2>/dev/null || cat "$RESULTS"
-exit "${IT_FAILED:-0}"
+#: `II-11`. Was `exit "$IT_FAILED"` — a COUNT. `exit` truncates modulo 256, so a section with
+#: exactly 256 failures reported SUCCESS, and one with 300 reported 44, a number meaning nothing
+#: to any reader. An exit status is a one-byte verdict, not a tally: the count is already printed
+#: on the line above and is in the register, which is where a consumer should read it anyway.
+if [ "${IT_FAILED:-0}" -eq 0 ]; then exit 0; fi
+exit 1
