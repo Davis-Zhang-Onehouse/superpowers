@@ -202,6 +202,7 @@ REAP_UNFREED = "reap-unfreed"
 #: a slot nobody could claim" — those call for different human follow-up. Before this kind existed the
 #: condition produced NO row, and the population line counted the lost slot as leased.
 REAP_RECLAIMED = "reap-reclaimed"
+REAP_UNATTRIBUTABLE = "reap-unattributable"
 
 #: `reconcile`'s two answers. The monitor branches on the KIND, never on the sentence — and the sentence
 #: still says why, because a watcher operator who cannot see why a pane is unarmed disarms the watcher.
@@ -2108,6 +2109,22 @@ def _do_reap(ctx: Ctx, parsed: Parsed) -> int:
             detail=(f"an INTERRUPTED claim was cleared BY THIS CALL: the directory that wins the slot "
                     f"existed with no lease body inside it, so no owner could be named — {what}. The slot "
                     f"is claimable again. This is a dead writer, not work that finished")))
+    # `E9` mode 2. A bodiless claim this call could see and could not yet judge. It is NOT cleared — no
+    # staging file means no pid, so nothing says its writer is dead, and below the age floor a bodiless
+    # claim cannot be told from one being born. Deleting it would hand a live worker's slot to a second
+    # claimant. But the slot IS unclaimable right now, and reap is the remedy the capacity refusal names,
+    # so a report that omits it lets a stuck pool read as a busy one — measured: reap emitted one row,
+    # `0 interrupted claim(s) reclaimed`, while a third of the pool was blocked.
+    for slot, why, wait in report.unattributable:
+        rows.append(Row(
+            kind=REAP_UNATTRIBUTABLE, subject=slot, severity=INFO,
+            detail=(f"the slot is held by a claim directory with no lease body and no staging file, so "
+                    f"nothing records who was writing: {why}. NOT cleared — below the age floor a "
+                    f"bodiless claim cannot be told from one being born, and clearing it would take a "
+                    f"live worker's slot. The slot is unclaimable until it is"),
+            clears_when=(f"`fleet reap` is run again in about {wait:.0f}s, by which point the claim is "
+                         f"old enough to judge and will be reclaimed"),
+            clears_who=base or ALL_EFFORTS))
     if refusal is not None:
         owner = refusal.clears_who or "an untagged (legacy) claim"
         rows.append(Row(
