@@ -243,14 +243,27 @@ class Roadmap:
         return out
 
     def _blocker(self, m: Milestone, by_id: dict):
-        """-> (blocker, clears_when, clears_who); blocker is None iff the milestone is ready."""
+        """-> (blocker, clears_when, clears_who, severity); blocker is None iff the milestone is ready.
+
+        **The severity is decided HERE, by the reason.** `FI-2`. It used to be decided by `report()` from
+        `m.status` alone, which made every not-ready milestone `attention` — including the commonest and
+        most benign case in the system, a stacked milestone waiting for its predecessor to finish. A
+        healthy three-deep stack shouted three times, and `using-fleet` says *act on `violation`, report
+        `info`*, so `attention` on a normal state leaves the reader nothing to do but learn to scroll
+        past it. The `not-ready` row that DOES matter then scrolls past with it.
+
+        This function is the only place that knows WHICH not-ready case applies, so it is the only place
+        that can grade it. `report()` discarding that and re-deriving from a status it can see is the
+        same shape as `FI-14` and `FI-12`: a judgement computed and then dropped.
+        """
         if m.status in TERMINAL:
-            return (f"status={m.status}: it is finished, so it is not pending work", None, None)
+            return (f"status={m.status}: it is finished, so it is not pending work", None, None, INFO)
         if m.status not in PENDING:
             actor = m.owner or COORDINATOR
+            #: Somebody is executing it. Nothing for a reader to do, so INFO.
             return (f"status={m.status}: it is already in flight, held by {actor}",
                     f"{actor} proposes the next status with evidence and the coordinator applies it",
-                    actor)
+                    actor, INFO)
         missing, unlanded = [], []
         for dep in m.deps:
             other = by_id.get(dep)
@@ -260,20 +273,26 @@ class Roadmap:
                 unlanded.append(other)
         if missing:
             names = ", ".join(repr(d) for d in missing)
+            #: ATTENTION, and this is the case that keeps the tier meaningful. A dep that is not in the
+            #: roadmap can NEVER land, so this milestone is permanently unready — `coordinating-instants`
+            #: warns that a typo'd dependency "is not an error later; it is a milestone that reads as
+            #: permanently in progress". Somebody must add the dep or remove it.
             return (f"dep(s) {names} are not in the roadmap at all, so their landing cannot be checked",
                     f"the missing dep(s) {names} are added to the roadmap or removed from {m.id!r}",
-                    COORDINATOR)
+                    COORDINATOR, ATTENTION)
         if unlanded:
             detail = ", ".join(f"{d.id!r} has status={d.status}" for d in unlanded)
             actor = next((d.owner for d in unlanded if d.owner), COORDINATOR)
+            #: INFO. The dep exists and is progressing; waiting for it is the design working, not a
+            #: condition anybody can act on. This is the row a stacked roadmap emits most often.
             return (f"dep(s) exist but have not LANDED (landed means status in {LANDED}): {detail}",
                     "every dep reaches status=done through an applied proposal",
-                    actor)
-        return (None, None, None)
+                    actor, INFO)
+        return (None, None, None, INFO)
 
     def ready(self) -> list:
         """Milestones whose deps have LANDED — not merely exist."""
-        return [m for m, blocker, _, _ in self._readiness() if blocker is None]
+        return [m for m, blocker, _, _, _ in self._readiness() if blocker is None]
 
     def claim(self, milestone_id: str, owner: str) -> "Milestone":
         """Record that `owner` is executing this milestone. `SI-27`.
@@ -311,7 +330,7 @@ class Roadmap:
                     f"aborting it with a reason.")
             #: Readiness is derived from the CURRENT file, which is the one held open here.
             by_id = {m["id"]: Milestone(**m) for m in data["milestones"]}
-            blocker, _, _ = self._blocker(by_id[milestone_id], by_id)
+            blocker, _, _, _ = self._blocker(by_id[milestone_id], by_id)
             if blocker:
                 raise BadInput(
                     f"milestone {milestone_id!r} is not ready, so nothing may be dispatched onto it: "
@@ -338,7 +357,7 @@ class Roadmap:
         `report` and this must never be able to disagree about the same milestone (`SI-26` needed a
         per-milestone answer at the moment one is added, and computing it a second way is how the coordinator
         ends up told a milestone is ready by one verb and blocked by another)."""
-        for m, blocker, _, _ in self._readiness():
+        for m, blocker, _, _, _ in self._readiness():
             if m.id == milestone_id:
                 return blocker
         raise BadInput(f"no milestone {milestone_id!r} in {self.path}")
@@ -413,11 +432,12 @@ class Roadmap:
         The population row is last and always present: a checker that narrows its scope silently reads as
         a pass (`OBS-49`), and a legitimately empty roadmap is reported rather than RED."""
         rows = []
-        for m, blocker, clears_when, clears_who in self._readiness():
+        for m, blocker, clears_when, clears_who, severity in self._readiness():
             if blocker is None:
                 continue
+            #: `severity` comes from `_blocker`, which is the only thing that knows WHY (`FI-2`).
             rows.append(Row(kind=NOT_READY, subject=m.id, detail=blocker,
-                            severity=INFO if m.status in TERMINAL else ATTENTION,
+                            severity=severity,
                             clears_when=clears_when, clears_who=clears_who))
 
         pending = self.proposals()
