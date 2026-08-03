@@ -8,6 +8,7 @@ the seam the package already declares and the outward-state audit already allows
 spawns nothing of its own: the package's three declared, injectable spawn seams stay three, and a caller
 that wants `Repo` without a repository underneath it can hand in its own runner.
 """
+import sys
 import tarfile
 import tempfile
 from pathlib import Path
@@ -178,8 +179,35 @@ class Repo:
         finished verification into an error.
         """
         dest = Path(dest)
+
+        #: `QI-7`. The suite CUTS RELEASES inside the tree it runs in — §Q's fixture does exactly what a
+        #: real cut does, ending in `chmod -R a-w` — and `git worktree remove --force` cannot delete a
+        #: read-only directory. The remove failed, neither call is checked (below), and `prune` then
+        #: tidied git's bookkeeping, so `git worktree list` read clean while the tree sat on disk. Five
+        #: verifies in one day left 35 MB in five copies, growing without bound.
+        #:
+        #: Owner-write is restored across the worktree first. Scoped to `dest`, which this class created
+        #: and named from `atomic.tmp_name`, and deepest-first so a directory is still traversable when
+        #: its children are reached. Nothing outside the worktree is touched.
+        for path in sorted(dest.rglob("*"), reverse=True) + [dest]:
+            if path.is_symlink():
+                continue
+            try:
+                path.chmod(path.stat().st_mode | 0o200)
+            except OSError:
+                pass                                   # best effort; the check below is what reports
+
+        #: Unchecked, deliberately: cleanup that raises turns a finished verification into an error.
         self.git(["worktree", "remove", "--force", str(dest)], self.path)
         self.git(["worktree", "prune"], self.path)
+
+        #: But NOT unnoticed. `QI-7` was invisible precisely because a silent failure here looks
+        #: identical to success, and `git worktree list` agrees with the lie. Absence is never success:
+        #: if the tree is still there, say so, on stderr, naming what to remove by hand.
+        if dest.exists():
+            print(f"fleet: the verification worktree at {dest} could not be removed and is still on "
+                  f"disk ({sum(1 for _ in dest.rglob('*'))} entries). git's bookkeeping is clean, so "
+                  f"`git worktree list` will not show it. Remove it by hand.", file=sys.stderr)
 
 
 def changelog_section(version: Version, *, head: str, branch: str, upstream_base: str,
