@@ -104,7 +104,12 @@ fleet dispatch --help
 names the blocker, what clears it, and who clears it. `1` means a checker found something that needs a human.
 
 `fleet pane-guard` has its own codes because it is a contract for an external monitor: `0` safe, `10`
-queued-text, `11` mid-turn, `12` not-claude, `13` unknown-pane. Branch on the code before any send.
+queued-text, `11` mid-turn, `12` not-claude, `13` unknown-pane, `14` indeterminate. Branch on the code
+before any send.
+
+`14` means the pane is alive and nothing about it could be READ — a failed observation, not a negative one.
+Treat it as wait, never as permission: before a send everything but `0` waits anyway, but before a CLOSE the
+difference is a live pane mid-turn being torn down (`FI-7`).
 
 ### Delivering text to a pane: type, WAIT, then Enter
 
