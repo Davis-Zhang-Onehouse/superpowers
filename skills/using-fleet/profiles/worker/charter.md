@@ -17,3 +17,16 @@
 ## Positioning
 
 {{CHECKOUT}}
+
+## When you are waiting on CI
+
+The moment your work is pushed and you are waiting on a CI run, declare it:
+
+```bash
+fleet declare phase awaiting-ci --instant {{INSTANT}}
+```
+
+The phase is **structured state**, and it is what the coordinator's admission rules read. A line of
+AWAITING-CI prose in `HANDOFF.md` is read by nothing: a worker that is blocked on CI but has not declared
+it is indistinguishable, to every consumer, from a worker that has stalled — and the coordinator will
+come and probe you to find out which. Declare it when you start waiting, and carry on when CI returns.
