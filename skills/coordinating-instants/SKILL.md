@@ -69,6 +69,25 @@ in ~118 against a live claude, with `11` on the polls either side (`FI-7`).
 
 Never treat a code you do not recognise as permission. A guard whose failure mode is "go ahead" is not a
 guard, and this contract read one that way for as long as it existed.
+
+**There is a FIFTH step, and it is a second wait.** `harvest` run straight after `close` is refused:
+
+```
+Refused: slot 'ws4' is held as cwd by live pid(s) 3342270; releasing it would let a second worker be
+  leased into a directory somebody is still working in (OBS-48).
+  clears when: pid(s) 3342270 exit /home/ubuntu/davis_root/ws4
+$ echo $?
+4
+```
+
+That is **correct and transient** — the worker's process is still exiting. Measured: the identical command
+succeeded eight seconds later. Exit `4` means a rule decided against you, not that anything broke, and this
+one clears by itself.
+
+So do NOT chain them. `close && harvest` reads as safe and is the shape that produces a confusing refusal
+at the end of a successful close-out; a coordinator who reads `4` as failure will reach for `--force`,
+which is the one thing that could actually take a slot somebody is still working in. Run `close`, wait for
+the pid named in the refusal to exit, then `harvest` (`FI-11`).
 <!-- v2-cite: close-refuses-queued-pane J8 -->
 
 Two verbs answer specific questions when the loop is not enough: `fleet status --id <todo>` for one subject in
