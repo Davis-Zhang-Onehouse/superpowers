@@ -82,6 +82,7 @@ Mutating. Each has `--dry-run`.
 | `fleet abort` | abandon an inflight instant, with a recorded reason |
 | `fleet harvest` | the close-out transaction, plus the observation tick |
 | `fleet close` | shut a pane this store owns and stamp the record |
+| `fleet pane-send` | deliver text to a pane and CONFIRM it submitted — type, poll for `10`, then Enter |
 | `fleet reap` | free every stale lease this base owns; name the ones it does not |
 | `fleet enroll` / `fleet unenroll` | put an existing workspace into the pool, or take it out |
 | `fleet set-golden` | declare the golden workspace; there is deliberately no fallback |
@@ -116,6 +117,11 @@ names the blocker, what clears it, and who clears it. `1` means a checker found 
 queued-text, `11` mid-turn, `12` not-claude, `13` unknown-pane, `14` indeterminate. Branch on the code
 before any send.
 
+`fleet pane-send` answers in the SAME vocabulary — its refusals are the guard's own classification, so
+there is nothing to translate — plus one code of its own: `15` text-lost. `15` means the text was typed and
+the box never came to hold it, so **Enter was not pressed**. It is the one code that must never be read as
+success: an Enter into an empty box submits nothing and looks exactly like it worked.
+
 `14` means the pane is alive and nothing about it could be READ — a failed observation, not a negative one.
 Treat it as wait, never as permission: before a send everything but `0` waits anyway, but before a CLOSE the
 difference is a live pane mid-turn being torn down (`FI-7`).
@@ -134,16 +140,35 @@ Measured on a real pane, one session, varying only the gap:
 | none | **Enter dropped** — `pane-guard` still `10`, text queued, nothing submitted |
 | 50ms and above | submitted |
 
-The rule is therefore a **condition, not a delay**:
+The rule is therefore a **condition, not a delay** — and you do not implement it, because
+`fleet pane-send` owns it:
 
 ```bash
-tmux -L "$SOCKET" send-keys -t "=$SESSION:" -l "$TEXT"
+fleet pane-send --pane "$SESSION" --text "$TEXT"     # type, poll pane-guard for 10, then Enter
+```
+
+It exits `0` only after re-reading the box and finding the text GONE, which is the difference between
+"a keystroke was sent" and "a message was delivered". Anything else means nothing was submitted: `10`/`11`
+are the pre-gate refusing (somebody else's text in the box, or a turn in flight — poll again), and `15`
+means the channel took the text and lost it.
+
+What it does, so nobody re-derives it:
+
+```bash
+fleet pane-guard --pane "$SESSION"                            # must be 0 FIRST: see the warning below
+tmux -L "$SOCKET" send-keys -t "=$SESSION:" -l "$TEXT"        # -l: literally, and never with an Enter
 until fleet pane-guard --pane "$SESSION"; [ $? = 10 ]; do sleep 0.2; done   # the box HAS the text
 tmux -L "$SOCKET" send-keys -t "=$SESSION:" Enter
 ```
 
+⚠️ **`10` means opposite things either side of the type.** BEFORE typing it is *somebody else's* text — an
+operator half-way through a sentence — and a send there produces `<their unfinished sentence><yours>` and
+then submits it, so it must REFUSE. AFTER typing it is *your* text, and it is the go signal. A caller using
+only one of the two senses has half a contract.
+
 `pane-guard`'s `10` means precisely *"there is text in the box"*, so it is the gate. No `sleep` constant
-is right on a box under load. Reference implementation: `fleet/it/bin/live-pane.sh submit`.
+is right on a box under load. `fleet/it/bin/live-pane.sh submit` is a thin wrapper over the verb, so there
+is one implementation and not two.
 
 You will see the advice *"send a space before Enter"*. It works, and it works for the wrong reason — the
 extra round-trip buys the milliseconds. Treating that as the mechanism leaves the channel one scheduling

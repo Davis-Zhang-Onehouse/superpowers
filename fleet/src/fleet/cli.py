@@ -59,6 +59,7 @@ import re
 import shlex
 import sys
 import tempfile
+import time
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Callable
@@ -152,9 +153,13 @@ CADENCE_PREFIX = "cadence:"
 # `fleet/__init__.EXIT_CODES` stays the ONE registry for the general codes. FD-10 documents four more for
 # `pane-guard` alone — `0` safe · `10` queued text · `11` mid-turn · `12` not-claude · `13` unknown pane —
 # because the external monitor branches on them before every send-keys and DA-2 enumerated SIX send paths.
-# They are declared here, next to the only verb allowed to return them, rather than folded into the base
+# They are declared here, next to the verbs allowed to return them, rather than folded into the base
 # registry: a code that means "the pane has text in its box" is not an answer to "did the verb succeed",
 # and `registered_codes()` is what every caller and the suite ask.
+#
+# `G-1` made that "verbs" rather than "verb": `pane-send` returns the same classification as its pre-gate
+# refusal, because the alternative is a second vocabulary for the same facts. It adds exactly one code of
+# its own (`PANE_TEXT_LOST`), and `PANE_GUARD_CODES` stays FD-10's contract untouched.
 
 PANE_SAFE = EXIT_OK
 PANE_QUEUED_TEXT = 10
@@ -184,17 +189,41 @@ PANE_GUARD_CODES = {
     PANE_UNKNOWN: "unknown-pane",
 }
 
-#: Every code any verb in this package may return, base registry first.
-EXIT_CODES_ALL = {**EXIT_CODES, **{code: name for code, name in PANE_GUARD_CODES.items()
-                                   if code not in EXIT_CODES}}
+#: `G-1`. The text was typed and the box never came to hold it, so the Enter was NOT pressed. Its own
+#: code because the caller's response differs from every refusal above: those mean "not now, poll again",
+#: this means "the channel accepted a keystroke and lost it" — which is `FI-15` happening live, and the
+#: one outcome a caller must never read as success. Deliberately outside PANE_GUARD_CODES: it is an
+#: answer about a SEND, not a classification of a pane.
+PANE_TEXT_LOST = 15
 
 PANE_GUARD = "pane-guard"
+PANE_SEND = "pane-send"
+
+#: The verbs that answer in the pane vocabulary. `pane-guard` CLASSIFIES a pane; `pane-send` returns that
+#: same classification verbatim as its pre-gate refusal, plus one code of its own — so a caller reads one
+#: vocabulary either way instead of a translation table per verb. Named as a set because two consumers ask
+#: the question (`registered_codes` here, and the generated exit-path property in `tests/test_contracts`),
+#: and a second hand-written list of the same two names is the copy this package keeps deleting.
+PANE_VERBS = frozenset({PANE_GUARD, PANE_SEND})
+
+#: Every pane code, guard classifications first. `PANE_GUARD_CODES` stays exactly FD-10's contract — the
+#: numbers an external monitor branches on before a send — and this is that set plus the send's own answer.
+PANE_CODES = {**PANE_GUARD_CODES, PANE_TEXT_LOST: "text-lost"}
+
+#: Every code any verb in this package may return, base registry first.
+EXIT_CODES_ALL = {**EXIT_CODES, **{code: name for code, name in PANE_CODES.items()
+                                   if code not in EXIT_CODES}}
 
 
 def registered_codes(verb: str) -> frozenset:
     """The codes `verb` is permitted to return. A verb returning anything else fails the suite (§9)."""
     if verb == PANE_GUARD:
         return frozenset(PANE_GUARD_CODES) | {EXIT_BAD_INPUT}
+    if verb == PANE_SEND:
+        #: A send answers with the pre-gate's classification when it refuses, `15` when the text was lost,
+        #: and the base registry otherwise — `4` for a `dt-` name on the default server, `2` for bad
+        #: input. The union, not the pane codes alone: this verb genuinely has both vocabularies.
+        return frozenset(PANE_CODES) | frozenset(EXIT_CODES)
     return frozenset(EXIT_CODES)
 
 
@@ -385,6 +414,9 @@ def _codes_block() -> str:
     lines.append(f"    {PANE_GUARD} only (FD-10):")
     for code in sorted(PANE_GUARD_CODES):
         lines.append(f"    {code:<3}{PANE_GUARD_CODES[code]}")
+    lines.append(f"    {PANE_SEND} also (G-1):")
+    for code in sorted(set(PANE_CODES) - set(PANE_GUARD_CODES)):
+        lines.append(f"    {code:<3}{PANE_CODES[code]}")
     return "\n".join(lines) + "\n"
 
 
@@ -440,6 +472,11 @@ class Ctx:
     dry_run: bool = False
     porcelain: bool = False
     now: Callable = _utc_now
+    #: `G-1`. The MONOTONIC clock, injected for the same reason `now` is: `pane-send` polls against a
+    #: deadline, and a test that cannot control the deadline can only assert about it by waiting for it.
+    #: A separate seam from `now` rather than a second use of it — `now` is a wall-clock STAMP that goes
+    #: into records, and a stamp that could go backwards is not a duration.
+    now_monotonic: Callable = time.monotonic
     git: object = None
     runner: object = None
     #: `None` means "derive it"; a bool says it out loud. The cadence alarm is silent for an idle fleet,
@@ -2650,15 +2687,16 @@ def _is_claude(sessions, text: str, name: str = "") -> bool:
     return sessions.busy(text) or sessions.unsubmitted(text) is not None
 
 
-def _do_pane_guard(ctx: Ctx, parsed: Parsed) -> int:
-    """The contract the external monitor is REQUIRED to call before any send-keys (FD-10).
+def _classify_pane(ctx: Ctx, pane: str) -> tuple:
+    """`(code, detail)` — what this pane IS, in FD-10's vocabulary. The single derivation.
 
-    DA-2 enumerated **six** send paths today, so this sits at the choke point rather than being restated
-    per path: a requirement phrased per-path would fix one and leave five. The codes are the interface —
-    `0` safe · `10` queued text · `11` mid-turn · `12` not-claude · `13` unknown pane — and a caller
-    branches on the number, never on the sentence.
+    Extracted from `_do_pane_guard` when `pane-send` needed the same judgement (`G-1`). It is one function
+    and not two because a second derivation of the same judgement is this codebase's most-repeated defect:
+    `SI-30` is a status verb and its guard disagreeing about the same fact, and here the two readings would
+    be *"may I send"* and *"did my text land"* — which are the SAME question asked twice, either side of a
+    keystroke. Duplicating it would let the guard and the sender drift into answering it differently, and
+    the sender's copy is the one nobody would be watching.
     """
-    pane = parsed.get("pane")
     if not ctx.sessions.alive(pane):
         code, detail = PANE_UNKNOWN, (f"no live process and no session answer for {pane!r}; sending keys "
                                       "to a pane nobody can name is the send with no target")
@@ -2695,8 +2733,110 @@ def _do_pane_guard(ctx: Ctx, parsed: Parsed) -> int:
                                               f"({queued!r}); a send would concatenate onto it")
         else:
             code, detail = PANE_SAFE, f"{pane} is a quiet claude pane with an empty input box"
+    return code, detail
+
+
+def _do_pane_guard(ctx: Ctx, parsed: Parsed) -> int:
+    """The contract the external monitor is REQUIRED to call before any send-keys (FD-10).
+
+    DA-2 enumerated **six** send paths today, so this sits at the choke point rather than being restated
+    per path: a requirement phrased per-path would fix one and leave five. The codes are the interface —
+    `0` safe · `10` queued text · `11` mid-turn · `12` not-claude · `13` unknown pane — and a caller
+    branches on the number, never on the sentence.
+
+    The classification itself is `_classify_pane`, shared with `pane-send`: this verb REPORTS a judgement
+    it does not own a second copy of.
+    """
+    pane = parsed.get("pane")
+    code, detail = _classify_pane(ctx, pane)
     _emit(ctx, PANE_GUARD, [("code", str(code)), ("verdict", PANE_GUARD_CODES[code]),
                             ("pane", pane), ("detail", detail)])
+    return code
+
+
+# --- pane-send ------------------------------------------------------------------------------------
+
+
+def _deliver(ctx: Ctx, pane: str, text: str, timeout_s: float = 10.0,
+             poll_s: float = 0.2) -> tuple:
+    """Deliver `text` to `pane` and CONFIRM it was submitted. Returns `(code, detail)`.
+
+    THE CONTRACT, and why it is a condition rather than a delay. Measured on a real claude pane
+    (2.1.220, 12 clean trials, `RA-1`): with the Enter sent immediately after the text it is DROPPED
+    1 time in 5 — and `pane-guard` polled after the type predicted the outcome in 12 of 12 trials. Every
+    trial that read `10` submitted; the one that read `0` dropped. So the failure mode is exactly "the
+    text has not landed yet", and `10` is exactly the question that answers. A fixed delay buys a
+    probability (which is what the one production send path on this box does, at 150ms); this buys a
+    guarantee.
+
+    ⚠️ `10` MEANS OPPOSITE THINGS EITHER SIDE OF THE TYPE, and inverting them is the likeliest way this
+    goes wrong:
+      · BEFORE typing, `10` = "somebody ELSE's text is in the box" -> refuse, or we concatenate onto an
+        operator's half-written sentence and then submit it.
+      · AFTER typing, `10` = "MY text is in the box" -> go.
+    The vendored `claude-auto-retry` patch uses only the first sense; `live-pane.sh submit` only the
+    second. This is the first implementation that needs both.
+    """
+    code, detail = _classify_pane(ctx, pane)
+    if code != PANE_SAFE:
+        return code, f"refusing to send: {detail}"
+
+    ctx.sessions.type_text(pane, text)
+
+    deadline = ctx.now_monotonic() + timeout_s
+    landed = False
+    while True:
+        if _classify_pane(ctx, pane)[0] == PANE_QUEUED_TEXT:
+            landed = True
+            break
+        if ctx.now_monotonic() >= deadline:
+            break
+        time.sleep(poll_s)
+
+    if not landed:
+        #: NOT pressing Enter is the whole point. An Enter into an empty box submits nothing and looks
+        #: exactly like success, which is how a channel silently drops instructions.
+        return PANE_TEXT_LOST, (
+            f"the text never reached {pane}'s input box within {timeout_s}s, so Enter was NOT pressed: "
+            f"an Enter into an empty box submits nothing and looks like it worked")
+
+    ctx.sessions.press_enter(pane)
+    after = _classify_pane(ctx, pane)[0]
+    if after == PANE_QUEUED_TEXT:
+        return PANE_TEXT_LOST, (f"the text is still in {pane}'s box after Enter, so the submit was "
+                                f"dropped — this is FI-15's race, observed live")
+    return EXIT_OK, f"delivered to {pane} and confirmed submitted (pane-guard {after} after Enter)"
+
+
+def _do_pane_send(ctx: Ctx, parsed: Parsed) -> int:
+    """`G-1`. The verb that owns pane delivery, so a correction reaches every caller instead of one.
+
+    A VERB rather than a library call, decided on evidence: the only production consumer is a node
+    package, which can reach python only through a subprocess — and already does exactly that for
+    `pane-guard`.
+    """
+    pane = parsed.get("pane")
+    text = parsed.get("text")
+    if not str(text or ""):
+        raise BadInput("--text is empty; a send with nothing to send is not a send")
+
+    #: The standing rule is 'never write a `dt-` session on the DEFAULT server' — NOT 'never write a
+    #: dt- session'. Every dispatched worker IS one, on the `fleet` socket, and they are precisely who
+    #: `nudge` exists to reach. `live-pane.sh` refuses all `dt-` names because a test probe should;
+    #: copying that here would make this verb useless for its only caller.
+    if pane.startswith("dt-") and not ctx.sessions.tmux_socket:
+        _emit(ctx, PANE_SEND, [("refused", "dt- on the default server"), ("pane", pane)])
+        return EXIT_REFUSED
+
+    if ctx.dry_run:
+        _emit(ctx, PANE_SEND, [("dry-run", "nothing was sent"), ("would-send", text),
+                               ("pane", pane)])
+        return EXIT_OK
+
+    code, detail = _deliver(ctx, pane, text,
+                            timeout_s=float(parsed.get("timeout-s") or 10.0))
+    _emit(ctx, PANE_SEND, [("pane", pane), ("code", str(code)), ("text", text),
+                           ("detail", detail)])
     return code
 
 
@@ -3441,6 +3581,12 @@ VERBS = {spec.name: spec for spec in (
           "14 indeterminate (could not read; wait)", (
         Flag("--pane", True, True, "the pane (session) name"),
     )),
+    _verb(PANE_SEND, _do_pane_send, False,
+          "deliver text to a pane and CONFIRM it submitted: type, poll pane-guard for 10, then Enter", (
+        Flag("--pane", True, True, "the pane (session) name"),
+        Flag("--text", True, True, "the text to deliver"),
+        Flag("--timeout-s", True, False, "how long to wait for the box to hold the text (default 10)"),
+    )),
     _verb("compaction-status", _do_compaction_status, True,
           "whether a compaction is holding every dispatch", checker=True, flags=(
         Flag("--base", True, False, "restrict to one base"),
@@ -3514,6 +3660,7 @@ PORCELAIN_COLUMNS = {
     "unenroll": KV_COLUMNS,
     "set-golden": KV_COLUMNS,
     PANE_GUARD: KV_COLUMNS,
+    PANE_SEND: KV_COLUMNS,
     "review": ROW_COLUMNS,
     "harvest": ROW_COLUMNS,
     "lint": ROW_COLUMNS,

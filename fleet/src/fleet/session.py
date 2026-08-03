@@ -110,6 +110,17 @@ class Probes:
     #: on every nudge pass. Defaulted, because every existing construction of `Probes` predates it and a
     #: required field here would break every caller and every fixture at once.
     attached_sessions: Callable[[], Optional[set]] = lambda: set()
+    #: `G-1`. The two halves of a submit, kept SEPARATE: `FI-15` is about their interaction, and a
+    #: single "send this and submit it" probe makes the race it describes untestable. Defaulted so every
+    #: existing construction keeps working.
+    send_text: Callable[[str, str], None] = lambda name, text: None
+    send_enter: Callable[[str], None] = lambda name: None
+    #: Which tmux SERVER these probes talk to, or None for the default one (`TMUX_SOCKET_ENV`). Recorded
+    #: rather than only closed over, because a CALLER has to be able to ask: the standing rule that
+    #: nothing may write a `dt-` session is a rule about the DEFAULT server specifically, and a verb that
+    #: cannot read the socket can only enforce it by refusing every `dt-` name — which would refuse every
+    #: dispatched worker in the fleet.
+    tmux_socket: Optional[str] = None
 
 
 #: tmux's exact-match marker. A BARE target is resolved by PREFIX: with only `itfleet-N-pre-ab` alive,
@@ -328,6 +339,30 @@ class SessionLayer:
 
     # --- control -----------------------------------------------------------------------------
 
+    @property
+    def tmux_socket(self) -> Optional[str]:
+        """Which tmux SERVER this layer talks to, or None for the default one. Read-only.
+
+        Exposed because the rule a caller has to enforce is server-specific: *never create, kill or write
+        a `dt-` session on the DEFAULT server*. Without this, a verb could only apply it by refusing every
+        `dt-` name — and every dispatched worker is a `dt-` session on a named socket, so a blanket refusal
+        would refuse precisely the panes a send exists to reach.
+        """
+        return self.probes.tmux_socket
+
+    def type_text(self, name: str, text: str) -> None:
+        """Put text in the pane's input box WITHOUT submitting. Literal (`-l`), so tmux key names inside
+        the text ("Enter", "C-c") are typed rather than interpreted."""
+        if not name:
+            raise BadInput("a send needs a pane name")
+        self.probes.send_text(name, text)
+
+    def press_enter(self, name: str) -> None:
+        """Submit whatever is in the box. Separate from `type_text` on purpose — see `Probes`."""
+        if not name:
+            raise BadInput("a send needs a pane name")
+        self.probes.send_enter(name)
+
     def start(self, name: str, cwd: Path, command: str) -> None:
         if not name:
             raise BadInput("a session needs a name")
@@ -449,6 +484,15 @@ def default_probes(process_name: str = "claude", tmux_socket=_FROM_ENV) -> Probe
     def kill_session(name: str) -> None:
         run(tmux + ["kill-session", "-t", exact_session_target(name)])
 
+    #: `G-1`. `-l` sends the text LITERALLY, so a message containing the word "Enter" is typed rather
+    #: than interpreted as a keystroke. The Enter is its own call, on purpose: `FI-15` is about what
+    #: happens BETWEEN them, and a probe that did both could not express the gap.
+    def send_text(name: str, text: str) -> None:
+        run(tmux + ["send-keys", "-t", exact_session_target(name), "-l", text])
+
+    def send_enter(name: str) -> None:
+        run(tmux + ["send-keys", "-t", exact_session_target(name), "Enter"])
+
     def attached_sessions():
         #: `#{session_attached}` is a COUNT of attached clients, not a bool: >0 means somebody is looking.
         #: A tmux that answers non-zero (no server, no sessions) returns None — "could not ask" — which
@@ -468,4 +512,9 @@ def default_probes(process_name: str = "claude", tmux_socket=_FROM_ENV) -> Probe
                   has_session=has_session,
                   start_session=start_session,
                   kill_session=kill_session,
-                  attached_sessions=attached_sessions)
+                  attached_sessions=attached_sessions,
+                  send_text=send_text,
+                  send_enter=send_enter,
+                  #: Already normalised above: `_FROM_ENV` has been resolved, so this is the socket these
+                  #: probes really talk to and `None` really means the default server.
+                  tmux_socket=tmux_socket)

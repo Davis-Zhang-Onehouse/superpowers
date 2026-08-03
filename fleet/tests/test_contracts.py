@@ -108,11 +108,21 @@ class Fleet:
         self.profiles_dir.mkdir()
         self.procs, self.panes, self.tmux_live = [], {}, set()
         self.started, self.killed = [], []
+        #: `G-1`. What was DELIVERED to a pane, as `(pane, "text"|"enter", payload)`. A pane keystroke is
+        #: an outward effect that leaves no trace in the tree, the records or the pool, so the zero-delta
+        #: property below cannot see it without a record of its own.
+        self.sent = []
         probes = Probes(list_processes=lambda: list(self.procs),
                         capture_pane=lambda name: self.panes.get(name, ""),
                         has_session=lambda name: name in self.tmux_live,
                         start_session=lambda n, c, m: self.started.append(n),
-                        kill_session=lambda n: self.killed.append(n))
+                        kill_session=lambda n: self.killed.append(n),
+                        send_text=self._send_text,
+                        send_enter=self._send_enter,
+                        #: A NAMED socket, which is where the real fleet lives: every dispatched worker is
+                        #: a `dt-` session on `fleet`. On the DEFAULT server a `dt-` send is refused, so
+                        #: the generated rows would assert that refusal instead of the property.
+                        tmux_socket="fleet")
         self.sessions = SessionLayer(probes)
         self.store = Store(self.home)
         self.pool = Pool(self.home, cwd_probe=lambda p: [], alive=self.sessions.alive)
@@ -125,6 +135,18 @@ class Fleet:
             self.pool.enroll(self.slots_dir / slot)
         self._n = 0
         self.paths, self.ids = {}, {}
+
+    def _send_text(self, name: str, text: str) -> None:
+        """Typing really PUTS the text in the box, so the delivery poll can succeed. A probe whose effect
+        is invisible describes a machine in which the act never happens."""
+        self.sent.append((name, "text", text))
+        self.panes[name] = f"❯ {text}"
+
+    def _send_enter(self, name: str) -> None:
+        """Enter SUBMITS: the box empties. A fixture that left the text there would report every send as
+        `FI-15`'s dropped submit, which is what the verb re-reads the box to detect."""
+        self.sent.append((name, "enter", ""))
+        self.panes[name] = IDLE_PANE
 
     def profile(self, kind="worker") -> pathlib.Path:
         path = self.profiles_dir / kind
@@ -238,6 +260,21 @@ class _Git:
         return 0, ""
 
 
+def quiet_pane_fixture(fleet) -> str:
+    """A live, QUIET claude pane `pane-send`'s row can actually deliver to. Idempotent, for the same
+    reason `release_fixture` is: `argv_for` runs before the dry-run snapshot is taken.
+
+    Its own pane rather than a worker's: `close`'s row kills `closable`'s pane and `pane-guard`'s row
+    wants a busy one, so a shared cell would assert a refusal rather than the property. It carries no
+    record and no instant, so no population any other generated case counts changes. The `dt-` name is
+    deliberate — on a NAMED socket that is the normal target, because every dispatched worker is one.
+    """
+    pane = "dt-quietPane"
+    fleet.tmux_live.add(pane)
+    fleet.panes.setdefault(pane, IDLE_PANE)
+    return pane
+
+
 def release_fixture(fleet) -> tuple:
     """`(repo, releases)` for the release verbs' rows, built once per fixture and never changed on a
     second call — `argv_for` runs before the dry-run snapshot is taken.
@@ -303,6 +340,7 @@ class Loaded(unittest.TestCase):
     def argv_for(self, fleet: Fleet) -> dict:
         ready = str(fleet.paths["readyWorker"])
         repo, releases = release_fixture(fleet)
+        quiet_pane = quiet_pane_fixture(fleet)
         return {
             "init": ["--name", "freshOne", "--base", "00000000"],
             "dispatch": ["--profile", str(fleet.profile()), "--title", "a fresh worker",
@@ -343,6 +381,7 @@ class Loaded(unittest.TestCase):
             "verify": ["--instant", ready],
             "reconcile": [],
             "pane-guard": ["--pane", "dt-solo"],
+            "pane-send": ["--pane", quiet_pane, "--text", "the generated rows drive this for real"],
             "compaction-status": [],
             "selftest": [],
             #: Every row names its repository and its release area. The generated cases drive these for
@@ -447,6 +486,10 @@ class TestEveryMutatingVerbDryRuns(Loaded):
         self.assertEqual(sorted(after), sorted(before_fs), f"{verb} --dry-run created a path")
         self.assertEqual(after, before_fs, f"{verb} --dry-run touched the tree (mtimes included)")
         self.assertEqual(fleet.started, [], f"{verb} --dry-run started a session")
+        #: `G-1`. The fourth outward effect, added the release a verb first had one. A keystroke delivered
+        #: to a live worker's pane is in none of the three halves of a delta above, so nothing here could
+        #: have seen it — and it is as irreversible as a claimed lease, with no artifact to notice it by.
+        self.assertEqual(fleet.sent, [], f"{verb} --dry-run sent keystrokes to a pane")
 
 
 class TestEveryExitPathIsRegistered(Loaded):
@@ -464,9 +507,13 @@ class TestEveryExitPathIsRegistered(Loaded):
             self.assertIn(code, allowed,
                           f"{' '.join(cell)} returned {code}; {verb} may return {sorted(allowed)}")
             self.assertIn(code, cli.EXIT_CODES_ALL)
-            if verb != cli.PANE_GUARD:
-                # Every verb but the one FD-10 documents an extension for answers out of the ONE
-                # registry in `fleet/__init__`, additive only.
+            if verb not in cli.PANE_VERBS:
+                # Every verb but the PANE ones answers out of the ONE registry in `fleet/__init__`,
+                # additive only. Two verbs now, not one: `G-1`'s `pane-send` returns the guard's own
+                # classification as its pre-gate refusal rather than inventing a second vocabulary for
+                # the same facts, and adds `15` for the send it would not complete. Read off
+                # `cli.PANE_VERBS` rather than re-listed here, because a hand-written second copy of the
+                # exempt set is exactly what let the extension in without an argument the first time.
                 self.assertIn(code, EXIT_CODES,
                               f"{' '.join(cell)} returned {code}, which is not in the base registry")
 

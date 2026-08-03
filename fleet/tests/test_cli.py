@@ -157,6 +157,26 @@ def release_fixture(fleet) -> tuple:
     return repo, releases.root
 
 
+def quiet_pane_fixture(fleet) -> str:
+    """A live, quiet claude pane `pane-send`'s row can actually deliver to. Idempotent, like
+    `release_fixture`: `argv_for` runs per test and, in the dry-run cases, before the snapshot.
+
+    Its OWN pane rather than a worker's, for two reasons the matrix would otherwise trip over. `close`'s
+    row kills `closable`'s pane and `pane-guard`'s row wants a BUSY one, and a cell that resolves to a
+    torn-down or mid-turn pane asserts a refusal instead of the property — the vacuity this table's own
+    docstring exists to prevent. And it carries no record and no instant, so adding it changes no
+    population any other case counts.
+
+    A `dt-` name deliberately: on a NAMED socket that is the normal target, because every dispatched
+    worker is one. The refusal is `dt-` AND the default server, and a fixture spelling it `probe-…` would
+    quietly stop exercising that.
+    """
+    pane = "dt-quietPane"
+    fleet.tmux_live.add(pane)
+    fleet.panes.setdefault(pane, IDLE_PANE)
+    return pane
+
+
 def snapshot(root: pathlib.Path) -> dict:
     """Every path under `root` with its kind, mtime and size.
 
@@ -245,13 +265,32 @@ class Fleet:
         #: `FI-7`: a FAILED capture is `None`; a genuinely EMPTY pane is `""`. The fixture has to be able
         #: to express both, or a case cannot tell which one it is testing — which is the defect itself.
         self.capture_fails = set()
-        probes = Probes(
+        #: `G-1`. What was DELIVERED to a pane, as `(pane, "text"|"enter", payload)`. Two KINDS rather
+        #: than one "a send happened" entry, because `FI-15` is about the interaction of two different
+        #: acts: the order is the property, and a record that cannot tell a type from a submit cannot
+        #: assert it.
+        self.sent = []
+        #: A pane that accepts the keystroke and never comes to HOLD the text — `FI-15` happening live.
+        #: The verb must refuse to press Enter into it, and the same reasoning as `capture_fails` above
+        #: applies: a fixture that cannot express the failure cannot tell that refusal from a working send.
+        self.type_is_swallowed = set()
+        #: The other half: the Enter is DROPPED, so the text is still in the box afterwards. That is the
+        #: outcome `_deliver`'s post-Enter confirmation exists to catch, and it is 1 trial in 5 on a real
+        #: pane at gap=0 (`RA-1`).
+        self.enter_is_dropped = set()
+        self.probes = Probes(
             list_processes=lambda: [] if self.live_sessions_fail else list(self.procs),
             capture_pane=lambda name: None if name in self.capture_fails else self.panes.get(name, ""),
             has_session=lambda name: name in self.tmux_live,
             start_session=lambda name, cwd, cmd: self.started.append((name, str(cwd), cmd)),
-            kill_session=self._kill)
-        self.sessions = SessionLayer(probes)
+            kill_session=self._kill,
+            send_text=self._send_text,
+            send_enter=self._send_enter,
+            #: This fixture describes a fleet on a NAMED socket, because that is where the real one lives:
+            #: every dispatched worker is a `dt-` session on the `fleet` socket (`cli._do_dispatch`). A
+            #: case about the DEFAULT server says so by assigning `fleet.tmux_socket = None`.
+            tmux_socket="fleet")
+        self.sessions = SessionLayer(self.probes)
         self.store = Store(self.home)
         self.pool = Pool(self.home,
                          cwd_probe=lambda path: list(self.holders.get(str(path), [])),
@@ -265,9 +304,42 @@ class Fleet:
             (self.slots_dir / slot).mkdir()
             self.pool.enroll(self.slots_dir / slot)
         self._n = 0
-        self.paths, self.ids = {}, {}
+        #: `ids` is the todo_id a verb is addressed by; `ids_tmux` is the PANE name. Two maps because they
+        #: are two identifiers of one subject and the pane verbs take the second — a case that spelled
+        #: `"dt-" + name` by hand would keep passing after `dispatch` changed how it names a session.
+        self.paths, self.ids, self.ids_tmux = {}, {}, {}
 
     # ---- fixture construction ---------------------------------------------------------------------
+
+    #: `G-1`. The socket lives in the PROBES, which is the seam that knows which tmux server it is talking
+    #: to, and `cli` reads it back through `ctx.sessions.tmux_socket`. A property rather than a plain
+    #: attribute so a case assigning it AFTER construction still reaches the object the verb asks.
+    @property
+    def tmux_socket(self):
+        return self.probes.tmux_socket
+
+    @tmux_socket.setter
+    def tmux_socket(self, value):
+        self.probes.tmux_socket = value
+
+    def _send_text(self, name: str, text: str) -> None:
+        """Typing text really PUTS it in the pane's box — unless the pane swallows it.
+
+        Recording the call and leaving the box empty would make the delivery poll unsatisfiable for every
+        pane at once, which is `_kill`'s reasoning one probe over: a probe whose effect is invisible
+        describes a machine in which the act never happens.
+        """
+        self.sent.append((name, "text", text))
+        if name not in self.type_is_swallowed:
+            self.panes[name] = f"❯ {text}"
+
+    def _send_enter(self, name: str) -> None:
+        """Enter SUBMITS: the box empties and the pane goes back to its idle shape. Unless the Enter is
+        dropped — `FI-15` — and then the text is still sitting in the box afterwards, which is exactly the
+        state `_deliver` re-reads before it reports a delivery."""
+        self.sent.append((name, "enter", ""))
+        if name not in self.enter_is_dropped:
+            self.panes[name] = IDLE_PANE
 
     def _kill(self, name: str) -> None:
         """Killing a session really ENDS its liveness here.
@@ -320,6 +392,7 @@ class Fleet:
             self.tmux_live.add(tmux)
         self.paths[name] = path
         self.ids[name] = todo_id
+        self.ids_tmux[name] = tmux
         return path
 
     def orphan(self, name="orphanWork") -> pathlib.Path:
@@ -434,6 +507,7 @@ class CliCase(unittest.TestCase):
         orphan = str(fleet.paths["orphanWork"])
         profile = str(fleet.profile("worker"))
         repo, releases = release_fixture(fleet)
+        quiet_pane = quiet_pane_fixture(fleet)
         return {
             "init": ["--name", "freshOne", "--base", "00000000"],
             "dispatch": ["--profile", profile, "--title", "a fresh worker",
@@ -475,6 +549,7 @@ class CliCase(unittest.TestCase):
             "verify": ["--instant", ready],
             "reconcile": [],
             "pane-guard": ["--pane", "dt-solo"],
+            "pane-send": ["--pane", quiet_pane, "--text", "the argv matrix drives this row for real"],
             "compaction-status": [],
             "selftest": [],
             #: `--repo` and `--releases` are on every row that needs them, and that is the point rather
@@ -683,6 +758,11 @@ class TestDryRun(CliCase):
                                  "not interrogated")
                 self.assertEqual(fleet.started, [], f"{verb} --dry-run started a session")
                 self.assertEqual(fleet.killed, [], f"{verb} --dry-run killed a session")
+                #: `G-1`. The fourth outward effect, added the release a verb first had one. A keystroke
+                #: delivered to somebody's pane is not in the tree, the records or the pool, so not one of
+                #: the assertions above could see it — and a `--dry-run` that types into a live worker is
+                #: the same class of defect as one that claims a lease, with no artifact to notice it by.
+                self.assertEqual(fleet.sent, [], f"{verb} --dry-run sent keystrokes to a pane")
 
 
 class TestExitCodes(CliCase):
@@ -690,6 +770,13 @@ class TestExitCodes(CliCase):
 
     def failure_matrix(self, fleet: Fleet) -> list:
         argv = self.argv_for(fleet)
+        #: `G-1`. Its OWN pane, not the quiet one every other pane-send cell uses: `type_is_swallowed` is
+        #: a property of a pane, so marking the shared one would turn the successful row into a 10-second
+        #: poll for a `15` and stop it exercising the success path at all.
+        swallows = "dt-swallowsText"
+        fleet.tmux_live.add(swallows)
+        fleet.panes[swallows] = IDLE_PANE
+        fleet.type_is_swallowed.add(swallows)
         cells = [(verb, [verb, *argv[verb]]) for verb in sorted(cli.VERBS)]
         for verb, spec in sorted(cli.VERBS.items()):
             required = [flag for flag in spec.flags if flag.required]
@@ -706,6 +793,13 @@ class TestExitCodes(CliCase):
             ("complete", ["complete", "--instant", str(fleet.paths["solo"])]),  # gate refuses
             ("harvest", ["harvest", "--id", fleet.ids["solo"]]),             # not renamed yet
             ("pane-guard", ["pane-guard", "--pane", "no-such-pane"]),
+            #: `G-1`. The send's two non-base answers, produced deliberately: a pre-gate refusal quoting
+            #: the guard's own classification, and `15` — the text typed into a box that never held it.
+            #: The generic cells above reach neither, and `15` is the one code a caller must never read as
+            #: success, so a matrix that never produces it is not asserting the registry over it.
+            ("pane-send", ["pane-send", "--pane", "dt-solo", "--text", "into a mid-turn pane"]),
+            ("pane-send", ["pane-send", "--pane", swallows, "--timeout-s", "0",
+                           "--text", "into a box that never holds it"]),
         ]
         return cells
 
@@ -716,10 +810,30 @@ class TestExitCodes(CliCase):
         self.assertEqual(set(EXIT_CODES), {0, 1, 2, 3, 4})
         self.assertTrue(set(EXIT_CODES) < set(cli.EXIT_CODES_ALL))
         self.assertEqual(set(cli.EXIT_CODES_ALL) - set(EXIT_CODES),
-                         set(cli.PANE_GUARD_CODES) - set(EXIT_CODES),
-                         "cli extends the registry with something other than FD-10's contract")
+                         set(cli.PANE_CODES) - set(EXIT_CODES),
+                         "cli extends the registry with something other than the pane vocabulary")
         self.assertEqual(set(cli.PANE_GUARD_CODES) - set(EXIT_CODES), {10, 11, 12, 13, 14},
                          "the pane-guard extension is not the documented contract")
+        #: `G-1`. The extension grew by exactly ONE, and the two halves are pinned separately on purpose.
+        #: `PANE_GUARD_CODES` is FD-10's published contract — an external monitor branches on those six
+        #: numbers — and `15` is an answer about a SEND rather than a classification of a pane, so folding
+        #: it in would change what an existing consumer is told the guard can return. Both sets are named
+        #: here because the whole point of this case is that a new code cannot appear in silence.
+        self.assertEqual(set(cli.PANE_CODES) - set(cli.PANE_GUARD_CODES), {cli.PANE_TEXT_LOST},
+                         "the pane vocabulary grew by something other than the send's own answer")
+        self.assertEqual(cli.PANE_TEXT_LOST, 15)
+        self.assertNotIn(cli.PANE_TEXT_LOST, cli.PANE_GUARD_CODES,
+                         "the send's code was folded into the guard's published contract")
+        #: The verbs allowed the extension, asserted as the SET rather than per verb: a third pane verb
+        #: added later has to appear here, which is the only reason this line is not just a restatement.
+        self.assertEqual(cli.PANE_VERBS, {cli.PANE_GUARD, cli.PANE_SEND})
+        for verb in sorted(cli.PANE_VERBS):
+            self.assertTrue(set(cli.registered_codes(verb)) - set(EXIT_CODES),
+                            f"{verb} is declared a pane verb and registers no pane code")
+        for verb in sorted(set(cli.VERBS) - cli.PANE_VERBS):
+            self.assertEqual(cli.registered_codes(verb), frozenset(EXIT_CODES),
+                             f"{verb} is not a pane verb and registers codes outside the ONE registry")
+        self.assertIn(cli.PANE_TEXT_LOST, cli.registered_codes(cli.PANE_SEND))
         #: `14` was added for `FI-7` and is pinned here BY NUMBER on purpose: it is the code that must
         #: stay OUTSIDE the set `coordinating-instants` treats as "the pane can go" (`0`, `12`, `13`).
         #: A future edit that renumbered it into that set would silently restore the defect — a
@@ -1402,6 +1516,133 @@ class TestPaneGuard(CliCase):
         self.assertIn(cli.PANE_INDETERMINATE, cli.PANE_GUARD_CODES)
         self.assertIn(cli.PANE_INDETERMINATE, cli.registered_codes(cli.PANE_GUARD),
                       "the code is not in the verb's registry, so §M1 will call it unregistered")
+
+
+class TestPaneSend(CliCase):
+    """`G-1`. `pane-guard` is "the send-keys contract, as an exit code" and nothing in the package could
+    perform a send: six citations of a six-send-paths count that traces to no enumeration, two real
+    implementations (both test-harness), and one production path in a vendored node package that sleeps
+    150ms and hopes.
+
+    The contract is a CONDITION, measured: at gap=0 the Enter is dropped 1 in 5, and pane-guard after the
+    type predicted the outcome in 12 of 12 trials. So: type, poll for 10, then Enter — and REFUSE rather
+    than press blind, because an Enter into an empty box submits nothing and looks like it worked.
+    """
+
+    def test_a_quiet_pane_gets_the_text_and_a_submitted_enter(self):
+        fleet = self.loaded()
+        pane = fleet.ids_tmux["solo"]
+        fleet.panes[pane] = IDLE_PANE
+
+        code, out, err = fleet.run(["pane-send", "--pane", pane, "--text", "hello"])
+
+        self.assertEqual(code, EXIT_OK, err)
+        typed = [c for c in fleet.sent if c[0] == pane]
+        self.assertTrue(typed, f"nothing was sent to {pane}: {fleet.sent}")
+        self.assertIn("hello", out)
+
+    def test_the_text_is_typed_BEFORE_the_enter_and_they_are_separate_calls(self):
+        """`FI-15`. "put text in the box" and "press Enter" are different acts, and collapsing them is
+        what makes the race invisible."""
+        fleet = self.loaded()
+        pane = fleet.ids_tmux["solo"]
+        fleet.panes[pane] = IDLE_PANE
+
+        fleet.run(["pane-send", "--pane", pane, "--text", "hello"])
+
+        kinds = [kind for target, kind, _ in fleet.sent if target == pane]
+        self.assertEqual(kinds, ["text", "enter"],
+                         f"expected a literal type then a separate Enter, got {kinds}")
+
+    def test_a_pane_that_already_holds_text_is_REFUSED_before_typing(self):
+        """Pre-gate. `10` here means SOMEBODY ELSE's text — an operator half-way through a sentence.
+        Typing would produce `<their unfinished sentence>hello` and the Enter would submit it."""
+        fleet = self.loaded()
+        pane = fleet.ids_tmux["solo"]
+        fleet.panes[pane] = "\n".join(["❯ half a sentence I was still typing"])
+
+        code, out, err = fleet.run(["pane-send", "--pane", pane, "--text", "hello"])
+
+        self.assertEqual(code, cli.PANE_QUEUED_TEXT, f"a send concatenated onto queued text: {out}")
+        self.assertEqual([c for c in fleet.sent if c[0] == pane], [],
+                         "the refusal still sent something")
+
+    def test_a_mid_turn_pane_is_refused(self):
+        fleet = self.loaded()
+        pane = fleet.ids_tmux["solo"]
+        fleet.panes[pane] = BUSY_PANE
+        code, out, err = fleet.run(["pane-send", "--pane", pane, "--text", "hello"])
+        self.assertEqual(code, cli.PANE_MID_TURN)
+        self.assertEqual([c for c in fleet.sent if c[0] == pane], [])
+
+    def test_when_the_text_never_lands_the_enter_is_NOT_pressed(self):
+        """The heart of it. An Enter into an empty box submits nothing and LOOKS like it worked, so a
+        verb that presses blind is worse than no verb: it reports success for a message nobody received."""
+        fleet = self.loaded()
+        pane = fleet.ids_tmux["solo"]
+        fleet.panes[pane] = IDLE_PANE
+        fleet.type_is_swallowed.add(pane)      # the pane never comes to hold the text
+
+        code, out, err = fleet.run(["pane-send", "--pane", pane, "--text", "hello",
+                                    "--timeout-s", "1"])
+
+        self.assertNotEqual(code, EXIT_OK, "a swallowed type reported success")
+        kinds = [kind for target, kind, _ in fleet.sent if target == pane]
+        self.assertNotIn("enter", kinds, "Enter was pressed into a box that never held the text")
+        self.assertIn("never reached", (out + err).lower())
+
+    def test_a_dropped_enter_is_reported_rather_than_read_as_delivered(self):
+        """The post-Enter confirmation, and the outcome it exists for: `RA-1` measured it at 1 trial in 5.
+        The text was typed, the box held it, Enter was pressed — and the text is STILL there, so nothing
+        was submitted. `0` here would be the verb telling a caller a message was delivered that the
+        recipient never saw, which is the one answer this whole verb exists to make impossible."""
+        fleet = self.loaded()
+        pane = fleet.ids_tmux["solo"]
+        fleet.panes[pane] = IDLE_PANE
+        fleet.enter_is_dropped.add(pane)
+
+        code, out, err = fleet.run(["pane-send", "--pane", pane, "--text", "hello"])
+
+        self.assertEqual(code, cli.PANE_TEXT_LOST, f"a dropped Enter was reported as delivered: {out}")
+        kinds = [kind for target, kind, _ in fleet.sent if target == pane]
+        self.assertEqual(kinds, ["text", "enter"], f"the Enter was never pressed at all: {kinds}")
+        self.assertIn("dropped", (out + err).lower())
+
+    def test_a_dt_session_on_the_DEFAULT_server_is_refused(self):
+        """The standing rule is 'never write a dt- session on the DEFAULT server'. Not 'never write a
+        dt- session' — every dispatched worker IS one, so a blanket refusal would make this verb useless
+        for its only caller. live-pane.sh refuses all dt- names because a TEST PROBE should; copying that
+        here would be the bug."""
+        fleet = self.loaded()
+        fleet.tmux_socket = None                      # the default server
+        fleet.panes["dt-somebody"] = IDLE_PANE
+        fleet.tmux_live.add("dt-somebody")
+
+        code, out, err = fleet.run(["pane-send", "--pane", "dt-somebody", "--text", "hello"])
+
+        self.assertEqual(code, EXIT_REFUSED, f"a dt- send on the default server was allowed: {out}")
+        self.assertEqual([c for c in fleet.sent if c[0] == "dt-somebody"], [])
+
+    def test_a_dt_session_on_a_NAMED_socket_is_a_legal_target(self):
+        """The other direction, and the one a blanket refusal breaks. Dispatched workers live on the
+        `fleet` socket and are exactly who `nudge` must reach."""
+        fleet = self.loaded()
+        fleet.tmux_socket = "fleet"
+        fleet.panes["dt-worker"] = IDLE_PANE
+        fleet.tmux_live.add("dt-worker")
+
+        code, out, err = fleet.run(["pane-send", "--pane", "dt-worker", "--text", "hello"])
+
+        self.assertEqual(code, EXIT_OK, err)
+
+    def test_dry_run_sends_nothing(self):
+        fleet = self.loaded()
+        pane = fleet.ids_tmux["solo"]
+        fleet.panes[pane] = IDLE_PANE
+        code, out, err = fleet.run(["pane-send", "--pane", pane, "--text", "hi", "--dry-run"])
+        self.assertEqual(code, EXIT_OK, err)
+        self.assertEqual([c for c in fleet.sent if c[0] == pane], [])
+        self.assertIn("would-send", out)
 
 
 class TestTheArgvTable(CliCase):
