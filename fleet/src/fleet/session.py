@@ -105,6 +105,11 @@ class Probes:
     has_session: Callable[[str], bool]
     start_session: Callable[[str, Path, str], None]
     kill_session: Callable[[str], None]
+    #: `G-2`. Session names a human is attached to, or None when tmux could not be asked. Set-valued so
+    #: one tmux call answers for the whole fleet: a per-name probe would mean one subprocess per subject
+    #: on every nudge pass. Defaulted, because every existing construction of `Probes` predates it and a
+    #: required field here would break every caller and every fixture at once.
+    attached_sessions: Callable[[], Optional[set]] = lambda: set()
 
 
 #: tmux's exact-match marker. A BARE target is resolved by PREFIX: with only `itfleet-N-pre-ab` alive,
@@ -219,6 +224,25 @@ class SessionLayer:
             if session.name == name:
                 return True
         return bool(self.probes.has_session(name))
+
+    def attached(self, name: str) -> bool:
+        """Whether a HUMAN is attached to this session's client.
+
+        FAILS SAFE: an unanswerable probe reports True. The consumer is `nudge`, which types into a pane,
+        and "I could not tell whether somebody is sitting there" must mean "leave it alone". A guard whose
+        failure mode is 'go ahead' is not a guard — the same reasoning that keeps `pane-guard`'s `14`
+        outside the can-go set.
+
+        This collects the fact `G-4` needs and deliberately does NOT use it to change any state's
+        meaning. `BLOCKED` still cannot distinguish a stuck worker from an attached human; that is `G-4`
+        and it stays open.
+        """
+        if not name:
+            return False
+        attached = self.probes.attached_sessions()
+        if attached is None:
+            return True
+        return name in attached
 
     # --- pane --------------------------------------------------------------------------------
 
@@ -425,8 +449,23 @@ def default_probes(process_name: str = "claude", tmux_socket=_FROM_ENV) -> Probe
     def kill_session(name: str) -> None:
         run(tmux + ["kill-session", "-t", exact_session_target(name)])
 
+    def attached_sessions():
+        #: `#{session_attached}` is a COUNT of attached clients, not a bool: >0 means somebody is looking.
+        #: A tmux that answers non-zero (no server, no sessions) returns None — "could not ask" — which
+        #: `SessionLayer.attached` reads as attached, not as free.
+        done = run(tmux + ["list-sessions", "-F", "#{session_name} #{session_attached}"])
+        if done.returncode != 0:
+            return None
+        names = set()
+        for line in (done.stdout or "").splitlines():
+            parts = line.rsplit(" ", 1)
+            if len(parts) == 2 and parts[1].strip() not in ("", "0"):
+                names.add(parts[0].strip())
+        return names
+
     return Probes(list_processes=list_processes,
                   capture_pane=capture_pane,
                   has_session=has_session,
                   start_session=start_session,
-                  kill_session=kill_session)
+                  kill_session=kill_session,
+                  attached_sessions=attached_sessions)

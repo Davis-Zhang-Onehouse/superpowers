@@ -494,3 +494,44 @@ class TestIsClaudeProcess(unittest.TestCase):
         sessions, _, _ = layer(procs=[LiveSession(42, pathlib.Path("/w"), "dt-x")])
         self.assertFalse(sessions.is_claude_process(""),
                          "an unnamed pane must never be asserted to be anything")
+
+
+class TestAttachment(unittest.TestCase):
+    """`G-4`'s discriminator, collected for `G-2`'s benefit only.
+
+    A nudge must never go to a pane a human is attached to. This does NOT change what any state MEANS —
+    `BLOCKED` still cannot tell a stuck worker from an attached human, which is `G-4` and stays open. It
+    only makes the fact available to a caller that must not act on an occupied pane.
+    """
+
+    def layer(self, attached=()):
+        return SessionLayer(Probes(
+            list_processes=lambda: [],
+            capture_pane=lambda name: "",
+            has_session=lambda name: True,
+            start_session=lambda name, cwd, cmd: None,
+            kill_session=lambda name: None,
+            attached_sessions=lambda: set(attached)))
+
+    def test_an_attached_session_is_reported_attached(self):
+        self.assertTrue(self.layer(attached=["dt-worker"]).attached("dt-worker"))
+
+    def test_a_detached_session_is_not(self):
+        self.assertFalse(self.layer(attached=["dt-other"]).attached("dt-worker"))
+
+    def test_no_name_is_not_attached_rather_than_an_error(self):
+        """A subject with no recorded tmux name must not raise inside a read-only join."""
+        self.assertFalse(self.layer(attached=["dt-worker"]).attached(""))
+
+    def test_a_probe_that_cannot_answer_reports_ATTACHED(self):
+        """FAILS SAFE, and this is the whole point of the case. If tmux cannot be asked, the honest
+        answer is 'I do not know whether a human is here' — and the action gated on it is typing into
+        somebody's pane. Unknown must therefore mean 'do not touch', never 'go ahead'. A guard whose
+        failure mode is 'proceed' is not a guard (the reasoning that put pane-guard's 14 outside the
+        can-go set)."""
+        layer = SessionLayer(Probes(
+            list_processes=lambda: [], capture_pane=lambda name: "",
+            has_session=lambda name: True, start_session=lambda name, cwd, cmd: None,
+            kill_session=lambda name: None,
+            attached_sessions=lambda: None))
+        self.assertTrue(layer.attached("dt-worker"))
