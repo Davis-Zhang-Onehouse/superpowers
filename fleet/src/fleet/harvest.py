@@ -571,18 +571,46 @@ class Harvest:
 
     # ---- the cadence trigger ------------------------------------------------------------------------
 
+    def unharvestable(self, source) -> str:
+        """Why this source can NEVER be harvested, or `""` if it can be.
+
+        `FI-5`. The ONE authority on the question, because it was answered in two places and the two
+        disagreed. `run()` special-cases the synthetic root and says so in as many words — *"INFO rather
+        than a violation because no action could clear it"* — while `stale()` did not, so one tick emitted
+        both that row and a `stale-source` VIOLATION whose `clears_when` prescribed exactly the action the
+        first row calls impossible.
+
+        It could not self-heal either: the tick declines to harvest an unharvestable source and therefore
+        never stamps `last_run`, so the cadence window never resets. Permanent, on every verb, at the
+        severity the skills instruct people to act on — which is the unclearable alarm `OBS-21`/`FI-18`
+        exist to prevent, arriving through a door nobody was watching.
+
+        Only the synthetic ROOT. Any OTHER base that will not resolve stays a violation: there something
+        really is broken — a real effort whose register nobody can read — and that is the condition this
+        alarm is for.
+        """
+        if str(source.base) == ROOT_BASE:
+            return (f"the root base {ROOT_BASE!r} is synthetic and has no register of its own; "
+                    f"{source.issues_path} is a path no rename can make exist")
+        return ""
+
     def stale(self, now: str, max_age_s: int, live_work: bool) -> list:
         """Watched sources nobody has harvested inside the window — but ONLY while work is live.
 
         `live_work` is a parameter and not a nicety. An alarm nobody can act on trains people to ignore
         it, and *this* alarm's action is "go look at a register", which is not an action when the fleet is
         idle. Reported for a live fleet, silent for a quiet one.
+
+        A source that CANNOT be harvested is excluded for the same reason (`FI-5`), and via the single
+        authority above rather than a second copy of the test. It is still reported by `run()` as an INFO
+        row, so the source does not vanish from the tick — it just stops being an alarm nobody can answer.
         """
         if not live_work:
             return []
         cutoff = _parse(now, "now") - timedelta(seconds=max(0, int(max_age_s)))
         return [s for s in self.sources()
-                if _parse(s.last_run or s.registered_at, f"{s.base} last_run") < cutoff]
+                if not self.unharvestable(s)
+                and _parse(s.last_run or s.registered_at, f"{s.base} last_run") < cutoff]
 
     # ---- the report ---------------------------------------------------------------------------------
 
@@ -619,13 +647,14 @@ class Harvest:
             # An INFO row, not a muted violation, and only for the root: there is nothing to be wrong about
             # when the register was never supposed to exist. Any OTHER base that will not resolve is still a
             # violation, because there something really is broken — a real effort nobody can read.
-            if str(src.base) == ROOT_BASE:
+            why_never = self.unharvestable(src)
+            if why_never:
                 return [Row(
                     kind=SOURCE, subject=src.base,
-                    detail=(f"the root base {ROOT_BASE!r} is synthetic and has no register of its own, so "
-                            f"there is nothing to harvest from it. Recorded so the source is not silently "
+                    detail=(f"nothing to harvest: {why_never}. Recorded so the source is not silently "
                             f"absent from the tick, and INFO rather than a violation because no action "
-                            f"could clear it: {src.issues_path} is a path no rename can make exist."),
+                            f"could clear it. `stale()` consults the same judgement (FI-5), so this "
+                            f"source also raises no cadence alarm — one answer, not two."),
                     severity=INFO, ids_found=0, new_count=0)]
             return [Row(
                 kind=UNREADABLE, subject=src.base,
