@@ -242,9 +242,12 @@ class Fleet:
         #: `capture_pane` returns `""` when tmux does. This switch reproduces the first half; an empty
         #: string in `self.panes` reproduces the second.
         self.live_sessions_fail = False
+        #: `FI-7`: a FAILED capture is `None`; a genuinely EMPTY pane is `""`. The fixture has to be able
+        #: to express both, or a case cannot tell which one it is testing — which is the defect itself.
+        self.capture_fails = set()
         probes = Probes(
             list_processes=lambda: [] if self.live_sessions_fail else list(self.procs),
-            capture_pane=lambda name: self.panes.get(name, ""),
+            capture_pane=lambda name: None if name in self.capture_fails else self.panes.get(name, ""),
             has_session=lambda name: name in self.tmux_live,
             start_session=lambda name, cwd, cmd: self.started.append((name, str(cwd), cmd)),
             kill_session=self._kill)
@@ -1320,7 +1323,7 @@ class TestPaneGuard(CliCase):
         # The pane is alive by the session probe, and BOTH evidence probes fail: no process attributed,
         # and an empty capture. Exactly the field case.
         fleet.live_sessions_fail = True
-        fleet.panes[pane] = ""
+        fleet.capture_fails.add(pane)          # tmux did not answer — NOT an empty pane
 
         code, out, err = fleet.run(["pane-guard", "--porcelain", "--pane", pane])
         self.assertNotEqual(code, cli.PANE_NOT_CLAUDE,
@@ -1336,6 +1339,22 @@ class TestPaneGuard(CliCase):
                       "the row does not distinguish a failed observation from a negative one")
         self.assertIn("do not close", detail,
                       "the row does not tell the close-out caller what to do, which is the whole finding")
+
+    def test_a_genuinely_EMPTY_pane_is_still_not_claude(self):
+        """The over-reach guard, and §M10 caught its absence within one gate run.
+
+        My first fix tested `not text.strip()`, which cannot tell a FAILED capture from an EMPTY pane —
+        the exact conflation `FI-7` is about, reintroduced one layer up. A real shell pane running
+        `sleep 900` produces no output and is genuinely not claude; it was reported `14 indeterminate`,
+        which blocks a legitimate teardown forever. An empty pane that captured CLEANLY is `12`.
+        """
+        fleet = self.loaded()
+        pane = "dt-emptyshell"
+        fleet.tmux_live.add(pane)
+        fleet.panes[pane] = ""                 # captured fine; there is simply nothing on screen
+        code, out, err = fleet.run(["pane-guard", "--porcelain", "--pane", pane])
+        self.assertEqual(code, cli.PANE_NOT_CLAUDE,
+                         f"an empty pane that captured cleanly is not reported not-claude: {out}{err}")
 
     def test_the_indeterminate_code_is_not_one_that_authorises_teardown(self):
         """The contract half. `close` may act on 0/12/13; the new code must be outside that set, or the
