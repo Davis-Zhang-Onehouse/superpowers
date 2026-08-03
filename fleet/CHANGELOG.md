@@ -1,5 +1,13 @@
 # fleet — changelog
 
+## fleet/v0.3.0 — 2026-08-03T01:07:53Z
+Cut from d73a528 on `live` (upstream base pre-merge-fleet-skills-20260731). 4 commit(s) since fleet/v0.2.4.
+
+- 8f1323b it: a runner's exit status is a verdict, not a failure count
+- 448c663 release: the worktree cleanup unfreezes, and the area keeps 10 releases
+- b44891e fleet: one authority on whether a source can be harvested at all (FI-5)
+- d73a528 fleet: a failed observation is not a negative one (FI-7)
+
 ## fleet/v0.2.4 — 2026-08-02T22:06:08Z
 Cut from 4ab0270 on `live` (upstream base pre-merge-fleet-skills-20260731). 1 commit(s) since fleet/v0.2.3.
 
