@@ -307,3 +307,28 @@ not what a monitor does once armed.
 - **§C10 is the one structural SKIP worth knowing about.** It needs a *succeeding* dispatch, which §C's own
   contract forbids, so it cannot be asserted there. Its second reason — "there is no clone to observe" — was
   removed by `fleet clone` (`SI-19`); the first still stands.
+
+## The release pipeline — internals
+
+Operator-facing docs are in `skills/using-fleet/SKILL.md` under "Releasing fleet". This is the part that
+matters when you are changing the pipeline rather than using it.
+
+- **`release.py` holds no git.** What is deployed must be answerable without a working repository —
+  `release-status` runs on every shell. `release_git.py` is where git lives, and its runner is injected
+  through `workspace.default_git`, the seam the outward-state audit already allows.
+- **`tree_sha` excludes exactly two root entries**, `.release` and `.git`. The first describes the
+  release rather than being part of it; the second is why verification can compare a worktree against
+  the MANIFEST at all. It is the root entry named exactly `.git` — `.gitignore` and `bin/git-helper` are
+  shipped content and stay in the hash.
+- **Verification runs in a `git worktree` at the tag, not in the export** (`II-7`). The suite assumes a
+  working copy in several places. `check_copy_matches` proves the worktree IS the artifact before
+  anything runs, so the guarantee survives the change of venue.
+- **`Verify` takes its command runner as a REQUIRED argument.** A `subprocess` default here would be a
+  fourth spawn seam in the one module whose job is running things, and §M9 asserts the count exactly.
+- **`Releases.prune` is the package's newest delete site.** Like every other, it is declared in BOTH
+  `tests/test_cli.py::OUTWARD_CALL_SITES` and `fleet/it/run-group5.sh::DELETE_ALLOWLIST`, and §M9
+  cross-checks them against the AST — declaring it in one is how those two registries drifted (`II-3`).
+- **The changelog is written twice on purpose:** prepended to `fleet/CHANGELOG.md` in the repo, and
+  written into the artifact's own `.release/CHANGELOG.md`. "What changed in the version I am holding" is
+  a different question from "the whole history", and the holder of one artifact should not have to
+  answer it by diffing two.

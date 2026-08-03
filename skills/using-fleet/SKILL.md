@@ -61,6 +61,9 @@ Read-only. Safe to run at any time; they change nothing.
 | `fleet lint` | the layout matrix, the watched-source registry, the near-miss rule |
 | `fleet verify` | EXECUTE every documented recipe in a sandbox |
 | `fleet selftest` | discover and run every suite; the tree state is always stamped |
+| `fleet release-status` | what is deployed right now, since when, by whom and why |
+| `fleet release-list` | every release, its state and its cut time |
+| `fleet release-history` | the deploy/rollback register |
 
 Mutating. Each has `--dry-run`.
 
@@ -82,6 +85,12 @@ Mutating. Each has `--dry-run`.
 | `fleet reap` | free every stale lease this base owns; name the ones it does not |
 | `fleet enroll` / `fleet unenroll` | put an existing workspace into the pool, or take it out |
 | `fleet set-golden` | declare the golden workspace; there is deliberately no fallback |
+| `fleet clone` | duplicate the declared golden into a new slot and enrol it |
+| `fleet release-cut` | export an immutable release from a tag and write its changelog |
+| `fleet release-verify` | run both suites against a release and record the verdict |
+| `fleet release-promote` | mark a CANDIDATE as RELEASED; refuses without GREEN evidence |
+| `fleet release-deploy` | point `current` at a release, or at the checkout with `--dev` |
+| `fleet release-rollback` | point `current` back, recording why |
 
 Every verb's flags are on its own help, and the help is derived from the same table the parser uses — so it
 cannot document one thing and accept another:
@@ -139,6 +148,44 @@ is right on a box under load. Reference implementation: `fleet/it/bin/live-pane.
 You will see the advice *"send a space before Enter"*. It works, and it works for the wrong reason — the
 extra round-trip buys the milliseconds. Treating that as the mechanism leaves the channel one scheduling
 hiccup from dropping instructions again, with a space keystroke as the charm that was meant to prevent it.
+
+## Releasing fleet
+
+A release is an **immutable export of a tag**, plus a verdict from both suites, plus a `current` symlink
+saying which one is live. Four states: cut → verified → promoted → deployed.
+
+```bash
+fleet release-cut     --version 0.4.0 --repo "$REPO" --releases "$FLEET_RELEASES" --notes "…"
+fleet release-verify  --version 0.4.0 --releases "$FLEET_RELEASES"     # both suites; ~25 min
+fleet release-promote --version 0.4.0 --releases "$FLEET_RELEASES"     # refuses without GREEN
+fleet release-deploy  --version 0.4.0 --releases "$FLEET_RELEASES" --reason "…"
+fleet release-rollback --reason "…"    --releases "$FLEET_RELEASES"    # --to, or the register decides
+```
+
+Seven things you cannot guess, each of which cost something to learn:
+
+1. **A cut needs a CLEAN tree.** An export carries committed content only, so a dirty tree means the
+   thing tested is not the thing you edited. Refused, with the paths named.
+2. **`release-verify` needs a REPOSITORY, not just the artifact.** It runs the IT suite from a
+   `git worktree` at the release's tag, because the suite cannot judge an export — several cases need a
+   real `.git`, and `git archive` writes none. A cut records `source_repo`; an older release needs
+   `--repo`. A release that records neither is **refused**, never quietly verified against the export.
+3. **A CANDIDATE is not deployable, and a promote without GREEN evidence is refused** — exit `4`, a rule
+   deciding against you, not a breakage.
+4. **The verdict comes from the FAIL rows in this run's own registers**, never from `run-all.sh`'s exit
+   status. That script reports; it is not a gate. A release once recorded GREEN over a suite with seven
+   FAIL rows because something asked it (`SI-38`).
+5. **To triage a RED, read the per-runner registers** — `.release/evidence/it-RESULTS-closeout-*.tsv` —
+   and never the merged `it-RESULTS.tsv`, which keeps rows from runs that did not happen this time. The
+   evidence a FAIL row cites is copied into `evidence/it-cited/`, because the worktree it lived in is
+   deleted when the run ends.
+6. **Retention is 10 releases.** The oldest beyond that are removed at the next cut — never the deployed
+   one, however old. Nothing is lost: the TAG is the durable artifact and a cut rebuilds the export.
+7. **`--dry-run` exists on every mutating verb here**, and on `release-cut` it tells you the commit, the
+   tag and the commit count without writing anything.
+
+`release-status` answers "what is live right now"; `release-history` is the append-only register of every
+deploy and rollback, with who, when and why.
 
 ## Porcelain
 
