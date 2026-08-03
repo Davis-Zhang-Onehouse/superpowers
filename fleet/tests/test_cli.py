@@ -802,6 +802,15 @@ OUTWARD_CALL_SITES = {
         "names matching atomic.tmp_name's shape are removed, and ANY other entry makes the whole reclaim "
         "raise Refused naming that entry rather than sweeping it, so a recovery cannot become a data loss. "
         "The rmdir then fails safe, because rmdir cannot empty a directory"),
+    ("release", "prune"): (
+        "rmtree of a RELEASE DIRECTORY under $FLEET_RELEASES, beyond the 10-release ceiling, chosen by "
+        "semver order from `versions()` — which only ever returns directories this package named "
+        "`fleet-v<semver>` itself. The DEPLOYED release is skipped however old, because `current` is what "
+        "every davis_root shell resolves through and deleting its target breaks the box. Nothing is lost "
+        "that matters: the TAG is the durable artifact and a cut can rebuild any export from it, so this "
+        "deletes a convenience copy and not a record. Owner-write is restored first because a cut ends in "
+        "`chmod -R a-w` and rmtree cannot delete a read-only tree — the same mistake QI-7 left in the "
+        "verification worktrees, one directory over"),
     ("roadmap", "_consume"): (
         "list.remove of a dict from a LOCAL list built by `list(data['pending'])` — an in-memory element, "
         "not a path. Nothing is deleted; the list is then written back through atomic_write"),

@@ -10,6 +10,7 @@ the alternative, and `FI-20` is what eight hand-rolled copies of one primitive c
 import hashlib
 import os
 import re
+import shutil
 import socket
 import stat
 from contextlib import contextmanager
@@ -32,6 +33,13 @@ HISTORY_COLUMNS = ("ts", "action", "version", "from_version", "actor", "host", "
 #: Everything under here describes the release; it is not part of the payload and must not be hashed into
 #: `tree_sha`, or a manifest could never record a hash of the tree that contains it.
 META_DIR = ".release"
+
+#: How many releases the area keeps. Beyond this the OLDEST are removed at the next cut.
+#:
+#: A release is ~5 MB frozen and the cadence is a release per few fixes, so without a ceiling the area
+#: grows without bound — one day of work took it to 77 MB. Nothing is lost that matters: the TAG is the
+#: durable artifact and `release-cut` can rebuild any export from it; the directory is a convenience.
+RELEASE_RETENTION = 10
 
 _SEMVER = re.compile(r"^(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$")
 
@@ -221,6 +229,49 @@ class Releases:
     @property
     def history_path(self) -> Path:
         return self.root / "RELEASE-HISTORY.tsv"
+
+    def prune(self, keep: int = RELEASE_RETENTION) -> list:
+        """Remove the oldest releases beyond `keep`. Returns `[(version, why)]`, newest-removed first.
+
+        Ordered by SEMVER, never by mtime: cutting `0.2.0` after `0.10.0` is legal, and a timestamp would
+        then delete the newer of the two.
+
+        The DEPLOYED release is never removed, however old — and it is precisely the one most likely to
+        be old, because it stays deployed while newer versions are cut. `current` is what every
+        `davis_root` shell resolves through, so deleting its target breaks the box. It is skipped and the
+        NEXT-oldest goes instead, so the ceiling is still honoured.
+
+        A cut ends in `chmod -R a-w`, and `rmtree` cannot delete a read-only tree, so owner-write is
+        restored first. That is the same mistake `QI-7` left in the verification worktrees, one directory
+        over; it is written out here rather than discovered again.
+        """
+        versions = self.versions()
+        if len(versions) <= keep:
+            return []
+        deployed = None
+        try:
+            target = (self.root / "current").resolve()
+            deployed = next((v for v in versions if self.dir_for(v).resolve() == target), None)
+        except OSError:
+            pass
+        removed = []
+        # Oldest first, stopping as soon as the count is within the ceiling.
+        for version in list(versions):
+            if len(versions) - len(removed) <= keep:
+                break
+            if version == deployed:
+                continue                    # never the live one; the next-oldest goes instead
+            root = self.dir_for(version)
+            for path in sorted(root.rglob("*"), reverse=True) + [root]:
+                if not path.is_symlink():
+                    try:
+                        path.chmod(path.stat().st_mode | 0o200)
+                    except OSError:
+                        pass
+            shutil.rmtree(root, ignore_errors=True)
+            removed.append((version, f"beyond the {keep}-release ceiling; the tag {version.tag} still "
+                                     f"has it and `release-cut` can rebuild the export from that"))
+        return removed
 
     def append_history(self, **fields) -> None:
         row = {name: _clean(fields.get(name)) for name in HISTORY_COLUMNS}
