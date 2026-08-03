@@ -1,5 +1,13 @@
 # fleet — changelog
 
+## fleet/v0.3.1 — 2026-08-03T01:32:45Z
+Cut from c4a729a on `live` (upstream base pre-merge-fleet-skills-20260731). 4 commit(s) since fleet/v0.3.0.
+
+- c8d44f0 fleet: the profiles fleet ships now pass fleet's own lint (FI-13)
+- 11b2d13 fleet: a not-ready milestone's severity follows the REASON (FI-2)
+- bd69a7f fleet: the coordinator can retire a superseded milestone (FI-10)
+- c4a729a fleet: capture_pane can say it FAILED, fixing FI-7 at the source
+
 ## fleet/v0.3.0 — 2026-08-03T01:07:53Z
 Cut from d73a528 on `live` (upstream base pre-merge-fleet-skills-20260731). 4 commit(s) since fleet/v0.2.4.
 
