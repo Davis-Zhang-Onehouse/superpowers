@@ -17,6 +17,7 @@ below exists rather than a comment:
 3. **`repetitions` flags at TWO**, and every instance is cited. A repetition with no citation is an opinion.
 """
 import pathlib
+import shutil
 import tempfile
 import unittest
 
@@ -25,7 +26,7 @@ from fleet.errors import BadInput
 from fleet.harvest import (EMPTY_REGISTER, NO_ISSUES_FILED, NO_MEMORY, POPULATION, REGISTER_NAME,
                            SOURCE, STALE, UNREADABLE, UNREGISTERED_BASE, VACUOUS, Harvest, Issue,
                            Repetition, Source, VacuousExtraction, exit_code)
-from fleet.identity import InstantName
+from fleet.identity import ROOT_BASE, InstantName
 from fleet.layout import INFO, VIOLATION, bootstrap
 from fleet.store import Record, Store
 
@@ -408,3 +409,66 @@ class HarvestRefusalCase(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class SyntheticRootSourceCase(unittest.TestCase):
+    """`FI-5` — the unclearable violation that banners every observation verb.
+
+    Reported by a coordinator who ran the remedy the alarm named and got two rows that contradict each
+    other, verbatim:
+
+        source        00000000  info       …INFO rather than a violation because no action could clear
+                                           it: 00000000/ISSUES.md is a path no rename can make exist.
+        stale-source  00000000  violation  …clears_when: a harvest tick runs against 00000000/ISSUES.md
+
+    One row states no action can clear this; the row beside it calls it a VIOLATION and prescribes
+    exactly the action that cannot exist. Re-running the tick does not clear it — the tick declines to
+    harvest an unharvestable source and therefore never stamps `last_run`, so the cadence window can
+    never reset. Permanent, on every verb, at the severity the skills tell people to act on.
+
+    `run()` already knew: it special-cases the synthetic root and says so. `stale()` did not, and
+    `stale()` is what both the report and `cli._cadence` consult. Two checks over one source, reaching
+    opposite conclusions, because the judgement lived in only one of them.
+    """
+
+    def setUp(self):
+        self.root = pathlib.Path(tempfile.mkdtemp())
+        self.addCleanup(shutil.rmtree, self.root, True)
+        self.home = self.root / "fleet-home"
+        # Registered in the PAST and queried in the present, or the source is not overdue and every
+        # assertion below passes without exercising anything. The first version of this fixture stamped
+        # `registered_at` at `self.at` and two of these tests went green against the unfixed code.
+        self.registered_at = "2026-07-31T03:34:06Z"      # the real box's value
+        self.at = "2026-08-03T00:00:00Z"                 # ~2 days later, far past any window
+        self.h = Harvest(self.home, now=lambda: self.registered_at)
+        self.h.register(ROOT_BASE, f"{ROOT_BASE}/ISSUES.md")
+        self.h = Harvest(self.home, now=lambda: self.at)  # same store, clock moved forward
+
+    def test_the_synthetic_root_is_never_reported_stale(self):
+        overdue = self.h.stale(self.at, max_age_s=1800, live_work=True)
+        self.assertEqual([s.base for s in overdue], [],
+                         "the root base is reported overdue, and no tick can ever clear it")
+
+    def test_no_row_prescribes_a_remedy_the_adjacent_row_calls_impossible(self):
+        rows = self.h.report(now=self.at, max_age_s=1800, live_work=True)
+        stale = [r for r in rows if r.kind == "stale-source"]
+        self.assertEqual(stale, [], f"an unclearable stale-source violation was emitted: {stale}")
+        # The source is still REPORTED — silence would be the other failure. Just not as a violation.
+        source_rows = [r for r in rows if r.kind == "source" and r.subject == ROOT_BASE]
+        self.assertEqual(len(source_rows), 1, "the root source vanished from the tick entirely")
+        self.assertEqual(source_rows[0].severity, "info")
+
+    def test_a_REAL_base_that_is_overdue_is_still_a_violation(self):
+        """The expensive direction. Exempting the synthetic root must not exempt a real effort whose
+        register nobody is reading — that is the condition this alarm exists for."""
+        real = self.root / "00000000-08030001-inflight-append-realEffort"
+        real.mkdir(parents=True)
+        (real / "ISSUES.md").write_text("# ISSUES\n\n## RI-1 something\n\ndetail\n")
+        self.h.register(str(real), str(real / "ISSUES.md"))     # registered at self.at
+        overdue = self.h.stale("2026-08-04T00:00:00Z", max_age_s=1800, live_work=True)
+        self.assertEqual([s.base for s in overdue], [str(real)],
+                         "a real overdue source stopped being reported")
+
+    def test_an_idle_fleet_is_still_silent(self):
+        """`live_work=False` short-circuits before any of this; the exemption must not disturb it."""
+        self.assertEqual(self.h.stale(self.at, max_age_s=1800, live_work=False), [])
