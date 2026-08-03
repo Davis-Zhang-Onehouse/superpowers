@@ -237,8 +237,13 @@ class Fleet:
 
         self.procs, self.panes, self.tmux_live, self.holders = [], {}, set(), {}
         self.started, self.killed = [], []
+        #: `FI-7`. The PROBE FAILING is a distinct state from the probe finding nothing, and the real
+        #: probes cannot tell them apart — `list_processes` returns `[]` when pgrep exits non-zero and
+        #: `capture_pane` returns `""` when tmux does. This switch reproduces the first half; an empty
+        #: string in `self.panes` reproduces the second.
+        self.live_sessions_fail = False
         probes = Probes(
-            list_processes=lambda: list(self.procs),
+            list_processes=lambda: [] if self.live_sessions_fail else list(self.procs),
             capture_pane=lambda name: self.panes.get(name, ""),
             has_session=lambda name: name in self.tmux_live,
             start_session=lambda name, cwd, cmd: self.started.append((name, str(cwd), cmd)),
@@ -707,8 +712,13 @@ class TestExitCodes(CliCase):
         self.assertEqual(set(cli.EXIT_CODES_ALL) - set(EXIT_CODES),
                          set(cli.PANE_GUARD_CODES) - set(EXIT_CODES),
                          "cli extends the registry with something other than FD-10's contract")
-        self.assertEqual(set(cli.PANE_GUARD_CODES) - set(EXIT_CODES), {10, 11, 12, 13},
-                         "the pane-guard extension is not FD-10's four codes")
+        self.assertEqual(set(cli.PANE_GUARD_CODES) - set(EXIT_CODES), {10, 11, 12, 13, 14},
+                         "the pane-guard extension is not the documented contract")
+        #: `14` was added for `FI-7` and is pinned here BY NUMBER on purpose: it is the code that must
+        #: stay OUTSIDE the set `coordinating-instants` treats as "the pane can go" (`0`, `12`, `13`).
+        #: A future edit that renumbered it into that set would silently restore the defect — a
+        #: transient probe failure authorising the teardown of a live mid-turn pane.
+        self.assertNotIn(cli.PANE_INDETERMINATE, (cli.PANE_SAFE, cli.PANE_NOT_CLAUDE, cli.PANE_UNKNOWN))
 
         seen, verbs_hit = set(), set()
         for verb, argv in self.failure_matrix(fleet):
@@ -1286,6 +1296,54 @@ class TestPaneGuard(CliCase):
             self.assertEqual(printed.get("verdict"), cli.PANE_GUARD_CODES[code],
                              f"pane-guard {pane} does not name its verdict: {out!r}")
         self.assertEqual(cli.PANE_GUARD_CODES[cli.PANE_SAFE], "safe")
+
+    def test_a_pane_whose_evidence_could_not_be_READ_is_never_reported_not_claude(self):
+        """`FI-7` — the transient `12` that authorises destroying a live pane.
+
+        Measured in the field: one poll in ~118 against a live mid-turn claude returned `12 not-claude`,
+        with `11` on the polls either side. That code is safe before a SEND (everything but `0` means
+        wait) and unsafe before a CLOSE: `coordinating-instants` states *"`0`, `12` or `13` mean the pane
+        can go"*, so a transient `12` authorises closing a pane mid-turn — destroying exactly what
+        `close`'s queued-pane refusal exists to protect.
+
+        The mechanism, reproduced deterministically because both probes are injectable:
+        `capture_pane` returns `""` when tmux exits non-zero and `list_processes` returns `[]` when pgrep
+        does, so **"I looked and it is not claude" and "I could not look" are the same value**. Both
+        probes failing in one poll is all it takes, and load is what makes that coincide.
+
+        A guard whose failure mode is "go ahead" is not a guard. Absence of evidence must not be reported
+        as evidence of absence — the pane is ALIVE, so something is there; we simply could not see it.
+        """
+        fleet = self.loaded()
+        pane = "dt-solo"
+        fleet.panes[pane] = IDLE_PANE
+        # The pane is alive by the session probe, and BOTH evidence probes fail: no process attributed,
+        # and an empty capture. Exactly the field case.
+        fleet.live_sessions_fail = True
+        fleet.panes[pane] = ""
+
+        code, out, err = fleet.run(["pane-guard", "--porcelain", "--pane", pane])
+        self.assertNotEqual(code, cli.PANE_NOT_CLAUDE,
+                            "an unreadable pane is reported as NOT-CLAUDE, which authorises teardown")
+        self.assertNotEqual(code, cli.PANE_SAFE, "an unreadable pane is reported as safe to send to")
+        self.assertEqual(code, cli.PANE_INDETERMINATE,
+                         f"expected the indeterminate code; got {code}: {out}{err}")
+        printed = dict(line.split("\t", 1) for line in out.splitlines())
+        detail = printed.get("detail", "").lower()
+        self.assertIn("nothing about it could be read", detail,
+                      f"the row does not say the evidence was unreadable: {out!r}")
+        self.assertIn("failed observation", detail,
+                      "the row does not distinguish a failed observation from a negative one")
+        self.assertIn("do not close", detail,
+                      "the row does not tell the close-out caller what to do, which is the whole finding")
+
+    def test_the_indeterminate_code_is_not_one_that_authorises_teardown(self):
+        """The contract half. `close` may act on 0/12/13; the new code must be outside that set, or the
+        fix relabels the defect instead of removing it."""
+        self.assertNotIn(cli.PANE_INDETERMINATE, (cli.PANE_SAFE, cli.PANE_NOT_CLAUDE, cli.PANE_UNKNOWN))
+        self.assertIn(cli.PANE_INDETERMINATE, cli.PANE_GUARD_CODES)
+        self.assertIn(cli.PANE_INDETERMINATE, cli.registered_codes(cli.PANE_GUARD),
+                      "the code is not in the verb's registry, so §M1 will call it unregistered")
 
 
 class TestTheArgvTable(CliCase):
