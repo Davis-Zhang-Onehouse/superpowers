@@ -414,3 +414,65 @@ class TestNotReadySeverityReflectsWHY(RoadmapCase):
         self.rm.add(Milestone(id="s3", title="third", status="ready", deps=["s2"], evidence=[]))
         loud = [(r.kind, r.subject, r.severity) for r in self.rm.report() if r.severity == ATTENTION]
         self.assertEqual(loud, [], "a healthy stacked roadmap is shouting")
+
+
+class TestRetiringASupersededMilestone(RoadmapCase):
+    """`FI-10` — across 31 verbs there was no path to retire a milestone.
+
+    A milestone raised early and then superseded by a re-plan cannot be removed from the population:
+    `milestone` refuses an id already in the roadmap (*"refusing to shadow it"*) and `apply` refuses to
+    invent a status without a worker's proposal — and a superseded milestone has no worker and never
+    will. Both refusals are individually CORRECT, which is why this went unnoticed: nothing is broken,
+    there is simply no door.
+
+    The consequence is not cosmetic. Once its deps land, a superseded milestone is derived READY forever,
+    and `roadmap --porcelain` prints `not-ready` rows but not ready ones — so it is a phantom dispatchable
+    milestone that no report shows. `coordinating-instants` warns of the mirror case, a typo'd dep that
+    "reads as permanently in progress"; this is the same failure from the other end.
+
+    `retire` is the coordinator's own decision and can write exactly ONE status. A worker still cannot
+    move the roadmap by any path, which is the invariant the two-party protocol exists for.
+    """
+
+    def test_a_superseded_milestone_can_be_retired_with_a_reason(self):
+        self.rm.add(ms("p1", status="ready"))
+        self.rm.retire("p1", reason="superseded by the s1 split; v1..v14 replace this layer")
+        [back] = [m for m in self.rm.milestones() if m.id == "p1"]
+        self.assertEqual(back.status, "dropped")
+        self.assertIn("superseded by the s1 split", back.retired_reason)
+
+    def test_a_retired_milestone_leaves_the_ready_population(self):
+        """The whole point. A phantom READY milestone is dispatchable and invisible."""
+        self.rm.add(ms("landed", status="done"))
+        self.rm.add(ms("p1", status="ready", deps=["landed"]))
+        self.assertIn("p1", {m.id for m in self.rm.ready()})
+        self.rm.retire("p1", reason="superseded")
+        self.assertNotIn("p1", {m.id for m in self.rm.ready()},
+                         "a retired milestone is still dispatchable")
+
+    def test_retiring_REQUIRES_a_reason(self):
+        """A milestone that vanished from the population with no recorded why is a decision nobody can
+        reconstruct — and `dropped` is indistinguishable from `done` to a reader who was not there."""
+        self.rm.add(ms("p1", status="ready"))
+        with self.assertRaises(BadInput):
+            self.rm.retire("p1", reason="   ")
+
+    def test_an_ALREADY_terminal_milestone_is_refused(self):
+        """Retiring something finished would rewrite history — the exact thing `milestone`'s
+        refuse-to-shadow protects, arriving through the new door."""
+        self.rm.add(ms("done1", status="done"))
+        with self.assertRaises(BadInput):
+            self.rm.retire("done1", reason="tidying up")
+
+    def test_an_unknown_milestone_is_refused_by_name(self):
+        with self.assertRaises(BadInput) as caught:
+            self.rm.retire("nosuch", reason="whatever")
+        self.assertIn("nosuch", str(caught.exception))
+
+    def test_a_retired_milestone_is_reported_as_INFO_not_an_alarm(self):
+        """`dropped` is TERMINAL, so `FI-2`'s grading already covers it — asserted here so the two
+        changes cannot drift apart."""
+        self.rm.add(ms("p1", status="ready"))
+        self.rm.retire("p1", reason="superseded")
+        [row] = [r for r in self.rows(NOT_READY) if r.subject == "p1"]
+        self.assertEqual(row.severity, INFO)
