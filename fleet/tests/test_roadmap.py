@@ -112,12 +112,26 @@ class TestReadiness(RoadmapCase):
                 self.assertIn(m.id, reported, "every non-ready milestone carries a blocker")
                 row = reported[m.id]
                 self.assertTrue(row.detail.strip(), "an empty blocker names nothing")
+                #: `FI-2` changed this rule, and the change is a NARROWING of what shouts, not a
+                #: weakening of what is checked. It used to be "terminal is INFO, everything else is
+                #: ATTENTION", which made the commonest healthy state in the system — a stacked
+                #: milestone waiting for its predecessor — an alarm. Now the severity follows the
+                #: REASON: only a dep that is not in the roadmap at all is actionable, because only that
+                #: one can never land on its own.
                 if m.status in TERMINAL:
                     self.assertEqual(row.severity, INFO, "finished work is information, not an alarm")
+                elif "not in the roadmap" in row.detail:
+                    self.assertEqual(row.severity, ATTENTION,
+                                     "a dep that can never land must still be actionable")
                 else:
-                    self.assertEqual(row.severity, ATTENTION)
-                    self.assertTrue(row.clears_when, "an alarm states its clearing condition")
-                    self.assertTrue(row.clears_who, "an alarm states its clearing ACTOR (RI-31)")
+                    self.assertEqual(row.severity, INFO,
+                                     f"a normally-blocked milestone is shouting: {row.detail}")
+                if m.status not in TERMINAL:
+                    #: Asserted for EVERY non-terminal row regardless of severity — an info row that
+                    #: names no way forward is as useless as an alarm that names none, and dropping this
+                    #: with the severity change is exactly how a narrowing becomes a weakening.
+                    self.assertTrue(row.clears_when, "the row states its clearing condition")
+                    self.assertTrue(row.clears_who, "the row states its clearing ACTOR (RI-31)")
         self.assertIn("nosuchMilestone", reported["phantom"].detail,
                       "a dep that is not in the roadmap is named, never silently satisfied")
         self.assertIn(WORKER, reported["inflight"].clears_who,
@@ -345,3 +359,58 @@ class TestProposalNote(unittest.TestCase):
         self.assertNotIn('""', row.detail)
         self.assertNotIn("''", row.detail)
         self.assertIn("evidence item(s)", row.detail, "the row lost its normal content")
+
+
+class TestNotReadySeverityReflectsWHY(RoadmapCase):
+    """`FI-2` — a milestone merely waiting on its dependency was reported at `severity=attention`.
+
+    A stacked roadmap produces that row constantly and it is the system working: `p1` waits on `s1`,
+    `s1` is in progress, nobody needs to do anything. But `using-fleet` says *act on `violation`, report
+    `info`*, which leaves `attention` in a third category the guidance does not cover — on the row type a
+    healthy roadmap emits most often. An alarm that fires when nothing is wrong is one people learn to
+    scroll past, and then the `not-ready` row that DOES matter scrolls past with it.
+
+    `_blocker` already distinguishes the cases; `report()` derived severity from `m.status` alone and
+    discarded that. The severity now comes from the reason:
+
+      * deps exist and have not landed yet  -> INFO      (normal; waiting is the design)
+      * a dep is NOT IN THE ROADMAP at all  -> ATTENTION (a typo'd dep never lands; the skill warns of
+                                                          "a milestone that reads as permanently in
+                                                          progress")
+      * already in flight, held by somebody -> INFO      (somebody is on it)
+      * terminal                            -> INFO      (already the case)
+    """
+
+    def rows_for(self, kind):
+        return [r for r in self.rm.report() if r.kind == kind]
+
+    def test_waiting_on_an_unlanded_dep_is_INFO(self):
+        self.rm.add(Milestone(id="s1", title="the dep", status="running", deps=[], evidence=[]))
+        self.rm.add(Milestone(id="p1", title="waits", status="ready", deps=["s1"], evidence=[]))
+        [row] = [r for r in self.rows_for(NOT_READY) if r.subject == "p1"]
+        self.assertEqual(row.severity, INFO,
+                         "a milestone waiting on a dep that is progressing is reported as attention")
+        self.assertIn("have not LANDED", row.detail, "the row stopped explaining itself")
+
+    def test_a_dep_that_is_NOT_IN_THE_ROADMAP_is_still_ATTENTION(self):
+        """The expensive direction, and the reason this is not a blanket downgrade. A typo'd dep can
+        never land, so the milestone is permanently unready and nothing will ever clear it."""
+        self.rm.add(Milestone(id="p1", title="waits", status="ready", deps=["s1-typo"], evidence=[]))
+        [row] = [r for r in self.rows_for(NOT_READY) if r.subject == "p1"]
+        self.assertEqual(row.severity, ATTENTION,
+                         "a dep that is not in the roadmap at all was downgraded to info")
+        self.assertIn("not in the roadmap", row.detail)
+
+    def test_a_milestone_already_in_flight_is_INFO(self):
+        self.rm.add(Milestone(id="p1", title="in flight", status="running", deps=[], evidence=[]))
+        [row] = [r for r in self.rows_for(NOT_READY) if r.subject == "p1"]
+        self.assertEqual(row.severity, INFO, "a milestone somebody is executing needs no attention")
+
+    def test_a_healthy_stacked_roadmap_raises_NO_attention_at_all(self):
+        """The whole point, stated as the property rather than per-row: three milestones stacked on each
+        other, all legitimate, must produce no attention row anywhere."""
+        self.rm.add(Milestone(id="s1", title="first", status="running", deps=[], evidence=[]))
+        self.rm.add(Milestone(id="s2", title="second", status="ready", deps=["s1"], evidence=[]))
+        self.rm.add(Milestone(id="s3", title="third", status="ready", deps=["s2"], evidence=[]))
+        loud = [(r.kind, r.subject, r.severity) for r in self.rm.report() if r.severity == ATTENTION]
+        self.assertEqual(loud, [], "a healthy stacked roadmap is shouting")
