@@ -247,6 +247,97 @@ class ReleasesCase(unittest.TestCase):
         self.assertNotEqual(after_ignore, tree_sha(src))
 
 
+class RetentionCase(unittest.TestCase):
+    """`release-cut` keeps the last N releases and deletes what is beyond.
+
+    Asked for after a day's releases plus their leaked verification worktrees took the release area to
+    77 MB. A release is ~5 MB frozen, so the area grows without bound at a release per fix, and the old
+    ones are recoverable from their tags anyway — the tag is the durable artifact, the export is a
+    convenience.
+    """
+
+    def setUp(self):
+        import shutil
+        self.tmp = pathlib.Path(tempfile.mkdtemp(prefix="fleet-retention-"))
+        self.addCleanup(self._thaw)
+        self.addCleanup(shutil.rmtree, self.tmp, True)
+        from fleet.release import Releases
+        self.rel = Releases(self.tmp / "releases")
+
+    def _thaw(self):
+        for path in sorted(self.tmp.rglob("*"), reverse=True) + [self.tmp]:
+            try:
+                path.chmod(path.stat().st_mode | 0o700)
+            except OSError:
+                pass
+
+    def _cut(self, version, freeze=True):
+        from fleet.release import CANDIDATE, META_DIR, Version
+        v = Version.parse(version)
+        root = self.rel.dir_for(v)
+        (root / "bin").mkdir(parents=True)
+        (root / "bin" / "fleet").write_text(f"#!/bin/sh\n# {version}\n")
+        (root / META_DIR).mkdir(parents=True)
+        self.rel.write_manifest(v, {"version": version, "tag": f"fleet/v{version}"})
+        self.rel.set_state(v, CANDIDATE)
+        if freeze:                                   # exactly what a real cut leaves: chmod -R a-w
+            for path in sorted(root.rglob("*"), reverse=True) + [root]:
+                path.chmod(path.stat().st_mode & ~0o222)
+        return v
+
+    def test_nothing_is_pruned_below_the_limit(self):
+        for n in range(1, 6):
+            self._cut(f"0.1.{n}")
+        removed = self.rel.prune(keep=10)
+        self.assertEqual(removed, [])
+        self.assertEqual(len(self.rel.versions()), 5)
+
+    def test_the_OLDEST_beyond_the_limit_go_and_the_newest_stay(self):
+        """Ordered by SEMVER, not by mtime. Cutting 0.2.0 after 0.10.0 is legal and a directory
+        timestamp would then delete the newer one."""
+        for n in list(range(1, 13)):
+            self._cut(f"0.1.{n}")
+        removed = self.rel.prune(keep=10)
+        self.assertEqual([str(v) for v, _ in removed], ["0.1.1", "0.1.2"])
+        kept = [str(v) for v in self.rel.versions()]
+        self.assertEqual(len(kept), 10)
+        self.assertNotIn("0.1.1", kept)
+        self.assertIn("0.1.12", kept)
+
+    def test_a_FROZEN_release_is_actually_removed(self):
+        """A cut ends in `chmod -R a-w`, and `rmtree` cannot delete a read-only directory. The leaked
+        verification worktrees (`QI-7`) were exactly this mistake one directory over."""
+        for n in range(1, 13):
+            self._cut(f"0.1.{n}", freeze=True)
+        self.rel.prune(keep=10)
+        self.assertFalse((self.rel.root / "fleet-v0.1.1").exists(),
+                         "a frozen release survived the prune")
+
+    def test_the_DEPLOYED_release_is_never_pruned_however_old(self):
+        """The one refusal that matters. `current` is what every davis_root shell resolves through, so
+        deleting its target breaks the box — and the deployed release is precisely the one most likely to
+        be old, because it stays deployed while newer ones are cut."""
+        oldest = self._cut("0.1.1")
+        for n in range(2, 13):
+            self._cut(f"0.1.{n}")
+        self.rel.point_current_at(self.rel.dir_for(oldest))
+        removed = self.rel.prune(keep=10)
+        gone = [str(v) for v, _ in removed]
+        self.assertNotIn("0.1.1", gone, "the DEPLOYED release was pruned")
+        self.assertTrue((self.rel.root / "fleet-v0.1.1").exists())
+        self.assertEqual(len(self.rel.versions()), 10, "the limit was not honoured around the refusal")
+
+    def test_every_removal_is_reported_with_a_reason(self):
+        """A prune that deletes silently is a release area that loses artifacts without a record."""
+        for n in range(1, 13):
+            self._cut(f"0.1.{n}")
+        removed = self.rel.prune(keep=10)
+        self.assertEqual(len(removed), 2)
+        for version, why in removed:
+            self.assertTrue(why, f"{version} was removed with no reason recorded")
+            self.assertIn("10", why)
+
+
 class GitCase(unittest.TestCase):
     """Against a real temporary repository. `git` is the thing under test here -- mocking it would assert
     that this module can spell the flags it was written with, which is not a property anyone needs."""
@@ -528,6 +619,37 @@ class GitCase(unittest.TestCase):
         self.assertFalse(worktree.exists())
         listed = self.run("worktree", "list").stdout
         self.assertNotIn("wt-gone", listed)
+
+    def test_a_worktree_holding_a_FROZEN_tree_is_still_fully_removed(self):
+        """`QI-7`. The verification worktree leaked 35 MB per run, silently.
+
+        §Q's fixture cuts releases INSIDE the tree it runs in and freezes them `chmod -R a-w`, which is
+        what a real cut does. `git worktree remove --force` cannot delete a read-only directory, so it
+        failed — and `worktree_remove` deliberately checks neither git call, on the grounds that cleanup
+        which raises turns a finished verification into an error. `git worktree prune` then tidied git's
+        bookkeeping, so `git worktree list` was clean while the tree stayed on disk. Five verifies in one
+        day left five copies.
+
+        The cleanup has to cope with the artifact its own suite produces.
+        """
+        import os
+        from fleet.release_git import Repo
+        self._tagged_tree()
+        repo = Repo(self.repo)
+        worktree = self.tmp / "wt-frozen"
+        repo.worktree_add("fleet/v0.2.0", worktree)
+
+        # Exactly what a cut leaves behind, inside the worktree: a payload and then `chmod -R a-w`.
+        frozen = worktree / "releases" / "fleet-v0.9.9"
+        (frozen / "bin").mkdir(parents=True)
+        (frozen / "bin" / "fleet").write_text("#!/bin/sh\n")
+        for path in sorted(frozen.rglob("*"), reverse=True) + [frozen]:
+            path.chmod(path.stat().st_mode & ~0o222)
+
+        repo.worktree_remove(worktree)
+        self.assertFalse(worktree.exists(),
+                         f"the worktree was left on disk; it still holds "
+                         f"{sum(1 for _ in worktree.rglob('*'))} entries")
 
     def test_a_worktree_can_be_taken_twice_in_a_row_at_the_same_tag(self):
         """Two verifies of one release, sequentially. The first must leave nothing that blocks the

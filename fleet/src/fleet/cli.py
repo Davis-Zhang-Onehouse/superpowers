@@ -73,7 +73,7 @@ from fleet.layout import INFO, VIOLATION
 from fleet.pool import Pool, ReapReport
 from fleet.profiles import Profile
 from fleet.reconcile import COMPLETE, KIND_WORKER, RUNNING, needs_a_human, reconcile
-from fleet.release import (CANDIDATE, DEV, HISTORY_COLUMNS, META_DIR, RELEASED, Releases, Version,
+from fleet.release import (CANDIDATE, DEV, HISTORY_COLUMNS, META_DIR, RELEASE_RETENTION, RELEASED, Releases, Version,
                            actor, tree_sha, utc_now)
 from fleet.release_git import Repo, changelog_section
 from fleet.release_verify import FULL_ROSTER, GATE_ROSTER, GREEN, Verify, read_verdict
@@ -2925,10 +2925,23 @@ def _do_release_cut(ctx: Ctx, parsed: Parsed) -> int:
             "notes": parsed.get("notes") or "-"})
         rel.set_state(version, CANDIDATE)
         _freeze_payload(export)
+        #: Inside the lock and AFTER the new release has landed, so a prune can never leave the area
+        #: below the ceiling by removing something while this cut is still half-written. A release is
+        #: ~5 MB frozen and the cadence is a release per few fixes; without a ceiling the area grows
+        #: without bound. The DEPLOYED release is never removed however old — see `Releases.prune`.
+        pruned = rel.prune()
 
-    _emit(ctx, "release-cut", [
-        ("version", str(version)), ("state", CANDIDATE), ("tag", version.tag),
-        ("path", str(rel.dir_for(version))), ("commits", f"{len(commits)} since {since}")])
+    rows = [("version", str(version)), ("state", CANDIDATE), ("tag", version.tag),
+            ("path", str(rel.dir_for(version))), ("commits", f"{len(commits)} since {since}")]
+    #: Reported, never silent. A release area that deletes artifacts without saying so is one an operator
+    #: cannot reconcile against `release-list` — and "absence is never success" is the rule the reap
+    #: report already follows for the same reason.
+    for gone, why in pruned:
+        rows.append((f"pruned-{gone}", why))
+    if pruned:
+        rows.append(("retention", f"{RELEASE_RETENTION} releases kept; {len(pruned)} removed. Every one "
+                                  f"is still recoverable from its tag"))
+    _emit(ctx, "release-cut", rows)
     return EXIT_OK
 
 
