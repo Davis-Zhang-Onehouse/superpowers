@@ -918,6 +918,10 @@ DELETE_ALLOWLIST = {
     ("pool.py", "release", "unlink"),       # <home>/pool/leases/<slot>/lease.json and leftovers
     ("pool.py", "release", "rmdir"),        # <home>/pool/leases/<slot>
     ("roadmap.py", "_consume", "remove"),   # list.remove(body) — not a filesystem call
+    ("release.py", "prune", "rmtree"),      # a release directory beyond the 10-release ceiling, under
+                                            # $FLEET_RELEASES, named `fleet-v<semver>` by this package and
+                                            # chosen by semver order. Never the DEPLOYED one. The tag
+                                            # keeps the content recoverable; this is a convenience copy.
     # SI-9 / SI-7. Four sites added deliberately, each with the reason it is safe. The list stays a
     # CEILING: it is printed when an entry disappears, so it cannot quietly grow stale.
     ("atomic.py", "atomic_write", "unlink"),  # its OWN staging file, path.parent/tmp_name(path.name),
