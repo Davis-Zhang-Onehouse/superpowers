@@ -54,9 +54,21 @@ are long-lived and will restart mid-effort, and memory is not a source.
 **Closing out is four steps, not three, and the fourth is a wait.** A worker that has renamed itself
 `-complete-` may still be mid-turn, and `close` refuses one: *"still offering a way to interrupt, so closing it
 now ends a turn in progress and whatever that turn had not yet written down."* Poll the contract before you
-close — `fleet pane-guard --pane <session>`, where `10` (queued text) and `11` (mid-turn) mean wait, and `0`,
-`12` or `13` mean the pane can go. Then `close`, then `harvest`. Finishing the work and finishing the turn are
-different moments; conflating them means either a refusal or a `--force` you did not need.
+close — `fleet pane-guard --pane <session>`, where `10` (queued text), `11` (mid-turn) and `14`
+(indeterminate) mean wait, and `0`, `12` or `13` mean the pane can go. Then `close`, then `harvest`.
+Finishing the work and finishing the turn are different moments; conflating them means either a refusal or
+a `--force` you did not need.
+
+**`14` is the one to read twice, and it is why this list changed.** It means the pane is ALIVE but nothing
+about it could be read — no claude process attributed to it, and an empty capture. That is a FAILED
+observation, not an observation of an empty pane, and the two used to be the same value: `capture-pane`
+returns empty when tmux exits non-zero, exactly as a genuinely idle pane does. So a transient probe failure
+produced `12 not-claude`, and this list read `12` as "can go" — authorising the teardown of a live pane
+mid-turn, which is the precise thing `close`'s refusal exists to prevent. Measured in the field at one poll
+in ~118 against a live claude, with `11` on the polls either side (`FI-7`).
+
+Never treat a code you do not recognise as permission. A guard whose failure mode is "go ahead" is not a
+guard, and this contract read one that way for as long as it existed.
 <!-- v2-cite: close-refuses-queued-pane J8 -->
 
 Two verbs answer specific questions when the loop is not enough: `fleet status --id <todo>` for one subject in
