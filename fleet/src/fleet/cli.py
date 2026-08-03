@@ -2636,17 +2636,26 @@ def _do_pane_guard(ctx: Ctx, parsed: Parsed) -> int:
         code, detail = PANE_UNKNOWN, (f"no live process and no session answer for {pane!r}; sending keys "
                                       "to a pane nobody can name is the send with no target")
     else:
-        text = ctx.sessions.pane(pane)
         #: `FI-7`. Absence of evidence, before absence of claude. The pane answered `alive`, so SOMETHING
-        #: is there; if on top of that the process probe attributed nothing and the capture is empty, we
+        #: is there; if on top of that the capture FAILED and the process probe attributed nothing, we
         #: did not observe a non-claude pane — we failed to observe anything. Reporting that as
         #: `12 not-claude` hands a caller the one answer that authorises destroying it.
-        if not text.strip() and not ctx.sessions.is_claude_process(pane):
+        #:
+        #: `capture()`, not `pane()`, and that is the whole correction. My first version tested
+        #: `not text.strip()`, which cannot tell a FAILED capture from a genuinely EMPTY pane — the exact
+        #: conflation this finding is about, reintroduced one layer up. §M10 caught it immediately: a
+        #: real shell pane running `sleep 900` produces no output, is genuinely not claude, and was
+        #: reported `14 indeterminate` — blocking a legitimate teardown forever. The probe now returns
+        #: None on failure and `""` for an empty pane, so this asks the question that was always meant.
+        captured = ctx.sessions.capture(pane)
+        text = captured or ""
+        if captured is None and not ctx.sessions.is_claude_process(pane):
             code, detail = PANE_INDETERMINATE, (
                 f"{pane} is alive but nothing about it could be read: no live claude process is "
-                f"attributed to it and its pane capture came back empty. That is a failed observation, "
-                f"not an observation of a non-claude pane — tmux exiting non-zero and a genuinely empty "
-                f"pane are the same bytes here. WAIT and re-poll; do not send, and do not close")
+                f"attributed to it and the pane capture FAILED — tmux did not answer. That is a failed "
+                f"observation, not an observation of a non-claude pane; an empty pane that captured "
+                f"cleanly is reported {PANE_NOT_CLAUDE}, not this. WAIT and re-poll; do not send, and "
+                f"do not close")
         elif not _is_claude(ctx.sessions, text, pane):
             code, detail = PANE_NOT_CLAUDE, (f"{pane} is alive and nothing in its tail is claude; a send "
                                              "here goes to somebody else's shell")
