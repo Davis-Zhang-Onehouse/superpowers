@@ -100,7 +100,8 @@ class Probes:
     """The seam between this module and the machine. Injected, so a test never needs a real tmux."""
 
     list_processes: Callable[[], list]
-    capture_pane: Callable[[str], str]
+    #: `FI-7`: returns None when the capture FAILED, `''` for a genuinely empty pane.
+    capture_pane: Callable[[str], Optional[str]]
     has_session: Callable[[str], bool]
     start_session: Callable[[str, Path, str], None]
     kill_session: Callable[[str], None]
@@ -221,10 +222,24 @@ class SessionLayer:
 
     # --- pane --------------------------------------------------------------------------------
 
-    def pane(self, name: str) -> str:
+    def capture(self, name: str):
+        """The pane's text, or None if the capture failed. `FI-7`.
+
+        The ONLY way to distinguish "tmux could not answer" from "the pane is empty". Everything that
+        merely wants text should use `pane()`; anything DECIDING on absence must use this, because on
+        this distinction rests whether a live pane may be destroyed.
+        """
         if not name:
             raise BadInput("a pane capture needs a session name")
         return self.probes.capture_pane(name)
+
+    def pane(self, name: str) -> str:
+        """The pane's text, with a failed capture flattened to `""`.
+
+        Kept for every reader that just wants something to scan. A caller that BRANCHES on emptiness
+        must use `capture()` instead — see `FI-7`.
+        """
+        return self.capture(name) or ""
 
     def unsubmitted(self, pane_text: str) -> Optional[str]:
         """Text sitting in the input box that was never submitted, or None.
@@ -385,9 +400,19 @@ def default_probes(process_name: str = "claude", tmux_socket=_FROM_ENV) -> Probe
 
     # Every `-t` below is EXACT (`FI-23`). `new-session -s` is not a target and needs no marker: it
     # NAMES the session being created rather than resolving an existing one.
-    def capture_pane(name: str) -> str:
+    def capture_pane(name: str):
+        """The pane's text, or **None if the capture FAILED**.
+
+        `FI-7`. This returned `""` on failure, so "tmux could not answer" and "the pane is empty" were
+        the same value — and every caller then read the same falsy thing and drew the permissive
+        conclusion. `pane-guard` answered `12 not-claude`, which the close-out contract treats as
+        permission to tear the pane down.
+
+        `None` and `""` are now different facts, which is the only way a caller can tell them apart. Any
+        probe that can fail must be able to SAY it failed; a falsy default is a caller-visible lie.
+        """
         done = run(tmux + ["capture-pane", "-p", "-t", exact_pane_target(name)])
-        return done.stdout if done.returncode == 0 else ""
+        return done.stdout if done.returncode == 0 else None
 
     def has_session(name: str) -> bool:
         return run(tmux + ["has-session", "-t", exact_session_target(name)]).returncode == 0

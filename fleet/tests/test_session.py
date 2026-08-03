@@ -414,9 +414,18 @@ class TestAgainstRealTmux(unittest.TestCase):
                       "the REAL session's pane captured nothing recognisable, so the comparison below "
                       "would hold for the wrong reason — this is exactly what a pane target missing its "
                       "trailing colon looks like (FI-23's vacuity trap)")
-        self.assertNotIn(self.marker, self.probes.capture_pane(self.prefix),
+        #: `FI-7` made a failed capture return None rather than `""`, and capturing a session that does
+        #: not exist IS a failure — so the expected answer here is now None, which is strictly stronger
+        #: than an empty string: it says tmux refused, rather than leaving the caller to infer it from
+        #: emptiness. Both are accepted so this case keeps testing PREFIX TARGETING and does not quietly
+        #: become a test of the probe's return convention.
+        of_prefix = self.probes.capture_pane(self.prefix)
+        self.assertNotIn(self.marker, of_prefix or "",
                          f"capturing {self.prefix!r}, which does not exist, returned {self.long!r}'s "
                          f"screen")
+        self.assertIsNone(of_prefix,
+                          "capturing a session that does not exist should FAIL, not return empty text — "
+                          "that distinction is what FI-7 turned on")
 
     def test_killing_a_prefix_does_not_destroy_the_longer_session(self):
         """The hazard itself. Before the fix this call DID destroy `itfleet-repro-ab`
