@@ -747,3 +747,47 @@ for _module in ("guards", "roadmap", "review"):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class TestEveryVerbIsDocumentedWhereUsersLook(unittest.TestCase):
+    """`G-6` — eight release verbs shipped, four releases were promoted through them, and not one
+    appeared in the document that carries the verb surface.
+
+    `skills/using-fleet/SKILL.md` has a read-only table and a mutating table listing every other verb.
+    `release-cut`, `-verify`, `-promote`, `-deploy`, `-rollback`, `-status`, `-list` and `-history` were
+    in neither, nor in `fleet/CLAUDE.md`, nor in the root `CLAUDE.md`. The only writing about the
+    pipeline was its design spec and implementation plan — artifacts that record what was DECIDED, not
+    how to use it.
+
+    This is `SI-19`'s shape, which this package already has a name for: a correct, tested, DEAD public
+    surface. `SI-26` records the same thing happening to `Roadmap.add`, which *"had always existed, been
+    locked and been tested; it had no verb, so from a command line the replacement was unreachable"*.
+    Here it is one step worse than unreachable — it is reachable, it has shipped four releases, and the
+    next person has to read the source to find it.
+
+    Nothing checked this, which is why it went unnoticed. Derived from `cli.VERBS` so a verb added later
+    cannot escape the documentation the way these eight did.
+    """
+
+    SKILL = pathlib.Path(__file__).resolve().parents[2] / "skills" / "using-fleet" / "SKILL.md"
+
+    def test_every_verb_appears_in_the_using_fleet_verb_surface(self):
+        from fleet.cli import VERBS
+        self.assertTrue(self.SKILL.is_file(), f"the skill moved from {self.SKILL}")
+        text = self.SKILL.read_text()
+        missing = sorted(v for v in VERBS if f"`fleet {v}`" not in text)
+        self.assertEqual(missing, [],
+                         f"{len(missing)} verb(s) exist and are documented nowhere a user looks: "
+                         f"{missing}. A shipped verb absent from the verb surface is SI-19's dead public "
+                         f"surface — reachable, tested, and undiscoverable.")
+
+    def test_the_skill_documents_no_verb_that_does_not_exist(self):
+        """The other direction, and it is not symmetric decoration: a doc naming a verb the parser does
+        not declare sends a reader to a refusal, which is exactly `FI-11` defect 1 — the close-out block
+        told coordinators to run `close --instant`, a flag `close` does not have."""
+        import re
+        from fleet.cli import VERBS
+        named = set(re.findall(r"`fleet ([a-z][a-z-]*)`", self.SKILL.read_text()))
+        phantom = sorted(named - set(VERBS))
+        self.assertEqual(phantom, [],
+                         f"the skill documents verb(s) that do not exist: {phantom}")
