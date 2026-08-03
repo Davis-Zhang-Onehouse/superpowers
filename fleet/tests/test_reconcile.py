@@ -9,13 +9,16 @@ everybody read**.
 The whole fleet is built through the injected probes (`Probes`, `cwd_probe`, `alive`): `NFR2-3` exists so
 a suite can describe a fleet without owning one. Nothing here starts a process, a tmux or a repository.
 """
+import os
 import pathlib
 import tempfile
+import time
 import unittest
 from dataclasses import fields as dataclass_fields
 
 from fleet.pool import Pool
-from fleet.reconcile import COMPLETE, DEAD, KINDS, STATES, UNREACHABLE, Subject, reconcile
+from fleet.reconcile import (COMPLETE, DEAD, IDLE, KINDS, RUNNING, STATES, UNREACHABLE,
+                             Subject, needs_a_human, reconcile)
 from fleet.session import LiveSession, Probes, SessionLayer
 from fleet.store import Declarations, Record, Store
 
@@ -119,6 +122,19 @@ class SyntheticFleet:
         self.procs.append(LiveSession(pid=pid, cwd=self.slots_dir / slot, name=tmux))
         self.panes[tmux] = pane
         self.tmux_live.add(tmux)
+
+    def age(self, todo_id, seconds):
+        """Make an instant look untouched for `seconds`. `_idle_for` reads the instant directory, its
+        direct children and `.fleet/*` — so all three must be aged, and aged LAST, because writing a
+        declaration refreshes the mtime of the file it writes."""
+        instant = self.paths[todo_id]
+        old = time.time() - seconds
+        paths = [instant] + list(instant.iterdir())
+        for child in list(instant.iterdir()):
+            if child.name == ".fleet" and child.is_dir():
+                paths += list(child.iterdir())
+        for path in paths:
+            os.utime(path, (old, old))
 
     def _build(self):
         # 1. Dead but recorded: a record, a lease, an `-inflight-` folder, and no process anywhere.
@@ -426,3 +442,67 @@ class TestATerminatedRecordDoesNotInheritTheLiveHolder(unittest.TestCase):
                          "that pid is fed to the watchdog's exclude list")
         self.assertEqual(subs["coord-334"].state, COMPLETE,
                          "the aborted folder still decides its state; only the pid was wrong")
+
+
+class TestTheIdleDetectorIsProduced(unittest.TestCase):
+    """`G-10`. `FI-14` made `IDLE` actionable and shipped; nothing ever drove `reconcile` TO it.
+
+    Its flagship test (`test_render.test_a_stalled_worker_is_counted_as_needing_a_human`) hand-builds a
+    subject already labelled `IDLE` and asserts the banner counts it — so it passes whether or not the
+    detector can ever produce one. Measured by mutation: disabling `_live_state`'s threshold branch, or
+    making `_idle_for` always report fresh, leaves the whole suite green. The control that says the
+    harness CAN kill is reverting `FI-14` itself, which dies in `test_render`.
+
+    These cases drive the real join, so the detector has a guard for the first time.
+    """
+
+    def setUp(self):
+        self.fleet = SyntheticFleet()
+
+    def subjects(self, idle_after_s=1800):
+        return {s.identity: s for s in reconcile(
+            self.fleet.store, self.fleet.pool, self.fleet.sessions,
+            self.fleet.instants, idle_after_s=idle_after_s)}
+
+    def test_a_worker_untouched_past_the_threshold_is_produced_as_idle(self):
+        self.fleet.dispatch("stalled-07300401", "00000000-07300401-inflight-append-stalled",
+                            "ws9", "dt-stalled")
+        self.fleet.launch("dt-stalled", 5101, "ws9", QUIET_PANE)
+        self.fleet.age("stalled-07300401", 2700)
+
+        subject = self.subjects()["stalled-07300401"]
+
+        self.assertEqual(subject.state, IDLE,
+                         f"a live worker with a quiet pane, untouched for 2700s against a 1800s "
+                         f"threshold, is not IDLE: {subject.state} / {subject.note!r}")
+        self.assertIn("1800", subject.note,
+                      "the IDLE note does not name the threshold it crossed")
+        self.assertTrue(needs_a_human(subject),
+                        "a stalled worker is not in the population a human is asked to act on")
+
+    def test_a_working_worker_is_never_idle_however_old_the_instant(self):
+        """The other half, and the one that stops the fix being "call everything IDLE". A pane still
+        offering a way to interrupt is progressing, whatever the filesystem says."""
+        self.fleet.dispatch("busy-07300402", "00000000-07300402-inflight-append-busy",
+                            "ws9", "dt-busy")
+        self.fleet.launch("dt-busy", 5102, "ws9", BUSY_PANE)
+        self.fleet.age("busy-07300402", 999999)
+
+        subject = self.subjects()["busy-07300402"]
+
+        self.assertEqual(subject.state, RUNNING,
+                         f"a busy pane was reported {subject.state} because its files are old")
+        self.assertFalse(needs_a_human(subject), "a working worker needs nobody")
+
+    def test_the_threshold_is_the_boundary_not_a_suggestion(self):
+        """`idle_after_s` is a parameter and the comparison is strict. A case that only ever tests
+        2700-vs-1800 cannot tell a working threshold from a hard-coded one."""
+        self.fleet.dispatch("edge-07300403", "00000000-07300403-inflight-append-edge",
+                            "ws9", "dt-edge")
+        self.fleet.launch("dt-edge", 5103, "ws9", QUIET_PANE)
+        self.fleet.age("edge-07300403", 600)
+
+        self.assertEqual(self.subjects(idle_after_s=300)["edge-07300403"].state, IDLE,
+                         "600s idle against a 300s threshold is not IDLE")
+        self.assertEqual(self.subjects(idle_after_s=1800)["edge-07300403"].state, RUNNING,
+                         "600s idle against a 1800s threshold was reported IDLE")
