@@ -206,3 +206,46 @@ class TestOptypeAgreement(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class TestTheSHIPPEDProfilesSatisfyOurOwnRules(unittest.TestCase):
+    """`FI-13` — `lint` is run against a user's profile and never against the ones fleet ships.
+
+    `profiles.lint` mandates, unconditionally, that every worker-facing profile instruct the worker to run
+    `fleet declare phase awaiting-ci` — and the rule's own comment says why it is unconditional: *"a
+    profile that forgot the clause is exactly the profile that also forgot to require it."* Both profiles
+    fleet SHIPS forgot it. Measured: 0 occurrences across `charter.md` and `seed.txt` for both `worker`
+    and `compaction`.
+
+    A rule a package states about itself and never checks against itself is a rule that has already
+    drifted; the only question is when somebody notices. This is the check that makes it impossible to
+    drift again, and it runs the SHIPPED `lint` rather than re-testing the condition, so a change to the
+    rule reaches this case automatically.
+    """
+
+    SHIPPED = pathlib.Path(__file__).resolve().parents[2] / "skills" / "using-fleet" / "profiles"
+
+    def test_every_shipped_profile_passes_fleet_s_own_lint(self):
+        self.assertTrue(self.SHIPPED.is_dir(), f"the shipped profiles moved from {self.SHIPPED}")
+        checked = 0
+        for path in sorted(self.SHIPPED.iterdir()):
+            if not path.is_dir():
+                continue
+            with self.subTest(profile=path.name):
+                #: Severity `violation` only. `lint` also emits a `population` row, which is INFO and
+                #: is the report saying what it examined — treating that as a failure would make this
+                #: case red forever and it would be switched off, which is the always-red alarm
+                #: `OBS-21` avoided.
+                bad = [(v.rule, v.detail) for v in lint(Profile.load(path))
+                       if getattr(v, "severity", "violation") == "violation"]
+                self.assertEqual(bad, [], f"the SHIPPED {path.name} profile fails fleet's own lint")
+                checked += 1
+        self.assertGreaterEqual(checked, 3, "the shipped profile set shrank; this case now proves less")
+
+    def test_the_shipped_set_still_contains_a_worker_facing_profile(self):
+        """Non-vacuity. If every shipped profile stopped being worker-facing, the case above would pass
+        while asserting nothing about the rule it exists for."""
+        from fleet.profiles import WORKER_FACING
+        kinds = {Profile.load(p).kind for p in sorted(self.SHIPPED.iterdir()) if p.is_dir()}
+        self.assertTrue(kinds & set(WORKER_FACING),
+                        f"no shipped profile is worker-facing any more; kinds are {sorted(kinds)}")
