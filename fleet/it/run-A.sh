@@ -195,7 +195,7 @@ a1_args() {               # every required flag supplied; no value contains a sp
     #: store and evaluates every gate against it, which is exactly the fallback question A1 asks.
     dispatch)   echo "--profile $A_PROFILE --title a1probe --base 00000000 --dry-run" ;;
     resume)     echo "--instant $A1_INST --tmux itfleet-A-a1resume" ;;
-    declare)    echo "--instant $A1_INST --phase awaiting-ci" ;;
+    declare)    echo "--instant $A1_INST --phase awaiting-ci --watcher $$" ;;
     park)       echo "--instant $A1_INST --question a1park" ;;
     unpark)     echo "--instant $A1_INST" ;;
     milestone)  echo "--instant $A1_INST --id a1m --title a1milestone" ;;
@@ -638,7 +638,7 @@ matrix = [("leases", []), ("board", []), ("lint", ["--instant", INST]), ("roadma
           ("reconcile", []), ("compaction-status", []), ("verify", ["--instant", INST]),
           ("init", ["--name", "a4cprobe"]), ("enroll", ["--slot", SLOT]),
           ("set-golden", ["--path", os.environ["A4_GOLDEN"]]), ("harvest", []), ("reap", []),
-          ("declare", ["--instant", INST, "--phase", "awaiting-ci"]),
+          ("declare", ["--instant", INST, "--phase", "awaiting-ci", "--watcher", str(os.getpid())]),
           ("park", ["--instant", INST, "--question", "a4c"]), ("unpark", ["--instant", INST]),
           ("pane-guard", ["--pane", "itfleet-A-absent-zzz"])]
 codes = {}
@@ -817,7 +817,7 @@ a5_main_matrix() {
   a5_drive ok roadmap    0 --instant "$A5_INST"
   a5_drive ok reconcile  0
   a5_drive ok compaction-status 0
-  a5_drive ok declare    0 --instant "$A5_INST" --phase awaiting-ci
+  a5_drive ok declare    0 --instant "$A5_INST" --phase awaiting-ci --watcher $$
   a5_drive ok park       0 --instant "$A5_INST" --question a5park
   a5_drive ok unpark     0 --instant "$A5_INST"
   a5_drive ok propose    0 --instant "$A5_INST" --milestone M1 --status running \

@@ -72,7 +72,8 @@ from fleet.identity import ROOT_BASE, InstantName, resolve
 from fleet.layout import INFO, VIOLATION
 from fleet.pool import Pool, ReapReport
 from fleet.profiles import Profile
-from fleet.reconcile import COMPLETE, KIND_WORKER, RUNNING, needs_a_human, reconcile
+from fleet.reconcile import (COMPLETE, KIND_WORKER, PHASE_AWAITING_CI, RUNNING, needs_a_human,
+                             reconcile)
 from fleet.release import (CANDIDATE, DEV, HISTORY_COLUMNS, META_DIR, RELEASE_RETENTION, RELEASED, Releases, Version,
                            actor, tree_sha, utc_now)
 from fleet.release_git import Repo, changelog_section
@@ -1042,11 +1043,33 @@ def _do_declare(ctx: Ctx, parsed: Parsed) -> int:
             f"rather than stored, because a stored empty phase reads as '(none declared)' to every consumer "
             f"while still suppressing the near-miss lint — silence from the control and no exclusion from the "
             f"cap. Declare a real phase, or leave the instant undeclared.")
+    #: `D-10`. `awaiting-ci` is the one phase that outranks both `busy` and the idle threshold, so an
+    #: unwatched one is an infinite silent wait hidden by its own declaration — and it frees the WIP cap
+    #: at the same time. Refused where it is made, like `park --question ""` and `propose`'s mandatory
+    #: evidence. The message names the route, because a refusal that states a rule and no route is `G-7`.
+    pid = None
+    if phase == PHASE_AWAITING_CI:
+        watcher = parsed.get("watcher")
+        if not watcher:
+            raise BadInput(
+                f"--phase {PHASE_AWAITING_CI} needs --watcher <pid>: the pid of whatever will wake this "
+                f"instant when the wait ends. This phase outranks both the busy check and the idle "
+                f"threshold, so declared with nothing watching it is a wait that never ends and never "
+                f"shows up — and it frees the WIP cap too. Pass the pid of your `gh run watch` (or "
+                f"whatever you are waiting on), or declare a different phase.")
+        try:
+            pid = int(watcher)
+        except (TypeError, ValueError):
+            raise BadInput(f"--watcher {watcher!r} is not a pid")
+        if not ctx.pool.pid_alive(pid):
+            raise BadInput(
+                f"--watcher {pid} is not running, so it will never wake this instant. A stale pid is the "
+                f"copy-paste this check exists to catch. Start the watcher, then declare.")
     if ctx.dry_run:
         _emit(ctx, "declare", [("dry-run", "nothing was declared"), ("would-declare", phase),
-                               ("asked", asked)])
+                               ("watcher", str(pid) if pid is not None else ""), ("asked", asked)])
         return EXIT_OK
-    Declarations(child).set_phase(phase)
+    Declarations(child).set_phase(phase, watcher=pid)
     consumer = Declarations(child)                       # a FRESH consumer, not the writer's return
     value = consumer.phase()
     if value is None:
@@ -1054,7 +1077,11 @@ def _do_declare(ctx: Ctx, parsed: Parsed) -> int:
             f"the declaration did not land: {consumer.path} reports no phase after writing {phase!r}. "
             "The acknowledgement is the re-read, so a declaration that cannot be read back is a failure "
             "and not a success with a caveat.")
-    _emit(ctx, "declare", [("phase", value), ("asked", asked), ("consumer", str(consumer.path)),
+    #: The watcher is acknowledged the same way the phase is — read back through the fresh consumer,
+    #: never echoed from the argument (`RCF-9`). A declarer who cannot see the watcher landed has the
+    #: same problem `D-10` exists to remove, one field over.
+    _emit(ctx, "declare", [("phase", value), ("watcher", str(consumer.watcher() or "")),
+                           ("asked", asked), ("consumer", str(consumer.path)),
                            ("instant", str(child))])
     return EXIT_OK
 
@@ -3280,6 +3307,8 @@ VERBS = {spec.name: spec for spec in (
     _verb("declare", _do_declare, False, "declare a phase and print what the CONSUMER now reads", (
         Flag("--instant", True, True, "the declaring instant"),
         Flag("--phase", True, True, "the phase; awaiting-ci is the one the WIP cap excludes"),
+        Flag("--watcher", True, False,
+             "pid that will wake this instant when the wait ends; REQUIRED with --phase awaiting-ci"),
     )),
     _verb("park", _do_park, False, "record a parked decision as structured state", (
         Flag("--instant", True, True, "the instant"),

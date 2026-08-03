@@ -439,7 +439,10 @@ class CliCase(unittest.TestCase):
             "dispatch": ["--profile", profile, "--title", "a fresh worker",
                          "--base", FRESH_BASE_DIGITS, "--optype", "append"],
             "resume": ["--instant", orphan, "--slot", "ws4", "--tmux", "dt-orphanWork"],
-            "declare": ["--instant", ready, "--phase", "AWAITING-CI"],
+            #: `D-10`: `awaiting-ci` needs a LIVE watcher, and this row must stay ADMISSIBLE — a refused
+            #: row would make the dry-run delta case vacuous for `declare`, since a refusal never reaches
+            #: the write it must not perform.
+            "declare": ["--instant", ready, "--phase", "AWAITING-CI", "--watcher", str(os.getpid())],
             "park": ["--instant", ready, "--question", "which baseline is the ruler?"],
             "unpark": ["--instant", ready],
             #: A fresh id: `add` refuses a duplicate, and `loaded()` pre-seeds `M1`. No `--dep`, so the row
@@ -1146,12 +1149,15 @@ class TestDeclare(CliCase):
     for the length of a CI queue."""
 
     def test_declare_prints_what_the_consumer_reads(self):
+        """`D-10` changed the contract this case is driven through: `awaiting-ci` now needs a live
+        `--watcher`, so the invocation carries this process's own pid. The property under test is
+        unchanged — the acknowledgement is the RE-READ, not an echo of the argument."""
         fleet = self.loaded()
         instant = fleet.paths["readyWorker"]
         asked = "AWAITING-CI"
 
         code, out, err = fleet.run(["declare", "--porcelain", "--instant", str(instant),
-                                    "--phase", asked])
+                                    "--phase", asked, "--watcher", str(os.getpid())])
         self.assertEqual(code, EXIT_OK, err)
 
         consumer = Declarations(instant).phase()
@@ -1169,6 +1175,39 @@ class TestDeclare(CliCase):
         code, out, err = fleet.run(["status", "--porcelain", "--id", fleet.ids["readyWorker"]])
         self.assertEqual(code, EXIT_OK, err)
         self.assertIn(f"evidence.declared_phase\t{consumer}", out)
+
+    def test_declaring_awaiting_ci_without_a_watcher_is_refused(self):
+        """`D-10`, producer half. Refused where it is made, like `park --question ""` and `propose`'s
+        mandatory evidence: a declaration nothing backs is not a declaration. The refusal must name the
+        flag that satisfies it — a refusal that states a rule and no route is `G-7`'s defect."""
+        fleet = self.loaded()
+        inst = fleet.paths["solo"]
+        code, out, err = fleet.run(["declare", "--instant", str(inst), "--phase", "awaiting-ci"])
+        self.assertEqual(code, EXIT_BAD_INPUT, f"an unwatched awaiting-ci was accepted: {out}")
+        self.assertIn("--watcher", err, f"the refusal does not name the route that works: {err}")
+
+    def test_declaring_awaiting_ci_with_a_watcher_is_accepted(self):
+        fleet = self.loaded()
+        inst = fleet.paths["solo"]
+        code, out, err = fleet.run(["declare", "--instant", str(inst), "--phase", "awaiting-ci",
+                                    "--watcher", str(os.getpid())])
+        self.assertEqual(code, EXIT_OK, err)
+        self.assertIn("awaiting-ci", out)
+
+    def test_a_watcher_that_is_not_alive_is_refused_at_declaration_time(self):
+        """A pid nobody is running is not a watcher. Refusing here is cheaper than discovering it in
+        reconcile, and it catches the copy-paste of a stale pid."""
+        fleet = self.loaded()
+        inst = fleet.paths["solo"]
+        code, out, err = fleet.run(["declare", "--instant", str(inst), "--phase", "awaiting-ci",
+                                    "--watcher", "999999"])
+        self.assertEqual(code, EXIT_BAD_INPUT, f"a dead watcher was accepted: {out}")
+
+    def test_a_phase_other_than_awaiting_ci_needs_no_watcher(self):
+        """The requirement is specific to the phase that suppresses detection. Do not tax the others."""
+        fleet = self.loaded()
+        code, out, err = fleet.run(["declare", "--instant", str(fleet.paths["solo"]), "--phase", "dev"])
+        self.assertEqual(code, EXIT_OK, err)
 
 
 class TestLint(CliCase):
@@ -2715,9 +2754,12 @@ class TestADeclarationIsNeverEmpty(CliCase):
     """
 
     def test_an_empty_phase_is_refused(self):
+        """`D-10` changed the standing-declaration setup, not the rule: `awaiting-ci` now needs a live
+        `--watcher`, so this process's pid stands one up. What is asserted is unchanged."""
         fleet = self.loaded()
         ready = str(fleet.paths["readyWorker"])
-        fleet.run(["declare", "--instant", ready, "--phase", "AWAITING-CI"])
+        fleet.run(["declare", "--instant", ready, "--phase", "AWAITING-CI",
+                   "--watcher", str(os.getpid())])
         before = Declarations(fleet.paths["readyWorker"]).phase()
         self.assertEqual("awaiting-ci", before, "this test needs a standing declaration to be meaningful")
 
@@ -2788,10 +2830,14 @@ class TestTheNearMissRuleReadsShapeAndRetraction(CliCase):
                                  f"fired on 5 of 5 live instants for exactly this reason")
 
     def test_a_real_declaration_silences_the_rule(self):
-        """It is a RULE, not a grep: the same line with a declaration behind it is not a near miss."""
+        """It is a RULE, not a grep: the same line with a declaration behind it is not a near miss.
+
+        `D-10` changed what a REAL declaration is — `awaiting-ci` now carries a live `--watcher` — so the
+        declaration this case stands up carries this process's pid. The rule under test is unchanged."""
         fleet = self.loaded()
         child = fleet.paths["readyWorker"]
-        fleet.run(["declare", "--instant", str(child), "--phase", "AWAITING-CI"])
+        fleet.run(["declare", "--instant", str(child), "--phase", "AWAITING-CI",
+                   "--watcher", str(os.getpid())])
 
         code, out, err = self._lint(fleet, "## Phase: AWAITING-CI")
 

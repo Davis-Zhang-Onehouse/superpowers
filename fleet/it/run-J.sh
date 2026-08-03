@@ -427,7 +427,7 @@ if [ -z "$J1W" ] || [ ! -d "$J1W" ]; then
     "the dispatch produced no instant: $(head -2 "$J1_OUT/dispatch.out" | tr '\n' ' ')"
 else
   j1_step milestone fleet milestone --instant "$J1W" --id j1m --title "the lifecycle milestone"
-  j1_step declare   fleet declare --instant "$J1W" --phase AWAITING-CI --porcelain
+  j1_step declare   fleet declare --instant "$J1W" --phase AWAITING-CI --watcher $$ --porcelain
   j1_step propose   fleet propose --instant "$J1W" --milestone j1m --status awaiting-ci \
                       --evidence evidence/INDEX.md
   j1_step review    fleet review --instant "$J1W" --scope all --verdict READY \

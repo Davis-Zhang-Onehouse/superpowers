@@ -142,13 +142,18 @@ class Subject:
     note: str
 
 
-def reconcile(store, pool, sessions, instants_dir: Path, idle_after_s: int = 1800) -> list:
+def reconcile(store, pool, sessions, instants_dir: Path, idle_after_s: int = 1800,
+              pid_alive=None) -> list:
     """Join every fact about the fleet into one subject list.
 
     Order is the join order: live processes first, then records nothing live matched, then leases no
     subject accounts for. Pure — it reads `store`, `pool`, `sessions` and the filesystem, and writes
     nothing to any of them.
     """
+    #: `D-10`. Defaults to the pool's, so the ONE implementation of pid liveness is shared and a test can
+    #: still inject one without a real process.
+    if pid_alive is None:
+        pid_alive = pool.pid_alive
     instants_dir = Path(instants_dir)
     records = list(store.all())
     record_by_tmux = {}
@@ -167,7 +172,8 @@ def reconcile(store, pool, sessions, instants_dir: Path, idle_after_s: int = 180
                 continue                     # one record, one subject, even with two processes on it
             seen_records.add(rec.todo_id)
             subject = _worker_subject(rec, pool, sessions, instants_dir, idle_after_s,
-                                      live=True, sess=sess, live_sessions=live_sessions)
+                                      live=True, sess=sess, live_sessions=live_sessions,
+                                      pid_alive=pid_alive)
             if subject.holds_slot:
                 accounted_slots.add(rec.slot)
             subjects.append(subject)
@@ -184,7 +190,7 @@ def reconcile(store, pool, sessions, instants_dir: Path, idle_after_s: int = 180
         seen_records.add(rec.todo_id)
         subject = _worker_subject(rec, pool, sessions, instants_dir, idle_after_s,
                                   live=sessions.alive(rec.tmux), sess=None,
-                                  live_sessions=live_sessions)
+                                  live_sessions=live_sessions, pid_alive=pid_alive)
         if subject.holds_slot:
             accounted_slots.add(rec.slot)
         subjects.append(subject)
@@ -203,11 +209,30 @@ def reconcile(store, pool, sessions, instants_dir: Path, idle_after_s: int = 180
 
 
 def _worker_subject(rec, pool, sessions, instants_dir: Path, idle_after_s: int, live: bool, sess,
-                    live_sessions=()):
+                    live_sessions=(), *, pid_alive=None):
+    #: `D-10`. Threaded from `reconcile` rather than read from a module global, so a test injects a fake
+    #: exactly as the fixtures already inject their probes. Keyword-only and defaulted through the pool,
+    #: so there is one home for pid liveness and no caller can silently skip the check.
+    if pid_alive is None:
+        pid_alive = pool.pid_alive
     instant = _instant_on_disk(rec, instants_dir)
     folder_state = _folder_state(instant)
     declared = Declarations(instant) if instant is not None else None
     phase = declared.phase() if declared is not None else None
+    watcher = declared.watcher() if declared is not None else None
+    #: `D-10`. An `awaiting-ci` phase outranks `busy` AND the idle threshold, so declaring it and then
+    #: stopping is an infinite silent wait that the declaration itself hides — while also freeing the WIP
+    #: cap, so the coordinator dispatches onward and stops thinking about it. It is the only phase that
+    #: suppresses the detector that would otherwise catch it. So it is trusted only while something is
+    #: alive to end the wait. Disregarded here rather than cleaned up: a stale declaration stops lying
+    #: without anybody having to run a sweep.
+    phase_disregarded = ""
+    if phase == PHASE_AWAITING_CI and not (watcher is not None and pid_alive(watcher)):
+        phase_disregarded = (f"declared {PHASE_AWAITING_CI} with "
+                             + (f"watcher {watcher} which is not running" if watcher is not None
+                                else "no watcher") +
+                             ": disregarded, because nothing is alive to end this wait")
+        phase = None
     parked = declared.parked() if declared is not None else None
     pane = sessions.pane(rec.tmux) if (live and rec.tmux) else ""
 
@@ -224,6 +249,10 @@ def _worker_subject(rec, pool, sessions, instants_dir: Path, idle_after_s: int, 
     holder = _slot_holder_pid(rec, pool, live_sessions) if holds else None
     state, note = _state_of(rec, folder_state, live, phase, parked, pane, sessions,
                             instant, idle_after_s, holder)
+    if phase_disregarded:
+        #: APPENDED, never substituted: without it a reader sees a declared instant reported IDLE and
+        #: cannot tell whether the declaration was made, lost or ignored.
+        note = f"{note}; {phase_disregarded}" if note else phase_disregarded
     evidence = {
         "record": rec.todo_id,
         "base": rec.base_instant,
@@ -238,6 +267,7 @@ def _worker_subject(rec, pool, sessions, instants_dir: Path, idle_after_s: int, 
         "milestone": rec.milestone or "",
         "lease": "held" if holds else "released",
         "declared_phase": phase or "",
+        "phase_disregarded": phase_disregarded,
         "parked": parked or "",
         "pane": _pane_summary(sessions, pane) if live else "",
     }

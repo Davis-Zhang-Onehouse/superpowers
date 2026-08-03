@@ -165,10 +165,13 @@ class SyntheticFleet:
                       "", "dt-foldTheStack", lease=False,
                       recorded_folder="00000000-07300303-inflight-compact-foldTheStack")
 
-        # 6. A declared CI waiter. Read from STRUCTURED state, never from prose.
+        # 6. A declared CI waiter. Read from STRUCTURED state, never from prose. `D-10`: the declaration
+        # names a WATCHER and is trusted only while that pid is alive, so this one names a pid that is —
+        # the test process. An unwatched declaration is disregarded, which is what `D-10` asserts
+        # separately in `TestAnUnwatchedCiWaitStopsHiding`.
         ci = self.dispatch("ciWaiter-07300304", "00000000-07300304-inflight-append-ciWaiter",
                            "ws4", "dt-ciWaiter")
-        Declarations(ci).set_phase("awaiting-ci")
+        Declarations(ci).set_phase("awaiting-ci", watcher=os.getpid())
         self.launch("dt-ciWaiter", 101, "ws4", QUIET_PANE)
 
         # 7. PROSE claiming the same phase, with no declaration. RCF-9, made unreachable.
@@ -545,3 +548,39 @@ class TestAParkedQuestionAsksForAHuman(unittest.TestCase):
         for state in (AWAITING_CI, DEAD, COMPLETE, RUNNING, UNREACHABLE):
             self.assertNotIn(state, ACTIONABLE_STATES,
                              f"{state} became actionable; nobody can answer it with a keystroke")
+
+
+class TestAnUnwatchedCiWaitStopsHiding(unittest.TestCase):
+    """`D-10`'s consumer half. An `awaiting-ci` phase whose watcher is dead is treated as ABSENT, so
+    derivation falls through to busy/idle as though nothing were declared. A stale declaration stops
+    lying rather than needing a cleanup pass, and it fails in the safe direction: a dead watcher makes a
+    worker MORE visible, never less."""
+
+    def build(self, watcher, alive_pids):
+        fleet = SyntheticFleet()
+        fleet.dispatch("ci-07300405", "00000000-07300405-inflight-append-ci", "ws9", "dt-ci")
+        fleet.launch("dt-ci", 5301, "ws9", QUIET_PANE)
+        Declarations(fleet.paths["ci-07300405"]).set_phase("awaiting-ci", watcher=watcher)
+        fleet.age("ci-07300405", 2700)
+        subjects = reconcile(fleet.store, fleet.pool, fleet.sessions, fleet.instants,
+                             pid_alive=lambda pid: pid in alive_pids)
+        return {s.identity: s for s in subjects}["ci-07300405"]
+
+    def test_a_live_watcher_means_the_wait_is_real(self):
+        subject = self.build(watcher=9001, alive_pids={9001})
+        self.assertEqual(subject.state, AWAITING_CI)
+        self.assertFalse(needs_a_human(subject), "a genuinely waiting worker needs nobody")
+
+    def test_a_dead_watcher_falls_through_to_the_idle_detector(self):
+        subject = self.build(watcher=9001, alive_pids=set())
+        self.assertEqual(subject.state, IDLE,
+                         "an awaiting-ci declaration with a DEAD watcher still suppressed the detector")
+        self.assertTrue(needs_a_human(subject))
+        self.assertIn("watcher", subject.note.lower(),
+                      "the note does not say the declaration was disregarded, so a reader cannot tell "
+                      "why a declared instant is reported IDLE")
+
+    def test_a_declaration_with_no_watcher_at_all_falls_through(self):
+        """Grandfathered declarations on disk. Intended direction: they stop suppressing detection."""
+        subject = self.build(watcher=None, alive_pids={9001})
+        self.assertEqual(subject.state, IDLE)

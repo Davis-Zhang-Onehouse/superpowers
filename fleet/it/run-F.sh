@@ -107,7 +107,7 @@ fi
 # F2 — AND A REAL DECLARATION DOES.  Same worker, same prose still in place, one declaration added: the
 #      cap must now report room and the dispatch must succeed. This is what makes F3 non-vacuous.
 # ==================================================================================================
-fleet declare --instant "$W1" --phase AWAITING-CI --porcelain > "$OUT/F2-declare.out" 2>&1
+fleet declare --instant "$W1" --phase AWAITING-CI --watcher $$ --porcelain > "$OUT/F2-declare.out" 2>&1
 f2_declare_rc=$?
 fleet dispatch --profile "$OUT/profile" --title "secondC" --base 00000000 --optype append \
       --porcelain > "$OUT/F2-dispatch.out" 2>&1
@@ -261,7 +261,7 @@ done
   echo "F4_EXIT=$?"
   echo "F5_DECLARE_START"
   COMPACT_INST="$(find "$FZ_INST" -maxdepth 1 -name '*-inflight-compact-fzcompaction' | head -1)"
-  fleet declare --instant "$COMPACT_INST" --phase AWAITING-CI --porcelain
+  fleet declare --instant "$COMPACT_INST" --phase AWAITING-CI --watcher $$ --porcelain
   echo "F5_CAP_START"
   fleet compaction-status --porcelain
   fleet dispatch --profile "$OUT/profile" --title "fzBlocked2" --base 00000000 --optype append

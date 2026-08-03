@@ -162,14 +162,37 @@ class Declarations:
     def phase(self) -> str | None:
         return self._load().get("phase")
 
-    def set_phase(self, phase: str | None) -> str | None:
+    def set_phase(self, phase: str | None, watcher: int | None = None) -> str | None:
         data = self._load()
         if phase is None:
             data.pop("phase", None)
+            #: `D-10`. The watcher belongs to the phase, not to the instant. Leaving it behind would let
+            #: a later, undeclared instant inherit a liveness token for a wait nobody declared.
+            data.pop("watcher", None)
         else:
             data["phase"] = phase
+            if watcher is None:
+                data.pop("watcher", None)
+            else:
+                data["watcher"] = int(watcher)
         self._save(data)
         return Declarations(self.dir.parent).phase()      # re-read THROUGH the consumer
+
+    def watcher(self) -> int | None:
+        """`D-10`. The pid that will wake this instant when its wait ends, or None.
+
+        None for every declaration written before this field existed. Absent, not an error: the
+        consumer's job is to stop TRUSTING an unwatched declaration, not to crash on one.
+        """
+        value = self._load().get("watcher")
+        if value is None:
+            return None
+        try:
+            return int(value)
+        except (TypeError, ValueError):
+            #: A malformed watcher is no watcher. Same direction as absent: it makes the instant more
+            #: visible, never less.
+            return None
 
     def parked(self) -> str | None:
         return self._load().get("parked")

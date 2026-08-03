@@ -481,7 +481,7 @@ e5_concurrent_declare() {
     fi
     g3_barrier_new
     local pa pb
-    g3_spawn a declare --instant "$child" --phase awaiting-ci;      pa=$G3_PID
+    g3_spawn a declare --instant "$child" --phase awaiting-ci --watcher $$;      pa=$G3_PID
     g3_spawn b declare --instant "$child" --phase blocked-on-review; pb=$G3_PID
     sleep 0.25
     g3_barrier_open
@@ -955,7 +955,7 @@ k_main_narrative() {            # K1 K2 K3 K4 K5 K7 — one compaction, in its r
   fi
 
   # --- K5: TWO INDEPENDENT RULES. The cap reports ROOM and the dispatch is STILL refused. ---
-  fleet declare --instant "$child" --phase awaiting-ci > "$out/k5-declare.out" 2>&1
+  fleet declare --instant "$child" --phase awaiting-ci --watcher $$ > "$out/k5-declare.out" 2>&1
   fleet dispatch --dry-run --profile "$P_WORKER" --title "k5 probe" --base 00000000 --porcelain \
     > "$out/k5-dryrun.out" 2>&1
   local capline exline

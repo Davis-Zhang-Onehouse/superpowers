@@ -368,7 +368,7 @@ PY
       init)      echo "--name l7v --dry-run" ;;
       dispatch)  echo "--profile $EV/profile --title l7t --dry-run" ;;
       resume)    echo "--instant $INSTP --dry-run" ;;
-      declare)   echo "--instant $INSTP --phase awaiting-ci --dry-run" ;;
+      declare)   echo "--instant $INSTP --phase awaiting-ci --watcher $$ --dry-run" ;;
       park)      echo "--instant $INSTP --question l7question --dry-run" ;;
       unpark)    echo "--instant $INSTP --dry-run" ;;
       propose)   echo "--instant $INSTP --milestone M1 --status done --evidence e1 --dry-run" ;;
@@ -588,7 +588,7 @@ PY
       init)      echo "--name mv1 --dry-run" ;;
       dispatch)  echo "--profile $EV/profile --title mt --dry-run" ;;
       resume)    echo "--instant $INSTP --dry-run" ;;
-      declare)   echo "--instant $INSTP --phase awaiting-ci --dry-run" ;;
+      declare)   echo "--instant $INSTP --phase awaiting-ci --watcher $$ --dry-run" ;;
       park)      echo "--instant $INSTP --question mq --dry-run" ;;
       unpark)    echo "--instant $INSTP --dry-run" ;;
       propose)   echo "--instant $INSTP --milestone M1 --status done --evidence e1 --dry-run" ;;

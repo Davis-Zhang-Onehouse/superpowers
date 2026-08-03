@@ -23,6 +23,7 @@ shows up as a named failure rather than as one loop that stopped early.
 import ast
 import io
 import json
+import os
 import pathlib
 import re
 import shutil
@@ -308,7 +309,9 @@ class Loaded(unittest.TestCase):
                          "--base", FRESH_BASE_DIGITS, "--optype", "append"],
             "resume": ["--instant", str(fleet.paths["orphanWork"]), "--slot", "ws4",
                        "--tmux", "dt-orphanWork"],
-            "declare": ["--instant", ready, "--phase", "AWAITING-CI"],
+            #: `D-10`: `awaiting-ci` needs a LIVE watcher. Kept ADMISSIBLE deliberately — a row that is
+            #: refused before it parses is a row that stops exercising the property this matrix is for.
+            "declare": ["--instant", ready, "--phase", "AWAITING-CI", "--watcher", str(os.getpid())],
             "park": ["--instant", ready, "--question", "which baseline is the ruler?"],
             "unpark": ["--instant", ready],
             #: `SI-26`. A fresh id, because `add` refuses a duplicate and the fixture pre-seeds `M1`.

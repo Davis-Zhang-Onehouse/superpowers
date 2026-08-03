@@ -107,6 +107,33 @@ class TestDeclarations(unittest.TestCase):
         self.assertEqual(LossyChannel(self.instant).set_phase("awaiting-ci"), "## awaiting-ci")
 
 
+class TestAPhaseCarriesItsWatcher(unittest.TestCase):
+    """`D-10`. A declared CI wait outranks both `busy` and the idle threshold, so it can never decay into
+    IDLE — and it frees the WIP cap. Declared with nothing watching, it is an infinite silent wait whose
+    own declaration is what hides it. So the declaration names what will wake the session."""
+
+    def setUp(self):
+        self.tmp = pathlib.Path(tempfile.mkdtemp())
+        self.decl = Declarations(self.tmp)
+
+    def test_a_phase_records_and_returns_its_watcher(self):
+        self.decl.set_phase("awaiting-ci", watcher=4242)
+        self.assertEqual(self.decl.phase(), "awaiting-ci")
+        self.assertEqual(self.decl.watcher(), 4242)
+
+    def test_a_phase_declared_without_a_watcher_has_none(self):
+        """Grandfathering: every declaration already on disk has no watcher. It must read as absent
+        rather than raise, because the consumer's job is to stop TRUSTING it, not to crash on it."""
+        self.decl.set_phase("awaiting-ci")
+        self.assertIsNone(self.decl.watcher())
+
+    def test_clearing_the_phase_clears_the_watcher(self):
+        """A watcher outliving its phase would let a later undeclared instant inherit it."""
+        self.decl.set_phase("awaiting-ci", watcher=4242)
+        self.decl.set_phase(None)
+        self.assertIsNone(self.decl.watcher())
+
+
 class TestACorruptFileIsRefusedByName(unittest.TestCase):
     """`SI-35`. Three bare `json.loads` calls in this module meant one truncated file raised
     `JSONDecodeError` out of `Store.all()` — which every view calls, so `board`, `status` and `reap` all

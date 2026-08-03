@@ -288,6 +288,16 @@ class Pool:
             raise BadInput(f"slot {slot!r} is not enrolled in {self.enrolled}")
         return Path(json.loads(record.read_text())["path"])
 
+    def pid_alive(self, pid: int) -> bool:
+        """Whether a pid is running. Public because `reconcile` needs it for `D-10`'s watcher check, and
+        one home for pid liveness is the point — `_live_pid` reads `/proc`, which is what
+        `session.default_probes` already reads, so this adds no platform assumption. Injectable through
+        the constructor's `pid_alive`, so a test never needs a real process."""
+        try:
+            return bool(self._pid_alive(int(pid)))
+        except (TypeError, ValueError):
+            return False
+
     # ---- leases ----------------------------------------------------------------------------
 
     def lease(self, slot: str) -> Optional[Lease]:

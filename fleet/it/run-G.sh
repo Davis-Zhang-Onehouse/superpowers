@@ -152,7 +152,7 @@ G1_ASKED='  AWAITING-CI  '
 #: (`NFR2-7`). So the echo cannot be compared byte-for-byte against the argument, and the case difference
 #: is what carries the non-echo assertion. Measured, not assumed: the row does come back upper-case.
 G1_ECHOED='AWAITING-CI'
-fleet declare --instant "$DECLARED" --phase "$G1_ASKED" --porcelain > "$OUT/G1-declare.tsv" 2>&1
+fleet declare --instant "$DECLARED" --phase "$G1_ASKED" --watcher $$ --porcelain > "$OUT/G1-declare.tsv" 2>&1
 g1_rc=$?
 cat "$OUT/G1-declare.tsv"
 g1_printed="$(awk -F'\t' '$1=="phase"{print $2}' "$OUT/G1-declare.tsv")"
@@ -424,7 +424,7 @@ fleet lint --instant "$EMPTY" --porcelain > "$OUT/G6-lint-before.tsv" 2>&1
 g6_lint_before_rc=$?
 g6_rows_before="$(g_near_miss_count "$OUT/G6-lint-before.tsv")"
 
-fleet declare --instant "$EMPTY" --phase "$G_CI_TOKEN" --porcelain > "$OUT/G6-declare-real.tsv" 2>&1
+fleet declare --instant "$EMPTY" --phase "$G_CI_TOKEN" --watcher $$ --porcelain > "$OUT/G6-declare-real.tsv" 2>&1
 g6_before_sha="$(sha256sum "$EMPTY/.fleet/declare.json" 2>/dev/null | cut -c1-12)"
 g6_before_read="$(g_brief_phase "$EMPTY")"
 
@@ -467,7 +467,7 @@ fi
 #      field has to be refused rather than matched to the nearest sibling (`OBS-14`).
 # ==================================================================================================
 G7_Q='is the base position right for this milestone?'
-fleet declare --instant "$RENAME" --phase "$G_CI_TOKEN" --porcelain > "$OUT/G7-declare.tsv" 2>&1
+fleet declare --instant "$RENAME" --phase "$G_CI_TOKEN" --watcher $$ --porcelain > "$OUT/G7-declare.tsv" 2>&1
 fleet park --instant "$RENAME" --question "$G7_Q" --porcelain > "$OUT/G7-park.tsv" 2>&1
 G7_TID="$(fleet resume --instant "$RENAME" --porcelain 2>&1 | awk -F'\t' '$1=="todo_id"{print $2}')"
 g7_before_read="$(g_brief_phase "$RENAME")"

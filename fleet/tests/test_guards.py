@@ -15,6 +15,7 @@ The whole fleet is built through the injected probes (`Probes`, `cwd_probe`, `al
 a process, a tmux or a repository, and nothing reads a `.md` file for a control signal.
 """
 import json
+import os
 import pathlib
 import shutil
 import tempfile
@@ -116,7 +117,12 @@ class Fleet:
             self.pool.claim(todo_id=todo_id, tmux=tmux, base_instant=base,
                             child_instant=str(path), slot=slot)
         if phase:
-            self.assertish(Declarations(path).set_phase(phase) == phase, "the declaration did not land")
+            #: `D-10` changed this contract: a declared phase is trusted by the join only while its
+            #: WATCHER is alive, so the fixture names a pid that genuinely is — this test process. Without
+            #: it every cap case below would derive RUNNING for its CI waiter, because an unwatched
+            #: `awaiting-ci` is disregarded. Nothing about the cap rule is relaxed by naming a live pid.
+            self.assertish(Declarations(path).set_phase(phase, watcher=os.getpid()) == phase,
+                           "the declaration did not land")
         if live:
             cwd = self.slots_dir / slot if slot else path
             self.procs.append(LiveSession(pid=1000 + self._n, cwd=cwd, name=tmux))

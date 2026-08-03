@@ -99,8 +99,14 @@ fleet propose --instant "$INSTANT" --milestone <m> --status awaiting-ci --eviden
 by the dispatcher. Evidence is mandatory: an empty list is refused at the producer for all three shapes of
 empty, because a proposal with no evidence is a claim rather than a report.
 <!-- v2-cite: evidence-is-mandatory H4 -->
-When the work waits on CI rather than on you, say so: `fleet declare --instant "$INSTANT" --phase awaiting-ci` is the
-phase the WIP cap excludes, so declaring it frees the coordinator to dispatch the next milestone.
+When the work waits on CI rather than on you, say so — `awaiting-ci` is the phase the WIP cap excludes, so
+declaring it frees the coordinator to dispatch the next milestone:
+
+```bash
+fleet declare --instant "$INSTANT" --phase awaiting-ci --watcher <pid>
+```
+
+> The `--watcher` pid is whatever will wake you when the wait ends — your `gh run watch`, your poll loop. It is required, because this phase outranks both the busy check and the idle threshold: declared with nothing watching, you become a wait that never ends and that no report shows, while also freeing the coordinator's WIP cap. An unwatched declaration is disregarded and you will be reported IDLE.
 
 **Get stuck.** A decision only the operator can make is a parked question, never a stalled pane:
 
