@@ -1,0 +1,21 @@
+# attention population — after
+# when: 2026-08-03T05:39:56Z
+# repo: fdccc8c
+# FLEET_HOME=/home/ubuntu/.fleet
+
+## ACTIONABLE_STATES
+('BLOCKED', 'IDLE', 'PARKED')
+
+## every subject: state, needs-you, parked
+unknown-session	session:pid1333985:1333985	UNKNOWN-SESSION	needs_you=False	parked=False
+unknown-session	session:pid1603465:1603465	UNKNOWN-SESSION	needs_you=False	parked=False
+worker	v34ansileverandgoldencorpusdims-08030524	RUNNING	needs_you=False	parked=False
+worker	v2stackcoordinator-07310334	COMPLETE	needs_you=False	parked=False
+unknown-session	session:pid4110896:4110896	UNKNOWN-SESSION	needs_you=False	parked=False
+unknown-session	session:pid4178978:4178978	UNKNOWN-SESSION	needs_you=False	parked=False
+worker	splitproposaldigestrcompact-07310400	COMPLETE	needs_you=False	parked=False
+worker	v0cienablementandstabilisation-07310613	COMPLETE	needs_you=False	parked=False
+worker	v1buildergonomicslocalveloxandcache-07311529	COMPLETE	needs_you=False	parked=False
+worker	v2stackcoordinator-07310348	BLOCKED	needs_you=True	parked=False
+
+TOTAL subjects=10  NEEDS-YOU=1

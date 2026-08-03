@@ -1,0 +1,113 @@
+# PROVENANCE: /home/ubuntu/davis_root/opt/car/node_modules/claude-auto-retry/src/tmux.js lines 29-92 and 99-140
+# package: claude-auto-retry (vendored, node) + local patch superpowers/patches/claude-auto-retry
+# captured 2026-08-03; version: 0.6.0
+# This is the ONLY production send path on this box.
+
+// Submit delay: when sending a message to a TUI like Claude Code (Ink-based),
+// the text and the submitting Enter must be sent as TWO separate tmux send-keys
+// calls with a brief pause between them. Without the pause, Ink on Linux often:
+//   - interprets the Enter as a newline within a bracketed-paste burst and just
+//     inserts "\n" into the input box instead of submitting (most common case)
+//   - or processes the Enter before React reconciliation has incorporated the
+//     text into input state, dropping the submit
+// 150ms is empirically reliable across Linux + macOS for Claude Code.
+export const SUBMIT_DELAY_MS = 150;
+
+// Single-call form. Kept for callers / tests that want the legacy shape; the
+// production sendKeys() below uses the split form for reliability.
+export function buildSendKeysArgs(pane, text) {
+  return ['send-keys', '-t', pane, text, 'Enter'];
+}
+
+// Split form: text-only, sent literally (-l) so any tmux key names inside a
+// custom retry message (e.g. "Enter", "C-c") are typed as text rather than
+// interpreted as keypresses. No trailing Enter — that is a separate call.
+export function buildSendTextArgs(pane, text) {
+  return ['send-keys', '-t', pane, '-l', text];
+}
+
+// Split form: bare Enter to submit, sent outside the paste window.
+export function buildSendEnterArgs(pane) {
+  return ['send-keys', '-t', pane, 'Enter'];
+}
+
+// Send a single named key (e.g. 'Down', 'Up', 'Enter', 'Escape') — used to drive
+// the interactive /rate-limit-options menu.
+export function buildSendKeyArgs(pane, key) {
+  return ['send-keys', '-t', pane, key];
+}
+
+export async function sendKey(pane, key) {
+  await execFileAsync('tmux', tmuxArgv(buildSendKeyArgs(pane, key)));
+}
+
+export function buildDisplayArgs(pane, format) {
+  return ['display-message', '-t', pane, '-p', format];
+}
+
+export function parseTmuxVersion(versionString) {
+  const match = versionString.match(/tmux\s+(\d+\.\d+)/);
+  return match ? parseFloat(match[1]) : 0;
+}
+
+export function getTmuxVersion() {
+  try {
+    return parseTmuxVersion(execFileSync('tmux', tmuxArgv(['-V']), { encoding: 'utf-8' }).trim());
+  } catch { return 0; }
+}
+
+export async function capturePane(pane, lines = 200) {
+  const { stdout } = await execFileAsync('tmux', tmuxArgv(buildCaptureArgs(pane, lines)));
+  return stdout;
+}
+
+export async function sendKeys(pane, text) {
+  // Submit-to-TUI in two steps. See SUBMIT_DELAY_MS for why.
+  await execFileAsync('tmux', tmuxArgv(buildSendTextArgs(pane, text)));
+  await new Promise(r => setTimeout(r, SUBMIT_DELAY_MS));
+  await execFileAsync('tmux', tmuxArgv(buildSendEnterArgs(pane)));
+}
+
+# ---- the local pane-guard patch ----
+// --- the send gate (local patch; see superpowers/patches/claude-auto-retry) -------------------------
+//
+// Before typing into a pane, ask `fleet pane-guard` whether that is safe. The codes are the interface:
+//   0 safe · 10 queued text in the input box · 11 mid-turn · 12 not-claude · 13 unknown pane
+//
+// WHY SHELL OUT INSTEAD OF CHECKING HERE. This monitor already guards code 12 (checkForeground). The gap
+// is 10, and detecting it means knowing what an unsubmitted input box looks like on screen -- which
+// `fleet` already decides, and which two independent implementations would eventually disagree about.
+// A second derivation of the same judgement is the failure this whole toolkit keeps re-learning.
+//
+// WHY CODE 10 MATTERS HERE SPECIFICALLY. sendKeys() sends the text literally, waits 150ms, then sends
+// Enter as a SEPARATE call. If the input box already holds something -- an operator half-way through
+// typing while the pane sits at a rate-limit banner -- the result is
+// `<their unfinished sentence>Continue where you left off.` and then Enter SUBMITS the concatenation.
+//
+// FAILS OPEN, deliberately. If fleet is missing, the pane cannot be named, or the guard errors, this
+// returns null and the caller sends anyway. A gate that silently disables auto-resume is worse than the
+// hazard it prevents: the bug costs one garbled message a human can see, the fail-closed version costs
+// every overnight resume with no signal at all.
+const FLEET_BIN = process.env.FLEET_BIN || '/home/ubuntu/davis_root/superpowers/bin/fleet';
+
+export async function paneGuardCode(pane) {
+  try {
+    // pane-guard takes a SESSION name; the monitor holds a pane id (%N). Pane ids are per-server, so this
+    // lookup must go through the same server as everything else -- hence tmuxArgv.
+    const { stdout } = await execFileAsync(
+      'tmux', tmuxArgv(['display-message', '-t', pane, '-p', '#{session_name}']));
+    const session = (stdout || '').trim();
+    if (!session) return null;
+    // fleet must be pointed at the same tmux server, or it reports 13 (unknown pane) about a live session.
+    const env = { ...process.env };
+    if (TMUX_SOCKET) env.FLEET_TMUX_SOCKET = TMUX_SOCKET;
+    try {
+      await execFileAsync(FLEET_BIN, ['pane-guard', '--pane', session], { env });
+      return 0;
+    } catch (err) {
+      return typeof err.code === 'number' ? err.code : null;
+    }
+  } catch {
+    return null;
+  }
+}

@@ -1,0 +1,18 @@
+# brief re-verification — 2026-08-03T03:17:55Z
+# repo:   /home/ubuntu/davis_root/superpowers
+# tip:    11f2f58 on live
+# tree:   CLEAN
+
+G-1   HOLDS    no send-keys invocation anywhere in fleet/src — the package gates a send it cannot perform (2 textual mentions, all prose)
+A-2   REFUTED  DA-2 is WITHDRAWN/REFUTED in its own register and enumerates NO send paths; the count 6 traces only back to the cli.py:153 comment that cites it. Real in-repo implementations today: 2 file(s), both test-harness
+G-2   HOLDS    every consumer of the actionable judgement is a VIEW inside the package (cli.py render.py ); nothing outside fleet reads it and nothing acts on it
+G-2   HOLDS    ACTIONABLE_STATES = ('BLOCKED', 'IDLE') — FI-14's detection half is still in place, so this gap is still only the actuation half
+G-4   HOLDS    #{session_attached} appears nowhere in the package or its tests — the discriminator is still uncollected
+G-7   HOLDS    the anti-shadowing refusal (roadmap.py:227) still states its rule and names no route
+G-7   HOLDS    Roadmap.retire's docstring still asserts 'no way to do this ... and no third one' — the refuted premise is live IN THE SHIPPED SOURCE, not only in bd69a7f's message
+G-8   HOLDS    LANDED = ('done',) — 'done' is the ONLY status that satisfies a dependent, so a decision-resolved milestone must still overstate or strand. Full vocab: ('blocked', 'ready', 'running', 'awaiting-ci', 'done', 'dropped')|('done',)|('done', 'dropped')
+G-3   HOLDS    the worker charter template's authoritative Scope section is still a comment addressed to the coordinator, and Acceptance criteria is still empty
+G-5   HOLDS    exactly one mutation runner exists (run-m9-mutation.sh, the PATTERN); no case in the sampled frame has been shown to fail — J7 and J2 are still unproven
+
+VERDICT: at least one premise MOVED or was REFUTED. Correct the brief BEFORE designing the fix —
+         a fix aimed at a premise that moved is the failure A-1 exists to prevent.

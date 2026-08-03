@@ -1,0 +1,8 @@
+ACTIONABLE_STATES = ('BLOCKED', 'IDLE')
+
+  stalled-07300001                   state=IDLE        needs_a_human=True  note='live, but nothing has changed in the instant for more than 1800s and the pane is not working'
+  working-07300002                   state=RUNNING     needs_a_human=False note=''
+
+VERDICT PART 1: the DETECTOR WORKS. A worker untouched for 2700s with a non-working pane is
+                classified IDLE and needs_a_human() returns True. The judgement exists and is
+                correct — so G-2 is NOT a broken detector. Whatever is missing is downstream.

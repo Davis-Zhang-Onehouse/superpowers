@@ -1,0 +1,58 @@
+RA-1 re-measurement of the FI-15 type->Enter race
+when:    2026-08-03T04:00:56Z
+claude:  2.1.220 (Claude Code)  (original measurement: 2.1.220)
+loadavg: 0.24 0.20 0.26   # relevant to A-5: the race is timing-sensitive
+repo:    11f2f58
+
+session: itfleet-probe-ra1race-1636894
+boot:    pane-guard=0 after 2s  (READY)
+
+--- pane at boot (first 12 lines) ---
+    
+    
+    
+    
+    
+    
+    
+    
+    
+    
+    
+    
+
+A submitted trial shows guard_after_type=10 (text queued) and guard_after_Enter != 10.
+A DROPPED Enter leaves it at 10. Every trial starts from an ASSERTED-empty box.
+
+immediate Enter #1   gap=0s      guard_after_type=0   guard_after_Enter=10  submitted=NO - still queued      [clean]
+immediate Enter #2   gap=0s      guard_after_type=10  guard_after_Enter=11  submitted=YES                    [clean]
+immediate Enter #3   gap=0s      guard_after_type=10  guard_after_Enter=11  submitted=YES                    [clean]
+immediate Enter #4   gap=0s      guard_after_type=10  guard_after_Enter=0   submitted=YES                    [clean]
+immediate Enter #5   gap=0s      guard_after_type=10  guard_after_Enter=0   submitted=YES                    [clean]
+50ms gap #1          gap=0.05s   guard_after_type=10  guard_after_Enter=0   submitted=YES                    [clean]
+50ms gap #2          gap=0.05s   guard_after_type=10  guard_after_Enter=0   submitted=YES                    [clean]
+50ms gap #3          gap=0.05s   guard_after_type=10  guard_after_Enter=0   submitted=YES                    [clean]
+150ms gap #1         gap=0.15s   guard_after_type=10  guard_after_Enter=0   submitted=YES                    [clean]
+150ms gap #2         gap=0.15s   guard_after_type=10  guard_after_Enter=0   submitted=YES                    [clean]
+500ms gap            gap=0.5s    guard_after_type=10  guard_after_Enter=0   submitted=YES                    [clean]
+3s gap               gap=3s      guard_after_type=10  guard_after_Enter=0   submitted=YES                    [clean]
+
+--- positive control: the CONDITION-based contract (live-pane.sh submit: type, poll for 10, Enter) ---
+submit (condition)   polled for the box to hold the text, then Enter  guard_after=11  submitted=YES
+
+=== DROP RATE per gap (clean trials only; a drop is guard_after_Enter=10) ===
+  gap=0.05s   trials=3   dropped=0   rate=0/3
+  gap=0.15s   trials=2   dropped=0   rate=0/2
+  gap=0.5s    trials=1   dropped=0   rate=0/1
+  gap=0s      trials=5   dropped=1   rate=1/5
+  gap=3s      trials=1   dropped=0   rate=0/1
+
+A NON-ZERO rate at any gap means a fixed delay buys a PROBABILITY, not a guarantee — which is the
+whole argument for a condition. A zero rate at 150ms does NOT clear claude-auto-retry (A-5): this box
+was at loadavg 0.32 and the failure is silent when it happens.
+
+=== compare with the 2026-08-02 original (parent instant, investigations/fi-15/timing.txt) ===
+  immediate Enter  gap=0s     guard_after_type=0   guard_after_Enter=10  submitted=NO
+  50ms gap         gap=0.05s  guard_after_type=10  guard_after_Enter=11  submitted=YES  <- residue in box
+  500ms gap        gap=0.5s   guard_after_type=10  guard_after_Enter=0   submitted=YES  <- residue in box
+  3s gap           gap=3s     guard_after_type=10  guard_after_Enter=0   submitted=YES  <- residue in box

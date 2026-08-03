@@ -1,0 +1,65 @@
+# G-2 reproduction — 2026-08-03T03:36:53Z
+# repo /home/ubuntu/davis_root/superpowers @ 11f2f58, tree CLEAN
+# artifacts -> evidence/repro-g2/
+
+== PART 1: does reconcile() actually produce IDLE for a stalled worker? ==
+ACTIONABLE_STATES = ('BLOCKED', 'IDLE')
+
+  stalled-07300001                   state=IDLE        needs_a_human=True  note='live, but nothing has changed in the instant for more than 1800s and the pane is not working'
+  working-07300002                   state=RUNNING     needs_a_human=False note=''
+
+VERDICT PART 1: the DETECTOR WORKS. A worker untouched for 2700s with a non-working pane is
+                classified IDLE and needs_a_human() returns True. The judgement exists and is
+                correct — so G-2 is NOT a broken detector. Whatever is missing is downstream.
+
+== PART 2: who consumes the judgement? ==
+# Every reference to the actionable judgement, repo-wide, at 11f2f58.
+# reconcile.py is the PRODUCER and is excluded. Anything left is a consumer.
+
+/home/ubuntu/davis_root/superpowers/fleet/src/fleet/cli.py:75:from fleet.reconcile import COMPLETE, KIND_WORKER, RUNNING, needs_a_human, reconcile
+/home/ubuntu/davis_root/superpowers/fleet/src/fleet/cli.py:1928:        #: Derived from `reconcile.needs_a_human`, the same predicate the board's banner uses, so the
+/home/ubuntu/davis_root/superpowers/fleet/src/fleet/cli.py:1930:        wants_you = needs_a_human(subject)
+/home/ubuntu/davis_root/superpowers/fleet/src/fleet/render.py:32:from fleet.reconcile import ACTIONABLE_STATES, needs_a_human
+/home/ubuntu/davis_root/superpowers/fleet/src/fleet/render.py:121:def _needs_a_human(subjects) -> list:
+/home/ubuntu/davis_root/superpowers/fleet/src/fleet/render.py:122:    """The "needs you" population, taken from `reconcile.needs_a_human` rather than decided here.
+/home/ubuntu/davis_root/superpowers/fleet/src/fleet/render.py:128:    Was a filter on `ACTIONABLE_STATES` directly. `FI-12` is not a pure state predicate — a COMPLETE
+/home/ubuntu/davis_root/superpowers/fleet/src/fleet/render.py:133:    return [s for s in subjects if needs_a_human(s)]
+/home/ubuntu/davis_root/superpowers/fleet/src/fleet/render.py:170:    banner = (f"fleet: {len(held)} holding a slot · {len(_needs_a_human(held))} needs you · "
+
+# --- and the only daemon on the box: does it know the word reconcile? ---
+11:# The daemon re-runs a scoped reconcile every $INTERVAL so new sessions get picked up
+36:EXCLUDE_FILE="$CAR_DIR/reconcile-exclude"
+61:# stop being re-armed. The daemon reconciles every $INTERVAL and previously re-attached a monitor to
+82:# operator and per effort. A daemon that reconciles every 300s for weeks must not depend on that.
+189:    cmd_reconcile >/dev/null 2>&1 || true
+204:# The cost was that `claude-auto-retry reconcile` only ever looks at ONE server, so every dispatched
+212:# Run one reconcile per server. The monitor `reconcile` spawns inherits its environment, so the socket
+217:  run_car reconcile || rc=$?
+221:    CLAUDE_AUTO_RETRY_TMUX_SOCKET="$sock" run_car reconcile || rc=$?
+226:# Internal: one scoped reconcile pass (used by the daemon and by arm).
+227:cmd_reconcile() {
+236:  cmd_reconcile
+274:  _reconcile) cmd_reconcile ;;
+
+== PART 3: mutation — is the IDLE detector protected by any test? ==
+  baseline   GREEN   Ran 1183 tests in 69.994s  OK 
+  injected M-1 the IDLE detector never fires
+  injected M-2 CONTROL — FI-14's fix reverted
+  injected M-3 the activity probe always says fresh
+
+  M-1  SURVIVED     AS-PREDICTED  the IDLE detector never fires — `_live_state`'s threshold branch is dead, so no worker is EVER classified IDLE
+        the whole suite is GREEN with this mutation in place
+  M-2  KILLED       AS-PREDICTED  CONTROL: `FI-14`'s shipped one-line fix reverted (IDLE dropped from ACTIONABLE_STATES)
+        died naming 'needs-you population is reconcile' — FAIL: test_a_stalled_worker_is_counted_as_needing_a_human (test_render.TestBoard)
+  M-3  SURVIVED     AS-PREDICTED  the activity probe always reports the instant as fresh, so the threshold is never crossed
+        the whole suite is GREEN with this mutation in place
+
+VERDICT: REPRODUCED, with the control holding.
+
+  The control (M-2) DIED, so this harness can kill: the suite does assert that IDLE is in
+  ACTIONABLE_STATES. The detector mutation (M-1) SURVIVED the same harness. So `FI-14`'s detection
+  half is guarded only where the TUPLE is asserted, and nowhere at all where the DETECTOR is —
+  `_live_state` can be made permanently blind to a stalled worker without one test noticing.
+
+  Part 1 showed the detector does work today. Part 3 shows nothing would tell us if it stopped.
+  That is the foundation G-2's actuation was about to be built on top of.

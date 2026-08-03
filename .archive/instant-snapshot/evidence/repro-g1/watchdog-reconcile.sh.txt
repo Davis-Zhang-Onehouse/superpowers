@@ -1,0 +1,59 @@
+# PROVENANCE: /home/ubuntu/davis_root/superpowers/scripts/claude-watchdog.sh — what its 'reconcile' actually means
+# commit: 11f2f58
+
+cmd_daemon() {  # internal: the loop. Single-instance guarded.
+  local existing; existing="$(daemon_pid)"
+  if [ -n "$existing" ] && [ "$existing" != "$$" ] && kill -0 "$existing" 2>/dev/null; then
+    exit 0
+  fi
+  mkdir -p "$CAR_DIR"
+  echo $$ > "$PIDFILE"
+  trap 'rm -f "$PIDFILE"' EXIT INT TERM
+  while true; do
+    cmd_reconcile >/dev/null 2>&1 || true
+    sleep "$INTERVAL"
+  done
+}
+
+# --- subcommands -----------------------------------------------------------
+
+# Every tmux SERVER this watchdog covers. The empty first element is the default server; the rest are
+# private servers reached with `tmux -L <name>`.
+#
+# This exists because dispatched agents are deliberately NOT on the default server: a private server bounds
+# what `close`/`harvest`/`abort` can reach when they kill a session by name, and stops a long-lived default
+# server handing new sessions a stale environment (that one is not hypothetical — it put a dispatched
+# coordinator under another operator's Claude account on 2026-07-31).
+#
+# The cost was that `claude-auto-retry reconcile` only ever looks at ONE server, so every dispatched
+# instant was invisible to auto-resume — silently, because "no panes here" and "no panes needing help"
+# print the same thing. `fleet` is included by DEFAULT rather than opt-in: it is the socket every
+# `fleet dispatch` uses, and an opt-in list is a list somebody forgets on the day it matters.
+#
+# Needs the local socket patch in the vendored package; see superpowers/patches/claude-auto-retry.
+CLAUDE_WATCHDOG_TMUX_SOCKETS="${CLAUDE_WATCHDOG_TMUX_SOCKETS-fleet}"
+
+# Run one reconcile per server. The monitor `reconcile` spawns inherits its environment, so the socket
+# reaches the monitor without touching its argv — which matters, because `monitor.js <pane> <pid>` is
+# parsed by a regex both here and inside the package.
+run_car_all_servers() {
+  local sock rc=0
+  run_car reconcile || rc=$?
+  for sock in $CLAUDE_WATCHDOG_TMUX_SOCKETS; do
+    [ -n "$sock" ] || continue
+    tmux -L "$sock" has-session 2>/dev/null || continue      # no such server: nothing to cover, not an error
+    CLAUDE_AUTO_RETRY_TMUX_SOCKET="$sock" run_car reconcile || rc=$?
+  done
+  return $rc
+}
+
+# Internal: one scoped reconcile pass (used by the daemon and by arm).
+cmd_reconcile() {
+  [ -x "$CAR" ] || { echo "claude-auto-retry not found at $CAR" >&2; exit 1; }
+  [ -x "$NODE_BIN/node" ] || { echo "local node not found at $NODE_BIN/node" >&2; exit 1; }
+  rebuild_exclude
+  reap_monitors out
+  run_car_all_servers
+}
+
+cmd_arm() {

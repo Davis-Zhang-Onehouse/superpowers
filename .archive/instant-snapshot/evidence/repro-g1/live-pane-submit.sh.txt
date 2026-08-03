@@ -1,0 +1,19 @@
+# PROVENANCE: /home/ubuntu/davis_root/superpowers/fleet/it/bin/live-pane.sh, cmd_submit
+# commit: 11f2f58; the CORRECT contract, per G-1 §3
+
+cmd_submit() {
+  local session="$1" text="$2" i g
+  check_name "$session"
+  cmd_type "$session" "$text"
+  for i in $(seq 1 50); do                      # 50 x 0.2s = 10s, generous for a keystroke to land
+    g="$(cmd_guard "$session")" || true
+    [ "$g" = 10 ] && break
+    sleep 0.2
+  done
+  if [ "${g:-}" != 10 ]; then
+    echo "live-pane: the text never reached the box (pane-guard=${g:-?} after 10s); NOT sending Enter, " \
+         "because an Enter into an empty box submits nothing and looks like it worked" >&2
+    return 1
+  fi
+  ptmux send-keys -t "=$session:" Enter
+}

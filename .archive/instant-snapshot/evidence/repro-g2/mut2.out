@@ -1,0 +1,31 @@
+.........................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................F..........................................................................................................................F........F....................................................................................................................
+======================================================================
+FAIL: test_a_worker_untouched_past_the_threshold_is_produced_as_idle (test_reconcile.TestTheIdleDetectorIsProduced)
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "/home/ubuntu/davis_root/operations/tasks/metaOpt/fleetInfraOps/00000000-08030228-inflight-append-fleetOpenGapClosure/evidence/repro-g2/mut2/fleet/tests/test_reconcile.py", line 480, in test_a_worker_untouched_past_the_threshold_is_produced_as_idle
+    self.assertTrue(needs_a_human(subject),
+AssertionError: False is not true : a stalled worker is not in the population a human is asked to act on
+
+======================================================================
+FAIL: test_a_stalled_worker_is_counted_as_needing_a_human (test_render.TestBoard)
+`FI-14`, reported by a coordinator driving real workers.
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "/home/ubuntu/davis_root/operations/tasks/metaOpt/fleetInfraOps/00000000-08030228-inflight-append-fleetOpenGapClosure/evidence/repro-g2/mut2/fleet/tests/test_render.py", line 178, in test_a_stalled_worker_is_counted_as_needing_a_human
+    self.assertEqual(count([idle]), 1, "a worker stalled past the idle threshold is not counted")
+AssertionError: 0 != 1 : a worker stalled past the idle threshold is not counted
+
+======================================================================
+FAIL: test_the_needs_you_count_excludes_dead_sessions (test_render.TestBoard)
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "/home/ubuntu/davis_root/operations/tasks/metaOpt/fleetInfraOps/00000000-08030228-inflight-append-fleetOpenGapClosure/evidence/repro-g2/mut2/fleet/tests/test_render.py", line 153, in test_the_needs_you_count_excludes_dead_sessions
+    self.assertEqual(set(ACTIONABLE_STATES), {"BLOCKED", "IDLE"},
+AssertionError: Items in the second set but not the first:
+'IDLE' : the needs-you population is reconcile's, not render's
+
+----------------------------------------------------------------------
+Ran 1186 tests in 71.742s
+
+FAILED (failures=3)

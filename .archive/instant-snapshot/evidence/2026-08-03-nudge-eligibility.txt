@@ -1,0 +1,39 @@
+# nudge-eligibility probe — repo @ 11f2f58
+# ACTIONABLE_STATES = ('BLOCKED', 'IDLE')   (PARKED actionable? False)
+
+case                               state        needs_a_human  parked?  would-be-nudged
+--------------------------------------------------------------------------------------------------------
+1 idle, not parked                 IDLE         True           False    YES
+2 parked+question, fresh           PARKED       False          True     no
+3 parked+question, idle >30min     IDLE         True           True     YES
+4 awaiting-ci, idle >30min         AWAITING-CI  False          False    no
+
+1 idle, not parked
+    note: 'live, but nothing has changed in the instant for more than 1800s and the pane is not working'
+    want: NUDGE — this is what the verb is for
+
+2 parked+question, fresh
+    note: 'parked decision: which baseline is the ruler? I cannot proceed without a decision'
+    want: COORDINATOR must answer
+
+3 parked+question, idle >30min
+    note: 'live, but nothing has changed in the instant for more than 1800s and the pane is not working; parked decision stands: which baseline is the ruler? I cannot proceed without a decision'
+    want: COORDINATOR must answer — NEVER nudge
+
+4 awaiting-ci, idle >30min
+    note: 'declared awaiting-ci; not consuming attention'
+    want: leave alone
+
+========================================================================================================
+VERDICT: THE DESIGN AS PRESENTED IS WRONG for these cases:
+  - 3 parked+question, idle >30min: parked with a question, state=IDLE, and `NUDGEABLE_STATES = (IDLE,)`
+    would send it a nudge. The park is APPENDED to the note, not reflected in the STATE,
+    so a state-only filter cannot see it.
+
+  The operator's concern is CONFIRMED, and it is not hypothetical: a child that correctly
+  declared a question and waited past the idle threshold is indistinguishable, BY STATE, from
+  a child that simply stopped.
+
+AND A SECOND FINDING — parked subjects that nothing surfaces at all:
+  - 2 parked+question, fresh: state=PARKED, needs_a_human=False. The child is waiting on an answer and
+    does NOT appear in the 'N needs you' population. Nothing routes the question anywhere.

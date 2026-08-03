@@ -1,0 +1,28 @@
+.........................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................F.F......................................................................................................................................................................................................................................................
+======================================================================
+FAIL: test_a_worker_untouched_past_the_threshold_is_produced_as_idle (test_reconcile.TestTheIdleDetectorIsProduced)
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "/home/ubuntu/davis_root/operations/tasks/metaOpt/fleetInfraOps/00000000-08030228-inflight-append-fleetOpenGapClosure/evidence/repro-g2/mut1/fleet/tests/test_reconcile.py", line 475, in test_a_worker_untouched_past_the_threshold_is_produced_as_idle
+    self.assertEqual(subject.state, IDLE,
+AssertionError: 'RUNNING' != 'IDLE'
+- RUNNING
++ IDLE
+ : a live worker with a quiet pane, untouched for 2700s against a 1800s threshold, is not IDLE: RUNNING / ''
+
+======================================================================
+FAIL: test_the_threshold_is_the_boundary_not_a_suggestion (test_reconcile.TestTheIdleDetectorIsProduced)
+`idle_after_s` is a parameter and the comparison is strict. A case that only ever tests
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "/home/ubuntu/davis_root/operations/tasks/metaOpt/fleetInfraOps/00000000-08030228-inflight-append-fleetOpenGapClosure/evidence/repro-g2/mut1/fleet/tests/test_reconcile.py", line 505, in test_the_threshold_is_the_boundary_not_a_suggestion
+    self.assertEqual(self.subjects(idle_after_s=300)["edge-07300403"].state, IDLE,
+AssertionError: 'RUNNING' != 'IDLE'
+- RUNNING
++ IDLE
+ : 600s idle against a 300s threshold is not IDLE
+
+----------------------------------------------------------------------
+Ran 1186 tests in 71.665s
+
+FAILED (failures=2)

@@ -1,0 +1,3 @@
+M-1	KILLED	AS-PREDICTED	the IDLE detector never fires — `_live_state`'s threshold branch is dead, so no worker is EVER classified IDLE
+M-2	KILLED	AS-PREDICTED	CONTROL: `FI-14`'s shipped one-line fix reverted (IDLE dropped from ACTIONABLE_STATES)
+M-3	KILLED	AS-PREDICTED	the activity probe always reports the instant as fresh, so the threshold is never crossed

@@ -1,0 +1,27 @@
+# Every reference to the actionable judgement, repo-wide, at 11f2f58.
+# reconcile.py is the PRODUCER and is excluded. Anything left is a consumer.
+
+/home/ubuntu/davis_root/superpowers/fleet/src/fleet/cli.py:75:from fleet.reconcile import COMPLETE, KIND_WORKER, RUNNING, needs_a_human, reconcile
+/home/ubuntu/davis_root/superpowers/fleet/src/fleet/cli.py:1928:        #: Derived from `reconcile.needs_a_human`, the same predicate the board's banner uses, so the
+/home/ubuntu/davis_root/superpowers/fleet/src/fleet/cli.py:1930:        wants_you = needs_a_human(subject)
+/home/ubuntu/davis_root/superpowers/fleet/src/fleet/render.py:32:from fleet.reconcile import ACTIONABLE_STATES, needs_a_human
+/home/ubuntu/davis_root/superpowers/fleet/src/fleet/render.py:121:def _needs_a_human(subjects) -> list:
+/home/ubuntu/davis_root/superpowers/fleet/src/fleet/render.py:122:    """The "needs you" population, taken from `reconcile.needs_a_human` rather than decided here.
+/home/ubuntu/davis_root/superpowers/fleet/src/fleet/render.py:128:    Was a filter on `ACTIONABLE_STATES` directly. `FI-12` is not a pure state predicate — a COMPLETE
+/home/ubuntu/davis_root/superpowers/fleet/src/fleet/render.py:133:    return [s for s in subjects if needs_a_human(s)]
+/home/ubuntu/davis_root/superpowers/fleet/src/fleet/render.py:170:    banner = (f"fleet: {len(held)} holding a slot · {len(_needs_a_human(held))} needs you · "
+
+# --- and the only daemon on the box: does it know the word reconcile? ---
+11:# The daemon re-runs a scoped reconcile every $INTERVAL so new sessions get picked up
+36:EXCLUDE_FILE="$CAR_DIR/reconcile-exclude"
+61:# stop being re-armed. The daemon reconciles every $INTERVAL and previously re-attached a monitor to
+82:# operator and per effort. A daemon that reconciles every 300s for weeks must not depend on that.
+189:    cmd_reconcile >/dev/null 2>&1 || true
+204:# The cost was that `claude-auto-retry reconcile` only ever looks at ONE server, so every dispatched
+212:# Run one reconcile per server. The monitor `reconcile` spawns inherits its environment, so the socket
+217:  run_car reconcile || rc=$?
+221:    CLAUDE_AUTO_RETRY_TMUX_SOCKET="$sock" run_car reconcile || rc=$?
+226:# Internal: one scoped reconcile pass (used by the daemon and by arm).
+227:cmd_reconcile() {
+236:  cmd_reconcile
+274:  _reconcile) cmd_reconcile ;;
