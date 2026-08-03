@@ -160,12 +160,26 @@ PANE_QUEUED_TEXT = 10
 PANE_MID_TURN = 11
 PANE_NOT_CLAUDE = 12
 PANE_UNKNOWN = 13
+#: `FI-7`. The pane is ALIVE but no evidence about it could be read: the process probe attributed nothing
+#: AND the capture came back empty. That is "I could not look", which is a different fact from "I looked
+#: and it is not claude" — and the two were the same value, because `capture_pane` returns `""` when tmux
+#: exits non-zero and `list_processes` returns `[]` when pgrep does.
+#:
+#: It needs its own code because of what the consumers do. Before a SEND, everything but `0` means wait,
+#: so a wrong `12` costs one more poll. Before a CLOSE, `coordinating-instants` states "`0`, `12` or `13`
+#: mean the pane can go" — so a transient `12` AUTHORISES tearing down a pane that is mid-turn, which is
+#: precisely what `close`'s queued-pane refusal exists to prevent. Measured in the field at one poll in
+#: ~118 against a live claude, with `11` either side.
+#:
+#: 14 is deliberately OUTSIDE the can-go set. A guard whose failure mode is "go ahead" is not a guard.
+PANE_INDETERMINATE = 14
 
 PANE_GUARD_CODES = {
     PANE_SAFE: "safe",
     PANE_QUEUED_TEXT: "queued-text",
     PANE_MID_TURN: "mid-turn",
     PANE_NOT_CLAUDE: "not-claude",
+    PANE_INDETERMINATE: "indeterminate",
     PANE_UNKNOWN: "unknown-pane",
 }
 
@@ -2589,7 +2603,17 @@ def _do_pane_guard(ctx: Ctx, parsed: Parsed) -> int:
                                       "to a pane nobody can name is the send with no target")
     else:
         text = ctx.sessions.pane(pane)
-        if not _is_claude(ctx.sessions, text, pane):
+        #: `FI-7`. Absence of evidence, before absence of claude. The pane answered `alive`, so SOMETHING
+        #: is there; if on top of that the process probe attributed nothing and the capture is empty, we
+        #: did not observe a non-claude pane — we failed to observe anything. Reporting that as
+        #: `12 not-claude` hands a caller the one answer that authorises destroying it.
+        if not text.strip() and not ctx.sessions.is_claude_process(pane):
+            code, detail = PANE_INDETERMINATE, (
+                f"{pane} is alive but nothing about it could be read: no live claude process is "
+                f"attributed to it and its pane capture came back empty. That is a failed observation, "
+                f"not an observation of a non-claude pane — tmux exiting non-zero and a genuinely empty "
+                f"pane are the same bytes here. WAIT and re-poll; do not send, and do not close")
+        elif not _is_claude(ctx.sessions, text, pane):
             code, detail = PANE_NOT_CLAUDE, (f"{pane} is alive and nothing in its tail is claude; a send "
                                              "here goes to somebody else's shell")
         elif ctx.sessions.busy(text):
@@ -3332,7 +3356,8 @@ VERBS = {spec.name: spec for spec in (
         Flag("--instant", True, True, "the instant whose recipes are checked"),
     )),
     _verb(PANE_GUARD, _do_pane_guard, True,
-          "the send-keys contract: 0 safe / 10 queued / 11 mid-turn / 12 not-claude / 13 unknown", (
+          "the send-keys contract: 0 safe / 10 queued / 11 mid-turn / 12 not-claude / 13 unknown / "
+          "14 indeterminate (could not read; wait)", (
         Flag("--pane", True, True, "the pane (session) name"),
     )),
     _verb("compaction-status", _do_compaction_status, True,
