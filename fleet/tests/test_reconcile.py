@@ -17,8 +17,8 @@ import unittest
 from dataclasses import fields as dataclass_fields
 
 from fleet.pool import Pool
-from fleet.reconcile import (COMPLETE, DEAD, IDLE, KINDS, RUNNING, STATES, UNREACHABLE,
-                             Subject, needs_a_human, reconcile)
+from fleet.reconcile import (ACTIONABLE_STATES, AWAITING_CI, COMPLETE, DEAD, IDLE, KINDS, PARKED,
+                             RUNNING, STATES, UNREACHABLE, Subject, needs_a_human, reconcile)
 from fleet.session import LiveSession, Probes, SessionLayer
 from fleet.store import Declarations, Record, Store
 
@@ -506,3 +506,42 @@ class TestTheIdleDetectorIsProduced(unittest.TestCase):
                          "600s idle against a 300s threshold is not IDLE")
         self.assertEqual(self.subjects(idle_after_s=1800)["edge-07300403"].state, RUNNING,
                          "600s idle against a 1800s threshold was reported IDLE")
+
+
+class TestAParkedQuestionAsksForAHuman(unittest.TestCase):
+    """`G-11`. `fleet park --question` is how a child says "I cannot proceed without a decision", and
+    *an empty park is not a park* — so a park is always a real question. It was not in
+    `ACTIONABLE_STATES`, so `needs_a_human` said False and the child never entered the "N needs you"
+    population. It surfaced only by timing out into `IDLE` after 30 minutes, which relabels a question
+    as a stall.
+
+    That is `FI-14` one state over: computed correctly, rendered correctly, read by nothing. Worse than
+    `FI-14`, arguably — `IDLE` means "nobody knows why it stopped", `PARKED` means "your child is
+    blocked on YOU specifically".
+    """
+
+    def test_a_parked_child_needs_a_human_immediately(self):
+        fleet = SyntheticFleet()
+        # ws9 is the one slot a fresh SyntheticFleet() leaves free (the harvested subject's slot,
+        # released not leased) -- every other slot is claimed by the canonical fixture in `_build`,
+        # matching the convention already used by the other post-canonical-fixture test classes below.
+        fleet.dispatch("asked-07300404", "00000000-07300404-inflight-append-asked", "ws9", "dt-asked")
+        fleet.launch("dt-asked", 5201, "ws9", QUIET_PANE)
+        Declarations(fleet.paths["asked-07300404"]).park(PARK_BLOCKED_Q)
+
+        subject = {s.identity: s for s in reconcile(
+            fleet.store, fleet.pool, fleet.sessions, fleet.instants)}["asked-07300404"]
+
+        self.assertEqual(subject.state, PARKED, f"expected PARKED, got {subject.state}")
+        self.assertTrue(needs_a_human(subject),
+                        "a child waiting on its coordinator's ANSWER is not in the needs-you population")
+        self.assertIn(PARK_BLOCKED_Q, subject.note, "the note does not carry the question")
+
+    def test_the_widening_is_exactly_one_state(self):
+        """A blanket widening is the defect `W2-14`/`OBS-57` recorded — a banner nobody can answer
+        trains people to ignore the banner. AWAITING-CI and the terminal states stay out."""
+        self.assertEqual(set(ACTIONABLE_STATES), {"BLOCKED", "IDLE", "PARKED"},
+                         f"ACTIONABLE_STATES is {ACTIONABLE_STATES}")
+        for state in (AWAITING_CI, DEAD, COMPLETE, RUNNING, UNREACHABLE):
+            self.assertNotIn(state, ACTIONABLE_STATES,
+                             f"{state} became actionable; nobody can answer it with a keystroke")

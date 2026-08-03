@@ -142,6 +142,11 @@ class TestBoard(unittest.TestCase):
 
     def test_the_needs_you_count_excludes_dead_sessions(self):
         # The banner half of the same defect.
+        #
+        # This is a tripwire on `ACTIONABLE_STATES`'s membership, not on its size: it exists so that a
+        # future widening of the tuple is *noticed here* rather than silently changing what the banner
+        # counts. `PARKED` joined `{BLOCKED, IDLE}` for `G-11` (a parked child is waiting on a human's
+        # ANSWER, same as `IDLE`'s stalled worker was waiting on a restart) — updated below, not deleted.
         def count(subjects):
             human = render.board(subjects)
             match = re.search(r"(\d+) needs you", human)
@@ -150,7 +155,7 @@ class TestBoard(unittest.TestCase):
 
         self.assertEqual(count([DEAD]), 0, "a dead session is counted as needing a human")
         self.assertEqual(count([DEAD, BLOCKED]), 1, "the banner does not count an actionable state")
-        self.assertEqual(set(ACTIONABLE_STATES), {"BLOCKED", "IDLE"},
+        self.assertEqual(set(ACTIONABLE_STATES), {"BLOCKED", "IDLE", "PARKED"},
                          "the needs-you population is reconcile's, not render's")
 
     def test_a_stalled_worker_is_counted_as_needing_a_human(self):

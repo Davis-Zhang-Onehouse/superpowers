@@ -83,7 +83,15 @@ KINDS = (KIND_WORKER, KIND_UNKNOWN, KIND_STALE_LEASE)
 #: `W2-14`/`OBS-57` recorded: a banner that cries for attention on a session nobody can answer trains
 #: people to ignore the banner. That is the same failure this fix is curing, so widening past what a
 #: human can actually DO would trade one silence for one more thing to tune out.
-ACTIONABLE_STATES = (BLOCKED, IDLE)
+#:
+#: `PARKED` added for `G-11`. `fleet park --question` is a child saying "I cannot proceed without a
+#: decision" — and *an empty park is not a park*, so it is always a real question. It was excluded, so
+#: `needs_a_human` said False and a blocked child reached nobody; it surfaced only by timing out into
+#: `IDLE` after 30 minutes, which relabels a question as a stall. Same defect as `IDLE`'s above, one
+#: state over, and sharper: `IDLE` means "nobody knows why it stopped", `PARKED` means "your child is
+#: blocked on YOU". The remedy is an ANSWER, never a keystroke — so `nudge` excludes it explicitly
+#: (`D-8`), which is why this widening is safe to make while an actuator exists.
+ACTIONABLE_STATES = (BLOCKED, IDLE, PARKED)
 
 
 def needs_a_human(subject) -> bool:
