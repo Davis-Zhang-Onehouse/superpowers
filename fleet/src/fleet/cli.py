@@ -1298,6 +1298,40 @@ def _do_milestone(ctx: Ctx, parsed: Parsed) -> int:
     """
     child = _instant(ctx, parsed)
     roadmap = Roadmap(child)
+
+    #: `FI-10`. Retiring is a different act from raising, so it is a flag on the coordinator's verb
+    #: rather than a new verb: same actor, same file, same authority, and one more verb is one more row
+    #: in three IT fixture matrices (`II-4`). It writes exactly `dropped`, only onto a milestone that has
+    #: not finished, and only with a reason — see `Roadmap.retire`.
+    if parsed.on("retire"):
+        if not parsed.get("reason"):
+            raise BadInput(
+                f"`--retire` needs `--reason`. `dropped` and `done` are both terminal and look alike to "
+                f"a later reader, so a milestone that left the population without a recorded why is a "
+                f"decision nobody can reconstruct.")
+        if ctx.dry_run:
+            _emit(ctx, "milestone", [("dry-run", "the roadmap was not written"),
+                                     ("would-retire", parsed.get("id")),
+                                     ("reason", parsed.get("reason"))])
+            return EXIT_OK
+        retired = roadmap.retire(parsed.get("id"), parsed.get("reason"))
+        _emit(ctx, "milestone", [
+            ("milestone", retired.id), ("status", retired.status),
+            ("retired-reason", retired.retired_reason),
+            ("dispatchable", "no — a retired milestone leaves the ready population, which is the point: "
+                             "once its deps land a superseded one is derived READY forever and no report "
+                             "prints ready rows")])
+        return EXIT_OK
+
+    #: The check the parser used to make. Kept word-for-word in force: `--title` went optional ONLY so
+    #: `--retire` could run without one, and an add path that quietly accepts an untitled milestone is a
+    #: worse defect than the one being fixed.
+    if not (parsed.get("title") or "").strip():
+        raise BadInput(
+            "raising a milestone needs --title: an untitled milestone cannot be dispatched, because the "
+            "title is what a worker's charter is rendered from. (`--retire` does not need one — it names "
+            "a milestone that already exists.)")
+
     deps = parsed.all("dep")
     known = {m.id for m in roadmap.milestones()}
     unknown = [d for d in deps if d not in known]
@@ -3246,14 +3280,23 @@ VERBS = {spec.name: spec for spec in (
         Flag("--instant", True, True, "the instant"),
     )),
     _verb("milestone", _do_milestone, False,
-          "the COORDINATOR puts a milestone ON the roadmap; the only way work becomes dispatchable", (
+          "the COORDINATOR puts a milestone ON the roadmap, or retires a superseded one", (
         Flag("--instant", True, True, "the instant holding the roadmap"),
         Flag("--id", True, True, "the milestone id, unique within the roadmap"),
-        Flag("--title", True, True, "what the milestone is; an untitled milestone cannot be dispatched"),
+        #: NOT parser-required, because `--retire` names an EXISTING milestone and inventing a title to
+        #: delete something is absurd. The parser cannot say "required unless --retire", so the ADD path
+        #: enforces it in the handler — with the same refusal it always gave, because a title that
+        #: became silently optional is how untitled milestones start appearing (`FI-10`).
+        Flag("--title", True, False,
+             "what the milestone is; required when RAISING one — an untitled milestone cannot be "
+             "dispatched. Not needed with --retire, which names an existing milestone"),
         Flag("--status", True, False, "blocked|ready|running|awaiting-ci|done|dropped (default: blocked)"),
         Flag("--dep", True, False, "a milestone id this one depends on; repeatable, and each must EXIST"),
         Flag("--evidence", True, False, "an evidence path; repeatable"),
         Flag("--owner", True, False, "informational only — readiness never reads it"),
+        Flag("--retire", False, False,
+             "retire an EXISTING milestone: sets it dropped and removes it from the ready population"),
+        Flag("--reason", True, False, "why it was retired; required with --retire"),
     )),
     _verb("propose", _do_propose, False, "the WORKER's status proposal; never a roadmap write", (
         Flag("--instant", True, True, "the PROPOSING instant — its id is what attributes the proposal"),

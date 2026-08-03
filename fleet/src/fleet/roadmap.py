@@ -116,6 +116,10 @@ class Milestone:
     deps: list
     evidence: list
     owner: str = None
+    #: `FI-10`. Why this milestone was retired. Defaulted, because every `roadmap.json` already on disk
+    #: has no such key and `milestones()` builds each entry with `Milestone(**d)` — a field without a
+    #: default turns every existing roadmap into a TypeError. Empty for anything never retired.
+    retired_reason: str = ""
 
 
 @dataclass(frozen=True)
@@ -223,6 +227,50 @@ class Roadmap:
                 raise BadInput(f"milestone {m.id!r} is already in the roadmap; refusing to shadow it")
             data["milestones"].append(asdict(m))
             self._save(self.path, data)
+
+    def retire(self, milestone_id: str, reason: str) -> Milestone:
+        """The COORDINATOR removes a superseded milestone from the population. `FI-10`.
+
+        Across 31 verbs there was no way to do this. `add` refuses an id already present — *"refusing to
+        shadow it"*, which is right, because silently reshaping a milestone loses its history — and
+        `apply` refuses to invent a status without a worker's proposal, which is also right, and a
+        superseded milestone has no worker and never will. Both doors correctly shut, and no third one.
+
+        The cost is not cosmetic: once its deps land, a superseded milestone is derived READY forever,
+        and `roadmap --porcelain` prints `not-ready` rows but not ready ones — so it is a phantom
+        dispatchable milestone that no report shows.
+
+        **On the module's stated invariant.** The header says `apply` is the only function that changes a
+        milestone's status. That is now stated more precisely, because this writes one too: `apply` is
+        the only thing that ADVANCES a milestone on a worker's evidence, and `retire` is the coordinator
+        removing one from the population by its own decision. The property the two-party protocol exists
+        for is untouched — a worker still cannot move the roadmap by any path — and this can write
+        exactly one value, `dropped`, onto a milestone that has not finished.
+
+        The reason is REQUIRED. `dropped` and `done` are both terminal and read alike months later; a
+        milestone that left the population with no recorded why is a decision nobody can reconstruct.
+        """
+        reason = " ".join(str(reason or "").split())
+        if not reason:
+            raise BadInput(
+                f"retiring {milestone_id!r} needs a --reason. `dropped` and `done` are both terminal and "
+                f"look alike to a later reader, so a milestone that left the population without a "
+                f"recorded why is a decision nobody can reconstruct.")
+        with held_for_update(self.path):
+            data = self._load()
+            for entry in data["milestones"]:
+                if entry["id"] != milestone_id:
+                    continue
+                if entry["status"] in TERMINAL:
+                    raise BadInput(
+                        f"milestone {milestone_id!r} is already {entry['status']}, which is terminal. "
+                        f"Retiring it would rewrite a finished record — the same thing `add` refuses "
+                        f"when it declines to shadow an existing id.")
+                entry["status"] = "dropped"
+                entry["retired_reason"] = reason
+                self._save(self.path, data)
+                return Milestone(**entry)
+        raise BadInput(f"no milestone {milestone_id!r} in {self.path}, so there is nothing to retire")
 
     def milestones(self) -> list:
         return [Milestone(**d) for d in self._load()["milestones"]]
