@@ -331,7 +331,27 @@ class Roadmap:
         if unlanded:
             detail = ", ".join(f"{d.id!r} has status={d.status}" for d in unlanded)
             actor = next((d.owner for d in unlanded if d.owner), COORDINATOR)
-            #: INFO. The dep exists and is progressing; waiting for it is the design working, not a
+            #: A dep that can NEVER land is not the same as one that has not landed YET, and `FI-2`'s
+            #: fix conflated them for one release. `LANDED` is `("done",)` and `TERMINAL` is
+            #: `("done", "dropped")`, so a dep sitting at `dropped` is finished AND unlandable: its
+            #: dependent is permanently unreachable. Reported as INFO — "waiting is the design" — that is
+            #: a permanent block filed as news, and its `clears_when` told the reader to wait for
+            #: `status=done`, which cannot happen. An alarm naming an impossible remedy is `FI-5`
+            #: exactly, reintroduced by the fix for `FI-2`.
+            #:
+            #: `milestone --retire` (`FI-10`) makes it one command away: retire a milestone and every
+            #: dependent silently becomes permanently unready.
+            #:
+            #: The question is not "has the dep landed" but "can it".
+            stuck = [d for d in unlanded if d.status in TERMINAL]
+            if stuck:
+                names = ", ".join(f"{d.id!r} is {d.status}" for d in stuck)
+                return (f"dep(s) can NEVER land: {names}. {LANDED[0]!r} is the only landing status and a "
+                        f"terminal dep cannot reach it, so {m.id!r} is permanently unready — not waiting",
+                        f"the dep is re-raised as new work, or {m.id!r} drops it from its deps, or "
+                        f"{m.id!r} is itself retired. Waiting will not clear this",
+                        COORDINATOR, ATTENTION)
+            #: INFO. Every dep exists and is progressing; waiting for it is the design working, not a
             #: condition anybody can act on. This is the row a stacked roadmap emits most often.
             return (f"dep(s) exist but have not LANDED (landed means status in {LANDED}): {detail}",
                     "every dep reaches status=done through an applied proposal",

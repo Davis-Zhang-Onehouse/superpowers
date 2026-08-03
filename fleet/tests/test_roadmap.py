@@ -476,3 +476,57 @@ class TestRetiringASupersededMilestone(RoadmapCase):
         self.rm.retire("p1", reason="superseded")
         [row] = [r for r in self.rows(NOT_READY) if r.subject == "p1"]
         self.assertEqual(row.severity, INFO)
+
+
+class TestADepThatCanNEVERLandIsActionable(RoadmapCase):
+    """A regression I shipped in `0.3.1` with the `FI-2` fix, surfaced by `FI-17`.
+
+    `FI-2` said a milestone waiting on an unlanded dep should be INFO, because waiting is the design and
+    a healthy stacked roadmap emits that row constantly. True — for a dep that is PROGRESSING.
+
+    It is false for a dep that is TERMINAL. `LANDED = ("done",)`, so a dep sitting at `dropped` can never
+    land, and its dependent is permanently unreachable. Before `FI-2` that row was ATTENTION; after it,
+    INFO — and its `clears_when` still read *"every dep reaches status=done through an applied
+    proposal"*, which for a dropped dep is impossible. **That is `FI-5`'s unclearable alarm, reintroduced
+    by the fix for `FI-2`.**
+
+    `milestone --retire` (`FI-10`, same release) makes this reachable in one command: retire a milestone
+    and every dependent silently becomes permanently unready, reported as information.
+
+    The distinction is not "is the dep done" but "can it ever be".
+    """
+
+    def rows_for(self, kind):
+        return [r for r in self.rm.report() if r.kind == kind]
+
+    def test_a_dep_stuck_at_a_TERMINAL_status_is_attention_not_info(self):
+        self.rm.add(ms("p1", status="ready"))
+        self.rm.add(ms("q5", status="ready", deps=["p1"]))
+        self.rm.retire("p1", reason="superseded by the v0..v3 split")
+        [row] = [r for r in self.rows_for(NOT_READY) if r.subject == "q5"]
+        self.assertEqual(row.severity, ATTENTION,
+                         "a dependent whose dep can NEVER land is reported as information")
+
+    def test_its_clears_when_does_not_prescribe_the_impossible(self):
+        """`FI-5`'s rule: an alarm may not name a remedy that cannot happen. `dropped` is terminal, so
+        'reaches status=done' is not a route — the route is to re-scope or re-raise."""
+        self.rm.add(ms("p1", status="ready"))
+        self.rm.add(ms("q5", status="ready", deps=["p1"]))
+        self.rm.retire("p1", reason="superseded")
+        [row] = [r for r in self.rows_for(NOT_READY) if r.subject == "q5"]
+        self.assertNotIn("reaches status=done", row.clears_when,
+                         "the row tells the reader to wait for something that can never happen")
+        self.assertTrue(row.clears_when, "the row states no route at all")
+        self.assertIn("p1", row.detail, "the row does not name the dep that can never land")
+
+    def test_a_dep_still_PROGRESSING_stays_info(self):
+        """`FI-2` unchanged for the case it was about — this must stay a narrowing, not a revert."""
+        self.rm.add(ms("s1", status="running"))
+        self.rm.add(ms("s2", status="ready", deps=["s1"]))
+        [row] = [r for r in self.rows_for(NOT_READY) if r.subject == "s2"]
+        self.assertEqual(row.severity, INFO, "FI-2 was reverted; a progressing dep is not an alarm")
+
+    def test_a_dep_at_DONE_is_not_a_blocker_at_all(self):
+        self.rm.add(ms("s1", status="done"))
+        self.rm.add(ms("s2", status="ready", deps=["s1"]))
+        self.assertIn("s2", {m.id for m in self.rm.ready()})
