@@ -1,5 +1,12 @@
 # fleet — changelog
 
+## fleet/v0.3.2 — 2026-08-04T20:08:12Z
+Cut from 11f2f58 on `live` (upstream base pre-merge-fleet-skills-20260731). 3 commit(s) since fleet/v0.3.1.
+
+- b9b0a08 skills: the close-out has a FIFTH step, and it is a second wait (FI-11)
+- d07b4a2 skills: the release pipeline is documented where users look (G-6)
+- 11f2f58 fleet: a dep that can NEVER land is actionable, not information
+
 ## fleet/v0.3.1 — 2026-08-03T01:32:45Z
 Cut from c4a729a on `live` (upstream base pre-merge-fleet-skills-20260731). 4 commit(s) since fleet/v0.3.0.
 
