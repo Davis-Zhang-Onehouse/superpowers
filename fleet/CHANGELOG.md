@@ -1,5 +1,10 @@
 # fleet — changelog
 
+## fleet/v0.3.3 — 2026-08-05T04:45:58Z
+Cut from 3150f5a on `live` (upstream base pre-merge-fleet-skills-20260731). 1 commit(s) since fleet/v0.3.2.
+
+- 3150f5a fleet: a release drill marker, so v0.3.3 has a delta to carry
+
 ## fleet/v0.3.2 — 2026-08-04T20:08:12Z
 Cut from 11f2f58 on `live` (upstream base pre-merge-fleet-skills-20260731). 3 commit(s) since fleet/v0.3.1.
 
