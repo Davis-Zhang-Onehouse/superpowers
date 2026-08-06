@@ -113,7 +113,9 @@ g3_enter() {                    # g3_enter <SECTION>
   G3_SOCK="/tmp/itf$1"                               # short path: a long TMUX_TMPDIR overflows sun_path
   rm -rf "$G3_SOCK"; mkdir -p "$G3_SOCK"
   G3_TMUX_BEFORE="$(g3_live_tmux)"                   # the LIVE server, deliberately: see g3_live_tmux
-  G3_CLAUDE_BEFORE="$(pgrep -x claude 2>/dev/null | wc -l)"
+  #: The pid SET, not the count. This section DOES dispatch, so attribution is real work here: a claude
+  #: it launched has its cwd in the slot it leased and still FAILS; a foreign transient does not.
+  G3_CLAUDE_BEFORE="$(it_claude_pids)"
   #: KEPT, not redundant with `-L`: this is what contains a tmux call that lost its socket name. See the
   #: two-layer note in the header. `-L NAME` under this becomes `$TMUX_TMPDIR/tmux-$UID/NAME`, and both
   #: this harness (via `it_tmux`) and every `fleet` subprocess (via FLEET_TMUX_SOCKET) inherit it.
@@ -173,7 +175,7 @@ g3_kill_sessions() {
 g3_leave() {                    # g3_leave <SECTION>
   g3_kill_sessions
   local after_claude
-  after_claude="$(pgrep -x claude 2>/dev/null | wc -l)"
+  after_claude="$(it_claude_pids)"
   #: BEFORE the live read, and it must stay before it: `it_assert_isolation` (below) reads the live
   #: server with a BARE `tmux ls` (`it_live_tmux_sessions`), which is only the live server while
   #: TMUX_TMPDIR is unset. `g3_live_tmux` no longer depends on this ordering; that helper does.
@@ -199,11 +201,16 @@ g3_leave() {                    # g3_leave <SECTION>
   fi
   it_assert_no_private_leak "ISOLATION-$1-private-leak" "$EV/out/private-tmux-sessions.txt" \
     "dt-* dispatch sessions: no name-shape rule can catch these, only the exact names"
-  if [ "$after_claude" = "$G3_CLAUDE_BEFORE" ]; then
-    g3_pass "ISOLATION-$1-claude-count" "" "pgrep -x claude: $after_claude before and after (A6)"
+  #: Classified, not compared — the same fix as `live-tmux` above. The dispatches this section makes run
+  #: the `claude` STUB (which execs sleep), so a pane process is never named `claude`; an addition that is
+  #: genuinely this section's therefore means a real leak, and cwd attribution is what separates it from
+  #: another operator's fork-before-exec transient.
+  local g3_claude
+  g3_claude="$(it_classify_claude_delta "$G3_CLAUDE_BEFORE" "$after_claude")"
+  if [ "${g3_claude%%|*}" = FAIL ]; then
+    g3_fail "ISOLATION-$1-claude-count" "" "${g3_claude#*|}"
   else
-    g3_fail "ISOLATION-$1-claude-count" "" \
-            "pgrep -x claude went $G3_CLAUDE_BEFORE -> $after_claude; no claude may launch outside §P"
+    g3_pass "ISOLATION-$1-claude-count" "" "${g3_claude#*|} (A6)"
   fi
   it_assert_isolation "$1-leave"
   rm -rf "$G3_SOCK"

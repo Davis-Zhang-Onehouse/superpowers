@@ -989,13 +989,16 @@ a6() {
     a_skip A6 "$after" "$(sq "pgrep -x claude matched NOTHING before §A ran, so before==after ($nb==$na) cannot distinguish 'no claude was started' from 'the detector matches nothing' — the same reason W1-4 skips when no dt- session exists. §A launched no claude; the assertion is simply not available on this machine state")"
     return
   fi
-  if diff -q "$A_CLAUDE_BEFORE" "$after" >/dev/null; then
-    a_pass A6 "$after" "$(sq "pgrep -x claude is identical before and after §A: the same $nb live pids, compared as a SET and not just a count. The detector is live (it matched $nb processes), so this is a measurement and not an empty world. §A starts and kills no claude; the only long-lived process it created is a tmux 'sleep 900' pane on the private server")"
+  #: Classified, not diffed. A bare set comparison fails on BOTH directions of a change no section can
+  #: cause: a foreign session ENDING (which broke a release gate on 10 -> 9, pid 3754352, a COMPLETE
+  #: worker's pane exiting) and a foreign fork-before-exec transient APPEARING. §A launches no claude, so
+  #: an addition whose cwd is inside this instant would be a genuine leak and still FAILS.
+  local a_claude
+  a_claude="$(it_classify_claude_delta "$(cat "$A_CLAUDE_BEFORE")" "$(cat "$after")")"
+  if [ "${a_claude%%|*}" = FAIL ]; then
+    a_fail A6 "$after" "$(sq "${a_claude#*|}")"
   else
-    local added removed
-    added="$(comm -13 "$A_CLAUDE_BEFORE" "$after" | tr '\n' ' ')"
-    removed="$(comm -23 "$A_CLAUDE_BEFORE" "$after" | tr '\n' ' ')"
-    a_fail A6 "$after" "$(sq "pgrep -x claude changed across §A: $nb -> $na. Appeared: ${added:-none}. Disappeared: ${removed:-none}. §A contains no claude invocation and no kill, so an APPEARED pid would be a real leak; a DISAPPEARED pid is most likely another live session ending mid-run and is reported here rather than absorbed")"
+    a_pass A6 "$after" "$(sq "${a_claude#*|}. Compared as an attributed SET, not a count: the detector is live (it matched $nb processes before), so this is a measurement and not an empty world. §A starts and kills no claude; the only long-lived process it created is a tmux 'sleep 900' pane on the private server")"
   fi
 }
 

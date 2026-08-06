@@ -225,14 +225,16 @@ d_leave() {
   it_assert_no_private_leak ISOLATION-D-private-leak "$EV/out/private-tmux-sessions.txt" \
     "dt-* dispatch sessions: no name-shape rule can catch these, only the exact names"
   printf '%s\n' "$after_claude" > "$EV/out/claude-pids-after.txt"
-  added="$(comm -13 <(printf '%s\n' "$D_CLAUDE_BEFORE") <(printf '%s\n' "$after_claude") | tr '\n' ' ')"
-  removed="$(comm -23 <(printf '%s\n' "$D_CLAUDE_BEFORE") <(printf '%s\n' "$after_claude") | tr '\n' ' ')"
-  if [ -n "${added// /}" ]; then
-    d_fail ISOLATION-D-claude-count "$EV/out/claude-pids-after.txt" \
-      "A NEW claude process appeared during this section (pid(s) $added). No claude may launch outside §P"
+  #: Attributed, not merely detected. `added` alone still charged this section for another operator's
+  #: fork-before-exec transient — the ADDITION half of the same blind spot the DECREASE note above
+  #: describes. A claude §D launched has its cwd in a slot under $INSTANT and still FAILS; every dispatch
+  #: here launches the stub at bin/claude, which execs sleep, so no pane process is ever named claude.
+  local d_claude
+  d_claude="$(it_classify_claude_delta "$D_CLAUDE_BEFORE" "$after_claude")"
+  if [ "${d_claude%%|*}" = FAIL ]; then
+    d_fail ISOLATION-D-claude-count "$EV/out/claude-pids-after.txt" "${d_claude#*|}"
   else
-    d_pass ISOLATION-D-claude-count "$EV/out/claude-pids-after.txt" \
-      "not one NEW claude pid appeared: $(printf '%s' "$D_CLAUDE_BEFORE" | grep -c .) live before, $(printf '%s' "$after_claude" | grep -c .) after, additions none$([ -n "${removed// /}" ] && printf ', and pid(s) %s EXITED — the operator'"'"'s own, since nothing in this section starts or signals a claude and every kill here targets a pid this harness spawned' "$removed"). Every dispatch launched the stub at bin/claude, which execs sleep, so no pane process is ever named claude (A6)"
+    d_pass ISOLATION-D-claude-count "$EV/out/claude-pids-after.txt" "${d_claude#*|} (A6)"
   fi
   #: BEFORE it_assert_isolation, which reads the live server with a bare `tmux ls`.
   unset TMUX_TMPDIR
