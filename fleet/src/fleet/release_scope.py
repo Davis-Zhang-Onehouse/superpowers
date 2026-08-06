@@ -25,7 +25,10 @@ A leaf: no imports from the package, no git, no filesystem, no subprocess. The d
 release is a pure function of a list of strings, so it can be tested exhaustively without a repository.
 """
 
-__all__ = ["INERT_DIRS", "INERT_ROOT_FILES", "REQUIRING_SKILLS", "SKILLS_DIR", "Scope", "classify"]
+import re
+
+__all__ = ["CUT_CHANGELOG", "CUT_STAMPED", "INERT_DIRS", "INERT_ROOT_FILES", "REQUIRING_SKILLS",
+           "SKILLS_DIR", "Scope", "classify", "without_version_line"]
 
 #: Directory trees whose contents cannot affect either suite. Trailing slash is load-bearing: it makes
 #: these path-segment prefixes, so `docs/` never matches a sibling named `docsomething.md`.
@@ -39,6 +42,33 @@ INERT_ROOT_FILES = frozenset({
 })
 
 SKILLS_DIR = "skills/"
+
+#: The two files `release-cut` writes ITSELF, under its lock, before it tags -- so they differ between
+#: EVERY pair of release tags no matter what the author changed. Treating them as ordinary `fleet/` paths
+#: made this whole feature unreachable: a documentation-only release still showed them changed, so nothing
+#: could ever be exempt. That is `SI-19`'s shape -- correct, tested, dead -- and it was invisible to unit
+#: tests because they fed hand-written path lists rather than a real cut's diff.
+#:
+#: `CUT_CHANGELOG` is pure documentation and is simply inert. `CUT_STAMPED` is NOT: it also carries the
+#: exit-code registry, so it is inert only when the two blobs are identical once the `__version__` line is
+#: removed. `classify` cannot make that distinction -- it sees paths, not contents -- so it treats the path
+#: as inert and `exemption_for` puts it back if anything other than the version moved.
+CUT_CHANGELOG = "fleet/CHANGELOG.md"
+CUT_STAMPED = "fleet/src/fleet/__init__.py"
+
+#: `__version__ = "X.Y.Z"`, however it is spaced or quoted. Matched rather than parsed, because the only
+#: thing that must be recognised is the line `release-cut` rewrites with `re.sub`.
+_VERSION_LINE = re.compile(r'^\s*__version__\s*=\s*["\'][^"\']*["\']\s*$', re.MULTILINE)
+
+
+def without_version_line(text: str) -> str:
+    """`text` with the `__version__` assignment removed, for comparing two stamps of one file.
+
+    The question this answers is "did anything OTHER than the version change here", and it has to be
+    answered on content because the path alone cannot distinguish a release stamp from someone editing
+    `EXIT_CODES` in the same file.
+    """
+    return _VERSION_LINE.sub("", text or "")
 
 #: Skills the suites actually read. Everything else under `skills/` is inert. Keep this narrow, and never
 #: widen it to silence a failing test -- check whether the call-sites named in the module docstring still
@@ -101,6 +131,12 @@ def _is_inert(path: str) -> bool:
         #: exactly the change the suites would catch.
         if path == prefix.rstrip("/") or path.startswith(prefix):
             return False
+
+    #: The cut's own footprint. See CUT_CHANGELOG / CUT_STAMPED: these differ between every pair of
+    #: release tags by construction, so counting them as ordinary `fleet/` paths makes exemption
+    #: unreachable. CUT_STAMPED is re-checked on CONTENT by `exemption_for`.
+    if path in (CUT_CHANGELOG, CUT_STAMPED):
+        return True
 
     if path.startswith(SKILLS_DIR):
         return True

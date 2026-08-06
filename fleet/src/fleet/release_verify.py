@@ -35,7 +35,7 @@ from pathlib import Path
 from fleet.atomic import atomic_write, tmp_name
 from fleet.errors import Refused
 from fleet.release import META_DIR, Releases, Version, tree_sha
-from fleet.release_scope import classify
+from fleet.release_scope import CUT_STAMPED, Scope, classify, without_version_line
 
 __all__ = ["EXEMPT", "EXEMPT_ROSTER", "FULL_ROSTER", "GATE_ROSTER", "GREEN", "INCONCLUSIVE",
            "PROMOTABLE", "RED", "Verify", "exemption_for", "last_green", "read_verdict",
@@ -182,7 +182,20 @@ def exemption_for(releases: Releases, version: Version, repo, full: bool = False
             clears_when=f"{anchor_tag} is back in the checkout (`git fetch --tags`), or the release is "
                         f"verified normally",
             clears_who="whoever is verifying")
-    scope = classify(repo.changed_paths(anchor_tag, this_tag))
+    changed = repo.changed_paths(anchor_tag, this_tag)
+    scope = classify(changed)
+
+    #: `classify` reads the version-stamped `__init__.py` as inert because it cannot see contents -- the
+    #: cut rewrites that file on EVERY release, so treating it as an ordinary `fleet/` path would make
+    #: exemption unreachable. Contents are the other half of the question, and they are checked here,
+    #: where the repository is. Anything in that file other than `__version__` moving puts it back in
+    #: `requiring`, so an edit to the exit-code registry it also carries can never ride out on a stamp.
+    if CUT_STAMPED in scope.inert:
+        before = without_version_line(repo.file_at(anchor_tag, CUT_STAMPED))
+        after = without_version_line(repo.file_at(this_tag, CUT_STAMPED))
+        if before != after:
+            scope = Scope([p for p in scope.inert if p != CUT_STAMPED],
+                          list(scope.requiring) + [CUT_STAMPED])
     return (anchor, scope) if scope.exempt else None
 
 
