@@ -76,8 +76,11 @@ from fleet.reconcile import COMPLETE, KIND_WORKER, RUNNING, needs_a_human, recon
 from fleet.release import (CANDIDATE, DEV, HISTORY_COLUMNS, META_DIR, RELEASE_RETENTION, RELEASED, Releases, Version,
                            actor, tree_sha, utc_now)
 from fleet.release_git import Repo, changelog_section
+from fleet.release_scope import areas, skills_changed
+from fleet.release_stamp import stamp_plugin_version
 from fleet.release_verify import (EXEMPT, EXEMPT_ROSTER, FULL_ROSTER, GATE_ROSTER, GREEN, PROMOTABLE,
-                                  Verify, exemption_for, read_verdict, write_exemption, write_verdict)
+                                  Verify, archive_previous_attempt, exemption_for, read_verdict,
+                                  write_exemption, write_verdict)
 from fleet.review import Finding, Review, exit_code_for
 from fleet import origin as origin_mod
 from fleet.origin import Origin
@@ -2905,6 +2908,43 @@ def _freeze_payload(export: Path) -> None:
         path.chmod(path.stat().st_mode & ~0o222)
 
 
+PAYLOAD_FILE = "PAYLOAD.tsv"
+
+
+def _write_payload(meta: Path, version: Version, prev_tag, changed_paths) -> None:
+    """What this release actually ships, as fields rather than prose (`RI-13`).
+
+    Shaped like `EXEMPTION.tsv`: a `key value` header, then one row per fact, so an operator can read it
+    with `awk` and a reader can see the whole answer without a parser. Written for EVERY release including
+    one with nothing to describe -- the file's SHAPE must not depend on the outcome, or a reader can never
+    tell an empty payload from an omitted section, which is the same rule `write_exemption` follows.
+    """
+    buckets = areas(changed_paths or ())
+    rows = ["key\tvalue",
+            f"version\t{version}",
+            f"compared\t{(prev_tag + '..HEAD') if prev_tag else '(no predecessor)'}",
+            f"files\t{sum(len(paths) for _, paths in buckets)}"]
+    rows.extend(f"area\t{name}\t{len(paths)}" for name, paths in buckets)
+    rows.extend(f"skill\t{name}" for name in skills_changed(changed_paths or ()))
+    rows.extend(f"path\t{name}\t{path}" for name, paths in buckets for path in paths)
+    atomic_write(meta / PAYLOAD_FILE, "\n".join(rows) + "\n")
+
+
+def _read_payload(meta: Path) -> dict:
+    """`{"areas": [(name, count)], "skills": [name]}` for a release, or `{}` when it predates the file."""
+    path = Path(meta) / PAYLOAD_FILE
+    if not path.is_file():
+        return {}
+    found, skills = [], []
+    for line in path.read_text().splitlines()[1:]:
+        cells = line.split("\t")
+        if cells[0] == "area" and len(cells) >= 3:
+            found.append((cells[1], cells[2]))
+        elif cells[0] == "skill" and len(cells) >= 2:
+            skills.append(cells[1])
+    return {"areas": found, "skills": skills}
+
+
 def _do_release_cut(ctx: Ctx, parsed: Parsed) -> int:
     rel = _releases(ctx, parsed)
     _refuse_if_self_deployed(rel, parsed)
@@ -2916,6 +2956,10 @@ def _do_release_cut(ctx: Ctx, parsed: Parsed) -> int:
             f"{repo.path} is a git repository but not the fleet checkout: {stamped} is not there, and a "
             f"cut rewrites that file's `__version__` before it tags. Refused at the edge and by name — "
             f"the alternative is a failure half way through, after the changelog has been written.")
+    #: The same edge check for the OTHER files a cut stamps (`RI-12`). Writes nothing: a manifest that is
+    #: unparseable or has lost its declared field must refuse while the operator's checkout is untouched,
+    #: not between the changelog write and the tag — which is the reason the line above exists.
+    stamp_plugin_version(repo.path, version, dry_run=True)
     _refuse_an_existing_release(rel, version)
     if repo.tag_exists(version.tag):
         raise Refused(
@@ -2948,18 +2992,32 @@ def _do_release_cut(ctx: Ctx, parsed: Parsed) -> int:
     rebased = bool(prev_tag) and not repo.is_ancestor(prev_tag, "HEAD")
     commits = repo.delta(prev_tag)
     when, head = utc_now(), repo.head()
+    #: `RI-13`. Taken HERE, before the lock rewrites the changelog and the version stamps, so a release's
+    #: payload description is the author's change and never the release's own bookkeeping (`AS-6`).
+    #: Two-dot, like `exemption_for`'s: whether a path is in the payload is a question about CONTENT.
+    payload = repo.changed_paths(prev_tag, "HEAD") if prev_tag is not None else None
     section = changelog_section(version, head=head, branch=repo.branch(),
                                 upstream_base=repo.upstream_base(), prev_tag=prev_tag,
-                                commits=commits, rebased=rebased, when=when)
+                                commits=commits, rebased=rebased, when=when, changed_paths=payload)
     since = prev_tag or "(no predecessor)"
 
     if ctx.dry_run:
-        _emit(ctx, "release-cut", [
-            ("dry-run", "nothing was written, committed, tagged or exported"),
-            ("would-cut", f"{version} from {head[:7]} on {repo.branch()}"),
-            ("would-tag", version.tag),
-            ("would-export", str(rel.dir_for(version))),
-            ("commits", f"{len(commits)} since {since}")])
+        rows = [("dry-run", "nothing was written, committed, tagged or exported"),
+                ("would-cut", f"{version} from {head[:7]} on {repo.branch()}"),
+                ("would-tag", version.tag),
+                ("would-export", str(rel.dir_for(version))),
+                ("commits", f"{len(commits)} since {since}")]
+        #: The payload and the stamps, PREVIEWED. A dry run whose only unknown is "what will this actually
+        #: ship" is a dry run that answers the easy half of the question -- and the payload is the half an
+        #: operator gets wrong, because "fleet release" reads as "the CLI" (`RI-13`).
+        rows.extend((f"would-ship-{name}", f"{len(paths)} file(s)") for name, paths in areas(payload or ()))
+        #: `-names`, not `would-ship-skills`, which is already the area's file count. A key-value report
+        #: with two rows under one key is one an operator cannot read and a script cannot parse.
+        if payload and (named := skills_changed(payload)):
+            rows.append(("would-ship-skill-names", ", ".join(named)))
+        rows.extend((f"would-stamp-{path}", f"{old} -> {new}")
+                    for path, old, new in stamp_plugin_version(repo.path, version, dry_run=True))
+        _emit(ctx, "release-cut", rows)
         return EXIT_OK
 
     with rel.lock():
@@ -2970,7 +3028,13 @@ def _do_release_cut(ctx: Ctx, parsed: Parsed) -> int:
         changelog.write_text(f"{head_line}\n\n{section}\n{rest.lstrip()}")
         stamped.write_text(re.sub(r'__version__ = "[^"]*"', f'__version__ = "{version}"',
                                   stamped.read_text()))
-        repo.commit([changelog, stamped], f"fleet v{version}")
+        #: `RI-12`. The version a user READS lives in the plugin manifests, not in `__init__.py`:
+        #: `claude plugin list` printed `Version: 6.2.0` on a box running fleet 0.3.7, and did so at all
+        #: fifteen release tags. Stamped INSIDE the lock and BEFORE the tag, or the export -- a
+        #: `git archive` of that tag -- ships manifests naming the previous release.
+        stamped_manifests = stamp_plugin_version(repo.path, version)
+        repo.commit([changelog, stamped] + [repo.path / path for path, _, _ in stamped_manifests],
+                    f"fleet v{version}")
         repo.annotated_tag(version.tag, section)
 
         export = rel.dir_for(version)
@@ -2980,6 +3044,9 @@ def _do_release_cut(ctx: Ctx, parsed: Parsed) -> int:
         # is the whole history, and "what changed in the version I am holding" is a different question
         # that the holder of one artifact should not have to answer by diffing two of them.
         atomic_write(export / META_DIR / "CHANGELOG.md", section)
+        #: `RI-13`, for the reader who has the box and not the repository. The changelog says it in prose;
+        #: this says it in fields, so `release-status` can answer "what is deployed" with what is IN it.
+        _write_payload(export / META_DIR, version, prev_tag, payload)
         rel.write_manifest(version, {
             "version": str(version), "tag": version.tag, "source_commit": repo.head(),
             "source_branch": repo.branch(), "upstream_base": repo.upstream_base(),
@@ -3057,11 +3124,18 @@ def _do_release_verify(ctx: Ctx, parsed: Parsed) -> int:
         anchor_tag = rel.manifest(anchor).get("tag") or anchor.tag
         this_tag = rel.manifest(version).get("tag") or version.tag
         meta = export / META_DIR
+        #: `RI-17`. This path writes the evidence directory without ever constructing a `Verify`, so it
+        #: needs the archive as much as the suite path does — and it is the path that PROVED it: release
+        #: `0.3.6` shipped RELEASED and EXEMPT carrying a `hermetic.log` and a `live-subjects-before.tsv`
+        #: from an abandoned earlier attempt, which the exempt branch writes neither of. A release whose
+        #: evidence says "no suite was required" was shipping a suite log.
+        archive_previous_attempt(meta)
         write_exemption(meta, version, anchor, anchor_tag, this_tag, scope)
         note = (f"not required: {len(scope.inert)} changed path(s) since {anchor}, none of which either "
                 f"suite reads")
         write_verdict(meta, [("hermetic", EXEMPT, "evidence/EXEMPTION.tsv", note),
-                             ("it", EXEMPT, "evidence/EXEMPTION.tsv", note)], EXEMPT_ROSTER)
+                             ("it", EXEMPT, "evidence/EXEMPTION.tsv", note)], EXEMPT_ROSTER,
+                      result=EXEMPT)
         _emit(ctx, "release-verify", [
             ("version", str(version)), ("verdict", EXEMPT), ("roster", EXEMPT_ROSTER),
             ("anchor", f"{anchor} ({anchor_tag}) — the newest release verified GREEN"),
@@ -3242,7 +3316,17 @@ def _do_release_status(ctx: Ctx, parsed: Parsed) -> int:
         out.append(("head", head_out.strip() if head_code == 0 and head_out.strip() else "unknown"))
         out.append(("dirty", "yes" if (dirty_code == 0 and dirty_out.strip()) else "no"))
     elif label != "none":
-        out.append(("state", rel.state(Version.parse(label))))
+        version = Version.parse(label)
+        out.append(("state", rel.state(version)))
+        #: `RI-13`. "What is deployed" is a question about CONTENT as much as about a version number, and
+        #: `fleet-releases/current` is the marketplace source every session on this box loads from — so
+        #: "which skills does the thing I am running carry" is answerable here or nowhere.
+        payload = _read_payload(rel.dir_for(version) / META_DIR)
+        if payload.get("areas"):
+            out.append(("payload", ", ".join(f"{name} ({count})"
+                                             for name, count in payload["areas"])))
+        if payload.get("skills"):
+            out.append(("skills", ", ".join(payload["skills"])))
     if last:
         out.append(("since", last["ts"]))
         out.append(("by", last["actor"]))

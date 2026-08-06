@@ -88,12 +88,17 @@ scheduled contamination event: it exits mid-run, moving both the board and the c
 finished workers before cutting. Other people's live sessions are an uncontrollable residual risk — a gate
 run here is not reliably repeatable.
 
-**Trap 5 — archive evidence BEFORE re-verifying.** `release-verify` writes fixed filenames into
-`<release>/.release/evidence/`, so a second run overwrites the first attempt's registers, verdict and
-cited artefacts. An `INCONCLUSIVE` asks you to re-run, and the re-run destroys the record of why it was
-inconclusive. `cp -r` the evidence dir somewhere first. (Related: `it-FAILURES.txt` and `it-cited/` are
-written only on the failure path and are *not* cleared on success, so a release that failed once and then
-passed ships a stale failure manifest beside its GREEN verdict. Check timestamps before believing it.)
+**Trap 5 — a re-verify archives the previous attempt FOR you; read the archive, don't recreate it.**
+Since 0.3.8 both `release-verify` paths (the suites and `EXEMPT`) move everything already in
+`<release>/.release/evidence/` into `evidence/attempt-<n>-<verdict>/` before writing, so every attempt
+starts from an empty directory. Nothing to copy by hand — and a GREEN run can no longer inherit an earlier
+attempt's `it-FAILURES.txt` or `it-cited/`. **Do this instead:** after a re-run, `ls` the evidence dir.
+`attempt-1-INCONCLUSIVE/` beside a current GREEN is the record of *why* you re-ran, and it is the first
+thing to read when a gate took two goes.
+
+> Releases below 0.3.8 carry the mixed state this rule used to guard by hand: `0.3.3` ships a GREEN verdict
+> beside an `it-FAILURES.txt` naming two failures, and `0.3.6` ships an `EXEMPT` verdict beside a
+> `hermetic.log` from an abandoned attempt. Check mtimes before believing the evidence of any of them.
 
 **Trap 6 — the documented hermetic command is not runnable as written.**
 `HERMETIC_COMMAND = "python3 -m unittest discover -s tests -q"` needs an env the constant does not
@@ -125,14 +130,37 @@ awk -F'\t' '$2=="FAIL"{print FILENAME" :: "$1" :: "$4}' "$EV"/it-RESULTS-closeou
 | `GREEN` | both suites passed | promote |
 | `EXEMPT` | not required — nothing either suite reads changed | promote |
 | `RED` | a suite failed and the live-subject set did **not** move | a real defect; fix it |
-| `INCONCLUSIVE` | a suite failed **and** the box moved during the run | contamination; re-run (after Trap 5) |
+| `INCONCLUSIVE` | a suite failed **and** the box moved during the run | contamination; re-run (Trap 5) |
 
 `INCONCLUSIVE` exists so a false RED is never written into a release's evidence permanently. Diff
 `live-subjects-before.tsv` against `live-subjects-after.tsv` to see what moved.
 
+**The overall verdict is in the file, from 0.3.8 on** — `awk -F'\t' '$1=="verdict"{print $2}' "$EV/VERDICT.tsv"`.
+Before that only per-suite `GREEN`/`RED` rows were written, so an INCONCLUSIVE run left evidence
+byte-identical to a genuine RED: release `0.3.4` is the instance, recorded RED with `live-subject set
+CHANGED during the run` in the note. A release below 0.3.8 has no `verdict` row and its archive, if any,
+is named `attempt-<n>-unknown`.
+
 **Do not re-roll until green.** Re-run only when you have *identified* the contaminating cause and
 removed it. If you cannot, leave the release at CANDIDATE and hand back a documented blocker — a gate you
 retry until it passes is not a gate.
+
+## What the release says about itself
+
+A cut stamps **two** version lineages and writes down what it ships:
+
+- `fleet/src/fleet/__init__.py` gets the fleet version (`0.3.8`).
+- The seven manifests in `.version-bump.json` get `<upstream core>+fleet.<fleet version>` —
+  `6.2.0+fleet.0.3.8`. Build metadata, so the number never decreases and the upstream fork point survives.
+  This is what `claude plugin list` reports; before 0.3.8 it read `6.2.0` at every release ever cut.
+- `<release>/.release/PAYLOAD.tsv` records which areas the release actually moves, and the changelog
+  section says the same in prose, naming the individual skills. `release-status` reports it for the
+  deployed release, so "which skills am I running" is answerable from the box alone:
+
+```bash
+$FLEET release-status --releases "$FLEET_RELEASES" --porcelain    # payload / skills rows
+awk -F'\t' '$1=="area"' "$FLEET_RELEASES/fleet-vX.Y.Z/.release/PAYLOAD.tsv"
+```
 
 ## Choosing the version
 
@@ -156,9 +184,9 @@ what the next person reads when they ask why `current` moved.
 |---------|-----|
 | `fleet release-cut …` straight from `PATH` | Absolute path to the **checkout's** `bin/fleet` (Trap 1) |
 | Creating `fleet/vX.Y.Z` before cutting | The cut makes it; pre-creating refuses (Trap 2) |
-| Hand-editing `CHANGELOG.md` / `__version__` before a cut | The cut writes both; the edit only makes the tree dirty, which is refused |
+| Hand-editing `CHANGELOG.md` / `__version__` / a plugin manifest before a cut | The cut writes all of them; the edit only makes the tree dirty, which is refused |
 | Polling the gate run from the session driving it | Silence protocol (Trap 3) |
-| Re-running `verify` before copying the evidence out | Archive first (Trap 5) |
+| Copying the evidence out by hand before re-verifying | The tool archives it: `evidence/attempt-<n>-<verdict>/` (Trap 5) |
 | Reading the verdict off `run-all.sh` or `it-RESULTS.tsv` | Per-runner `it-RESULTS-closeout-*.tsv` FAIL rows |
 | `release-deploy --force` to skip a slow gate | That is what `EXEMPT` is for; `--force` records the release UNVERIFIED |
 | Treating `INCONCLUSIVE` as RED, or as "just retry" | Identify the mover, remove it, then re-run |

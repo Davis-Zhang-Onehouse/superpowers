@@ -95,9 +95,16 @@ class TestUnknownPathsFailSafe(unittest.TestCase):
         self.assertFalse(classify(["something-invented-tomorrow/thing.py"]).exempt)
 
     def test_infrastructure_paths_require_verification(self):
+        """The plugin manifests used to be in this list and now live in `TestTheCutsOwnFootprint`.
+
+        Not a relaxation. `release-cut` stamps them on every release (`RI-12`), so they differ between
+        every pair of release tags exactly as `fleet/src/fleet/__init__.py` does, and leaving them here
+        would make exemption unreachable for every release that will ever exist -- `SI-19`'s shape. They
+        are inert as PATHS and re-checked on CONTENT by `exemption_for`, which is the same two-part answer
+        that file already gets.
+        """
         for path in ("scripts/sync/lib.sh", "hooks/session-start", "bin/fleet",
-                     "tests/test_x.py", "package.json", ".claude-plugin/plugin.json",
-                     "patches/p.diff", "_staging/x", "gemini-extension.json"):
+                     "tests/test_x.py", "patches/p.diff", "_staging/x", ".version-bump.json"):
             with self.subTest(path=path):
                 self.assertFalse(classify([path]).exempt, f"{path} must require verification")
 
@@ -150,6 +157,33 @@ class TestTheCutsOwnFootprint(unittest.TestCase):
         path back if anything else moved. That split is deliberate: this module stays pure, and the
         content check lives where the repository is available. See `test_release_exemption`."""
         self.assertTrue(classify(["fleet/src/fleet/__init__.py"]).exempt)
+
+    def test_every_manifest_the_cut_stamps_is_inert_as_a_PATH(self):
+        """`RI-12` added seven more files to every cut's diff. Same carve-out, same content re-check."""
+        from fleet.release_scope import CUT_MANIFESTS
+        for path in CUT_MANIFESTS:
+            with self.subTest(path=path):
+                self.assertTrue(classify([path]).exempt,
+                                f"{path} is stamped by every cut; as an ordinary path it makes exemption "
+                                f"unreachable for every release that will ever exist")
+
+    def test_the_declared_manifests_match_the_repositorys_own_version_config(self):
+        """`CUT_MANIFESTS` mirrors `.version-bump.json`, which this leaf module may not read -- it has no
+        filesystem, by design. The duplication is deliberate and this is what stops it drifting: a
+        manifest added to the config and not here would be stamped by the cut and then counted as an
+        author's change, silently killing exemption again.
+        """
+        import json
+        import pathlib
+        from fleet.release_scope import CUT_MANIFESTS
+        root = pathlib.Path(__file__).resolve().parents[2]
+        config = root / ".version-bump.json"
+        if not config.is_file():                      # a worktree that predates the config
+            self.skipTest(f"{config} is not present in this tree")
+        declared = [entry["path"] for entry in json.loads(config.read_text())["files"]]
+        self.assertEqual(sorted(declared), sorted(CUT_MANIFESTS),
+                         "release_scope.CUT_MANIFESTS and .version-bump.json disagree about which files "
+                         "the cut stamps")
 
     def test_no_other_fleet_source_file_is_inert(self):
         """The carve-out is exactly two paths. Nothing else under `fleet/src/` inherits it."""
