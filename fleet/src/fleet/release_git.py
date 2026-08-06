@@ -102,6 +102,16 @@ class Repo:
             commits.append((sha[:7], subject.strip()))
         return commits
 
+    def file_at(self, ref: str, path: str) -> str:
+        """One file's contents at one ref, or `""` if it is not there.
+
+        Absence is not an error here: the caller is comparing the same path at two refs to decide whether
+        anything but a version stamp moved, and "added" or "deleted" are answers to that question rather
+        than failures of it.
+        """
+        code, out = self.git(["show", f"{ref}:{path}"], self.path)
+        return out if code == 0 else ""
+
     def changed_paths(self, from_ref: str, to_ref: str) -> list:
         """Every repo-relative path differing between two refs, as `git diff --name-only` reports it.
 
