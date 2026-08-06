@@ -1,5 +1,14 @@
 # fleet — changelog
 
+## fleet/v0.3.8 — 2026-08-06T15:01:17Z
+Cut from 6626405 on `live` (upstream base pre-merge-fleet-skills-20260731). 1 commit(s) since fleet/v0.3.7.
+
+Every release ships the whole repository — all skills, `commands/`, `hooks/` and the plugin manifest, not only `fleet/`.
+Payload: fleet (10 files), skills (1 file).
+Skills changed: releasing-fleet.
+
+- 6626405 fleet: the release's evidence, version and payload all describe the release
+
 ## fleet/v0.3.7 — 2026-08-06T06:49:18Z
 Cut from b8dc466 on `live` (upstream base pre-merge-fleet-skills-20260731). 1 commit(s) since fleet/v0.3.6.
 
