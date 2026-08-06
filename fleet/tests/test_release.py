@@ -1197,15 +1197,12 @@ class VerifyCase(unittest.TestCase):
         self.assertEqual(len(board), 2, "the live-subject set must be sampled before AND after the run")
 
 
-class CliCase(unittest.TestCase):
-    """The eight release verbs, driven through `main` so the exit code asserted is the one an operator sees.
+class ReleaseCliFixture:
+    """The throwaway release area, checkout and injected context the release-verb cases run against.
 
-    The context is INJECTED, like every other suite in this package: the session probes are stubs and the
-    command runner is a fake that records what it was handed, so nothing here starts a tmux, a suite or a
-    `claude`. `git` is the real seam and the repository is a real temporary checkout, because `git archive`
-    is what a cut exports and no fake can produce a tar -- the same reasoning `GitCase` gives.
-
-    Nothing in this class runs a mutating git command anywhere but in the throwaway checkout it built.
+    A plain mixin and NOT a `TestCase`, so a suite in another file can reuse the fixture without also
+    re-running every case in `CliCase` -- which is what subclassing a populated `TestCase` does, silently,
+    and it doubles a 90-case class the moment anybody borrows the harness.
     """
 
     #: A checkout a cut will accept: the file whose `__version__` the cut rewrites has to be there, and the
@@ -1343,6 +1340,18 @@ class CliCase(unittest.TestCase):
             stat = path.stat()
             out[str(path)] = (path.is_dir(), stat.st_mtime_ns, stat.st_size if path.is_file() else 0)
         return out
+
+
+class CliCase(ReleaseCliFixture, unittest.TestCase):
+    """The eight release verbs, driven through `main` so the exit code asserted is the one an operator sees.
+
+    The context is INJECTED, like every other suite in this package: the session probes are stubs and the
+    command runner is a fake that records what it was handed, so nothing here starts a tmux, a suite or a
+    `claude`. `git` is the real seam and the repository is a real temporary checkout, because `git archive`
+    is what a cut exports and no fake can produce a tar -- the same reasoning `GitCase` gives.
+
+    Nothing in this class runs a mutating git command anywhere but in the throwaway checkout it built.
+    """
 
     # --- the registry ----------------------------------------------------------------------------
 
