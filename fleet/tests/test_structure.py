@@ -6,7 +6,7 @@ import unittest
 
 ROOT = pathlib.Path(__file__).resolve().parents[1]
 SRC = ROOT / "src" / "fleet"
-LEAVES = {"identity", "store", "pool", "session", "atomic"}
+LEAVES = {"identity", "store", "pool", "session", "atomic", "release_scope"}
 EXPECTED = {"identity", "store", "pool", "session", "atomic", "layout", "profiles", "reconcile",
             "guards", "roadmap", "review", "harvest", "render", "cli"}
 

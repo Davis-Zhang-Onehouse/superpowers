@@ -76,7 +76,8 @@ from fleet.reconcile import COMPLETE, KIND_WORKER, RUNNING, needs_a_human, recon
 from fleet.release import (CANDIDATE, DEV, HISTORY_COLUMNS, META_DIR, RELEASE_RETENTION, RELEASED, Releases, Version,
                            actor, tree_sha, utc_now)
 from fleet.release_git import Repo, changelog_section
-from fleet.release_verify import FULL_ROSTER, GATE_ROSTER, GREEN, Verify, read_verdict
+from fleet.release_verify import (EXEMPT, EXEMPT_ROSTER, FULL_ROSTER, GATE_ROSTER, GREEN, PROMOTABLE,
+                                  Verify, exemption_for, read_verdict, write_exemption, write_verdict)
 from fleet.review import Finding, Review, exit_code_for
 from fleet import origin as origin_mod
 from fleet.origin import Origin
@@ -3039,6 +3040,36 @@ def _do_release_verify(ctx: Ctx, parsed: Parsed) -> int:
     # worktree at the release's tag because it cannot judge an export, so a repository is needed; a
     # release cut after that field existed carries its own, and one cut before it must be told.
     repo = Repo(parsed.get("repo"), git=ctx.git) if parsed.get("repo") else None
+
+    #: The exemption check, BEFORE anything is spawned. A release is a `git archive` of the whole
+    #: repository, so a docs- or skills-only release otherwise pays ~24 minutes to prove that `fleet/` --
+    #: which it did not touch -- still works. The alternative in use before this was
+    #: `release-deploy --force`, which is not a decision but an override: it discards the gate and records
+    #: the release UNVERIFIED, which is how `0.3.2` came to be deployed without evidence.
+    #:
+    #: Fail-safe: `exemption_for` answers None -- run them -- for every uncertainty, and the classifier
+    #: is an allowlist, so an unrecognised path can never skip the gate. The repository is resolved the
+    #: same way the suites resolve it, because the diff needs the anchor's tag.
+    scope_repo = repo or Verify(rel, version, ctx.runner).repo()
+    exempted = exemption_for(rel, version, scope_repo, full=parsed.on("full"))
+    if exempted is not None:
+        anchor, scope = exempted
+        anchor_tag = rel.manifest(anchor).get("tag") or anchor.tag
+        this_tag = rel.manifest(version).get("tag") or version.tag
+        meta = export / META_DIR
+        write_exemption(meta, version, anchor, anchor_tag, this_tag, scope)
+        note = (f"not required: {len(scope.inert)} changed path(s) since {anchor}, none of which either "
+                f"suite reads")
+        write_verdict(meta, [("hermetic", EXEMPT, "evidence/EXEMPTION.tsv", note),
+                             ("it", EXEMPT, "evidence/EXEMPTION.tsv", note)], EXEMPT_ROSTER)
+        _emit(ctx, "release-verify", [
+            ("version", str(version)), ("verdict", EXEMPT), ("roster", EXEMPT_ROSTER),
+            ("anchor", f"{anchor} ({anchor_tag}) — the newest release verified GREEN"),
+            ("compared", f"{anchor_tag}..{this_tag}"),
+            ("paths", f"{len(scope.inert)} changed, all inert"),
+            ("evidence", str(meta / "evidence"))])
+        return EXIT_OK
+
     result = Verify(rel, version, ctx.runner, repo=repo).run(full=parsed.on("full"))
     _emit(ctx, "release-verify", [
         ("version", str(version)), ("verdict", result), ("roster", roster),
@@ -3052,14 +3083,29 @@ def _do_release_promote(ctx: Ctx, parsed: Parsed) -> int:
     version = Version.parse(parsed.get("version"))
     verdict = read_verdict(rel.dir_for(version) / META_DIR)
     suites = verdict.get("suites") or {}
-    if not suites or any(value != GREEN for value in suites.values()):
+    if not suites or any(value not in PROMOTABLE for value in suites.values()):
         raise Refused(
-            f"{version} has no GREEN evidence: {suites or 'no VERDICT.tsv at all'}. Run "
+            f"{version} has no promotable evidence: {suites or 'no VERDICT.tsv at all'}. Run "
             f"`fleet release-verify --version {version}` first. `promote` never runs tests — it reads "
-            f"what `verify` left, so a promotion always cites a measurement someone can go and look at.",
-            clears_when=f"`fleet release-verify --version {version}` records a GREEN verdict",
+            f"what `verify` left, so a promotion always cites a measurement someone can go and look at. "
+            f"An EXEMPT verdict is promotable too, and it cites the diff that earned it "
+            f"(`evidence/EXEMPTION.tsv`) rather than a test run.",
+            clears_when=f"`fleet release-verify --version {version}` records a GREEN or EXEMPT verdict",
             clears_who="whoever is releasing")
     prev = rel.previous(version)
+    #: An exemption says "nothing either suite reads has changed". A minor or major bump asserts the
+    #: opposite in the version number, and the two cannot both be true: whichever is wrong, the operator
+    #: should find out from a suite rather than from production. Cheap insurance -- a patch release is the
+    #: shape a documentation change actually has.
+    if prev is not None and version.bump_kind(prev) in ("minor", "major") \
+            and any(value == EXEMPT for value in suites.values()):
+        raise Refused(
+            f"{version} is a {version.bump_kind(prev)} bump over {prev}, and its evidence is EXEMPT — no "
+            f"suite ran. A bump of that size claims substantive change while the exemption claims nothing "
+            f"either suite reads was touched; they cannot both hold.",
+            clears_when=f"`fleet release-verify --version {version} --full` records a GREEN verdict "
+                        f"(`--full` never exempts), or the version is cut as a patch",
+            clears_who="whoever is releasing")
     if prev is not None and version.bump_kind(prev) in ("minor", "major") \
             and verdict.get("roster") != FULL_ROSTER:
         raise Refused(
@@ -3073,7 +3119,10 @@ def _do_release_promote(ctx: Ctx, parsed: Parsed) -> int:
         _emit(ctx, "release-promote", [
             ("dry-run", "the state file was not written"),
             ("would-promote", f"{version}: {rel.state(version)} -> {RELEASED}"),
-            ("evidence", f"{verdict.get('roster')} roster, {len(suites)} suite(s) GREEN")])
+            #: Names the verdicts rather than asserting GREEN: an EXEMPT promotion reported as
+            #: "2 suite(s) GREEN" would be the same lie about evidence that `SI-38` cost.
+            ("evidence", f"{verdict.get('roster')} roster, "
+                         f"{', '.join(f'{name}={value}' for name, value in sorted(suites.items()))}")])
         return EXIT_OK
 
     with rel.lock():

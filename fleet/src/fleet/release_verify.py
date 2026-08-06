@@ -35,16 +35,27 @@ from pathlib import Path
 from fleet.atomic import atomic_write, tmp_name
 from fleet.errors import Refused
 from fleet.release import META_DIR, Releases, Version, tree_sha
+from fleet.release_scope import classify
 
-__all__ = ["FULL_ROSTER", "GATE_ROSTER", "GREEN", "INCONCLUSIVE", "RED", "Verify",
-           "read_verdict", "verdict_for", "write_verdict"]
+__all__ = ["EXEMPT", "EXEMPT_ROSTER", "FULL_ROSTER", "GATE_ROSTER", "GREEN", "INCONCLUSIVE",
+           "PROMOTABLE", "RED", "Verify", "exemption_for", "last_green", "read_verdict",
+           "verdict_for", "write_exemption", "write_verdict"]
 
 GREEN = "GREEN"
 RED = "RED"
 INCONCLUSIVE = "INCONCLUSIVE"
+#: The suites were not REQUIRED, which is a different claim from "they passed", and is never spelled
+#: GREEN. `SI-38` is what a verdict whose evidence does not support it costs; recording a skipped run as a
+#: pass would reproduce that in a new place. A reader must always be able to tell the two apart.
+EXEMPT = "EXEMPT"
+
+#: The verdicts `release-promote` accepts. A set rather than a comparison against GREEN, so adding a
+#: fourth verdict later is a decision made here rather than an accident of an `!=` somewhere in the CLI.
+PROMOTABLE = frozenset({GREEN, EXEMPT})
 
 GATE_ROSTER = "gate"
 FULL_ROSTER = "full"
+EXEMPT_ROSTER = "exempt"
 
 VERDICT_COLUMNS = ("suite", "verdict", "evidence", "note")
 
@@ -122,6 +133,79 @@ def read_verdict(meta_dir) -> dict:
         else:
             suites[parts[0]] = parts[1]
     return {"suites": suites, "roster": roster}
+
+
+def last_green(releases: Releases, version: Version):
+    """The newest release below `version` whose recorded verdict is entirely GREEN, or None.
+
+    The ANCHOR for an exemption. An `EXEMPT` release is deliberately not an anchor: chaining exemptions
+    off each other would let a run of docs-only releases drift arbitrarily far from anything a suite ever
+    saw. Anchoring each one to the last release that actually PASSED keeps the guarantee flat -- an exempt
+    release's `fleet/` tree is byte-identical to verified code, however many exempt releases precede it.
+
+    Nor is the immediate predecessor an anchor, which is the other tempting answer: `0.3.2` was a
+    CANDIDATE that had been deployed with the gate skipped, and anchoring to it would have inherited
+    exactly the unverified state this pipeline exists to prevent.
+    """
+    for candidate in reversed([v for v in releases.versions() if v < version]):
+        suites = (read_verdict(releases.dir_for(candidate) / META_DIR).get("suites") or {})
+        if suites and all(value == GREEN for value in suites.values()):
+            return candidate
+    return None
+
+
+def exemption_for(releases: Releases, version: Version, repo, full: bool = False):
+    """`(anchor, scope)` when the suites are not required for this release, else `None`.
+
+    Returns None -- meaning "run them" -- for every uncertainty, never a guess:
+
+      * `--full` was asked for. An operator who names the full roster gets the full roster.
+      * no GREEN release exists to anchor against, so there is nothing to claim identity with.
+      * the anchor's tag is gone from the checkout, so the diff cannot be computed. `changed_paths`
+        raises rather than returning empty, and that refusal is allowed to propagate: a release skipping
+        its suites because a git command quietly failed is the one outcome worth crashing over.
+      * any changed path is not in the declared inert set (`release_scope`).
+    """
+    if full:
+        return None
+    anchor = last_green(releases, version)
+    if anchor is None:
+        return None
+    anchor_tag = (releases.manifest(anchor).get("tag") or anchor.tag)
+    this_tag = (releases.manifest(version).get("tag") or version.tag)
+    if not repo.tag_exists(anchor_tag):
+        raise Refused(
+            f"the anchor for an exemption check is {anchor} and its tag {anchor_tag} is not in "
+            f"{repo.path}. Whether {version} may skip the suites is decided by diffing those two tags, so "
+            f"a missing one means the question cannot be answered -- and 'cannot answer' must never read "
+            f"as 'nothing changed'.",
+            clears_when=f"{anchor_tag} is back in the checkout (`git fetch --tags`), or the release is "
+                        f"verified normally",
+            clears_who="whoever is verifying")
+    scope = classify(repo.changed_paths(anchor_tag, this_tag))
+    return (anchor, scope) if scope.exempt else None
+
+
+def write_exemption(meta_dir, version: Version, anchor: Version, anchor_tag: str, this_tag: str,
+                    scope) -> None:
+    """The evidence an exempt promotion cites, in place of a test run.
+
+    The gate's rule is that a promotion always cites a measurement someone can go and look at. An
+    exemption keeps that rule -- the measurement is the diff -- so every changed path is written out with
+    its classification, and the two tags are named, so the decision can be re-derived by hand with one
+    `git diff --name-only`.
+    """
+    rows = [f"key\tvalue",
+            f"version\t{version}",
+            f"anchor\t{anchor}",
+            f"anchor_tag\t{anchor_tag}",
+            f"compared\t{anchor_tag}..{this_tag}",
+            f"paths_changed\t{len(scope.inert) + len(scope.requiring)}"]
+    rows.extend(f"path\t{path}\tinert" for path in scope.inert)
+    #: Empty by construction on this path -- written anyway, so the file's shape does not depend on the
+    #: outcome and a reader never has to wonder whether the section was omitted or was genuinely empty.
+    rows.extend(f"path\t{path}\trequiring" for path in scope.requiring)
+    atomic_write(Path(meta_dir) / "evidence" / "EXEMPTION.tsv", "\n".join(rows) + "\n")
 
 
 class Verify:
