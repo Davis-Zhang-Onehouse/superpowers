@@ -154,3 +154,11 @@ measurement is the diff instead of a test run.
 previous attempt and a GREEN release can ship a stale failure manifest), `RI-10` (`pgrep -x claude` counts
 fork-before-exec children), and `RI-12` (the `.claude-plugin` / `package.json` version line does not move
 with a fleet release). Tracked in their own instant.
+
+## Outcome (2026-08-06)
+
+Shipped in `0.3.5`. Building it surfaced a second, larger problem: `0.3.4` could not pass its gate at all,
+because three `ISOLATION-*-claude-count` sections compared a bare `pgrep -x claude` count and so failed on
+other operators' fork-before-exec transients. That is fixed in the same release
+(`it_classify_claude_delta`), and the exemption is what stops a docs-only change from having to survive a
+25-minute gate on a shared box in the first place.
