@@ -1,5 +1,10 @@
 # fleet — changelog
 
+## fleet/v0.3.6 — 2026-08-06T06:41:24Z
+Cut from 10147f1 on `live` (upstream base pre-merge-fleet-skills-20260731). 1 commit(s) since fleet/v0.3.5.
+
+- 10147f1 docs: record the exemption design's outcome and the gate fix it forced
+
 ## fleet/v0.3.5 — 2026-08-06T06:13:23Z
 Cut from 926fcdd on `live` (upstream base pre-merge-fleet-skills-20260731). 1 commit(s) since fleet/v0.3.4.
 
