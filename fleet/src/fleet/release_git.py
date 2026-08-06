@@ -17,7 +17,7 @@ from fleet.errors import BadInput, Refused
 from fleet.release import Version
 from fleet.workspace import default_git
 
-__all__ = ["Repo", "changelog_section"]
+__all__ = ["Repo", "changelog_section", "payload_lines"]
 
 
 class Repo:
@@ -235,10 +235,43 @@ class Repo:
                   f"`git worktree list` will not show it. Remove it by hand.", file=sys.stderr)
 
 
+def payload_lines(changed_paths) -> list:
+    """The `Payload:` block: which areas of the artifact this release actually moves.
+
+    `RI-13`. A release is a `git archive` of the WHOLE repository -- 23 skills, `commands/`, `hooks/` and
+    the plugin manifest -- and the deployed export IS the marketplace source every session on this box
+    loads from. The changelog filed every commit under a `fleet/vX.Y.Z` heading regardless of what it
+    touched, so "fleet release" read as "the CLI", and a skills-only release was indistinguishable from a
+    CLI one without exporting two versions and diffing them. Three releases (0.2.3, 0.3.2, 0.3.4) changed
+    `skills/`; nothing in their notes said so.
+
+    The skills are named individually because that is the case a reader cannot otherwise see: an area
+    count says `skills (2 files)`, and what they want is `releasing-fleet`.
+    """
+    from fleet.release_scope import areas, skills_changed
+    buckets = areas(changed_paths)
+    lines = ["",
+             "Every release ships the whole repository — all skills, `commands/`, `hooks/` and the "
+             "plugin manifest, not only `fleet/`."]
+    if not buckets:
+        lines.append("Payload: nothing outside this release's own version stamp and changelog changed.")
+        return lines
+    lines.append("Payload: " + ", ".join(f"{name} ({len(paths)} file{'' if len(paths) == 1 else 's'})"
+                                         for name, paths in buckets) + ".")
+    named = skills_changed(changed_paths)
+    if named:
+        lines.append(f"Skills changed: {', '.join(named)}.")
+    return lines
+
+
 def changelog_section(version: Version, *, head: str, branch: str, upstream_base: str,
-                      prev_tag, commits, rebased: bool, when: str) -> str:
+                      prev_tag, commits, rebased: bool, when: str, changed_paths=None) -> str:
     """One release's changelog section. The same text is prepended to `fleet/CHANGELOG.md` and written
-    into the artifact, so a release always carries its own notes."""
+    into the artifact, so a release always carries its own notes.
+
+    `changed_paths` is optional: an initial release has no predecessor to diff against, and this function
+    is pure text with no repository of its own to ask.
+    """
     lines = [f"## {version.tag} — {when}"]
     if prev_tag is None:
         lines.append(f"Cut from {head[:7]} on `{branch}` (upstream base {upstream_base}). "
@@ -246,6 +279,8 @@ def changelog_section(version: Version, *, head: str, branch: str, upstream_base
         return "\n".join(lines) + "\n"
     lines.append(f"Cut from {head[:7]} on `{branch}` (upstream base {upstream_base}). "
                  f"{len(commits)} commit(s) since {prev_tag}.")
+    if changed_paths is not None:
+        lines.extend(payload_lines(changed_paths))
     if rebased:
         lines.append("")
         lines.append(f"> {prev_tag} is no longer an ancestor of `{branch}` — an upstream rebase rewrote "

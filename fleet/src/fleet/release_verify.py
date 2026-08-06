@@ -35,11 +35,12 @@ from pathlib import Path
 from fleet.atomic import atomic_write, tmp_name
 from fleet.errors import Refused
 from fleet.release import META_DIR, Releases, Version, tree_sha
-from fleet.release_scope import CUT_STAMPED, Scope, classify, without_version_line
+from fleet.release_scope import (CUT_MANIFESTS, CUT_STAMPED, Scope, classify, without_version_field,
+                                 without_version_line)
 
 __all__ = ["EXEMPT", "EXEMPT_ROSTER", "FULL_ROSTER", "GATE_ROSTER", "GREEN", "INCONCLUSIVE",
-           "PROMOTABLE", "RED", "Verify", "exemption_for", "last_green", "read_verdict",
-           "verdict_for", "write_exemption", "write_verdict"]
+           "PROMOTABLE", "RED", "Verify", "archive_previous_attempt", "exemption_for", "last_green",
+           "read_verdict", "verdict_for", "write_exemption", "write_verdict"]
 
 GREEN = "GREEN"
 RED = "RED"
@@ -62,6 +63,22 @@ VERDICT_COLUMNS = ("suite", "verdict", "evidence", "note")
 #: The row that carries the roster. A key rather than a header field, so a reader that does not know about
 #: rosters still parses every suite row correctly.
 ROSTER_KEY = "roster"
+
+#: The row that carries the run's OVERALL verdict, which the per-suite rows cannot express.
+#:
+#: `RI-16`, measured on release `0.3.4`: its `it` row reads RED with the note "live-subject set CHANGED
+#: during the run", so `verdict_for(True, False, True)` -- INCONCLUSIVE -- is what `run()` returned, while
+#: the file it left is byte-identical to a genuine RED's. The verdict that exists precisely so a false RED
+#: is never written into a release's evidence permanently had nowhere to be written.
+#:
+#: A key row like `ROSTER_KEY`, for the same reason: a reader that predates it still parses every suite row
+#: correctly, and `read_verdict` keeps it out of `suites` so `promote` never gates on a value that is not a
+#: suite's verdict.
+VERDICT_KEY = "verdict"
+
+#: Where a superseded attempt goes. The prefix is what `archive_previous_attempt` recognises as "already
+#: archived", so it is named once here rather than spelled in three places that must agree.
+ATTEMPT_PREFIX = "attempt-"
 
 #: The live-subject probe. A command string, because that is what the injected runner takes.
 BOARD_COMMAND = "fleet board --porcelain"
@@ -101,38 +118,103 @@ def _cell(value) -> str:
     return " ".join(str("-" if value is None else value).split()) or "-"
 
 
-def write_verdict(meta_dir, rows, roster: str) -> None:
+def write_verdict(meta_dir, rows, roster: str, result: str = None) -> None:
     """The verdict file, inside the artifact's metadata directory.
 
     Published through `atomic_write` like every other record in this package: `release-promote` reads this
     file to decide whether a version may ship, and a half-written verdict is a promotion gate that answers
     from a prefix.
+
+    `result` is the run's OVERALL verdict (`VERDICT_KEY`) and is optional only so a caller with nothing to
+    say -- a test writing suite rows in isolation -- is not forced to invent one. Every real writer passes
+    it: without it an INCONCLUSIVE run is indistinguishable from a RED one, and the archive of a superseded
+    attempt has no true name to take.
     """
     body = ["\t".join(VERDICT_COLUMNS)]
     body.extend("\t".join(_cell(cell) for cell in row) for row in rows)
     body.append(f"{ROSTER_KEY}\t{_cell(roster)}\t-\tthe set of IT runners this verdict covers")
+    if result is not None:
+        body.append(f"{VERDICT_KEY}\t{_cell(result)}\t-\tthe run's overall verdict, which the per-suite "
+                    f"rows cannot express (an INCONCLUSIVE run leaves RED suite rows)")
     atomic_write(Path(meta_dir) / "evidence" / "VERDICT.tsv", "\n".join(body) + "\n")
 
 
 def read_verdict(meta_dir) -> dict:
-    """`{"suites": {name: verdict}, "roster": str}`, or `{}` when nothing has been verified.
+    """`{"suites": {name: verdict}, "roster": str, "result": str|None}`, or `{}` when nothing has been
+    verified.
 
     Empty rather than raising: "this release has no verdict" is the ordinary state of a fresh candidate
     and every reader has to handle it, so making it an exception only moves the branch.
+
+    `result` is `None` for every release cut before `VERDICT_KEY` existed. Absent is not a verdict, and a
+    caller that needs a label for such an attempt says `unknown` rather than guessing one from the suite
+    rows -- which is exactly how an INCONCLUSIVE run would acquire a permanent RED.
     """
     path = Path(meta_dir) / "evidence" / "VERDICT.tsv"
     if not path.is_file():
         return {}
-    suites, roster = {}, None
+    suites, roster, result = {}, None, None
     for line in path.read_text().splitlines()[1:]:
         parts = line.split("\t")
         if len(parts) < 2:
             continue
         if parts[0] == ROSTER_KEY:
             roster = parts[1]
+        elif parts[0] == VERDICT_KEY:
+            result = parts[1]
         else:
             suites[parts[0]] = parts[1]
-    return {"suites": suites, "roster": roster}
+    return {"suites": suites, "roster": roster, "result": result}
+
+
+def archive_previous_attempt(meta_dir):
+    """Move whatever a previous attempt left in `evidence/` into `evidence/attempt-<n>-<verdict>/`.
+
+    Returns the archive directory, or `None` when there was nothing to archive.
+
+    `RI-9` and `RI-11`, which are one defect seen from two sides. The evidence directory is addressed by
+    constant filenames -- `hermetic.log`, `it-RESULTS.tsv`, `VERDICT.tsv` -- so a second attempt overwrites
+    the first WHERE THE TWO HAPPEN TO WRITE THE SAME FILE and inherits it everywhere else. Release `0.3.3`
+    shipped RELEASED holding an `it-cited/` file stamped 05:10, an `it-FAILURES.txt` stamped 05:37 naming
+    two failures, and a `VERDICT.tsv` stamped 06:07 recording `0 FAIL rows` -- three attempts in one
+    directory, and the only file naming a failure thirty minutes older than the verdict denying it.
+
+    Archiving FIRST is what makes both go away, and the second one goes away without a line of code:
+    `it-FAILURES.txt` and `it-cited/` are written only on the failure path and cleared on neither, but a
+    run that starts in an empty directory cannot inherit what is no longer there. A remembered `else:
+    unlink` would be a second thing to keep correct; an empty directory is a property.
+
+    Deliberately a MODULE-LEVEL function and not a step inside `Verify._evidence_dir`. The exempt path
+    writes this same directory from the CLI without constructing a `Verify` at all, and release `0.3.6` --
+    RELEASED, verdict EXEMPT -- ships a `hermetic.log` from an abandoned earlier attempt because of it
+    (`RI-17`). A fix reachable from only one of the two writers would have looked complete and left the
+    newer one destroying evidence.
+
+    Nothing is deleted, here or anywhere downstream: this is a rename within one directory. The freeze a
+    cut applies covers the payload and never `META_DIR` (`_freeze_payload`), but the mode is widened anyway
+    for the same reason `_evidence_dir` does it -- restoring the invariant that the metadata half is
+    writable, rather than assuming it.
+    """
+    evidence = Path(meta_dir) / "evidence"
+    if not evidence.is_dir():
+        return None
+    evidence.chmod(evidence.stat().st_mode | 0o700)
+
+    existing = sorted(evidence.iterdir(), key=lambda path: path.name)
+    archives = [path for path in existing if path.is_dir() and path.name.startswith(ATTEMPT_PREFIX)]
+    #: Everything that is NOT already an archive. Filtering by the prefix rather than by mtime or by a
+    #: manifest is what stops the archive nesting: run three would otherwise move `attempt-1-RED/` inside
+    #: `attempt-2-…/`, burying attempt one a directory deeper on every subsequent verify.
+    loose = [path for path in existing if path not in archives]
+    if not loose:
+        return None
+
+    verdict = (read_verdict(meta_dir).get("result") or "unknown")
+    destination = evidence / f"{ATTEMPT_PREFIX}{len(archives) + 1}-{_cell(verdict)}"
+    destination.mkdir(parents=True, exist_ok=True)
+    for path in loose:
+        path.rename(destination / path.name)
+    return destination
 
 
 def last_green(releases: Releases, version: Version):
@@ -190,12 +272,21 @@ def exemption_for(releases: Releases, version: Version, repo, full: bool = False
     #: exemption unreachable. Contents are the other half of the question, and they are checked here,
     #: where the repository is. Anything in that file other than `__version__` moving puts it back in
     #: `requiring`, so an edit to the exit-code registry it also carries can never ride out on a stamp.
-    if CUT_STAMPED in scope.inert:
-        before = without_version_line(repo.file_at(anchor_tag, CUT_STAMPED))
-        after = without_version_line(repo.file_at(this_tag, CUT_STAMPED))
-        if before != after:
-            scope = Scope([p for p in scope.inert if p != CUT_STAMPED],
-                          list(scope.requiring) + [CUT_STAMPED])
+    #: One list of (path, how to strip its version) so the two families are checked by the same loop.
+    #: `CUT_STAMPED` is a Python module whose version is an assignment; a `CUT_MANIFEST` is JSON whose
+    #: version is a field. Everything else about the question is identical, and writing it twice is how
+    #: the second family would later acquire a check the first has and the other does not.
+    stamped = [(CUT_STAMPED, without_version_line)]
+    stamped += [(path, without_version_field) for path in CUT_MANIFESTS]
+    put_back = []
+    for path, strip in stamped:
+        if path not in scope.inert:
+            continue
+        if strip(repo.file_at(anchor_tag, path)) != strip(repo.file_at(this_tag, path)):
+            put_back.append(path)
+    if put_back:
+        scope = Scope([p for p in scope.inert if p not in put_back],
+                      list(scope.requiring) + put_back)
     return (anchor, scope) if scope.exempt else None
 
 
@@ -459,6 +550,10 @@ class Verify:
 
     def run(self, full: bool = False) -> str:
         """Both suites, then the verdict. Returns GREEN, RED or INCONCLUSIVE."""
+        #: BEFORE anything is written. `RI-9`/`RI-11`: this attempt has to start from an empty directory,
+        #: or it overwrites the previous one where their filenames collide and inherits it where they do
+        #: not -- which is how a GREEN release came to ship a failure manifest naming two failures.
+        archive_previous_attempt(self.meta)
         evidence = self._evidence_dir()
         roster = FULL_ROSTER if full else GATE_ROSTER
 
@@ -498,5 +593,5 @@ class Verify:
                 if getattr(self, "_it_failures_seen", None) else "0 FAIL rows; ")
              + f"live-subject set "
              f"{'CHANGED during the run' if activity_changed else 'unchanged'}"),
-        ], roster)
+        ], roster, result=result)
         return result

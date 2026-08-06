@@ -197,6 +197,49 @@ class ExemptionCase(unittest.TestCase):
         result = exemption_for(self.rel, target, repo)
         self.assertIsNone(result, "an edit to the exit-code registry must not ride out on a version stamp")
 
+    def _manifest_cut_shaped(self, blobs):
+        """A release diff as it looks once the cut ALSO stamps the plugin manifests (`RI-12`)."""
+        return self.BlobRepo(
+            changed=["skills/releasing-fleet/SKILL.md", "fleet/CHANGELOG.md",
+                     "fleet/src/fleet/__init__.py", ".claude-plugin/plugin.json"],
+            tags=["fleet/v0.1.0", "fleet/v0.1.1"], blobs=blobs)
+
+    def test_a_skills_release_is_exempt_despite_the_cuts_manifest_stamp(self):
+        """`RI-12`'s trap, held shut where it would actually spring.
+
+        Stamping the manifests puts seven more paths into every release's diff. If they are not carved out
+        the way `__init__.py` is, the exemption feature 0.3.7 shipped becomes unreachable again -- and the
+        unit tests over `classify` alone would not notice, because they feed hand-written path lists.
+        """
+        self._release("0.1.0", GREEN)
+        target = self._release("0.1.1")
+        repo = self._manifest_cut_shaped({
+            ("fleet/v0.1.0", "fleet/src/fleet/__init__.py"): '__version__ = "0.1.0"\nEXIT_OK = 0\n',
+            ("fleet/v0.1.1", "fleet/src/fleet/__init__.py"): '__version__ = "0.1.1"\nEXIT_OK = 0\n',
+            ("fleet/v0.1.0", ".claude-plugin/plugin.json"):
+                '{\n  "name": "superpowers",\n  "version": "6.2.0+fleet.0.1.0"\n}\n',
+            ("fleet/v0.1.1", ".claude-plugin/plugin.json"):
+                '{\n  "name": "superpowers",\n  "version": "6.2.0+fleet.0.1.1"\n}\n'})
+        result = exemption_for(self.rel, target, repo)
+        self.assertIsNotNone(result, "a skills-only release must stay exempt once the cut stamps the "
+                                     "plugin manifests")
+
+    def test_a_real_edit_to_a_manifest_still_requires_verification(self):
+        """The other half, and the reason the carve-out is by PATH only. `plugin.json` carries the plugin
+        name, the hook wiring and the marketplace entry beside its version; an edit to any of those riding
+        out on a version stamp would be an unverified release of the thing sessions load skills from."""
+        self._release("0.1.0", GREEN)
+        target = self._release("0.1.1")
+        repo = self._manifest_cut_shaped({
+            ("fleet/v0.1.0", "fleet/src/fleet/__init__.py"): '__version__ = "0.1.0"\n',
+            ("fleet/v0.1.1", "fleet/src/fleet/__init__.py"): '__version__ = "0.1.1"\n',
+            ("fleet/v0.1.0", ".claude-plugin/plugin.json"):
+                '{\n  "name": "superpowers",\n  "version": "6.2.0+fleet.0.1.0"\n}\n',
+            ("fleet/v0.1.1", ".claude-plugin/plugin.json"):
+                '{\n  "name": "renamed",\n  "version": "6.2.0+fleet.0.1.1"\n}\n'})
+        self.assertIsNone(exemption_for(self.rel, target, repo),
+                          "a rename in plugin.json must not ride out on a version stamp")
+
     def test_the_stamped_file_is_named_in_requiring_when_it_really_changed(self):
         """Not merely 'not exempt' — the path has to come back in `requiring`, because that list is what
         `EXEMPTION.tsv` and any future diagnostic report."""
