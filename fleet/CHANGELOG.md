@@ -1,5 +1,12 @@
 # fleet — changelog
 
+## fleet/v0.3.4 — 2026-08-06T05:11:24Z
+Cut from 9833dd9 on `live` (upstream base pre-merge-fleet-skills-20260731). 3 commit(s) since fleet/v0.3.3.
+
+- 54d1eb5 docs: design for release test exemption
+- 0368435 fleet: a release that changes nothing the suites read is EXEMPT, not forced
+- 9833dd9 skills: the release chain, and the traps that cost a gate run
+
 ## fleet/v0.3.3 — 2026-08-05T04:45:58Z
 Cut from 3150f5a on `live` (upstream base pre-merge-fleet-skills-20260731). 1 commit(s) since fleet/v0.3.2.
 

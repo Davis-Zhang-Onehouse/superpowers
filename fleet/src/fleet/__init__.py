@@ -5,7 +5,7 @@ them with regexes; each was patched at the instance and recurred at a different 
 within days to weeks (RCF-9, OBS-53, OBS-64, RCF-10, RCF-11). Two recurrences cost more than the original.
 Structured state is the source of truth here; markdown is generated.
 """
-__version__ = "0.3.3"
+__version__ = "0.3.4"
 
 EXIT_OK = 0
 EXIT_ATTENTION = 1
