@@ -183,6 +183,27 @@ Seven things you cannot guess, each of which cost something to learn:
    one, however old. Nothing is lost: the TAG is the durable artifact and a cut rebuilds the export.
 7. **`--dry-run` exists on every mutating verb here**, and on `release-cut` it tells you the commit, the
    tag and the commit count without writing anything.
+8. **A release that changes nothing either suite reads is `EXEMPT`, and `verify` returns in seconds.** A
+   release is a `git archive` of the WHOLE repo — it ships `skills/`, `docs/` and the plugin manifest, and
+   the deployed export is the marketplace source Claude Code loads skills from — so a docs- or skills-only
+   release otherwise pays ~24 minutes to prove that `fleet/`, which it did not touch, still works.
+   `release-verify` computes this before it spawns anything, and `release-promote` accepts `EXEMPT`, so
+   **no `--force` and no per-release judgement call**. Four things make it safe:
+   - The classifier is an **allowlist** (`fleet/src/fleet/release_scope.py`): a path is inert only because
+     it matches something declared. An unrecognised path — a new top-level directory, a new script — runs
+     the suites. A denylist would be fail-open and the failure would ship invisibly.
+   - **`skills/using-fleet/**` is NOT inert**, because two suite call-sites read it: `test_contracts.py`
+     asserts verb parity against this file in both directions, and `fleet/it/run-P.sh` copies its
+     `profiles/worker` fixture. "Outside `fleet/`" is not the same as "not covered by the suites".
+   - The anchor is the newest release verified **GREEN**, never the immediate predecessor and never
+     another `EXEMPT` one — so a chain of docs-only releases stays anchored to code a suite actually saw.
+     No anchor, or a missing anchor tag, means run the suites (the missing tag is refused outright).
+   - The verdict is spelled `EXEMPT`, never `GREEN`, and cites `evidence/EXEMPTION.tsv` listing every
+     changed path with its classification — so "the suites passed" and "the suites were not required"
+     stay distinguishable, and the decision is re-derivable with one `git diff --name-only`.
+
+   `--full` never exempts, and an `EXEMPT` verdict cannot promote a **minor or major** bump: a bump that
+   size claims substantive change while the exemption claims the opposite.
 
 `release-status` answers "what is live right now"; `release-history` is the append-only register of every
 deploy and rollback, with who, when and why.
