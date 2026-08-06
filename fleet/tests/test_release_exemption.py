@@ -150,6 +150,66 @@ class ExemptionCase(unittest.TestCase):
         repo = self.FakeRepo(changed=[], tags=["fleet/v0.1.0", "fleet/v0.1.1"])
         self.assertIsNotNone(exemption_for(self.rel, target, repo))
 
+    # --- the cut's own footprint ----------------------------------------------------------------------
+
+    class BlobRepo(FakeRepo):
+        """A repo that can also answer "what did this file look like at that ref"."""
+
+        def __init__(self, changed=(), tags=(), blobs=None):
+            super().__init__(changed, tags)
+            self.blobs = dict(blobs or {})
+
+        def file_at(self, ref, path):
+            return self.blobs.get((ref, path), "")
+
+    def _cut_shaped(self, blobs):
+        """A realistic release diff: the author's file plus the two the cut writes itself."""
+        return self.BlobRepo(
+            changed=["docs/a.md", "fleet/CHANGELOG.md", "fleet/src/fleet/__init__.py"],
+            tags=["fleet/v0.1.0", "fleet/v0.1.1"], blobs=blobs)
+
+    def test_a_real_docs_release_is_exempt_despite_the_cuts_own_stamp(self):
+        """The case that made the first implementation DEAD ON ARRIVAL.
+
+        `release-cut` prepends to `fleet/CHANGELOG.md` and rewrites `__version__` before it tags, so EVERY
+        pair of release tags differs by those two `fleet/**` paths. Measured on the real thing:
+        `git diff --name-only fleet/v0.3.5..fleet/v0.3.6`, for a commit touching one spec file, returned
+        exactly the three paths below. Nothing could ever have been exempt.
+        """
+        self._release("0.1.0", GREEN)
+        target = self._release("0.1.1")
+        repo = self._cut_shaped({
+            ("fleet/v0.1.0", "fleet/src/fleet/__init__.py"): '__version__ = "0.1.0"\nEXIT_OK = 0\n',
+            ("fleet/v0.1.1", "fleet/src/fleet/__init__.py"): '__version__ = "0.1.1"\nEXIT_OK = 0\n'})
+        result = exemption_for(self.rel, target, repo)
+        self.assertIsNotNone(result, "a docs-only release must be exempt despite the cut's own stamp")
+        self.assertTrue(result[1].exempt)
+
+    def test_a_real_edit_to_the_stamped_file_still_requires_verification(self):
+        """The safety hole the fix above could have opened. `__init__.py` also carries the exit-code
+        registry, so it is inert ONLY when nothing but `__version__` moved. An edit to `EXIT_OK` riding
+        out on a version stamp would be a genuinely unverified release."""
+        self._release("0.1.0", GREEN)
+        target = self._release("0.1.1")
+        repo = self._cut_shaped({
+            ("fleet/v0.1.0", "fleet/src/fleet/__init__.py"): '__version__ = "0.1.0"\nEXIT_OK = 0\n',
+            ("fleet/v0.1.1", "fleet/src/fleet/__init__.py"): '__version__ = "0.1.1"\nEXIT_OK = 9\n'})
+        result = exemption_for(self.rel, target, repo)
+        self.assertIsNone(result, "an edit to the exit-code registry must not ride out on a version stamp")
+
+    def test_the_stamped_file_is_named_in_requiring_when_it_really_changed(self):
+        """Not merely 'not exempt' — the path has to come back in `requiring`, because that list is what
+        `EXEMPTION.tsv` and any future diagnostic report."""
+        from fleet.release_scope import CUT_STAMPED, Scope, classify, without_version_line
+        scope = classify(["docs/a.md", CUT_STAMPED])
+        self.assertIn(CUT_STAMPED, scope.inert)
+        moved = Scope([p for p in scope.inert if p != CUT_STAMPED],
+                      list(scope.requiring) + [CUT_STAMPED])
+        self.assertEqual(moved.requiring, (CUT_STAMPED,))
+        self.assertFalse(moved.exempt)
+        self.assertNotEqual(without_version_line('__version__ = "1"\nA = 1\n'),
+                            without_version_line('__version__ = "2"\nA = 2\n'))
+
     # --- the evidence ---------------------------------------------------------------------------------
 
     def test_the_exemption_file_records_every_path_and_both_tags(self):

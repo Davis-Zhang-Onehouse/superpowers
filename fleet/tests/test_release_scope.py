@@ -111,6 +111,76 @@ class TestUnknownPathsFailSafe(unittest.TestCase):
         self.assertFalse(classify(["SECURITY.md"]).exempt)
 
 
+class TestTheCutsOwnFootprint(unittest.TestCase):
+    """`release-cut` writes two files ITSELF, on every cut, before it tags.
+
+    This is what made the first implementation of this feature DEAD ON ARRIVAL. The diff between two
+    release tags is never just the author's change: under its lock the cut prepends a section to
+    `fleet/CHANGELOG.md` and rewrites `__version__` in `fleet/src/fleet/__init__.py`, then commits both as
+    `fleet vX.Y.Z` and tags THAT commit. So a documentation-only release still shows two `fleet/**` paths
+    changed, and a naive classifier answers "verify required" for every release that will ever exist —
+    a correct, tested, unreachable feature, which is `SI-19`'s exact shape.
+
+    Measured, not reasoned about: `git diff --name-only fleet/v0.3.5..fleet/v0.3.6` on a commit that
+    touched one spec file returned
+
+        docs/superpowers/specs/2026-08-06-release-test-exemption-design.md
+        fleet/CHANGELOG.md
+        fleet/src/fleet/__init__.py
+
+    The unit tests all passed while this was true, because they fed `classify` hand-written path lists and
+    never a real cut's diff. That gap is what these cases close.
+    """
+
+    def test_the_changelog_the_cut_writes_is_inert(self):
+        """Pure documentation, and the cut appends to it on every single release."""
+        self.assertTrue(classify(["fleet/CHANGELOG.md"]).exempt)
+
+    def test_a_realistic_docs_only_release_diff_is_exempt(self):
+        """The exact shape above. If this fails, the feature is unreachable again."""
+        scope = classify(["docs/superpowers/specs/2026-08-06-release-test-exemption-design.md",
+                          "fleet/CHANGELOG.md",
+                          "fleet/src/fleet/__init__.py"])
+        self.assertTrue(scope.exempt,
+                        f"a docs-only release must be exempt; requiring={scope.requiring}")
+
+    def test_the_stamped_init_is_inert_only_as_a_PATH(self):
+        """`classify` sees paths, not contents, so it cannot tell a version stamp from a real edit to that
+        file — `exemption_for` compares the two blobs with the `__version__` line stripped and puts the
+        path back if anything else moved. That split is deliberate: this module stays pure, and the
+        content check lives where the repository is available. See `test_release_exemption`."""
+        self.assertTrue(classify(["fleet/src/fleet/__init__.py"]).exempt)
+
+    def test_no_other_fleet_source_file_is_inert(self):
+        """The carve-out is exactly two paths. Nothing else under `fleet/src/` inherits it."""
+        for path in ("fleet/src/fleet/cli.py", "fleet/src/fleet/release.py",
+                     "fleet/src/fleet/release_scope.py", "fleet/src/fleet/__main__.py",
+                     "fleet/tests/test_cli.py", "fleet/it/run-A.sh", "fleet/CLAUDE.md"):
+            with self.subTest(path=path):
+                self.assertFalse(classify([path]).exempt, f"{path} must require verification")
+
+
+class TestVersionLineStripping(unittest.TestCase):
+    """`without_version_line` is how a version stamp is told apart from a real edit to the same file."""
+
+    def test_only_the_version_assignment_is_removed(self):
+        from fleet.release_scope import without_version_line
+        before = '"""doc"""\n__version__ = "0.3.5"\n\nEXIT_OK = 0\n'
+        after = '"""doc"""\n__version__ = "0.3.6"\n\nEXIT_OK = 0\n'
+        self.assertEqual(without_version_line(before), without_version_line(after))
+
+    def test_a_real_edit_still_shows_through(self):
+        from fleet.release_scope import without_version_line
+        before = '__version__ = "0.3.5"\nEXIT_OK = 0\n'
+        after = '__version__ = "0.3.6"\nEXIT_OK = 9\n'
+        self.assertNotEqual(without_version_line(before), without_version_line(after))
+
+    def test_an_edit_that_only_reformats_the_version_line_is_still_equal(self):
+        from fleet.release_scope import without_version_line
+        self.assertEqual(without_version_line('__version__="1.0.0"\nX = 1\n'),
+                         without_version_line('__version__ = "2.0.0"\nX = 1\n'))
+
+
 class TestNormalisation(unittest.TestCase):
     """`git diff --name-only` output is repo-relative and slash-separated, but the module is fed by a
     caller and must not be tricked by trivial spellings into reading a requiring path as inert."""
