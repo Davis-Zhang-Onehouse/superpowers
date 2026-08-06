@@ -110,7 +110,8 @@ c_enter() {
   C_SOCK="/tmp/itfC"
   case "$C_SOCK" in /tmp/itfC) rm -rf "$C_SOCK"; mkdir -p "$C_SOCK" ;; *) echo "refusing" >&2; exit 2 ;; esac
   C_TMUX_BEFORE="$(c_live_tmux)"                             # the LIVE server, deliberately
-  C_CLAUDE_BEFORE="$(pgrep -x claude 2>/dev/null | wc -l)"
+  #: The pid SET, not the count: only an addition whose cwd is inside this instant is §C's.
+  C_CLAUDE_BEFORE="$(it_claude_pids)"
   export TMUX_TMPDIR="$C_SOCK"
   #: Defence in depth only: nothing in §C launches `claude` (no dispatch here is expected to succeed, so
   #: `sessions.start` is never reached). If one ever were, the stub is a real process that is not claude
@@ -148,7 +149,7 @@ c_leave() {
   c_kill_sessions
   c_kill_sleeps
   local after_claude after_tmux
-  after_claude="$(pgrep -x claude 2>/dev/null | wc -l)"
+  after_claude="$(it_claude_pids)"
   unset TMUX_TMPDIR                          # BEFORE it_assert_isolation's bare `tmux ls`
   after_tmux="$(c_live_tmux)"
   printf '%s\n' "$after_tmux" > "$EV/out/live-tmux-after.txt"
@@ -168,12 +169,16 @@ c_leave() {
     c_pass "ISOLATION-C-live-tmux" "$EV/out/live-tmux-after.txt" \
            "${c_classified#*|} ($(printf '%s' "$after_tmux" | grep -c .) sessions, incl. $(printf '%s' "$after_tmux" | grep -c '^dt-') dt-); §C starts only ${TMUX_PREFIX}-* sessions and only on socket $IT_TMUX_SOCKET"
   fi
-  if [ "$after_claude" = "$C_CLAUDE_BEFORE" ]; then
-    c_pass "ISOLATION-C-claude-count" "$EV/out/claude-count-after.txt" \
-           "pgrep -x claude: $after_claude before and after (A6); §C starts none"
+  #: The same collapse as `live-tmux` above, one control over. A count comparison fires on another
+  #: operator's fork-before-exec transient as loudly as on a launch, and §C starts no claude at all, so
+  #: every failure it produced here was somebody else's. Classified now, in the one place the rule lives.
+  local c_claude
+  c_claude="$(it_classify_claude_delta "$C_CLAUDE_BEFORE" "$after_claude")"
+  if [ "${c_claude%%|*}" = FAIL ]; then
+    c_fail "ISOLATION-C-claude-count" "$EV/out/claude-count-after.txt" "${c_claude#*|}"
   else
-    c_fail "ISOLATION-C-claude-count" "$EV/out/claude-count-after.txt" \
-           "pgrep -x claude went $C_CLAUDE_BEFORE -> $after_claude; §C must launch none"
+    c_pass "ISOLATION-C-claude-count" "$EV/out/claude-count-after.txt" \
+           "${c_claude#*|}. §C starts none (A6)"
   fi
   it_assert_isolation "C-leave"
   case "${C_SOCK:-}" in /tmp/itfC) rm -rf "$C_SOCK" ;; esac
