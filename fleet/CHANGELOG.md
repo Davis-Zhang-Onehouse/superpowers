@@ -1,5 +1,10 @@
 # fleet — changelog
 
+## fleet/v0.3.5 — 2026-08-06T06:13:23Z
+Cut from 926fcdd on `live` (upstream base pre-merge-fleet-skills-20260731). 1 commit(s) since fleet/v0.3.4.
+
+- 926fcdd it: a claude-count check must attribute an addition, not just detect one
+
 ## fleet/v0.3.4 — 2026-08-06T05:11:24Z
 Cut from 9833dd9 on `live` (upstream base pre-merge-fleet-skills-20260731). 3 commit(s) since fleet/v0.3.3.
 
