@@ -90,7 +90,9 @@ b_enter() {
   B_SOCK="/tmp/itfB"                                 # short path: a long TMUX_TMPDIR overflows sun_path
   rm -rf "$B_SOCK"; mkdir -p "$B_SOCK"
   B_TMUX_BEFORE="$(b_live_tmux)"
-  B_CLAUDE_BEFORE="$(pgrep -x claude 2>/dev/null | wc -l)"
+  #: The pid SET, not the count. A count cannot separate "this section launched one" from "another
+  #: operator's session forked mid-run", and only the first is §B's. See `it_classify_claude_delta`.
+  B_CLAUDE_BEFORE="$(it_claude_pids)"
   export TMUX_TMPDIR="$B_SOCK"
   export PATH="$B_HERE/bin:$PATH"                    # the `claude` stub, never the real binary
   printf '%s\n' "$B_TMUX_BEFORE" > "$OUT/live-tmux-before.txt"
@@ -106,7 +108,7 @@ b_leave() {
   printf '%s\n' "${private:-(no server on socket $IT_TMUX_SOCKET — §B starts no session)}" \
     > "$OUT/private-tmux-after.txt"
   local after_claude
-  after_claude="$(pgrep -x claude 2>/dev/null | wc -l)"
+  after_claude="$(it_claude_pids)"
   #: BEFORE the live read, and it must stay before it: `it_assert_isolation` reads the live server with a
   #: bare `tmux ls`, which is only the live server while TMUX_TMPDIR is unset.
   unset TMUX_TMPDIR
@@ -131,12 +133,17 @@ b_leave() {
     b_pass "ISOLATION-B-live-tmux" "$OUT/live-tmux-after.txt" \
       "${b_classified#*|} §B's own private server ($IT_TMUX_SOCKET) held: ${private:-nothing — it was never started}"
   fi
-  if [ "$after_claude" = "$B_CLAUDE_BEFORE" ]; then
-    b_pass "ISOLATION-B-claude-count" "$OUT/claude-count-after.txt" \
-      "pgrep -x claude: $after_claude before and after (A6); §B launches no process at all"
+  #: Same collapse as `live-tmux` immediately above, one control over: this was a private count
+  #: comparison, and a count fires on another operator's fork-before-exec transient exactly as loudly as
+  #: on a launch. §B launches no process at all, so every failure it ever produced here was somebody
+  #: else's. Classified now, in the one place the rule lives.
+  local b_claude
+  b_claude="$(it_classify_claude_delta "$B_CLAUDE_BEFORE" "$after_claude")"
+  if [ "${b_claude%%|*}" = FAIL ]; then
+    b_fail "ISOLATION-B-claude-count" "$OUT/claude-count-after.txt" "${b_claude#*|}"
   else
-    b_fail "ISOLATION-B-claude-count" "$OUT/claude-count-after.txt" \
-      "pgrep -x claude went $B_CLAUDE_BEFORE -> $after_claude; no claude may launch outside §P"
+    b_pass "ISOLATION-B-claude-count" "$OUT/claude-count-after.txt" \
+      "${b_claude#*|}. §B launches no process at all (A6)"
   fi
   it_assert_isolation "B-leave"
   rm -rf "$B_SOCK"

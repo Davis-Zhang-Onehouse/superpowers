@@ -244,6 +244,57 @@ it_assert_no_new_claude() {      # it_assert_no_new_claude <case> <before-pids> 
   fi
 }
 
+# Classify a claude-pid delta instead of comparing counts. Prints "<verdict>|<detail>", verdict OK or FAIL.
+#
+# `SI-25` again, and this time in the ADDITION direction. §B, §C and §E compared `pgrep -x claude | wc -l`
+# before and after; that count moves for a reason no section can cause, and consecutive release gates died
+# on it:
+#
+#     ISOLATION-B-claude-count  pgrep -x claude went 13 -> 14; no claude may launch outside §P
+#     ISOLATION-C-claude-count  pgrep -x claude went 14 -> 13; §C must launch none
+#     ISOLATION-E-claude-count  pgrep -x claude went 13 -> 14; no claude may launch outside §P
+#
+# +1 then -1 is not a launch. `pgrep -x` matches on `comm`, and between `fork()` and `exec()` a child
+# carries its PARENT's `comm` — so every tool call any live agent session makes puts a process named
+# `claude` on this box for a few hundred milliseconds. Measured directly: against a 9-process baseline,
+# pids 1158926 and 1162691 appeared for ~630ms each, exactly during three deliberate tool calls. On a box
+# where other operators are working those transients are continuous, and a count check fires on whichever
+# section boundary one happens to land in — which is a coin toss, not a control.
+#
+# The resolution is the one this file has already reached twice: do not make the check cleverer about
+# WHETHER a change is acceptable — attribute it mechanically and report what could not be attributed. A
+# claude a SECTION launched has its cwd in a slot or instant under `$INSTANT`, because dispatch starts a
+# worker in the slot it leased. Anything else is somebody else's session, or a fork already gone by the
+# time it could be asked. Neither is this section's to fail on.
+#
+# The assertion the contract actually states — "no claude is launched outside §P" — is NOT weakened: a real
+# leak is still alive when the check runs, so its cwd is readable, and it still FAILS.
+it_classify_claude_delta() {    # it_classify_claude_delta <before-pids> <after-pids>
+  local before="$1" after="$2" added removed mine foreign pid cwd
+  added="$(comm -13 <(printf '%s\n' "$before") <(printf '%s\n' "$after") | tr '\n' ' ')"
+  removed="$(comm -23 <(printf '%s\n' "$before") <(printf '%s\n' "$after") | tr '\n' ' ')"
+  mine=""; foreign=""
+  for pid in $added; do
+    if it_pid_cwd_inside_instant "$pid"; then
+      mine="$mine $pid"
+    else
+      cwd="$(readlink "/proc/$pid/cwd" 2>/dev/null | sed "s|$HOME|~|")"
+      foreign="$foreign $pid(${cwd:-gone-before-it-could-be-read})"
+    fi
+  done
+
+  if [ -n "${mine// /}" ]; then
+    printf 'FAIL|a claude process launched BY THIS SECTION appeared: pid(s)%s, with a cwd inside this instant. No section outside §P may launch one\n' "$mine"
+    return 0
+  fi
+  printf 'OK|no claude was launched by this section (%s live before, %s after)' \
+         "$(printf '%s' "$before" | grep -c .)" "$(printf '%s' "$after" | grep -c .)"
+  [ -n "${foreign// /}" ] && printf '. %s claude pid(s) appeared with a cwd OUTSIDE this instant —%s— which a section cannot cause; on a shared box most are fork-before-exec children of another live agent session, named `claude` only until they exec. Reported, not charged here' \
+         "$(printf '%s' "$foreign" | wc -w)" "$foreign"
+  [ -n "${removed// /}" ] && printf '. pid(s)%s EXITED during the run, which is the operator'"'"'s own and is reported rather than failed' "$removed"
+  printf '\n'
+}
+
 # Re-baseline the live session set, WITH A STATED REASON, and never automatically.
 #
 # `SI-1` made the isolation check compare the whole live session-name set, which means it fires on any
