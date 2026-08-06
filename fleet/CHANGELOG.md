@@ -1,5 +1,10 @@
 # fleet — changelog
 
+## fleet/v0.3.7 — 2026-08-06T06:49:18Z
+Cut from b8dc466 on `live` (upstream base pre-merge-fleet-skills-20260731). 1 commit(s) since fleet/v0.3.6.
+
+- b8dc466 fleet: the exemption was unreachable — release-cut's own stamp is in every diff
+
 ## fleet/v0.3.6 — 2026-08-06T06:41:24Z
 Cut from 10147f1 on `live` (upstream base pre-merge-fleet-skills-20260731). 1 commit(s) since fleet/v0.3.5.
 
