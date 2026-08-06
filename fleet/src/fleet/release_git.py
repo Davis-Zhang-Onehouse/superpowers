@@ -102,6 +102,21 @@ class Repo:
             commits.append((sha[:7], subject.strip()))
         return commits
 
+    def changed_paths(self, from_ref: str, to_ref: str) -> list:
+        """Every repo-relative path differing between two refs, as `git diff --name-only` reports it.
+
+        Compared by TREE, not by ancestry: `a..b` here is git's two-dot diff, which asks "how do these two
+        trees differ". That is immune to the 03:30 rebase which rewrites this fork's commits, and it is
+        the right question, because whether a release may skip its suites is a question about CONTENT, not
+        about history. `delta()` above deliberately uses `git cherry` instead -- it is asking the other
+        question, which changes this release has not shipped before.
+
+        A missing ref surfaces as `BadInput` from `_git`, naming the command, rather than as an empty
+        list: "nothing changed" and "I could not tell" must never be the same answer here.
+        """
+        out = self._git("diff", "--name-only", f"{from_ref}..{to_ref}")
+        return [line.strip() for line in out.splitlines() if line.strip()]
+
     # --- mutation ----------------------------------------------------------------------------------
     def commit(self, paths, message: str) -> None:
         """Stage the named paths and record them. Used for the changelog the cut writes back."""
