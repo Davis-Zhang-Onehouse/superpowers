@@ -382,7 +382,7 @@ PY
       unenroll)  echo "--slot s1 --dry-run" ;;
       reap)      echo "--base $INSTP --dry-run" ;;
       set-golden) echo "--path $DUMMY/alpha --dry-run" ;;
-      board|leases|selftest|reconcile|compaction-status) echo "" ;;
+      board|leases|selftest|reconcile|compaction-status|seed-check) echo "" ;;
       status)    echo "--id $TODO" ;;
       roadmap|lint|verify|brief) echo "--instant $INSTP" ;;
       base-check) echo "--id $TODO" ;;
@@ -602,7 +602,7 @@ PY
       unenroll)  echo "--slot ms1 --dry-run" ;;
       reap)      echo "--base $INSTP --dry-run" ;;
       set-golden) echo "--path $DUMMY/alpha --dry-run" ;;
-      board|leases|selftest|reconcile|compaction-status) echo "" ;;
+      board|leases|selftest|reconcile|compaction-status|seed-check) echo "" ;;
       status)    echo "--id $TODO" ;;
       roadmap|lint|verify|brief) echo "--instant $INSTP" ;;
       base-check) echo "--id $TODO" ;;
