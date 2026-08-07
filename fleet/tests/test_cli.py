@@ -472,6 +472,10 @@ class CliCase(unittest.TestCase):
             "verify": ["--instant", ready],
             "reconcile": [],
             "pane-guard": ["--pane", "dt-solo"],
+            #: No flags: the interesting population is "every live worker", and `--id` only narrows it.
+            #: An empty row also drives the empty-population branch, which must report that it examined
+            #: NOTHING rather than reporting clean.
+            "seed-check": [],
             "compaction-status": [],
             "selftest": [],
             #: `--repo` and `--releases` are on every row that needs them, and that is the point rather
@@ -1074,25 +1078,58 @@ class TestOutwardState(CliCase):
                                  f"{path.name} contains the outward command {banned!r}")
         self.assertGreater(checked, 1, "the grep read one file, which is FI-27b again")
 
-    def test_only_the_three_lifecycle_transactions_end_a_session(self):
-        """Ending our OWN dispatched session belongs to the three LIFECYCLE TRANSACTIONS and to nothing
-        else: `harvest` (the delta landed), `abort` (the work is being abandoned, with a reason) and
-        `close` (the pane is being shut, guarded and overridable). FD-5 — *"no code path leaves a session
-        alive with no work"* — is why the set is not smaller; *"some of those sessions are people's"*
-        (D-6) is why it is exact rather than a floor. A fourth caller fails here, which is the property:
-        the audit is over the population, not over the instance.
+    def test_only_the_three_lifecycle_transactions_and_dispatch_rollback_end_a_session(self):
+        """Ending our OWN dispatched session belongs to the three LIFECYCLE TRANSACTIONS — `harvest` (the
+        delta landed), `abort` (the work is being abandoned, with a reason) and `close` (the pane is being
+        shut, guarded and overridable) — **and to `dispatch`'s own rollback, which is the fourth and is
+        different in kind.** FD-5 — *"no code path leaves a session alive with no work"* — is why the set
+        is not smaller; *"some of those sessions are people's"* (D-6) is why it is exact rather than a
+        floor. A FIFTH caller fails here, which is the property: the audit is over the population, not
+        over the instance.
 
-        Package-wide now, so a `kill` added in `reconcile` or `harvest` — modules that hold a
-        `SessionLayer` and were entirely outside the old check — fails it too.
+        **Why `_do_dispatch` was admitted, stated rather than assumed, because widening an exact invariant
+        is how exact invariants stop being exact.**
+
+        D-6's concern is ending a session that might be SOMEBODY'S. Every other killer acts on a session
+        that has existed independently — for minutes or days, possibly with a human attached. `dispatch`'s
+        rollback acts only on the session `dispatch` itself created seconds earlier, inside the same call,
+        which it is in the middle of undoing: the lease is being given back and the milestone disowned. It
+        cannot be anybody's, because nobody has been told it exists.
+
+        The alternative is worse in FD-5's own terms. Leaving it alive is *precisely* "a session alive with
+        no work": the record is rolled back, the lease released, the milestone disowned — and a claude keeps
+        running on the wrong instant's briefing, which is the one state seed-misdelivery makes dangerous
+        (the 2026-08-05 `r1` misdelivery would have made it a SECOND WRITER on a live `roadmap.json`). The
+        rule exists to stop a session being destroyed carelessly, not to require that a mis-seeded worker
+        be left running.
+
+        The admission is narrow on purpose: `_do_dispatch` may kill only on the FOREIGN verdict, and the
+        NOT-DELIVERED verdict — the far commoner one — deliberately does not kill.
         """
         killers = {site for site, node in self.functions.items()
                    if any(isinstance(child, ast.Call) and isinstance(child.func, ast.Attribute)
                           and child.func.attr == "kill" for child in ast.walk(node))}
         expected = {("cli", cli.VERBS[verb].handler.__name__)
-                    for verb in ("harvest", "abort", "close")}
+                    for verb in ("harvest", "abort", "close", "dispatch")}
         self.assertEqual(killers, expected,
                          f"session.kill() is called from {sorted(killers)}, which is not exactly the "
-                         "three lifecycle transactions")
+                         "three lifecycle transactions plus dispatch's own rollback")
+
+    def test_dispatch_kills_only_on_a_foreign_seed_and_never_on_an_unverifiable_one(self):
+        """The narrowness of the admission above, asserted rather than promised.
+
+        `NOT-DELIVERED` is what a correct send-keys delivery looks like from inside `dispatch`, because
+        `fleet` renders the seed and does not deliver it. If that verdict could kill, every dispatch on the
+        box would be torn down to fix one — the shape where a safety check becomes the outage.
+        """
+        import inspect
+        source = inspect.getsource(cli._do_dispatch)
+        killing_branch = source.split("ctx.sessions.kill(")[0]
+        self.assertIn("seedcheck.FOREIGN", killing_branch,
+                      "the kill must be guarded by the FOREIGN verdict")
+        self.assertNotIn("seedcheck.NOT_DELIVERED", killing_branch,
+                         "NOT-DELIVERED must not be able to reach the kill: it is the ordinary state of a "
+                         "send-keys delivery, not a misdelivery")
 
 
 class TestCadence(CliCase):

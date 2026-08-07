@@ -105,6 +105,18 @@ class Probes:
     has_session: Callable[[str], bool]
     start_session: Callable[[str, Path, str], None]
     kill_session: Callable[[str], None]
+    #: The pid tmux itself started in this session's pane, or None.
+    #:
+    #: Deliberately NOT derived from `list_processes`, which is `pgrep -x claude` joined to pane ownership
+    #: and therefore answers only for processes NAMED claude. Seed-delivery integrity (`seedcheck`) must
+    #: read the argv of whatever was ACTUALLY started — a launcher, a wrapper, a stub under test — and a
+    #: probe that first requires the process to be the thing we are trying to confirm cannot do that. tmux
+    #: knows the pane pid for certain and does not care what it is called.
+    #:
+    #: Defaulted so every existing construction of `Probes` — the suite builds several by hand — keeps
+    #: working. A caller that does not supply it gets None, which `SessionLayer.pane_pid` reports as "not
+    #: observable" rather than as "no process", because those are different facts.
+    pane_pid: Optional[Callable[[str], Optional[int]]] = None
 
 
 #: tmux's exact-match marker. A BARE target is resolved by PREFIX: with only `itfleet-N-pre-ab` alive,
@@ -314,6 +326,18 @@ class SessionLayer:
             raise BadInput("a session needs a name to be killed")
         self.probes.kill_session(name)
 
+    def pane_pid(self, name: str) -> Optional[int]:
+        """The pid tmux started in this session's pane, or None if it cannot be observed.
+
+        None is "not observable", not "nothing is running" — the probe may be absent (an injected `Probes`
+        that predates it) or tmux may not answer. Every caller here must treat it as the former, because
+        the alternative reading turns an unreadable probe into a clean bill of health, which is the
+        `FI-7` conflation one layer up.
+        """
+        if not name or self.probes.pane_pid is None:
+            return None
+        return self.probes.pane_pid(name)
+
 
 def default_probes(process_name: str = "claude", tmux_socket=_FROM_ENV) -> Probes:
     """The real probes: `pgrep -x <process_name>`, `/proc/<pid>/{cwd,cmdline}` and `tmux`.
@@ -425,8 +449,20 @@ def default_probes(process_name: str = "claude", tmux_socket=_FROM_ENV) -> Probe
     def kill_session(name: str) -> None:
         run(tmux + ["kill-session", "-t", exact_session_target(name)])
 
+    def pane_pid(name: str):
+        """`list-panes` on an EXACT pane target — the same target form `capture_pane` uses, and for the
+        same measured reason (`exact_pane_target`: a session-exact `=name` is not a pane target)."""
+        done = run(tmux + ["list-panes", "-t", exact_pane_target(name), "-F", "#{pane_pid}"])
+        if done.returncode != 0:
+            return None
+        for token in done.stdout.split():
+            if token.isdigit():
+                return int(token)
+        return None
+
     return Probes(list_processes=list_processes,
                   capture_pane=capture_pane,
                   has_session=has_session,
                   start_session=start_session,
-                  kill_session=kill_session)
+                  kill_session=kill_session,
+                  pane_pid=pane_pid)
