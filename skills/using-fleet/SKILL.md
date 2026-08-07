@@ -58,6 +58,7 @@ Read-only. Safe to run at any time; they change nothing.
 | `fleet reconcile` | the arm set an external monitor reads, from the one join |
 | `fleet compaction-status` | whether a compaction is holding every dispatch |
 | `fleet pane-guard` | the send-keys contract, as an exit code |
+| `fleet seed-check` | is every live worker running the briefing that was rendered FOR it? |
 | `fleet lint` | the layout matrix, the watched-source registry, the near-miss rule |
 | `fleet verify` | EXECUTE every documented recipe in a sandbox |
 | `fleet selftest` | discover and run every suite; the tree state is always stamped |
