@@ -64,7 +64,7 @@ from pathlib import Path
 from typing import Callable
 
 from fleet import EXIT_ATTENTION, EXIT_BAD_INPUT, EXIT_CODES, EXIT_OK, EXIT_REFUSED, __version__
-from fleet import guards, layout, render
+from fleet import guards, layout, render, seedcheck
 from fleet.atomic import atomic_write
 from fleet.errors import BadInput, FleetError, Refused
 from fleet.harvest import DEFAULT_MAX_AGE_S, REGISTER_NAME, Harvest
@@ -723,6 +723,144 @@ def _do_init(ctx: Ctx, parsed: Parsed) -> int:
     return EXIT_OK
 
 
+# --- seed-delivery integrity ----------------------------------------------------------------------
+
+#: How long `dispatch` waits for a briefing to appear in the worker's argv before concluding it cannot see
+#: one. Bounded and small on purpose: a STALE launcher already holds a non-empty seed file and execs at
+#: once, so the dangerous case is visible almost immediately, while a CORRECT launcher waits for the caller
+#: to write a seed — which happens after `dispatch` has returned, and therefore can never be observed from
+#: here however long we wait. Waiting longer would add latency to every dispatch and catch nothing extra.
+SEED_CHECK_SECONDS = "FLEET_SEED_CHECK_SECONDS"
+SEED_CHECK_DEFAULT_S = 5.0
+
+
+def _seed_check_window(env=None) -> float:
+    raw = (env if env is not None else os.environ).get(SEED_CHECK_SECONDS, "")
+    try:
+        window = float(raw)
+    except (TypeError, ValueError):
+        return SEED_CHECK_DEFAULT_S
+    #: Zero DISABLES the wait but not the check — one look, then decide. Negative is meaningless input and
+    #: falls back rather than silently disabling a safety check.
+    return window if window >= 0 else SEED_CHECK_DEFAULT_S
+
+
+def _verify_seed_delivery(ctx: Ctx, tmux: str, rendered_seed: str, probes=None, sleep=None):
+    """What was this session actually started with? `None` when it cannot be asked at all.
+
+    `None` is returned only when the pane pid is unobservable — an injected `Probes` with no `pane_pid`,
+    or a tmux that did not answer. It is NOT a verdict, and the caller must not read it as one: the three
+    verdicts are `seedcheck`'s, and "I could not look" is a fourth thing.
+    """
+    import time
+
+    pid = ctx.sessions.pane_pid(tmux)
+    if not pid:
+        return None
+    probes = probes or seedcheck.default_probes()
+    sleep = sleep or time.sleep
+    deadline = _seed_check_window()
+    waited, step = 0.0, 0.25
+    verdict = seedcheck.check_session(tmux, pid, rendered_seed, probes)
+    #: Poll only while the answer is "nothing delivered yet". A launcher that execs takes a moment, and a
+    #: check that read once would report NOT-DELIVERED for a delivery that was milliseconds away —
+    #: reporting the dangerous case as the benign one. VERIFIED and FOREIGN are final the instant they are
+    #: observed: argv does not change after exec.
+    while verdict.state == seedcheck.NOT_DELIVERED and waited < deadline:
+        sleep(step)
+        waited += step
+        verdict = seedcheck.check_session(tmux, pid, rendered_seed, probes)
+    return verdict
+
+
+def _do_seed_check(ctx: Ctx, parsed: Parsed) -> int:
+    """Is every live worker running the briefing that was rendered for it?
+
+    The standing form of the dispatch-time assertion, and the one that would have caught the 2026-08-07
+    incident: it can be run at ANY time, so it sees deliveries that settled long after `dispatch` returned.
+    Read-only — it reads `.fleet/seed.txt` and `/proc/<pid>/cmdline` and writes nothing.
+
+    Two independent signals, deliberately, because they fail in different ways:
+      * per session, the delivered argv against that instant's own rendered seed;
+      * across sessions, whether any two were started with a BYTE-IDENTICAL briefing — which needs no
+        knowledge of what any seed should have been, and so survives every way the first signal can be
+        defeated (a missing seed file, an instant folder that has been renamed, a profile that changed).
+    """
+    wanted = parsed.get("id", "")
+    verdicts, unreadable, rows = [], [], []
+    #: The clearing contract for a misdelivery, stated once and attached to every row that alarms: an
+    #: alarm whose remedy the reader has to invent gets ignored (§9).
+    clears = ("the launcher that delivers the seed is corrected — usually a stale `claude` shim first on "
+              "the tmux SERVER's PATH holding a hardcoded seed file — and the worker is dispatched again")
+    clears_who = "the coordinator that dispatched it, with whoever owns the tmux server's PATH"
+    for record in ctx.store.all():
+        if record.harvested_at or record.closed_at:
+            continue
+        if wanted and wanted not in record.todo_id:
+            continue
+        session = record.tmux
+        if not ctx.sessions.alive(session):
+            continue
+        seed_file = Path(record.child_instant) / ".fleet" / "seed.txt"
+        if not seed_file.is_file():
+            unreadable.append((session, f"no rendered seed at {seed_file} to compare against. This is NOT "
+                                        f"a pass — it is a check that could not run"))
+            continue
+        pid = ctx.sessions.pane_pid(session)
+        if not pid:
+            unreadable.append((session, "the pane pid could not be read, so nothing about this session's "
+                                        "delivery was observed. This is NOT a pass"))
+            continue
+        verdict = seedcheck.check_session(session, pid, seed_file.read_text(),
+                                          seedcheck.default_probes())
+        verdicts.append(verdict)
+        #: Only FOREIGN is a VIOLATION. NOT-DELIVERED is reported at INFO because `fleet` renders the seed
+        #: and does not deliver it, so it is the ordinary appearance of a send-keys delivery — but its
+        #: DETAIL says so in words, because a severity alone would let it read as clean.
+        rows.append(Row(kind=verdict.state.lower(), subject=session,
+                        severity=VIOLATION if verdict.state == seedcheck.FOREIGN else INFO,
+                        detail=(f"pid={verdict.pid} todo={record.todo_id} "
+                                f"rendered_md5={verdict.rendered_md5} "
+                                f"delivered_md5={verdict.delivered_md5 or '(none)'} :: {verdict.detail}"),
+                        clears_when=clears if verdict.state == seedcheck.FOREIGN else "",
+                        clears_who=clears_who if verdict.state == seedcheck.FOREIGN else ""))
+
+    for session, why in unreadable:
+        rows.append(Row(kind="unreadable", subject=session, severity=INFO, detail=why))
+
+    collided = seedcheck.collisions(verdicts)
+    for md5, names in collided:
+        rows.append(Row(kind="collision", subject=", ".join(names), severity=VIOLATION,
+                        detail=(f"{len(names)} live sessions were started with a BYTE-IDENTICAL briefing "
+                                f"(md5 {md5}). Two instants dispatched for two milestones must never have "
+                                f"been given one briefing"),
+                        clears_when=clears, clears_who=clears_who))
+
+    #: The POPULATION, always, even when nothing is wrong, and NAMED rather than counted. A check that
+    #: prints only its hits cannot be told apart from one that examined nothing — and this entire defect
+    #: class is checks that examined nothing while reading as clean.
+    examined = len(verdicts) + len(unreadable)
+    foreign = [v.session for v in verdicts if v.state == seedcheck.FOREIGN]
+    unverified = [v.session for v in verdicts if v.state == seedcheck.NOT_DELIVERED]
+    verified = [v.session for v in verdicts if v.state == seedcheck.VERIFIED]
+    rows.append(Row(kind=POPULATION, subject=wanted or "(every live dispatched session)", severity=INFO,
+                    detail=(f"{examined} live session(s) examined: "
+                            f"{len(verified)} verified {verified or '[]'}; "
+                            f"{len(foreign)} FOREIGN {foreign or '[]'}; "
+                            f"{len(unverified)} unverifiable {unverified or '[]'}; "
+                            f"{len(unreadable)} unreadable {[s for s, _ in unreadable] or '[]'}. "
+                            f"Only 'verified' means the delivered briefing was confirmed to be this "
+                            f"instant's own")))
+    if examined == 0:
+        rows.append(Row(kind="empty-population", subject=wanted or "(every live dispatched session)",
+                        severity=INFO,
+                        detail=("no live dispatched session matched, so this run examined NOTHING. That "
+                                "is not a clean result, it is an empty population: an exit 0 here says "
+                                "the check found nothing to look at, not that delivery is correct")))
+    _emit(ctx, "seed-check", rows)
+    return EXIT_ATTENTION if (foreign or collided) else EXIT_OK
+
+
 # --- dispatch -------------------------------------------------------------------------------------
 
 
@@ -904,6 +1042,43 @@ def _do_dispatch(ctx: Ctx, parsed: Parsed) -> int:
         # order. A record whose effort nobody watches is `OBS-68` — invisible because unlisted.
         source = ctx.harvest.record_dispatch(ctx.store, record)
         ctx.sessions.start(tmux, lease.path, "claude")
+        #: POST-LAUNCH SEED INTEGRITY — the control this class was missing.
+        #:
+        #: `dispatch` renders the seed above and starts the worker with the bare string "claude". tmux
+        #: resolves that against the SERVER's PATH, not this process's, so WHAT gets started is decided by
+        #: an environment no dispatcher controls. On 2026-08-07 that handed a fleet-infra worker the
+        #: v2stack COORDINATOR's briefing, byte for byte, and every gate passed because nothing compared
+        #: the seed rendered here to the seed actually delivered. `FI-78` checks the seed FILE; it has
+        #: never checked what was DELIVERED.
+        #:
+        #: A FOREIGN briefing REFUSES: the raise falls into the rollback path below, which gives the lease
+        #: back and disowns the milestone. The session is killed FIRST and deliberately — a worker holding
+        #: another instant's briefing acts on it, and the one instance of this we have was harmless only
+        #: because that worker happened to notice by itself.
+        #:
+        #: NOT-DELIVERED does NOT refuse, and that asymmetry is the point. `fleet` delivers no seed, so
+        #: every caller that delivers by send-keys legitimately shows nothing in argv at this moment, and
+        #: refusing there would break every dispatch on the box to fix one. It is reported instead —
+        #: loudly, and never as a pass (`seedcheck.Verdict.ok` is VERIFIED only).
+        seed_verdict = _verify_seed_delivery(ctx, tmux, rendered["seed"])
+        if seed_verdict is not None and seed_verdict.state == seedcheck.FOREIGN:
+            ctx.sessions.kill(tmux)
+            raise Refused(
+                f"SEED MISDELIVERY — {tmux} was started with a briefing that is NOT the one rendered for "
+                f"{child}. {seed_verdict.detail}. The session has been KILLED and this dispatch is "
+                f"rolled back, because a worker holding another instant's briefing acts on it. The usual "
+                f"cause is a stale `claude` shim first on the TMUX SERVER's PATH holding a hardcoded seed "
+                f"file: read it with `tmux -L <socket> show-environment -g | grep '^PATH='`, then "
+                f"regenerate or remove that launcher and dispatch again.",
+                clears_when="the launcher that delivers the seed is corrected, or removed from the tmux "
+                            "server's PATH",
+                clears_who="whoever owns the tmux server that dispatch starts sessions on")
+        if seed_verdict is not None and seed_verdict.state == seedcheck.NOT_DELIVERED:
+            print(f"WARNING: seed delivery to {tmux} could NOT be verified. {seed_verdict.detail}. "
+                  f"`fleet` renders the seed but does not deliver it, so this is also what a correct "
+                  f"send-keys delivery looks like from here — it is not evidence that anything is wrong, "
+                  f"and it is not evidence that anything is right. Re-check once delivery has settled: "
+                  f"`fleet seed-check --id {todo_id}`.", file=ctx.err)
         record.launched_at = ctx.now()
         ctx.store.write(record)
         # The claim is the LAST mutation, so every earlier failure leaves the roadmap untouched and there is
@@ -2672,8 +2847,24 @@ def _do_pane_guard(ctx: Ctx, parsed: Parsed) -> int:
                                               f"({queued!r}); a send would concatenate onto it")
         else:
             code, detail = PANE_SAFE, f"{pane} is a quiet claude pane with an empty input box"
+    #: `queued_text` is a FIELD, not a sentence to be parsed back out of `detail`.
+    #:
+    #: Every external monitor that wants the box text has had to re-extract it from the pane, and the
+    #: coordinator's `child-watchdog.sh` did exactly that with `grep '^\xe2\x9d\xaf'` — a literal-string
+    #: match inside single quotes, which in BRE is the twelve characters `^xe2x9dxaf` and matches nothing
+    #: any pane has ever drawn. Measured on the live log: `UNSIGNED-BOX-TEXT` fired 0 times across 218
+    #: `rc=10` rows, so the FI-103 protection it guarded had never once run.
+    #:
+    #: The extraction being duplicated already lives in `session.unsubmitted`, which handles the caret
+    #: forms, the box-drawing gutter, the placeholder shapes and the tail window, and is covered by this
+    #: suite. Exported as data so there is ONE implementation: parsing machine-consumed state back out of
+    #: prose is precisely what this package exists not to do.
+    #:
+    #: Empty for every code but `10`, and that is not a hedge — no other code asserts anything about the
+    #: box, and emitting a best guess there would invent a fact.
+    queued = ctx.sessions.unsubmitted(text) if code == PANE_QUEUED_TEXT else None
     _emit(ctx, PANE_GUARD, [("code", str(code)), ("verdict", PANE_GUARD_CODES[code]),
-                            ("pane", pane), ("detail", detail)])
+                            ("pane", pane), ("queued_text", queued or ""), ("detail", detail)])
     return code
 
 
@@ -3540,6 +3731,11 @@ VERBS = {spec.name: spec for spec in (
           checker=True, flags=(
         Flag("--instant", True, True, "the instant whose recipes are checked"),
     )),
+    _verb("seed-check", _do_seed_check, True,
+          "is every live worker running the briefing that was rendered FOR it? (seed misdelivery)",
+          checker=True, flags=(
+        Flag("--id", True, False, "restrict to one todo id, or a unique substring of it"),
+    )),
     _verb(PANE_GUARD, _do_pane_guard, True,
           "the send-keys contract: 0 safe / 10 queued / 11 mid-turn / 12 not-claude / 13 unknown / "
           "14 indeterminate (could not read; wait)", (
@@ -3624,6 +3820,7 @@ PORCELAIN_COLUMNS = {
     "verify": ROW_COLUMNS,
     "reap": ROW_COLUMNS,
     "reconcile": ROW_COLUMNS,
+    "seed-check": ROW_COLUMNS,
     "compaction-status": ROW_COLUMNS,
     "selftest": ROW_COLUMNS,
     "brief": ROW_COLUMNS,

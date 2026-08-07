@@ -340,6 +340,7 @@ class Loaded(unittest.TestCase):
             "verify": ["--instant", ready],
             "reconcile": [],
             "pane-guard": ["--pane", "dt-solo"],
+            "seed-check": [],
             "compaction-status": [],
             "selftest": [],
             #: Every row names its repository and its release area. The generated cases drive these for
