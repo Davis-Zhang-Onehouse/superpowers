@@ -1,5 +1,13 @@
 # fleet — changelog
 
+## fleet/v0.3.10 — 2026-08-07T23:25:03Z
+Cut from 0df31d2 on `live` (upstream base pre-merge-fleet-skills-20260731). 1 commit(s) since fleet/v0.3.9.
+
+Every release ships the whole repository — all skills, `commands/`, `hooks/` and the plugin manifest, not only `fleet/`.
+Payload: fleet (1 file).
+
+- 0df31d2 it: seed-check needs an argv recipe, or §L7 and §M5 say nothing about it
+
 ## fleet/v0.3.9 — 2026-08-07T22:08:46Z
 Cut from 84355ef on `live` (upstream base pre-merge-fleet-skills-20260731). 1 commit(s) since fleet/v0.3.8.
 
