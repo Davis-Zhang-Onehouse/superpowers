@@ -83,6 +83,23 @@ at each section boundary and require equality. Polling a run you are driving fai
 the background and make **zero** tool calls until it reports; a background shell that already exec'd is
 safe, because its own forks are `comm=bash`.
 
+**Trap 3b — AN IT RUN DIRTIES THE TREE, AND `release cut` REFUSES ON ANY DIRTY ROW.**
+`Repo.dirty()` counts **untracked** rows too, so a single `??` refuses the cut. Running any IT runner in
+the checkout rewrites tracked registers — `fleet/it/RESULTS.tsv` via the merge step, and historically the
+SOURCE PIN scratch. **Before any cut, the register is either COMMITTED — when the run you just did is the
+run you are releasing — or REVERTED, when it was a scratch run.** Decide which; do not leave it.
+
+`RESULTS.tsv` stays TRACKED deliberately: `it_own_cases` makes it the CURRENT state of every case with
+history left to git, so a diff of it is evidence. Untracking it would trade a visible recurring cost for
+an invisible permanent one — a register you cannot diff is a claim, not a record. The recurring cost is
+this paragraph, which exists because "detect and prevent are different asks: if the actor forgets the
+remedy, what happens?" An unwritten pre-cut step is exactly that shape, and it cost a refused cut on
+`0.3.10` (`SOURCE-PIN-group5-{before,after}.txt`, since gitignored) before it was written down.
+
+⚠️ **Do not clear this refusal by `git add`-ing the offending scratch file.** Somebody did that once for
+the group5 pins, which is why they then showed `M` on every run forever and each new refusal tempted the
+next person to add one more. Per-run scratch gets a `.gitignore` entry; a register gets committed.
+
 **Trap 4 — quiet the box first.** A **COMPLETE** worker still holding a slot with a live pane is a
 scheduled contamination event: it exits mid-run, moving both the board and the claude count. Harvest
 finished workers before cutting. Other people's live sessions are an uncontrollable residual risk — a gate
