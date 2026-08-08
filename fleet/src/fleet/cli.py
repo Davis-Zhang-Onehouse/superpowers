@@ -492,8 +492,30 @@ def default_context(parsed: Parsed, out, err) -> Ctx:
             f"a fleet's real state gets touched by a command that meant to work somewhere else, so it is "
             f"refused rather than guessed.")
     home = Path(named_home or (Path.home() / ".fleet"))
-    instants = Path(parsed.get("instants-dir") or os.environ.get("FLEET_INSTANTS")
-                    or (home / "instants"))
+    # `I2-11`. Precedence here is ordered by HOW SPECIFICALLY THE CALLER NAMED THE DESTINATION — flags
+    # before environment — and not by which variable happens to hold it. The line this replaced was
+    # `--instants-dir or $FLEET_INSTANTS or home/"instants"`, which reads correctly and is wrong for a
+    # reason four lines up: `named_home` has already COLLAPSED `--home` and `$FLEET_HOME` into one value,
+    # so by the time the instants directory is resolved there is no longer any record that the home was
+    # TYPED rather than inherited. An explicit `--home` was therefore out-ranked, for a component of its
+    # own destination, by an environment variable the caller never mentioned.
+    #
+    # Measured, not reasoned about (2026-08-08): the shared tmux server on this box exports
+    # `FLEET_INSTANTS` globally, so every seeded shell inherits the FIRST effort's tree. `fleet init
+    # --home <sandbox>` wrote its folder into a LIVE effort tree and exited 0. Ten strays reached one that
+    # way and `FI-196` is the instant that came up believing it WAS the coordinator, because it inherited
+    # the coordinator's instants directory. `guards.blocking_compactions()` is the severe consumer: it
+    # reads this path DIRECTLY and counts record-less `*-inflight-compact-*` folders, so one stray of that
+    # shape refuses EVERY dispatch in an effort while `subjects()` stays clean.
+    #
+    # `$FLEET_INSTANTS` is deliberately still ABOVE `home/"instants"`: fifteen IT runners and every script
+    # in the coordinator's tick name the instants directory that way and nothing else, so demoting it
+    # below a DERIVED default would trade this defect for a larger one. It is demoted only below a flag,
+    # and a caller who genuinely wants the store and the instants apart says `--instants-dir` — which is
+    # the tier that has always won, and the remedy that does not have to be remembered as `env -u`.
+    named_instants = parsed.get("instants-dir") or (
+        f"{parsed.get('home')}/instants" if parsed.get("home") else None)
+    instants = Path(named_instants or os.environ.get("FLEET_INSTANTS") or (home / "instants"))
     sessions = SessionLayer(default_probes())
     pool = Pool(home, cwd_probe=_cwd_holders, alive=sessions.alive)
     return Ctx(home=home, instants_dir=instants, store=Store(home), pool=pool, sessions=sessions,
