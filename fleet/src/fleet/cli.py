@@ -85,7 +85,7 @@ from fleet.review import Finding, Review, exit_code_for
 from fleet import origin as origin_mod
 from fleet.origin import Origin
 from fleet.roadmap import ATTENTION, COORDINATOR, TERMINAL, Milestone, Roadmap
-from fleet.session import SessionLayer, default_probes
+from fleet.session import SessionLayer, default_probes, plain as pane_plain
 from fleet.store import Declarations, Record, Store
 from fleet.workspace import GOLDEN_FILE, Workspace, default_git
 
@@ -2781,8 +2781,19 @@ def _do_verify(ctx: Ctx, parsed: Parsed) -> int:
 
 #: What a claude pane renders when it is idle and not busy. Needed because an idle pane offers neither an
 #: interrupt hint nor unsubmitted text, and "no evidence of claude" must not read as "safe to send".
+#:
+#: `shift+tab to cycle` is `FI-208`'s, and it is here to stop that fix introducing a defect of its own.
+#: MEASURED on two live Claude Code panes on 2026-08-08 (`i7` evidence `01-red/01-w22-capture-WITH-e.raw`
+#: and `04-own-pane-WITH-e.raw`): an IDLE modern pane matches **none** of the eight markers above — its
+#: footer reads `⏵⏵ auto mode on (shift+tab to cycle) · ← for agents`. So the glyph fallback had already
+#: rotted, and the only reason such a pane still classified as claude was that `unsubmitted` was reporting
+#: the DIM ghost as text. Take the ghost away — which is the whole of `FI-208` — and the fallback answers
+#: `12 not-claude`, the one code the close-out contract treats as permission to tear the pane down.
+#: A fix that trades a false `10` for a false `12` has moved the error into the dangerous direction, which
+#: is `FI-180`'s rule; this marker is the replacement visibility, and it is measured, not guessed.
 CLAUDE_MARKERS = ("esc to interrupt", "esc to cancel", "? for shortcuts", "/ for commands",
-                  "# for memory", "bypass permissions", "new task?", "claude code")
+                  "# for memory", "bypass permissions", "new task?", "claude code",
+                  "shift+tab to cycle")
 
 
 def _is_claude(sessions, text: str, name: str = "") -> bool:
@@ -2796,7 +2807,12 @@ def _is_claude(sessions, text: str, name: str = "") -> bool:
     """
     if sessions.is_claude_process(name):
         return True
-    lowered = str(text).lower()
+    #: `pane_plain`, because the capture carries SGR attributes since `FI-208`. A marker is a PHRASE and
+    #: the TUI styles its hints: one colour change inside `esc to interrupt` and a raw substring match
+    #: stops finding it. That direction reports a live claude as `12 not-claude`, the one code the
+    #: close-out contract treats as permission to tear the pane down — so the strip is a safety property,
+    #: not tidiness.
+    lowered = pane_plain(str(text)).lower()
     if any(marker in lowered for marker in CLAUDE_MARKERS):
         return True
     return sessions.busy(text) or sessions.unsubmitted(text) is not None
