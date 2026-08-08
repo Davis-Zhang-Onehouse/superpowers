@@ -143,6 +143,17 @@ section_L() {
   #: can be cut. §Q owns the lifecycle.
   mkdir -p "$EV/reg" "$SLOTS" "$PY_DIR" "$EV/relarea" "$EV/relrepo"
 
+  #: `peers` shells out to `claude agents --json` to enumerate live local sessions. Left alone inside a
+  #: section that would (a) start a REAL process named `claude`, which is exactly what the A6 and
+  #: ISOLATION-*-claude-count cases snapshot and require to be stable, and (b) make the verdict depend
+  #: on whatever else happens to be running on this box. Point it at a stub emitting an empty session
+  #: list: L7 and M5 ask whether the verb emits its cadence line and well-formed porcelain, not how
+  #: many peers exist. `FLEET_CLAUDE_BIN` is the module's documented override, exported for the whole
+  #: section so every invocation here is hermetic.
+  printf '#!/usr/bin/env bash\necho "[]"\n' > "$EV/claude-stub"
+  chmod +x "$EV/claude-stub"
+  export FLEET_CLAUDE_BIN="$EV/claude-stub"
+
   # ---- L1 ---------------------------------------------------------------------------------------
   cat > "$PY_DIR/l1.py" <<'PY'
 """L1 — register the dummy ISSUES.md; prime reports its COUNT and reports no issues."""
@@ -382,7 +393,7 @@ PY
       unenroll)  echo "--slot s1 --dry-run" ;;
       reap)      echo "--base $INSTP --dry-run" ;;
       set-golden) echo "--path $DUMMY/alpha --dry-run" ;;
-      board|leases|selftest|reconcile|compaction-status|seed-check) echo "" ;;
+      board|leases|peers|selftest|reconcile|compaction-status|seed-check) echo "" ;;
       status)    echo "--id $TODO" ;;
       roadmap|lint|verify|brief) echo "--instant $INSTP" ;;
       base-check) echo "--id $TODO" ;;
@@ -583,6 +594,13 @@ PY
         >> "$EV/M-setup.out" 2>&1
   export INSTP TODO
 
+  #: Same reason as §L: `peers` shells out to `claude agents --json`, and M5 appends one extra flag
+  #: per probe so it runs many times over. An unstubbed run would start a real process named
+  #: `claude` on each one, which the claude-count cases exist to police.
+  printf '#!/usr/bin/env bash\necho "[]"\n' > "$EV/claude-stub"
+  chmod +x "$EV/claude-stub"
+  export FLEET_CLAUDE_BIN="$EV/claude-stub"
+
   m_args() {
     case "$1" in
       init)      echo "--name mv1 --dry-run" ;;
@@ -602,7 +620,7 @@ PY
       unenroll)  echo "--slot ms1 --dry-run" ;;
       reap)      echo "--base $INSTP --dry-run" ;;
       set-golden) echo "--path $DUMMY/alpha --dry-run" ;;
-      board|leases|selftest|reconcile|compaction-status|seed-check) echo "" ;;
+      board|leases|peers|selftest|reconcile|compaction-status|seed-check) echo "" ;;
       status)    echo "--id $TODO" ;;
       roadmap|lint|verify|brief) echo "--instant $INSTP" ;;
       base-check) echo "--id $TODO" ;;
