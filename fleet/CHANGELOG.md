@@ -1,5 +1,17 @@
 # fleet — changelog
 
+## fleet/v0.3.11 — 2026-08-08T04:17:35Z
+Cut from fba0038 on `live` (upstream base pre-merge-fleet-skills-20260731). 4 commit(s) since fleet/v0.3.10.
+
+Every release ships the whole repository — all skills, `commands/`, `hooks/` and the plugin manifest, not only `fleet/`.
+Payload: fleet (12 files), skills (1 file), other (1 file).
+Skills changed: releasing-fleet.
+
+- 07b07bc it: the dispatch-kill narrowing must be structural, not a source-text prefix
+- e2f5fda session: the pane capture must keep the attribute that says who typed the text
+- 2912184 it: §i7's rows never reached the closeout register, and the pins dirty every cut
+- fba0038 skills: an IT run dirties the tree, and the pre-cut step must be written down
+
 ## fleet/v0.3.10 — 2026-08-07T23:25:03Z
 Cut from 0df31d2 on `live` (upstream base pre-merge-fleet-skills-20260731). 1 commit(s) since fleet/v0.3.9.
 
