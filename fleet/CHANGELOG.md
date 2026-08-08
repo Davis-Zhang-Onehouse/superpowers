@@ -1,5 +1,14 @@
 # fleet — changelog
 
+## fleet/v0.3.13 — 2026-08-08T21:22:34Z
+Cut from 40a1013 on `live` (upstream base pre-merge-fleet-skills-20260731). 1 commit(s) since fleet/v0.3.12.
+
+Every release ships the whole repository — all skills, `commands/`, `hooks/` and the plugin manifest, not only `fleet/`.
+Payload: fleet (4 files), skills (1 file).
+Skills changed: using-fleet.
+
+- 40a1013 fleet peers: a mechanical provenance whitelist for cross-session messaging
+
 ## fleet/v0.3.12 — 2026-08-08T06:43:42Z
 Cut from 2b55013 on `live` (upstream base pre-merge-fleet-skills-20260731). 1 commit(s) since fleet/v0.3.11.
 
