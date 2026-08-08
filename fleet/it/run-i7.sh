@@ -37,7 +37,14 @@ IT_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]:-$0}")" && pwd)"
 #: and the exit row to ours — so the register gained one duplicate `ISOLATION-i7-enter` per run and the
 #: repo was dirty for a reason nothing in the change table explained. `run-Q.sh:44` already orders it this
 #: way; I did not, and four runs proved it.
-RESULTS="$IT_ROOT/RESULTS-i7.tsv"
+#: `${IT_RESULTS:-...}` and NOT a bare assignment. `run-all.sh:113` hands every runner its own
+#: `IT_RESULTS=RESULTS-closeout-<name>.tsv`, and an unconditional assignment here IGNORED it: this
+#: section's rows went to `RESULTS-i7.tsv` while `RESULTS-closeout-i7.tsv` stayed HEADER-ONLY.
+#: `release_verify.py:457` enumerates failures ONLY from the `RESULTS-closeout-*.tsv` glob, so a
+#: FAILING §i7 would have turned the gate RED via its exit code while its own verdict row read
+#: "0 FAIL rows" and `it-FAILURES.txt` was empty — exactly the split `release_verify.py:492-502`
+#: exists to prevent. The default keeps a standalone `bash run-i7.sh` writing its own register.
+RESULTS="${IT_RESULTS:-$IT_ROOT/RESULTS-i7.tsv}"
 [ -f "$RESULTS" ] || printf 'case\tverdict\tevidence\tnote\n' > "$RESULTS"
 #: The ISOLATION rows are OURS too. Every other section says so — `run-A.sh:52`, `run-Q.sh:44`,
 #: `run-H.sh:22`, `run-J.sh:26`, `run-m9-mutation.sh:31` — and omitting them makes a register grow one
@@ -106,7 +113,7 @@ grep -q 'REAL-TYPED-TEXT-GAMMA' "$OUT/i7-ghost-capture.raw" \
   && { FIXTURE_OK=0; FIXTURE_WHY="$FIXTURE_WHY; BOTH panes are showing the TYPED frame — the two cases would not be measuring different things"; }
 
 if [ "$FIXTURE_OK" != 1 ]; then
-  for c in i7-1 i7-2 i7-3 i7-4 i7-5; do
+  for c in i7-1 i7-2 i7-3 i7-4 i7-5 i7-6; do
     it_fail "$c" "fleet/it/i7/out/i7-ghost-capture.raw" \
       "THE FIXTURE DOES NOT DISCRIMINATE${FIXTURE_WHY}. Every verdict below would be about the wrong screen, which is a false pass wearing a real exit code"
   done
