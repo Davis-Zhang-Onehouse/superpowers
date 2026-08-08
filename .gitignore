@@ -41,3 +41,12 @@ fleet/it/dt-sessions-seen*.txt
 # Per-run results files; RESULTS.tsv is the merged current state and IS committed.
 fleet/it/RESULTS-*.tsv
 fleet/it/*.log
+
+# Per-run SOURCE PIN scratch, written by fleet/it/bin/source-pin.sh on every runner invocation.
+# NOT registers — they record "what the tree looked like at this run" and are meaningless once it ends.
+# They are gitignored rather than committed because committing them is what makes a tracked file show `M`
+# on every run FOREVER: SOURCE-PIN-group5-{before,after}.txt were cleared that way once, and each new
+# refusal then tempts the next person to `git add` one more. A dirty tree REFUSES `release cut`
+# (release_git.Repo.dirty counts untracked too), so this is a release-gate fix, not tidiness.
+fleet/it/SOURCE-PIN-*.txt
+fleet/it/SOURCE-CONTAMINATED.txt
