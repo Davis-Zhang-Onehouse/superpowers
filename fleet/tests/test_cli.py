@@ -3018,3 +3018,83 @@ class TestAnIdleClaudePaneIsStillAClaudePane(unittest.TestCase):
         reachable, or `close`/`reap` can never tidy a real shell."""
         pane = "\n".join(["$ tail -f /var/log/syslog", "Aug  8 02:31:02 host sshd[1]: ok", "$ "])
         self.assertFalse(cli._is_claude(self.sessions(), pane, "some-shell"))
+
+
+class TestANamedDestinationIsWholeNotHalf(unittest.TestCase):
+    """`FI-2xx`/`I2-11` — a caller who names its store explicitly must not have its INSTANT written into a
+    tree it never mentioned.
+
+    Measured on 2026-08-08 against the working tree (`evidence/10-red/red-worktree.txt`): with
+    `FLEET_INSTANTS` pointing at the coordinator's live effort tree — which is the value the SHARED tmux
+    server exports, so every seeded shell on this box inherits it — `fleet init --home <sandbox>` printed
+    `path .../quantonOnSpark4V2/instants/...` and exited **0**. Ten stray folders reached a live effort
+    tree that way, and one of them (`FI-196`) came up believing it WAS the coordinator.
+
+    The root cause is not "the flag loses" — `--instants-dir` already wins, and a change that only made it
+    win would be a green proving nothing. It is that `default_context` collapsed `--home` and `$FLEET_HOME`
+    into one value BEFORE resolving the instants directory, discarding the fact that one was typed by the
+    caller and the other merely inherited. Precedence is therefore ordered here by **how specifically the
+    caller named the destination**, flags before environment, and these four cases pin all four rungs.
+
+    The severe consumer is `guards.blocking_compactions()`, which reads `ctx.instants_dir` DIRECTLY and
+    counts record-less `*-inflight-compact-*` folders: one stray of that shape refuses every dispatch in an
+    effort while `subjects()` stays clean.
+    """
+
+    def setUp(self):
+        self.tmp = pathlib.Path(tempfile.mkdtemp(prefix="fleet-nameddest-"))
+        self.addCleanup(shutil.rmtree, self.tmp, True)
+        self.home = self.tmp / "sandbox-home"
+        self.ambient = self.tmp / "someone-elses-live-effort-tree"
+        self.flagged = self.tmp / "flagged-instants"
+        for path in (self.home, self.ambient, self.flagged):
+            path.mkdir(parents=True)
+
+    def _instants(self, argv, env):
+        """`default_context`'s answer for one argv under one environment, and nothing else."""
+        parsed = cli.parse(cli.VERBS["init"], list(argv))
+        keep = {name: os.environ.get(name) for name in ("FLEET_HOME", "FLEET_INSTANTS")}
+
+        def restore():
+            for name, was in keep.items():
+                if was is None:
+                    os.environ.pop(name, None)
+                else:
+                    os.environ[name] = was
+
+        self.addCleanup(restore)
+        for name in keep:
+            os.environ.pop(name, None)
+        os.environ.update(env)
+        return cli.default_context(parsed, io.StringIO(), io.StringIO()).instants_dir
+
+    def test_an_explicit_home_flag_outranks_an_inherited_FLEET_INSTANTS(self):
+        """THE KNOWN-BAD INPUT. This is the case that minted the ten strays, and the only one of the four
+        that was failing before the fix."""
+        got = self._instants(["--name", "x", "--home", str(self.home)],
+                             {"FLEET_INSTANTS": str(self.ambient)})
+        self.assertEqual(self.home / "instants", got,
+                         "`--home` was TYPED and `$FLEET_INSTANTS` was merely inherited from the shared "
+                         "tmux server, so the instant belongs under the named home. Resolving to "
+                         f"{self.ambient} writes a folder into a tree the caller never mentioned, at "
+                         "exit 0, and that is FI-196")
+
+    def test_an_explicit_instants_dir_still_outranks_everything(self):
+        """The previously-passing case, and it must stay passing: a caller that genuinely wants its store
+        and its instants apart says so, and that is the remedy for the case above."""
+        got = self._instants(["--name", "x", "--home", str(self.home),
+                              "--instants-dir", str(self.flagged)],
+                             {"FLEET_INSTANTS": str(self.ambient)})
+        self.assertEqual(self.flagged, got)
+
+    def test_with_no_flag_the_environment_still_names_the_instants_directory(self):
+        """The twin that stops the fix becoming "ignore `$FLEET_INSTANTS`". Eleven IT runners and every
+        script in the coordinator's `tools/` name it that way and nothing else; breaking it would trade
+        this defect for a larger one."""
+        got = self._instants(["--name", "x"],
+                             {"FLEET_HOME": str(self.home), "FLEET_INSTANTS": str(self.ambient)})
+        self.assertEqual(self.ambient, got)
+
+    def test_with_nothing_named_it_derives_from_the_home_that_won(self):
+        got = self._instants(["--name", "x"], {"FLEET_HOME": str(self.home)})
+        self.assertEqual(self.home / "instants", got)
