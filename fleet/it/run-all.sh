@@ -62,6 +62,11 @@ RUNNERS=(
   "C:bash $IT_ROOT/run-C.sh"
   "D:bash $IT_ROOT/run-D.sh"
   "Q:bash $IT_ROOT/run-Q.sh"
+  #: In the DEFAULT roster, not `FULL_EXTRA`. It costs about ten seconds and it guards `FI-208` — the
+  #: defect that made every input-box alarm in a live effort a false positive for ten and a half hours
+  #: and left a finished worker unclosable except by `--force`. A control that only runs under `--full`
+  #: is a control that is mostly not running.
+  "i7:bash $IT_ROOT/run-i7.sh"
   "rmw:bash $IT_ROOT/run-rmw.sh 8"
   "K:bash $IT_ROOT/run-group3.sh K"
   "group5:bash $IT_ROOT/run-group5.sh L M N"
