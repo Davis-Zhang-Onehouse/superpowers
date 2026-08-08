@@ -1,5 +1,13 @@
 # fleet — changelog
 
+## fleet/v0.3.14 — 2026-08-08T22:13:03Z
+Cut from f40676b on `live` (upstream base pre-merge-fleet-skills-20260731). 1 commit(s) since fleet/v0.3.13.
+
+Every release ships the whole repository — all skills, `commands/`, `hooks/` and the plugin manifest, not only `fleet/`.
+Payload: fleet (1 file).
+
+- f40676b it: give `peers` an argv recipe in L7 and M5, and stub its claude call
+
 ## fleet/v0.3.13 — 2026-08-08T21:22:34Z
 Cut from 40a1013 on `live` (upstream base pre-merge-fleet-skills-20260731). 1 commit(s) since fleet/v0.3.12.
 
