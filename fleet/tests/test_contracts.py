@@ -322,6 +322,10 @@ class Loaded(unittest.TestCase):
             "board": [],
             "status": ["--id", fleet.ids["solo"]],
             "leases": [],
+            #: Read-only and argument-free. It shells out to `claude agents --json`; where that binary
+            #: is absent the verb REFUSES (`PeersUnavailable` -> `EXIT_ATTENTION`) rather than
+            #: reporting an empty peer set, which is the fail-closed behaviour it exists to provide.
+            "peers": [],
             "abort": ["--instant", str(fleet.paths["doomed"]),
                       "--reason", "the baseline moved under it"],
             "close": ["--id", fleet.ids["closable"]],

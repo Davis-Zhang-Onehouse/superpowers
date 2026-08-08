@@ -52,6 +52,7 @@ Read-only. Safe to run at any time; they change nothing.
 | `fleet board` | every subject HOLDING A SLOT, and nothing else |
 | `fleet status` | one subject in full, with the evidence behind its state |
 | `fleet leases` | every enrolled slot and who holds it |
+| `fleet peers` | which live Claude sessions this fleet may address, and which are FOREIGN |
 | `fleet roadmap` | milestones, readiness, blockers and pending proposals |
 | `fleet brief` | what a dispatched instant needs to know about itself |
 | `fleet base-check` | is this workspace positioned on the base its milestone builds on? |
