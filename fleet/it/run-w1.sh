@@ -19,7 +19,7 @@ mkdir -p "$OUT"
 bash "$IT_ROOT/bin/source-pin.sh" before "$OUT" || exit 2
 
 # This runner owns these rows. Re-running it replaces them rather than appending a second opinion.
-it_own_cases 'W1-[0-9]+|W1-7-restored|ISOLATION-W1-(enter|leave)'
+it_own_cases 'W1-[0-9]+|W1-7-restored|W1-11-restored|ISOLATION-W1-(enter|leave)'
 
 it_section W1
 S="itfleet-W1-probe-$$"
@@ -222,6 +222,97 @@ if [ "$w9_ok" = 1 ]; then
 else
   it_fail W1-9 "fleet/it/W1/out/W1-9-attribution.tsv" \
     "the attribution does not discriminate:$w9_detail"
+fi
+
+# ---------------------------------------------------------------------------------------------------
+# W1-10 · SANDBOXED BY CONSTRUCTION. `it_section` gives a section its own store, slots and tmux server; the
+#         INSTANTS DIRECTORY was the one shared resource it left to the caller's environment, and eleven
+#         runners remembered to name it while six did not. `run-group5.sh` is in the second set and creates
+#         five instants, which is where `l7probe mprobe m12probe nprobe nOwned` came from.
+if case "$(cd "$FLEET_INSTANTS" && pwd -P)/" in "$IT_ROOT"/*) true ;; *) false ;; esac; then
+  it_pass W1-10 "" \
+    "it_section sandboxed the instants directory BY CONSTRUCTION: FLEET_INSTANTS=$FLEET_INSTANTS is inside $IT_ROOT, so a runner cannot be exposed by forgetting to export it. Before this the caller's ambient value won, and ten strays reached a live effort tree"
+else
+  it_fail W1-10 "" \
+    "it_section left FLEET_INSTANTS=$FLEET_INSTANTS OUTSIDE $IT_ROOT — every instant this section creates lands in somebody else's tree, which is I2-11/FI-196"
+fi
+
+# W1-11/W1-12 · THE NEGATIVE CONTROL FOR THE INSTANTS HALF, and it is the half that matters. W1-7 proved
+#         the tmux alarm is falsifiable; nothing proved the instants alarm is, and an alarm nobody has seen
+#         fire is `SI-1`'s shape — which is precisely how the ten strays survived. `it_assert_isolation`
+#         recorded PASS on every call while folders were landing in a live effort tree, because the instants
+#         directory was not a term in the check at all.
+#
+#         The stray is made BY THE PRODUCT, under `run-group5.sh:324`'s own name, rather than by a `mkdir`
+#         of a string typed here: a decoy frozen at authoring time tests the author's imagination, and this
+#         way the folder name, the register entry and the attribution all have to agree for the FAIL to be
+#         real.
+#
+#         The pretend live tree is under TMPDIR and NOT under `$IT_ROOT`, deliberately —
+#         `it_live_instants_roots` excludes everything inside `$IT_ROOT` as ours, so a decoy placed in
+#         `$OUT` would be skipped and this control would pass vacuously by never looking.
+W11_LIVE="$(mktemp -d "${TMPDIR:-/tmp}/it-w1-pretend-live-XXXXXX")"
+mkdir -p "$OUT/w1-11"
+(
+  REAL_RESULTS="$RESULTS"
+  RESULTS="$OUT/w1-11/negative-control.tsv"; : > "$RESULTS"
+  # Repointed COPIES, never the shared files — the same discipline as W1-7, and for the same reason: a
+  # concurrent runner reading a real baseline inside this window would compare against a fiction.
+  IT_AMBIENT_INSTANTS="$W11_LIVE"
+  LIVE_INSTANTS_SNAPSHOT="$OUT/w1-11/instants-baseline.txt"; rm -f "$LIVE_INSTANTS_SNAPSHOT"
+  LIVE_TMUX_SNAPSHOT="$OUT/w1-11/tmux-baseline.txt"; cp "$IT_ROOT/live-tmux-sessions.txt" "$LIVE_TMUX_SNAPSHOT"
+  LIVE_SNAPSHOT="$OUT/w1-11/stores-baseline.sha256"; cp "$IT_ROOT/live-stores.sha256" "$LIVE_SNAPSHOT"
+
+  it_assert_isolation W1-11-baseline >/dev/null 2>&1     # establishes over the EMPTY pretend tree
+
+  # W1-12 first, over that baseline: somebody else's instant appearing must NOT be charged to us. A check
+  # that fails on the operator using their own box gets switched off, and then it protects nothing.
+  mkdir -p "$W11_LIVE/00000000-01011200-inflight-append-someoneElsesWorker"
+  it_assert_isolation W1-12-foreign >/dev/null 2>&1
+
+  # W1-11: the product mints the stray, with the real argv shape, into the pretend live tree.
+  fleet init --instants-dir "$W11_LIVE" --name l7probe > "$OUT/w1-11/mint.out" 2>&1
+  it_assert_isolation W1-11-injected >/dev/null 2>&1
+
+  RESULTS="$REAL_RESULTS"
+
+  # BOTH conditions. `it_assert_isolation` also FAILs for the stores half and the tmux half, so matching
+  # only `…-injected\tFAIL` would let a live-stores change during the run make this decoy green for a
+  # reason that has nothing to do with instants. The marker is a constant in lib.sh so the two cannot drift.
+  if grep -q '^ISOLATION-W1-11-injected	FAIL' "$OUT/w1-11/negative-control.tsv" \
+     && grep -qF "$IT_INSTANTS_FAIL_MARK" "$OUT/w1-11/negative-control.tsv"; then
+    it_pass W1-11 "fleet/it/W1/out/w1-11/negative-control.tsv" \
+      "negative control: a folder THIS SECTION NAMED, appearing in an instants tree outside $IT_ROOT, is reported FAIL — so every ISOLATION verdict about the instants directory is falsifiable. The pre-fix check had no instants term at all and passed while ten strays landed in a live effort tree (I2-11/FI-196)"
+  else
+    it_fail W1-11 "fleet/it/W1/out/w1-11/negative-control.tsv" \
+      "THE INSTANTS ALARM DOES NOT GO OFF: minting $(ls "$W11_LIVE" | tr '\n' ' ') in a foreign tree produced $(cut -f1,2 "$OUT/w1-11/negative-control.tsv" | tr '\n' ' ') — every isolation verdict about instants is unfalsifiable"
+  fi
+
+  # ABSENCE IS NEVER SUCCESS. The old form was `if grep FAIL; then it_fail; else it_pass` — so a MISSING
+  # `W1-12-foreign` row, which is what a crashed or skipped assertion leaves behind, read as a pass about a
+  # discrimination nobody had observed. The row must EXIST and be PASS before this case may claim anything.
+  if ! grep -q '^ISOLATION-W1-12-foreign	' "$OUT/w1-11/negative-control.tsv"; then
+    it_fail W1-12 "fleet/it/W1/out/w1-11/negative-control.tsv" \
+      "no ISOLATION-W1-12-foreign row was recorded at all, so the twin never ran and this case cannot say whether the instants alarm discriminates. A missing row is not a pass"
+  elif grep -q '^ISOLATION-W1-12-foreign	FAIL' "$OUT/w1-11/negative-control.tsv"; then
+    it_fail W1-12 "fleet/it/W1/out/w1-11/negative-control.tsv" \
+      "the instants half charged the OPERATOR's own dispatch to this section. A check that cries wolf when somebody else uses their own box is one that gets ignored, and then it protects nothing"
+  else
+    it_pass W1-12 "fleet/it/W1/out/w1-11/negative-control.tsv" \
+      "the twin: an instant appearing in a live tree under a name this section NEVER asked for is a NOTE and not a FAIL, so W1-11's alarm discriminates rather than firing on any change at all"
+  fi
+)
+rm -rf "$W11_LIVE"
+# The shared baseline must be untouched — the control ran against repointed copies inside a subshell.
+if [ ! -f "$LIVE_INSTANTS_SNAPSHOT" ]; then
+  it_fail W1-11-restored "${LIVE_INSTANTS_SNAPSHOT#$IT_ROOT/}" \
+    "the shared instants baseline does not exist, so 'it was not leaked into' is a claim about a file that is not there. Absence is never success"
+elif ! grep -qF "it-w1-pretend-live-" "$LIVE_INSTANTS_SNAPSHOT"; then
+  it_pass W1-11-restored "${LIVE_INSTANTS_SNAPSHOT#$IT_ROOT/}" \
+    "the negative control never wrote the shared instants baseline $LIVE_INSTANTS_SNAPSHOT: it ran against a repointed copy inside a subshell"
+else
+  it_fail W1-11-restored "${LIVE_INSTANTS_SNAPSHOT#$IT_ROOT/}" \
+    "the negative control leaked its pretend tree into the shared instants baseline — every later verdict is against a fiction"
 fi
 
 it_assert_isolation W1-leave

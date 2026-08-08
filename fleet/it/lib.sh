@@ -21,6 +21,35 @@ RESULTS="${IT_RESULTS:-$IT_ROOT/RESULTS.tsv}"
 
 LIVE_SNAPSHOT="$IT_ROOT/live-stores.sha256"
 LIVE_TMUX_SNAPSHOT="$IT_ROOT/live-tmux-sessions.txt"
+#: The THIRD live resource this harness can damage, and the one `it_assert_isolation` could not see.
+#: `I2-11`/`FI-196`: `it_section` sandboxes FLEET_HOME and the tmux server, so the record store and the
+#: session set were both provably isolated — and every `fleet init` still wrote its FOLDER into whatever
+#: tree the CALLER's `$FLEET_INSTANTS` named, because `cli.default_context` resolved the instants directory
+#: from the environment and `--home` never scoped it. Ten strays reached a live effort tree that way and
+#: one of them came up believing it WAS the coordinator, while the isolation assertion recorded PASS on
+#: every call. The contamination was structurally unobservable to the check that exists to catch it.
+#: PER SECTION, not one shared file — the same rule `dt-sessions-seen` already states two functions
+#: down: *"two sections running concurrently would otherwise both write it, and a register with two
+#: writers is the defect this whole wave is about."* It binds harder here than for the tmux baseline,
+#: because this one ADVANCES on an attributed NOTE and therefore writes on most calls rather than only
+#: on the establishing one. `it_section` repoints it; this value is what a call before any section uses.
+LIVE_INSTANTS_SNAPSHOT="$IT_ROOT/live-instants.txt"
+#: `$FLEET_INSTANTS` AS THIS FILE WAS SOURCED — before any `it_section` rewrites it. That is precisely the
+#: operator's ambient value, inherited from the SHARED tmux server, and it is the tree the ten strays
+#: landed in. Captured here rather than read later, because after `it_section` the variable names our own
+#: sandbox and the vector would have erased itself from the evidence.
+IT_AMBIENT_INSTANTS="${FLEET_INSTANTS:-}"
+#: And the ambient `$FLEET_HOME` for the same reason one line up. With `FLEET_INSTANTS` UNSET — which is
+#: the state of a clean box, and the state this fix is meant to make safe — the product derives
+#: `$FLEET_HOME/instants`, so that is where a leak would go and it must be watched or the check watches
+#: NOTHING and reports a PASS about it. `SI-1`'s shape, found in review before it shipped.
+IT_AMBIENT_HOME="${FLEET_HOME:-}"
+#: The instants half's FAIL marker, a CONSTANT because a control asserts on it. `W1-11` used to grep
+#: `^ISOLATION-W1-11-injected\tFAIL` alone — but `it_assert_isolation` also FAILs for the stores half
+#: and the tmux half, so a live-stores change during the run would have made the instants decoy pass
+#: for a reason that has nothing to do with instants. A control that can pass on the wrong evidence is
+#: not a control. Found in review.
+IT_INSTANTS_FAIL_MARK="A FOLDER THIS SECTION NAMED IS IN A LIVE INSTANTS TREE"
 
 # W-1. Every section gets a tmux server of its OWN, named by socket.
 #
@@ -78,6 +107,36 @@ it_section() {            # it_section <name> -> own FLEET_HOME, own slots, own 
   # matches, and defence in depth costs nothing here.
   IT_TMUX_SOCKET="itfleet-$SECTION"
   export FLEET_TMUX_SOCKET="$IT_TMUX_SOCKET"
+  # SANDBOXED BY CONSTRUCTION, and this line is the whole point of the fix. `it_section` already gave the
+  # section its own store, its own slots and its own tmux SERVER; the instants directory was the one shared
+  # resource it left to the caller's environment. FIFTEEN runners remembered to export it and SIX did not —
+  # `run-Q run-all run-e9-leak run-group5 run-m9-mutation run-w1` — and `run-group5.sh` is the one that
+  # creates instants (`:324 :556 :1231 :1328 :1533`, named `l7probe mprobe m12probe nprobe nOwned`, which
+  # is 5 of the 5 stray names release-verify 0.3.9 minted). A runner could be exposed by FORGETTING, and a
+  # guarantee you have to remember is the failure mode this whole wave keeps paying for.
+  #
+  # `$FLEET_HOME/instants` and NOT `$EV/instants`, and the difference is a REGRESSION I measured rather than
+  # a preference. `$FLEET_HOME/instants` is exactly what `cli.default_context` DERIVES when nothing names the
+  # directory, so on a box with `FLEET_INSTANTS` unset this line changes nothing at all — it makes the
+  # existing default explicit, which is what stops an ambient value overriding it. Pointing it at `$EV`
+  # instead moved the directory, and `run-group5.sh` reads the derived path directly (`:1232` and `:1534`,
+  # `ls "$FLEET_HOME/instants"`): §M failed with *"cannot access .../M/home/instants: No such file or
+  # directory"*. A sandbox that relocates what it is sandboxing is a second defect wearing the fix's badge.
+  #
+  # Set BEFORE the assertion below, so a section is already sandboxed on the call that establishes the
+  # baseline. The eleven runners that name `$EV/instants` for themselves two lines later still override it;
+  # they are unaffected either way.
+  export FLEET_INSTANTS="$FLEET_HOME/instants"
+  mkdir -p "$FLEET_INSTANTS"
+  # This section's OWN instants baseline. Scoping it to the section is also what makes the comparison mean
+  # what its rows claim: "did anything appear in a live tree BETWEEN THIS SECTION'S enter AND ITS leave".
+  LIVE_INSTANTS_SNAPSHOT="$IT_ROOT/live-instants-$SECTION.txt"
+  rm -f "$LIVE_INSTANTS_SNAPSHOT"
+  # The section's register of every instantName it ASKED the product to create. It is what lets the
+  # isolation assertion tell OUR escape from the operator dispatching into their own tree while we run —
+  # without it the check either misses the defect or cries wolf, and a check that cries wolf gets ignored.
+  IT_ASKED_NAMES="$EV/it-asked-names.txt"
+  : > "$IT_ASKED_NAMES"
   it_assert_isolation "$SECTION-enter"
 }
 
@@ -92,9 +151,29 @@ it_section() {            # it_section <name> -> own FLEET_HOME, own slots, own 
 it_fresh_store() {
   rm -rf "$FLEET_HOME"
   mkdir -p "$FLEET_HOME"
+  # `$FLEET_INSTANTS` is `$FLEET_HOME/instants`, so the `rm -rf` above takes the sandboxed instants
+  # directory with it and the guarantee `it_section` just made evaporates for the rest of the section.
+  # Three callers do not export a FLEET_INSTANTS of their own — run-I.sh, run-Q.sh, run-i7.sh — so this is
+  # not theoretical. Found in review, not in the field.
+  mkdir -p "${FLEET_INSTANTS:-$FLEET_HOME/instants}"
 }
 
-fleet() { python3 -m fleet.cli "$@"; }     # never a bare `fleet` on PATH — FLEET_HOME must be explicit
+# Never a bare `fleet` on PATH — FLEET_HOME must be explicit.
+#
+# The wrapper records every instantName this section ASKS for and touches nothing else: argv is read, both
+# streams and the exit code pass through untouched. That matters — §A parses `--porcelain` stdout
+# byte-for-byte and several sections branch on `$?`, so a wrapper that captured stdout to inspect it would
+# change what the suite measures in order to measure it.
+fleet() {
+  if [ -n "${IT_ASKED_NAMES:-}" ]; then
+    local _prev="" _a
+    for _a in "$@"; do
+      case "$_prev" in --name|--title) printf '%s\n' "$_a" >> "$IT_ASKED_NAMES" ;; esac
+      _prev="$_a"
+    done
+  fi
+  python3 -m fleet.cli "$@"
+}
 
 it_pass() { printf '%s\tPASS\t%s\t%s\n' "$1" "${2:-}" "${3:-}" >> "$RESULTS"; printf 'PASS %s %s\n' "$1" "${3:-}"; }
 it_fail() { printf '%s\tFAIL\t%s\t%s\n' "$1" "${2:-}" "${3:-}" >> "$RESULTS"; printf 'FAIL %s %s\n' "$1" "${3:-}" >&2; IT_FAILED=1; }
@@ -386,6 +465,111 @@ it_classify_session_delta() {   # it_classify_session_delta <baseline> <after>
 # `itfleet-M-worker` reached the live server unremarked, and it means every earlier `ISOLATION-*` PASS
 # proves "no dt- session touched" and NOT "the live server is unchanged". Now the full name set is
 # compared, so appearing and disappearing sessions are both caught, whatever they are called.
+# The LIVE instants directories — the ones this harness must never write into. Derived, never hardcoded:
+#
+#   1. `$IT_AMBIENT_INSTANTS`, the caller's own `$FLEET_INSTANTS` as lib.sh was sourced. This is the
+#      measured vector: the shared tmux server exports it globally, so `release-verify` inherits the FIRST
+#      effort's tree and hands it to the suite through `env=dict(os.environ, …)`.
+#   2. `$HOME/.fleet/instants`, which is where a `fleet` with no `$FLEET_INSTANTS` lands by default and is
+#      a real store on this box.
+#
+# Anything under `$IT_ROOT` is OURS and is excluded: the section sandbox is not a live tree, and watching
+# it would turn every legitimate case into a failure.
+it_live_instants_roots() {
+  local root
+  for root in "$IT_AMBIENT_INSTANTS" "${IT_AMBIENT_HOME:+$IT_AMBIENT_HOME/instants}" "$HOME/.fleet/instants"; do
+    [ -n "$root" ] || continue
+    [ -d "$root" ] || continue
+    case "$(cd "$root" && pwd -P)/" in "$IT_ROOT"/*) continue ;; esac
+    printf '%s\n' "$(cd "$root" && pwd -P)"
+  done | sort -u
+}
+
+# One line per entry, `<full path>\t<basename>` — `find -printf '%p\t%f\n'`. Names only — never content or mtimes. A live effort tree is
+# WRITTEN CONTINUOUSLY by the instants living in it, so hashing it the way the stores half hashes
+# `~/.claude-dispatch-board` would fail on every call for reasons that have nothing to do with this
+# harness. The question here is narrower and answerable: *did a FOLDER APPEAR OR VANISH.*
+it_instants_manifest() {
+  local root
+  it_live_instants_roots | while read -r root; do
+    find "$root" -maxdepth 1 -mindepth 1 -type d -printf '%p\t%f\n' 2>/dev/null
+  done | sort
+}
+
+#: `-append-<name>` tail of an instant folder, lowercased and dashless — the form in which a folder name
+#: can be compared with what a runner ASKED for. `identity.camel()` only changes case and separators, so
+#: this comparison is exact under it: `--name nOwned` produced `…-append-nowned` in `run-group5.sh:1533`.
+it_instant_name_tail() {
+  printf '%s' "$1" | sed -E 's/^[0-9]{8}-[0-9]{8}-(inflight|complete|abort)-(append|compact)-//' \
+                   | tr -d -- '_-' | tr '[:upper:]' '[:lower:]'
+}
+
+# THE ATTRIBUTION. An entry that appeared in (or vanished from) a live tree is charged to THIS SECTION only
+# when its name is one this section asked the product to create; anything else is the operator using their
+# own box and is recorded as a NOTE.
+#
+# The asymmetry is deliberate and it is the opposite of the tmux half's. There, an ADDITION is ours only if
+# it carries our prefix, because sessions are cheap and the operator's come and go. Here a name we asked
+# for, appearing in a tree we do not own, IS the defect — there is no other way for it to get there — so it
+# is a FAIL in BOTH directions: appearing means we minted a stray, and vanishing means we renamed or
+# destroyed one, which is worse.
+it_classify_instants_delta() {   # it_classify_instants_delta <baseline> <after>
+  local baseline="$1" after="$2" appeared vanished ours="" others="" line entry tail asked=" " n
+  appeared="$(comm -13 <(printf '%s\n' "$baseline") <(printf '%s\n' "$after") | grep -v '^$')"
+  vanished="$(comm -23 <(printf '%s\n' "$baseline") <(printf '%s\n' "$after") | grep -v '^$')"
+
+  # The asked-for names, normalised ONCE into a space-delimited set. A `--name` value is not yet an instant
+  # folder name, so it is normalised through the same tail function with a synthetic prefix — one code path
+  # for both sides of the comparison, because two normalisers are two things to keep in step.
+  if [ -s "${IT_ASKED_NAMES:-/dev/null}" ]; then
+    while IFS= read -r n; do
+      [ -n "$n" ] || continue
+      asked="$asked$(it_instant_name_tail "00000000-00000000-inflight-append-$n") "
+    done < "$IT_ASKED_NAMES"
+    # DISTRUST ABSENCE, and this branch is here because the absence was real. The first version of
+    # `it_instant_name_tail` ended `tr -d '-_'`, which `tr` reads as OPTIONS (`invalid option -- '_'`), so
+    # every tail came back EMPTY and every escape was attributed to "the operator" — a check that can never
+    # charge anything to itself and therefore can never fail. `W1-11` caught it before it shipped. An
+    # attributor that normalises a non-empty register to nothing is broken, not reassuring, and it says so.
+    if [ -z "${asked// /}" ]; then
+      printf 'FAIL|THE ATTRIBUTOR IS BROKEN: %s holds %s name(s) and every one normalised to the empty string, so nothing could ever be charged to this section and this check cannot fail. Fix it_instant_name_tail before trusting any ISOLATION verdict about instants.\n' \
+        "$IT_ASKED_NAMES" "$(grep -c . "$IT_ASKED_NAMES")"
+      return 0
+    fi
+  fi
+
+  while IFS= read -r line; do
+    [ -n "$line" ] || continue
+    entry="${line##*$'\t'}"
+    # Only an entry that PARSES as an instantName is a candidate. Two reasons, and the second is not
+    # cosmetic: a live tree may hold ordinary directories that are nobody's instant, and the membership test
+    # below is a bash PATTERN substitution — a directory literally named `*` would otherwise normalise to a
+    # glob, match everything in the asked-set, and raise a FAIL about a folder we never created.
+    if ! [[ "$entry" =~ ^[0-9]{8}-[0-9]{8}-(inflight|complete|abort)-(append|compact)-[A-Za-z0-9]+$ ]]; then
+      others="$others ${entry}"
+      continue
+    fi
+    tail="$(it_instant_name_tail "$entry")"
+    if [ -n "$tail" ] && [ "$asked" != "${asked/ $tail / }" ]; then
+      ours="$ours ${line%%$'\t'*}"
+    else
+      others="$others ${entry}"
+    fi
+  done <<< "$appeared
+$vanished"
+
+  if [ -n "${ours// /}" ]; then
+    printf 'FAIL|'"$IT_INSTANTS_FAIL_MARK"':%s. This section asked the product to create that instantName and the folder is outside %s, so it cannot be anyone else. That is I2-11 — the instants directory resolved from the environment rather than from the sandbox — and it is how ten strays and FI-196 happened while this very assertion recorded PASS.\n' \
+      "$ours" "$IT_ROOT"
+    return 0
+  fi
+  if [ -n "${others// /}" ]; then
+    printf 'NOTE|instants appeared or vanished in a live tree and NONE carries a name this section asked for, so this is the operator using their own box:%s\n' "$others"
+    return 0
+  fi
+  printf 'OK|live instants trees byte-identical\n'
+}
+
 it_assert_isolation() {
   local tag="$1" now sessions
   now="$( { find ~/.claude-dispatch-board ~/.claude-ws-pool -type f -print0 2>/dev/null | sort -z | xargs -0 sha256sum; } )"
@@ -409,6 +593,43 @@ it_assert_isolation() {
     it_fail "ISOLATION-$tag" "" "THE LIVE STORES CHANGED — the ANSI coordinator runs on them. Aborting."
     return 1
   fi
+  # --- THE THIRD HALF: the live INSTANTS directories -----------------------------------------------
+  #
+  # Evaluated HERE, above the tmux baseline branch, and NOT after it. That branch `return`s on a first run,
+  # and the comment on it records what the last such early return cost: a half that is skipped on the
+  # establishing call never binds at all. Its fact is carried into whichever row this call emits, exactly
+  # like `stores_note`.
+  local instants_now instants_note="" instants_classified instants_verdict instants_roots
+  instants_roots="$(it_live_instants_roots | grep -c . )"
+  instants_now="$(it_instants_manifest)"
+  # DISTRUST ABSENCE. Zero watched trees is not "nothing changed", it is "nothing was looked at", and the
+  # terminal row below would otherwise report `unchanged in 0 live tree(s)` — true, vacuous, and reading
+  # exactly like a pass. On a box with FLEET_INSTANTS and FLEET_HOME both unset that is the DEFAULT state.
+  if [ "$instants_roots" = 0 ]; then
+    instants_note="the instants half is VACUOUS on this call: ZERO live instants trees resolved (ambient FLEET_INSTANTS=[${IT_AMBIENT_INSTANTS:-unset}], ambient FLEET_HOME=[${IT_AMBIENT_HOME:-unset}], ~/.fleet/instants absent), so it compared NOTHING and proves nothing. "
+  fi
+  if [ ! -f "$LIVE_INSTANTS_SNAPSHOT" ]; then
+    printf '%s\n' "$instants_now" > "$LIVE_INSTANTS_SNAPSHOT"
+    instants_note="${instants_note}live-INSTANTS baseline ESTABLISHED on this call ($(printf '%s' "$instants_now" | grep -c . ) folder(s) across $(it_live_instants_roots | grep -c . ) live tree(s)), so the instants half is vacuous here and binds from the next call on. "
+  else
+    instants_classified="$(it_classify_instants_delta "$(cat "$LIVE_INSTANTS_SNAPSHOT")" "$instants_now")"
+    instants_verdict="${instants_classified%%|*}"
+    if [ "$instants_verdict" = FAIL ]; then
+      # The artifact is the ACTUAL per-section baseline, not the hardcoded shared name it used to be —
+      # a row citing a file the comparison did not use sends the reader to the wrong evidence.
+      it_fail "ISOLATION-$tag" "${LIVE_INSTANTS_SNAPSHOT#$IT_ROOT/}" "${stores_note}${instants_note}${instants_classified#*|}"
+      return 1
+    fi
+    if [ "$instants_verdict" = NOTE ]; then
+      # The baseline MOVES FORWARD on an attributed NOTE, and only there. Otherwise one operator dispatch
+      # mid-run re-reports itself on every remaining call of a 24-minute suite, and a row that repeats
+      # something already judged harmless is how a real one stops being read. It never moves forward on a
+      # FAIL: that alarm has to keep firing until somebody clears the folder.
+      printf '%s\n' "$instants_now" > "$LIVE_INSTANTS_SNAPSHOT"
+      instants_note="${instants_note}${instants_classified#*|} "
+    fi
+  fi
+
   sessions="$(it_live_tmux_sessions)"
   # Recorded, never touched. Per section rather than one shared file: two sections running concurrently
   # would otherwise both write it, and a register with two writers is the defect this whole wave is about.
@@ -420,24 +641,24 @@ it_assert_isolation() {
     # Not a PASS. This call ESTABLISHED the baseline and therefore compared nothing, and a baseline-setting
     # call reported as a pass is the "absence is never success" defect wearing the harness's own badge.
     it_skip "ISOLATION-$tag" "fleet/it/live-tmux-sessions.txt" \
-            "${stores_note}live-session baseline ESTABLISHED on this call ($(printf '%s' "$sessions" | grep -c . ) sessions), so the tmux comparison is vacuous here; it binds from the next call on"
+            "${stores_note}${instants_note}live-session baseline ESTABLISHED on this call ($(printf '%s' "$sessions" | grep -c . ) sessions), so the tmux comparison is vacuous here; it binds from the next call on"
     return 0
   fi
   local classified verdict detail
   classified="$(it_classify_session_delta "$(cat "$LIVE_TMUX_SNAPSHOT")" "$sessions")"
   verdict="${classified%%|*}"; detail="${classified#*|}"
   if [ "$verdict" = FAIL ]; then
-    it_fail "ISOLATION-$tag" "fleet/it/live-tmux-sessions.txt" "${stores_note}${detail}"
+    it_fail "ISOLATION-$tag" "fleet/it/live-tmux-sessions.txt" "${stores_note}${instants_note}${detail}"
     return 1
   fi
   if [ "$verdict" = NOTE ]; then
     # Recorded on the PASS row rather than swallowed: the run stays attributable, and `verify` reads this
     # to decide between RED and INCONCLUSIVE.
-    it_pass "ISOLATION-$tag" "fleet/it/live-tmux-sessions.txt" "${stores_note}${detail}"
+    it_pass "ISOLATION-$tag" "fleet/it/live-tmux-sessions.txt" "${stores_note}${instants_note}${detail}"
     return 0
   fi
   it_pass "ISOLATION-$tag" "" \
-          "${stores_note}live stores byte-identical; live tmux session set byte-identical ($(printf '%s' "$sessions" | grep -c . ) sessions, incl. $(printf '%s' "$sessions" | grep -c '^dt-') dt-); section work is on socket $IT_TMUX_SOCKET"
+          "${stores_note}${instants_note}live stores byte-identical; live instants trees unchanged in $(it_live_instants_roots | grep -c . ) live tree(s); live tmux session set byte-identical ($(printf '%s' "$sessions" | grep -c . ) sessions, incl. $(printf '%s' "$sessions" | grep -c '^dt-') dt-); section work is on socket $IT_TMUX_SOCKET"
 }
 
 # Kills only this section's sessions, on the private server, by EXACT name. Two changes from the form that

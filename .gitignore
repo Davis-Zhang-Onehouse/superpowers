@@ -23,6 +23,9 @@ fleet/it/*/
 # Box-local baselines, established on first run by it/lib.sh: another checkout has different live sessions.
 fleet/it/live-stores.sha256
 fleet/it/live-tmux-sessions.txt
+# The instants-directory baseline, the third live resource `it_assert_isolation` compares (I2-11).
+# A snapshot of THIS BOX's live effort trees, exactly like the two above, so it cannot be committed.
+fleet/it/live-instants*.txt
 fleet/it/dt-sessions-seen*.txt
 
 .worktrees/
