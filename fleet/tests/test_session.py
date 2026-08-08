@@ -494,3 +494,217 @@ class TestIsClaudeProcess(unittest.TestCase):
         sessions, _, _ = layer(procs=[LiveSession(42, pathlib.Path("/w"), "dt-x")])
         self.assertFalse(sessions.is_claude_process(""),
                          "an unnamed pane must never be asserted to be anything")
+
+
+# --- FI-208: the DIM ghost suggestion is not typed text -------------------------------------------
+#
+# EVERY constant below is a byte sequence a REAL Claude Code pane emitted, captured with
+# `tmux capture-pane -p -e` on 2026-08-08 and archived in the `i7` instant's `evidence/01-red/`. None of
+# them is authored. That distinction is the point of these cases: the defect they cover survived because
+# the one bit that mattered was an ATTRIBUTE nobody had looked at, and a fixture invented at a desk
+# reproduces the author's idea of a pane rather than a pane.
+#
+# Three DIFFERENT caret-line shapes appear here because three different shapes were measured, and a fix
+# that handled one would have been flaky against the others:
+#   * `\x1b[39m❯\xa0…`  — attribute BEFORE the caret        (`dt-w22…`, 01:57Z)
+#   * `❯\xa0\x1b[39m`   — attribute AFTER the caret          (`dt-i7…`, own pane, 02:05Z)
+#   * `❯\xa0\x1b[2m…`   — attribute opening the BODY         (the ghost, re-rendered through real tmux)
+
+#: `dt-w22RetainedTestsNeedRestructuring`, the pane FI-208 was measured on. The box is EMPTY and the
+#: suggestion is drawn in SGR 2. Recorded in the coordinator's `ISSUES.md` at 01:40Z and reproduced
+#: byte-for-byte through a real tmux round-trip at 02:00Z (`evidence/01-red/07-…`).
+LIVE_GHOST_BOX = "\x1b[39m❯ \x1b[2mkeep watching and triage anything red\x1b[0m\x1b[39m\x1b[49m"
+#: The SAME pane fifteen minutes later, box still empty, ghost not currently drawn. The caret is preceded
+#: by an attribute here too — which is what makes it the false-safe control below.
+LIVE_EMPTY_BOX = "\x1b[39m❯ "
+#: A second live pane's empty box, with the attribute on the OTHER side of the caret.
+LIVE_EMPTY_BOX_TRAILING_SGR = "❯ \x1b[39m"
+#: An auditor's control probe: genuinely TYPED text renders at normal intensity, no SGR 2 anywhere.
+LIVE_TYPED_BOX = "\x1b[39m❯ REAL-TYPED-TEXT-GAMMA"
+#: A live idle Claude Code footer. Note `auto mode on` and `(shift+tab to cycle)` are ONE phrase split by
+#: a colour change — measured, not hypothetical, and the reason marker matching runs on `plain`.
+LIVE_FOOTER = ("\x1b[39m  \x1b[93m⏵⏵ auto mode on\x1b[37m (shift+tab to cycle) · "
+               "← for agents\x1b[39m")
+LIVE_BUSY_FOOTER = ("\x1b[39m  \x1b[93m⏵⏵ auto mode on\x1b[37m (shift+tab to cycle) · "
+                    "esc to interrupt · ← for agents\x1b[39m")
+#: tmux pads a capture to the pane height, and with `-e` a padding row is not the empty string.
+LIVE_STYLED_BLANK = "\x1b[39m\x1b[49m"
+
+
+def pane(*rows) -> str:
+    """A capture: the rows, then the styled-blank padding a real `-e` capture carries."""
+    return "\n".join(list(rows) + [LIVE_STYLED_BLANK] * 6)
+
+
+class TestTheDimGhostIsNotTypedText(unittest.TestCase):
+    """`FI-208`, and BOTH directions of it, which is the whole requirement.
+
+    Claude Code draws a model-generated suggestion into an EMPTY input box in SGR 2 (DIM). Captured
+    without `-e` that attribute is gone, so the suggestion is indistinguishable from a message a human
+    typed and never sent. `pane-guard` answered `10 queued-text` for every idle worker in a live effort
+    for ten and a half hours, and `close` refused to close a finished one naming a remedy — *submit or
+    clear the text* — that could not be performed, because there was no text.
+
+    **The opposite direction is tested just as hard, and deliberately so.** Making the ghost read as empty
+    is easy; doing it in a way that ALSO stops real queued text being seen is a worse defect than the one
+    being fixed, because a `send-keys` then concatenates onto a draft nobody knew was there. That is
+    `FI-180`'s rule — when a fix makes a failure stop being visible, it is not done until the visibility
+    is replaced — so every case here has a twin.
+    """
+
+    def setUp(self):
+        self.sessions, _, _ = layer()
+
+    # --- direction 1: the ghost must read as an EMPTY box -----------------------------------------
+
+    def test_the_live_ghost_suggestion_is_not_unsubmitted_text(self):
+        self.assertIsNone(self.sessions.unsubmitted(pane("output", LIVE_GHOST_BOX, LIVE_FOOTER)),
+                          "the DIM body is Claude Code's own suggestion in an EMPTY box. Reporting it as "
+                          "queued text is FI-208: an alarm with no subject, and a close refusal whose "
+                          "stated remedy nobody can perform")
+
+    def test_the_ghost_is_classified_by_ATTRIBUTE_and_not_by_matching_its_TEXT(self):
+        """`AC-6`. The suggestion is model-generated prose, so a denylist of texts can never be finished.
+
+        Same DIM wrapper, arbitrary body — if this only passed for the one string that was measured, the
+        fix would be a denylist with one entry and the next suggestion would re-open the defect.
+        """
+        for body in ("run the tests again", "ask me anything", "⌘ summarise the last hour",
+                     "keep watching and triage anything red"):
+            ghost = f"\x1b[39m❯ \x1b[2m{body}\x1b[0m\x1b[39m\x1b[49m"
+            self.assertIsNone(self.sessions.unsubmitted(pane("output", ghost, LIVE_FOOTER)),
+                              f"a DIM body must be a placeholder whatever it says: {body!r}")
+
+    # --- direction 2: REAL typed text must still be seen ------------------------------------------
+
+    def test_genuinely_typed_text_is_still_reported_as_queued(self):
+        """The `FI-169` control. `send-keys` DOES concatenate onto an existing draft — proven by
+        execution on a private socket, one user turn with no separator — so this guard is correct and the
+        FI-208 fix must not weaken it."""
+        self.assertEqual(self.sessions.unsubmitted(pane("output", LIVE_TYPED_BOX, LIVE_FOOTER)),
+                         "REAL-TYPED-TEXT-GAMMA")
+
+    def test_an_attribute_before_the_caret_does_not_HIDE_a_box_holding_real_text(self):
+        """THE false-safe this fix could most easily have introduced, and it is not hypothetical: adding
+        `-e` to the capture and stopping there was measured returning None for exactly this line, because
+        `line.strip()[0]` is then `ESC` rather than the caret. Every pane with a styled caret — which is
+        every live pane measured — would have reported an empty box while holding a real draft, and
+        `pane-guard` would have said `0 safe`."""
+        self.assertEqual(self.sessions.unsubmitted(pane("output", LIVE_TYPED_BOX, LIVE_FOOTER)),
+                         "REAL-TYPED-TEXT-GAMMA",
+                         "the caret is preceded by an SGR escape on every live pane measured; a predicate "
+                         "that cannot find it reports every box as empty")
+
+    def test_a_dim_HINT_beside_typed_text_does_not_swallow_the_typed_text(self):
+        """Partially-dim bodies are the case that separates *drop the dim cells* from *any dim means
+        placeholder*. The lazy rule would classify this whole box as empty and lose a real draft."""
+        mixed = "\x1b[39m❯ ship it\x1b[2m  (press enter)\x1b[0m"
+        self.assertEqual(self.sessions.unsubmitted(pane("output", mixed, LIVE_FOOTER)), "ship it")
+
+    # --- the box shapes that are genuinely empty --------------------------------------------------
+
+    def test_both_live_forms_of_an_EMPTY_box_read_as_empty(self):
+        for label, row in (("attribute before the caret", LIVE_EMPTY_BOX),
+                           ("attribute after the caret", LIVE_EMPTY_BOX_TRAILING_SGR)):
+            self.assertIsNone(self.sessions.unsubmitted(pane("output", row, LIVE_FOOTER)),
+                              f"an empty box must read empty: {label}")
+
+    def test_the_five_legacy_placeholder_shapes_still_answer_for_a_terminal_that_STRIPS_attributes(self):
+        """`AC-6`: attribute-absence is the primary signal and these remain the fallback. A terminal or a
+        tmux that yields no SGR leaves the old shapes as the only evidence available, and deleting them
+        would trade one blind spot for another."""
+        for placeholder in ('❯ Try "fix the bug"', "❯ / for commands", "❯ # for memory",
+                            "❯ new task?", "❯ ask about this repo"):
+            self.assertIsNone(self.sessions.unsubmitted(pane("output", placeholder, "footer")),
+                              f"the legacy fallback must still hold for {placeholder!r}")
+
+
+class TestTheCaptureKeepsWhatTheseCasesDependOn(unittest.TestCase):
+    """The attribute has to SURVIVE the probe, or every case above is asserting on a string the product
+    never sees. `FI-208` is precisely that gap: the predicates were fine, the capture threw the input
+    away, and the suite could not tell because it fed the predicates by hand."""
+
+    def test_the_capture_argv_asks_tmux_for_escape_sequences(self):
+        captured = []
+        probes = default_probes(tmux_socket="itfleet-selftest-argv")
+        import fleet.session as session_mod
+        real_run = subprocess.run
+        try:
+            def spy(argv, *a, **kw):
+                captured.append(argv)
+                return subprocess.CompletedProcess(argv, 1, "", "")
+            subprocess.run = spy
+            probes.capture_pane("itfleet-nothing")
+        finally:
+            subprocess.run = real_run
+        argv = [a for a in captured if "capture-pane" in a]
+        self.assertTrue(argv, "no capture-pane argv was built at all")
+        self.assertIn("-e", argv[0],
+                      "the capture must ask tmux for the SGR attributes (FI-208). Without -e the DIM "
+                      "ghost suggestion and text a human typed are the SAME STRING, and every consumer "
+                      "above this line is deciding on a value the distinguishing bit was removed from")
+
+    def test_styled_blank_padding_does_not_push_the_window_off_the_content(self):
+        """`FI-24`, re-opened by the attributes. tmux pads a capture to the pane height; with `-e` those
+        padding rows carry escapes, so a blank-check on the raw row stops trimming at the padding and
+        anchors the tail window BELOW the content — a box with real text then falls outside its own
+        window and reads safe."""
+        sessions, _, _ = layer()
+        deep = pane(*(["scrollback"] * 20 + [LIVE_TYPED_BOX, LIVE_FOOTER]))
+        self.assertEqual(sessions.unsubmitted(deep), "REAL-TYPED-TEXT-GAMMA")
+
+    def test_busy_survives_a_footer_whose_phrase_is_split_by_a_colour_change(self):
+        """Marker matching runs on the visible characters. `auto mode on (shift+tab to cycle)` is ONE
+        phrase interrupted by `\\x1b[37m` in the live capture — measured — so a raw substring match is one
+        styling change away from reporting a mid-turn pane as idle."""
+        sessions, _, _ = layer()
+        self.assertTrue(sessions.busy(pane("working", LIVE_BUSY_FOOTER)))
+        self.assertFalse(sessions.busy(pane("done", LIVE_FOOTER)))
+        from fleet.session import plain as _plain
+        self.assertNotIn("auto mode on (shift+tab to cycle)", LIVE_FOOTER,
+                         "if the raw footer already contains the whole phrase this case proves nothing")
+        self.assertIn("auto mode on (shift+tab to cycle)", _plain(LIVE_FOOTER))
+
+
+class TestExtendedColourIsNotDim(unittest.TestCase):
+    """`OI-1` — the false-safe the FI-208 fix introduced and a review caught before it shipped.
+
+    `\\x1b[38;2;136;192;208m` is truecolor foreground. Read parameter-by-parameter it **contains a `2`**,
+    and the first version of `_cells` scored that as SGR 2 = DIM. Measured consequence: a truecolor-styled
+    input box made REAL TYPED TEXT VANISH — `_caret_content` returned `''`, `unsubmitted` returned None,
+    `pane-guard` said `0 safe`, and a `send-keys` would concatenate onto somebody's live draft.
+
+    That is the exact failure `AC-5` forbids and `FI-169` exists to prevent, reintroduced by the fix for
+    `FI-208` — a fix trading one blind spot for a worse one, one layer down. It was latent rather than
+    live (neither archived live capture contains `38;2`), which is precisely why it needed a control
+    rather than a note: nothing in the fleet would have shown it until the day a TUI restyled its box.
+    """
+
+    def setUp(self):
+        self.sessions, _, _ = layer()
+
+    def test_a_truecolor_or_256_colour_body_is_TYPED_TEXT_not_a_placeholder(self):
+        for label, sequence in (
+                ("truecolor foreground", "\x1b[38;2;136;192;208m"),
+                ("truecolor background", "\x1b[48;2;1;2;3m"),
+                ("256-colour index 2 — the one that looks most like SGR 2", "\x1b[38;5;2m"),
+                ("256-colour index 99", "\x1b[38;5;99m"),
+                ("underline colour", "\x1b[58;2;1;2;3m")):
+            row = f"\x1b[39m{CARET}{NBSP}{sequence}REAL-TYPED-TEXT-GAMMA"
+            self.assertEqual(self.sessions.unsubmitted(pane("output", row, LIVE_FOOTER)),
+                             "REAL-TYPED-TEXT-GAMMA",
+                             f"{label}: an extended-colour introducer swallows its own arguments. Scoring "
+                             f"one of them as SGR 2 makes a styled box read EMPTY while it holds a real "
+                             f"draft, and a send then concatenates onto it")
+
+    def test_real_DIM_still_wins_when_it_follows_an_extended_colour(self):
+        """The twin. Skipping colour arguments must not also skip a genuine SGR 2 after them."""
+        row = f"\x1b[38;2;1;2;3m{CARET}{NBSP}\x1b[2mkeep watching and triage anything red\x1b[0m"
+        self.assertIsNone(self.sessions.unsubmitted(pane("output", row, LIVE_FOOTER)))
+
+    def test_a_malformed_introducer_consumes_only_itself(self):
+        """`\\x1b[38m` with no selector must not eat the rest of the sequence — a malformed escape that
+        swallowed everything after it would be a second way to lose a draft."""
+        row = f"\x1b[39m{CARET}{NBSP}\x1b[38mtyped after a malformed introducer"
+        self.assertEqual(self.sessions.unsubmitted(pane("output", row, LIVE_FOOTER)),
+                         "typed after a malformed introducer")

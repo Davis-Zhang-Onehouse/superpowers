@@ -2967,3 +2967,54 @@ class TestCloneMakesTheGoldenAnInput(CliCase):
         self.assertEqual(0, code, err)
         self.assertIn("this clone is unverified", out,
                       "a clone with no --verify-repos must SAY it was not verified")
+
+
+class TestAnIdleClaudePaneIsStillAClaudePane(unittest.TestCase):
+    """`FI-208`/`OI-2` — `_is_claude`'s glyph fallback, and the half of the fix that had no control.
+
+    `pane-guard`'s `12 not-claude` says *"a send here goes to somebody else's shell"*, and the close-out
+    contract treats it as permission to tear the pane down. `_is_claude` reaches it by falling through
+    process evidence, then the marker list, then `busy() or unsubmitted() is not None`.
+
+    **MEASURED on two live Claude Code panes on 2026-08-08** (`i7` evidence `01-red/01-…` and `04-…`): an
+    IDLE modern pane matches **none** of the eight original markers. Its footer is
+    `⏵⏵ auto mode on (shift+tab to cycle) · ← for agents`. So before `FI-208` the only thing keeping such
+    a pane out of `12` was `unsubmitted()` returning the DIM ghost — and fixing `FI-208` removes exactly
+    that. Trading a false `10` for a false `12` moves the error into the direction that destroys work.
+
+    These two cases are what stop the replacement marker being deleted by someone who cannot see why it
+    is there. Without them, `cli.py`'s half of the fix has no failing control at all.
+    """
+
+    #: Copied byte-for-byte from `evidence/01-red/01-w22-capture-WITH-e.raw`, an idle live pane.
+    IDLE_FOOTER = ("\x1b[39m  \x1b[93m⏵⏵ auto mode on\x1b[37m (shift+tab to cycle) · "
+                   "← for agents\x1b[39m                       \x1b[96m/rc\x1b[39m")
+
+    def sessions(self):
+        from fleet.session import Probes, SessionLayer
+        return SessionLayer(Probes(list_processes=lambda: [], capture_pane=lambda n: "",
+                                   has_session=lambda n: False, start_session=lambda *a: None,
+                                   kill_session=lambda n: None))
+
+    def test_a_live_IDLE_footer_is_recognised_as_claude_with_no_process_and_an_empty_box(self):
+        pane = "\n".join(["some finished answer", "\x1b[39m❯\xa0", self.IDLE_FOOTER])
+        self.assertTrue(
+            cli._is_claude(self.sessions(), pane, "dt-someworker"),
+            "an idle Claude Code pane with an EMPTY box and no attributable process must still be a "
+            "claude pane. Answering 12 not-claude here authorises tearing down a live worker, and it is "
+            "reachable the moment the DIM ghost stops being miscounted as queued text (FI-208)")
+
+    def test_a_marker_split_by_a_colour_change_is_still_found(self):
+        """`auto mode on (shift+tab to cycle)` is ONE phrase interrupted by `\\x1b[37m` in the live
+        capture. The capture carries attributes now, so matching the raw text is one styling change away
+        from reporting a live pane as somebody else's shell."""
+        self.assertNotIn("auto mode on (shift+tab to cycle)", self.IDLE_FOOTER,
+                         "if the raw footer already held the whole phrase this case would prove nothing")
+        pane = "\n".join(["output", "\x1b[39m❯\xa0", self.IDLE_FOOTER])
+        self.assertTrue(cli._is_claude(self.sessions(), pane, "dt-x"))
+
+    def test_a_genuinely_foreign_pane_is_still_NOT_claude(self):
+        """The twin. A fallback widened until everything matches is not a fallback — `12` has to stay
+        reachable, or `close`/`reap` can never tidy a real shell."""
+        pane = "\n".join(["$ tail -f /var/log/syslog", "Aug  8 02:31:02 host sshd[1]: ok", "$ "])
+        self.assertFalse(cli._is_claude(self.sessions(), pane, "some-shell"))
