@@ -64,7 +64,7 @@ from pathlib import Path
 from typing import Callable
 
 from fleet import EXIT_ATTENTION, EXIT_BAD_INPUT, EXIT_CODES, EXIT_OK, EXIT_REFUSED, __version__
-from fleet import guards, layout, render, seedcheck
+from fleet import guards, layout, peers as peers_mod, render, seedcheck
 from fleet.atomic import atomic_write
 from fleet.errors import BadInput, FleetError, Refused
 from fleet.harvest import DEFAULT_MAX_AGE_S, REGISTER_NAME, Harvest
@@ -2078,6 +2078,33 @@ def _do_leases(ctx: Ctx, parsed: Parsed) -> int:
     return EXIT_OK
 
 
+def _do_peers(ctx: Ctx, parsed: Parsed) -> int:
+    """Every live local Claude session, classified by PROVENANCE into addressable and not.
+
+    Cross-session messaging made "never touch another effort's session" a matter of discipline where
+    it used to be a matter of impossibility. This verb is the mechanism that replaces the discipline:
+    it resolves each peer's `cwd` against this store's OPEN leases, so ownership is derived from what
+    the runtime and the lease records say rather than from a name a reader has to interpret.
+
+    It is deliberately READ-ONLY and it does not send anything. Deciding who may be addressed and
+    actually addressing them are separate powers, and a verb that did both would be one mistake away
+    from messaging a stranger.
+    """
+    rows = peers_mod.load_peers()
+    leases = peers_mod.load_leases(str(ctx.home / "records"))
+    results = peers_mod.classify(rows, leases)
+    only = parsed.on("addressable-only")
+    if ctx.porcelain:
+        # `porcelain()` already terminates EVERY row including the last: `wc -l` and `while read`
+        # both drop an unterminated final line, and which peer that silently loses depends only on
+        # listing order -- under --addressable-only it can be the sole OURS row.
+        _write(ctx, peers_mod.porcelain(results, addressable_only=only))
+    else:
+        _write(ctx, peers_mod.render(results, addressable_only=only))
+        _write(ctx, "\n" + peers_mod.summary(results) + "\n")
+    return EXIT_OK
+
+
 def _do_roadmap(ctx: Ctx, parsed: Parsed) -> int:
     child = _instant(ctx, parsed)
     _write(ctx, render.roadmap_view(Roadmap(child), porcelain=ctx.porcelain))
@@ -3741,6 +3768,11 @@ VERBS = {spec.name: spec for spec in (
         Flag("--id", True, True, "the subject identity, or a unique substring of it"),
     )),
     _verb("leases", _do_leases, True, "every enrolled slot and who holds it"),
+    _verb("peers", _do_peers, True,
+          "live local Claude sessions, classified by provenance into addressable and FOREIGN",
+          flags=(
+        Flag("--addressable-only", False, help="print only the peers this fleet owns"),
+    )),
     _verb("roadmap", _do_roadmap, True, "milestones, readiness, blockers and pending proposals",
           checker=True, flags=(
         Flag("--instant", True, True, "the instant holding the roadmap"),
@@ -3835,6 +3867,7 @@ VERBS = {spec.name: spec for spec in (
 #: The porcelain schema per verb, declared as data so a consumer and a test read the column count off the
 #: surface rather than off a comment that can go stale (`W2-20`'s class).
 PORCELAIN_COLUMNS = {
+    "peers": peers_mod.PEER_COLUMNS,
     "init": KV_COLUMNS,
     "dispatch": KV_COLUMNS,
     "resume": KV_COLUMNS,
