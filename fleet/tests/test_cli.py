@@ -1122,11 +1122,41 @@ class TestOutwardState(CliCase):
         `fleet` renders the seed and does not deliver it. If that verdict could kill, every dispatch on the
         box would be torn down to fix one — the shape where a safety check becomes the outage.
         """
-        import inspect
-        source = inspect.getsource(cli._do_dispatch)
+        import inspect, textwrap
+        source = textwrap.dedent(inspect.getsource(cli._do_dispatch))
+        tree = ast.parse(source)
+
+        # STRUCTURAL, over EVERY kill in the function — not a prefix of its source text.
+        #
+        # The first version of this case did `source.split("ctx.sessions.kill(")[0]` and asserted over the
+        # text BEFORE THE FIRST kill. A reviewer found the hole: a SECOND `ctx.sessions.kill(...)` added
+        # anywhere later in `_do_dispatch` is invisible to that check, and the package-wide AST test above
+        # records only WHICH functions call kill, never how many times. So the admission would have been
+        # narrow by convention rather than by construction — exactly the next-editor move this milestone
+        # exists to anticipate.
+        kills = [node for node in ast.walk(tree)
+                 if isinstance(node, ast.Call) and isinstance(node.func, ast.Attribute)
+                 and node.func.attr == "kill"]
+        self.assertEqual(len(kills), 1,
+                         f"_do_dispatch may end exactly ONE session — its own, on a FOREIGN seed — and "
+                         f"{len(kills)} kill call(s) were found. A second one is a new outward action "
+                         f"hiding inside an admission granted for one.")
+
+        # ...and that one kill must sit inside a branch testing FOREIGN, never NOT_DELIVERED.
+        def guarded(node) -> bool:
+            for branch in ast.walk(tree):
+                if not isinstance(branch, ast.If):
+                    continue
+                if any(k is node for k in ast.walk(branch)) and not any(
+                        k is node for k in ast.walk(ast.Module(body=[branch.test], type_ignores=[]))):
+                    names = {n.attr for n in ast.walk(branch.test) if isinstance(n, ast.Attribute)}
+                    if "FOREIGN" in names:
+                        return True
+            return False
+
+        self.assertTrue(guarded(kills[0]),
+                        "the kill must sit inside a branch whose test references seedcheck.FOREIGN")
         killing_branch = source.split("ctx.sessions.kill(")[0]
-        self.assertIn("seedcheck.FOREIGN", killing_branch,
-                      "the kill must be guarded by the FOREIGN verdict")
         self.assertNotIn("seedcheck.NOT_DELIVERED", killing_branch,
                          "NOT-DELIVERED must not be able to reach the kill: it is the ordinary state of a "
                          "send-keys delivery, not a misdelivery")
