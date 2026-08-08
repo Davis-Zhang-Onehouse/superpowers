@@ -1,0 +1,35 @@
+i7-ghost-box.frame / i7-typed-box.frame — FI-208's two decoys, DERIVED FROM LIVE INPUT.
+
+PROVENANCE, so a reader can tell a measurement from an invention:
+
+  Both frames are the last rows of a REAL `tmux capture-pane -p -e` of the live Claude Code pane
+  `dt-w22RetainedTestsNeedRestructuring`, taken 2026-08-08T01:57Z on the fleet socket and archived at
+  `…/fleetInfraOps/00000000-08080153-…-i7paneguardplaceholder/evidence/01-red/01-w22-capture-WITH-e.raw`.
+  That pane was harvested fifteen minutes later, which is why the capture is archived rather than
+  re-taken.
+
+  ⚠️ EVERY ESCAPE IS A CAPTURED BYTE **EXCEPT THE ONE ROW THAT MATTERS**, and being precise about that
+  is the difference between provenance and decoration. The archived capture carries SGR parameters
+  0, 1, 37, 39, 49, 93, 96 and 97 — and **no `2` anywhere**: by 01:57Z the box was already empty and the
+  ghost was not being drawn. The `ESC[2m` row below is the COORDINATOR's verbatim measurement of the SAME
+  pane at 01:40Z, recorded in FI-208 and transcribed here. The ghost was therefore **REPRODUCED, not
+  re-observed** — see `ASSUMPTIONS.md` A-1 in the i7 instant. What IS first-hand is that a real tmux,
+  handed that row, renders and returns it byte-for-byte, which is exactly what these fixtures exercise.
+
+  ONE row differs between the two files — the input-box row:
+
+    i7-ghost-box.frame  ^[[39m❯<NBSP>^[[2mkeep watching and triage anything red^[[0m^[[39m^[[49m
+    i7-typed-box.frame  ^[[39m❯<NBSP>REAL-TYPED-TEXT-GAMMA
+
+  The ghost row is the coordinator's verbatim live measurement of the same pane at 01:40Z, recorded in
+  FI-208. `ESC[2m` is SGR 2 = DIM: Claude Code's model-generated suggestion, drawn in an EMPTY box. The
+  typed row is an auditor's control probe of genuinely typed text, which renders no `ESC[2m` at all.
+
+  ONE ROW APART IS THE POINT. Captured without `-e` the two frames are the same bytes except for the
+  body text, and no predicate anywhere above the capture can tell them apart. That was FI-208.
+
+WHY THEY ARE RENDERED THROUGH A REAL TMUX RATHER THAN FED IN AS STRINGS: the defect is in the capture
+ARGV, one layer below every predicate. A case that hands a predicate a string cannot reach it — measured:
+the ghost cases in `tests/test_session.py` pass against the PRE-FIX source, vacuously, because the pre-fix
+`_caret_content` cannot find a caret in an escaped line at all. Only a case that goes out to tmux and
+comes back sees what the product sees.

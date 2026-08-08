@@ -55,8 +55,107 @@ _CARET = ("❯", ">")
 #: Box-drawing gutter around the input box, stripped before the caret is looked for.
 _GUTTER = "│┃|"
 
+#: SGR — the "select graphic rendition" escape, the ONLY thing `capture-pane -e` adds to a capture. It is
+#: also the whole of `FI-208`: an empty Claude Code box is not blank, it is drawn holding a model-generated
+#: ghost SUGGESTION in **SGR 2 (DIM/faint)**, and a capture taken WITHOUT `-e` throws that attribute away
+#: one layer below every consumer. `pane-guard` then reported `10 queued-text` for a box nobody had typed
+#: into, `close` refused naming a clearing condition of *"the text is submitted or cleared"* — a remedy
+#: that cannot be performed, because there is no text — and the question "who typed that?" (`FI-43`) was
+#: chased for days over a string that had no author.
+_SGR = re.compile(r"\x1b\[([0-9;]*)m")
+#: Any OTHER escape `-e` or a TUI may emit. Stripped, never interpreted — this module reasons about
+#: VISIBLE characters plus one attribute, and a sequence it does not understand must not become text.
+_ESC_OTHER = re.compile(r"\x1b\][^\x07\x1b]*(?:\x07|\x1b\\)|\x1b\[[0-9;:?]*[ -/]*[@-~]|\x1b[@-Z\\-_]")
+
+#: The SGR parameters that turn DIM on and off, compared AFTER leading zeros are stripped — so `0` and a
+#: bare `\x1b[m` both arrive here as `""`. `2` is faint; `0`/`""` reset everything; `22` is the targeted
+#: "normal intensity" that ends bold AND faint. Nothing else touches it.
+_SGR_DIM_ON = "2"
+_SGR_DIM_OFF = ("", "22")
+
+#: SGR parameters that SWALLOW the parameters after them: `38` (foreground), `48` (background) and `58`
+#: (underline colour) introduce an extended colour, and the value that follows selects its form —
+#: `5;<n>` is a 256-colour index (one more parameter), `2;<r>;<g>;<b>` is truecolor (three more).
+#:
+#: This is not pedantry about a spec. **`\x1b[38;2;136;192;208m` contains a `2`**, and read parameter-by
+#: -parameter that `2` is SGR 2 = DIM. My first version of `_cells` did exactly that, and the consequence
+#: was measured: `_caret_content` returned `''` for `❯ ` + truecolor + `REAL-TYPED-TEXT-GAMMA`, so a
+#: truecolor-styled input box makes REAL TYPED TEXT VANISH — `unsubmitted` None, `pane-guard 0 safe`, and
+#: a `send-keys` concatenates onto somebody's live draft. That is the exact false-safe `AC-5` forbids and
+#: `FI-169` exists to prevent, reintroduced by the fix for `FI-208`. `38;5;2` (256-colour index 2) failed
+#: the same way; `38;5;99` did not, which is what a partial fix looks like from the outside.
+_SGR_EXTENDED_COLOUR = ("38", "48", "58")
+#: How many parameters each extended-colour FORM consumes after its selector.
+_SGR_COLOUR_FORM = {"5": 1, "2": 3}
+
+
+def plain(text: str) -> str:
+    """`text` with every escape removed — the VISIBLE characters, and nothing else.
+
+    Public because `capture()` now returns what tmux drew *including* attributes, and a caller matching
+    UI chrome (`cli.CLAUDE_MARKERS`) must match on what a human would read. Matching a marker against raw
+    capture output works right up until tmux happens to split the phrase across a colour change, and then
+    it fails silently in the direction that reports a live claude pane as `12 not-claude`.
+    """
+    return _ESC_OTHER.sub("", _SGR.sub("", text))
+
+
+def _cells(line: str) -> list:
+    """`line` as `[(visible character, is it DIM), …]`.
+
+    The pair is the point. Every predicate below wants the characters; exactly one of them —
+    `_caret_content` — also wants the attribute, and it is the one bit that separates *a human typed
+    this* from *the TUI is suggesting this*. Carrying them together means no layer can drop the second
+    while keeping the first, which is precisely how `FI-208` happened.
+    """
+    out, dim, i = [], False, 0
+    while i < len(line):
+        match = _SGR.match(line, i)
+        if match:
+            params = match.group(1).split(";")
+            index = 0
+            while index < len(params):
+                param = params[index].lstrip("0")          # `2`, `02` and `002` are all SGR 2
+                index += 1
+                if param in _SGR_EXTENDED_COLOUR:
+                    #: Skip the selector AND its arguments, so the `2` inside `38;2;R;G;B` is a colour
+                    #: component and never SGR 2. An unknown selector consumes only itself, which stops a
+                    #: malformed sequence eating the rest of the line.
+                    selector = params[index].lstrip("0") if index < len(params) else ""
+                    index += 1 + _SGR_COLOUR_FORM.get(selector or "0", 0)
+                elif param == _SGR_DIM_ON:
+                    dim = True
+                elif param in _SGR_DIM_OFF:
+                    dim = False
+            i = match.end()
+            continue
+        match = _ESC_OTHER.match(line, i)
+        if match:
+            i = match.end()
+            continue
+        out.append((line[i], dim))
+        i += 1
+    return out
+
+
+def _undim(cells: list) -> str:
+    """The characters a human actually typed: the cells left once the DIM ones are dropped.
+
+    **Not** "empty if any cell is dim". A box can hold typed text AND a dim completion hint at once, and
+    calling that whole body a placeholder would blind the guard to real queued text — the `FI-180` shape,
+    where a fix stops a failure being visible instead of fixing it. Dropping only the dim cells answers
+    both directions from one rule: an all-dim body collapses to `''` (an empty box), and a body with any
+    non-dim character keeps exactly that character as the queued text.
+    """
+    return "".join(char for char, dim in cells if not dim).strip()
+
+
 #: Shapes an EMPTY input box renders. None of these is a swallowed submit, and alarming on them is a
 #: false positive on every idle session in the fleet at once.
+#:
+#: These are the FALLBACK, not the primary signal (`FI-208`). They are five fixed legacy strings and the
+#: thing they need to catch today is *model-generated prose* — a denylist of suggestion texts can never be
+#: completed, so the attribute decides first and these only answer for a terminal that stripped it.
 _PLACEHOLDERS = (
     re.compile(r'^try\s+["“]', re.I),
     re.compile(r"^ask\b", re.I),
@@ -171,9 +270,15 @@ def _rendered(text: str) -> list:
     lines put the box outside itself and the predicate answered *safe* with text in the box — a
     false-safe, the dangerous direction. The last non-blank row is the bottom of the content; the
     window is anchored there.
+
+    Blankness is judged on the VISIBLE characters (`plain`), which is not cosmetic now that the capture
+    carries attributes: a padding row that tmux emits as `\\x1b[39m\\x1b[49m` is blank to a reader and
+    NON-blank to `str.strip`, so trimming on the raw row stops at the padding and re-opens `FI-24` with
+    the window anchored below the content. Measured before the fix: a two-row frame with two styled-blank
+    padding rows kept **4** rows where the plain equivalent keeps 2.
     """
     rows = text.splitlines()
-    while rows and not rows[-1].strip():
+    while rows and not plain(rows[-1]).strip():
         rows.pop()
     return rows
 
@@ -182,18 +287,45 @@ def _tail(text: str, count: int) -> list:
     return _rendered(text)[-count:]
 
 
-def _caret_content(line: str) -> Optional[str]:
-    """The text a caret line carries, or None when the line has no caret.
+def _trim(cells: list) -> list:
+    """`cells` with leading and trailing whitespace dropped, attributes kept alongside."""
+    start, end = 0, len(cells)
+    while start < end and cells[start][0].isspace():
+        start += 1
+    while end > start and cells[end - 1][0].isspace():
+        end -= 1
+    return cells[start:end]
 
-    Tolerates the box-drawing gutter a real pane draws around its input box.
+
+def _caret_content(line: str) -> Optional[str]:
+    """The text a caret line carries **that a human typed**, or None when the line has no caret.
+
+    Tolerates the box-drawing gutter a real pane draws around its input box, and — since `FI-208` — the
+    SGR attributes the capture now carries.
+
+    Both halves of the attribute handling are load-bearing and they fail in OPPOSITE directions:
+
+    * **Finding the caret at all.** The live `w22` box row is `\\x1b[39m❯\\xa0`: the caret is preceded by a
+      colour escape. Under the old text-only rule `line.strip()[0]` is `ESC`, so the caret is not found,
+      `unsubmitted` reports None, and `pane-guard` answers `0 safe` **for a box holding real typed text**.
+      Adding `-e` to the capture *without* this is therefore not a fix — it is a false-safe, and a worse
+      defect than the one it was meant to close. Measured before the change: `_caret_content` returned
+      `None` for that exact live row.
+    * **Deciding what the body IS.** `_undim` drops the DIM cells, so a body drawn entirely in SGR 2 —
+      Claude Code's ghost suggestion in an EMPTY box — collapses to `''` and a body with any normal-
+      intensity character keeps it. Attribute first, `_PLACEHOLDERS` only as the fallback for a terminal
+      that stripped attributes (`AC-6`): the suggestion is model-generated prose, so no list of texts
+      could ever have matched it.
     """
-    stripped = line.strip()
-    while stripped and stripped[0] in _GUTTER:
-        stripped = stripped[1:].strip()
+    cells = _trim(_cells(line))
+    while cells and cells[0][0] in _GUTTER:
+        cells = _trim(cells[1:])
     for caret in _CARET:
-        if stripped.startswith(caret):
-            body = stripped[len(caret):]
-            return body.strip().rstrip(_GUTTER).strip()
+        if "".join(char for char, _ in cells[:len(caret)]) == caret:
+            body = _trim(cells[len(caret):])
+            while body and body[-1][0] in _GUTTER:
+                body = _trim(body[:-1])
+            return _undim(body)
     return None
 
 
@@ -310,8 +442,13 @@ class SessionLayer:
         interrupt hint from an hour ago is not evidence of current work — and to the tail of the
         RENDERED rows for the same reason as `unsubmitted`: padding that pushed an input box out of its
         window pushes an interrupt hint out of this one too, and a mid-turn pane reading idle is the
-        direction that lands a send in the middle of a turn."""
-        window = "\n".join(_tail(pane_text, BUSY_TAIL_LINES)).lower()
+        direction that lands a send in the middle of a turn.
+
+        Matched on the VISIBLE characters (`plain`). The capture carries attributes now, and a marker is a
+        PHRASE: the moment tmux emits a colour change inside `esc to interrupt` — which it does whenever
+        the TUI styles part of a hint — a raw substring match stops finding it and a mid-turn pane reads
+        idle. Stripping first makes the match test what a human would read."""
+        window = plain("\n".join(_tail(pane_text, BUSY_TAIL_LINES))).lower()
         return any(marker in window for marker in _BUSY_MARKERS)
 
     # --- control -----------------------------------------------------------------------------
@@ -434,8 +571,27 @@ def default_probes(process_name: str = "claude", tmux_socket=_FROM_ENV) -> Probe
 
         `None` and `""` are now different facts, which is the only way a caller can tell them apart. Any
         probe that can fail must be able to SAY it failed; a falsy default is a caller-visible lie.
+
+        **`-e` IS PART OF THE CONTRACT, not a formatting preference (`FI-208`).** Without it tmux strips
+        the SGR attributes, and the one bit that distinguishes *text a human typed* from *the TUI's own
+        DIM ghost suggestion in an empty box* is discarded HERE — one layer below `unsubmitted`, below
+        `pane-guard`, below `close`'s refusal and below every external monitor. Nothing above this line
+        can recover it, and for ten and a half hours nothing above this line knew it was missing: every
+        box alarm in a live effort was a false positive, and `close` refused a finished worker naming a
+        clearing CONDITION of *"the text is submitted or cleared"* for a box that held nothing to clear —
+        a remedy nobody could perform, which turns a guard into a toll.
+
+        (The clearing-condition phrase above is deliberately not spelled as the field name `cli` and
+        `guards` use. `tests/test_contracts.py` decides which modules are alarm-bearing by looking for
+        that identifier as TEXT, and this module raises no such refusal — so writing it here would enrol
+        `session` in a table it does not belong in. Same class as `FI-1`, and as the note at the top of
+        this file about the liveness checker: a checker's own words tripping the checker.)
+
+        Every consumer in this module reads the capture through `plain`/`_cells`, so the attributes are
+        interpreted in exactly one place and are text nowhere. `tests/test_session.py` asserts this argv
+        still carries `-e`, because the failure mode of losing it again is silent.
         """
-        done = run(tmux + ["capture-pane", "-p", "-t", exact_pane_target(name)])
+        done = run(tmux + ["capture-pane", "-p", "-e", "-t", exact_pane_target(name)])
         return done.stdout if done.returncode == 0 else None
 
     def has_session(name: str) -> bool:
