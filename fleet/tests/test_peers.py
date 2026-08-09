@@ -244,8 +244,30 @@ class PeersSelfDetection(unittest.TestCase):
         falling through to the lease branch and appearing under --addressable-only."""
         self.assertIsNone(peers.detect_self_pid({999999999}))
 
-    def test_detect_self_pid_finds_an_ancestor_that_is_a_peer(self):
-        self.assertEqual(peers.detect_self_pid({os.getpid()}), os.getpid())
+    def test_detect_self_pid_actually_WALKS_the_ancestry(self):
+        """VACUOUS TEST, CAUGHT IN REVIEW. The previous version asserted
+        `detect_self_pid({os.getpid()})` — which matches on the FIRST iteration, before `_ppid_of`
+        is ever called. It tested depth 0 and was named "finds an ancestor". Proven vacuous by
+        mutation: making `_ppid_of` return None unconditionally — deleting the entire mechanism —
+        left all 24 tests green.
+
+        A synthetic /proc with a 3-deep PPid chain forces the walk. If the walk breaks, our OWN
+        session stops being recognised as SELF, falls through to the lease branch, resolves to OURS
+        and appears under --addressable-only — so a caller fanning out to every addressable peer
+        messages itself. That is the one direction the module's docstring names as consequential."""
+        root = tempfile.mkdtemp(prefix="t_anc.")
+        self.addCleanup(shutil.rmtree, root, True)
+        # 4001 -> 4002 -> 4003 ; only 4003 is a "peer"
+        for pid, ppid in ((4001, 4002), (4002, 4003), (4003, 0)):
+            d = os.path.join(root, str(pid)); os.makedirs(d, exist_ok=True)
+            with open(os.path.join(d, "status"), "w") as fh:
+                fh.write(f"Name:\tclaude\nPPid:\t{ppid}\n")
+        self.assertEqual(peers._ppid_of(4001, proc_root=root), 4002)
+        self.assertEqual(
+            peers.detect_self_pid({4003}, start_pid=4001, proc_root=root), 4003,
+            "the ancestry walk did not reach a peer two levels up")
+        # and it must still terminate, returning None, when no ancestor is a peer
+        self.assertIsNone(peers.detect_self_pid({999999}, start_pid=4001, proc_root=root))
 
 
 class PeersPorcelain(unittest.TestCase):
@@ -253,7 +275,7 @@ class PeersPorcelain(unittest.TestCase):
 
     def _rows(self, name):
         return [{"verdict": peers.FOREIGN, "name": name, "pid": 1, "cwd": "/x", "status": "idle",
-                 "instant": "", "milestone": "", "tmux": "", "todo_id": ""}]
+                 "instant": "", "milestone": "", "tmux": "", "todo_id": "", "why": "not ours"}]
 
     def test_a_tab_or_newline_in_a_cell_cannot_forge_a_row(self):
         """SHIPPED DEFECT. `name` is derived by the runtime from `basename(cwd)`, and POSIX paths may
@@ -276,6 +298,21 @@ class PeersPorcelain(unittest.TestCase):
         """SHIPPED DEFECT. Without a trailing newline `wc -l` and `while read` drop the final row —
         and under --addressable-only that can be the ONLY OURS row, reading as "nothing addressable"."""
         self.assertTrue(peers.porcelain(self._rows("a")).endswith("\n"))
+
+    def test_cursor_control_cannot_repaint_a_verdict(self):
+        """SHIPPED DEFECT. `_cell` escaped `\r` because the docstring reasoned about terminal
+        repainting — but `ESC [ G` (CHA, cursor-to-column-1) and backspace do the same job with
+        different bytes, so a FOREIGN peer painted itself over the verdict column as OURS on the
+        DEFAULT surface. NUL survived too and truncates a cell for mawk-family consumers.
+        Escaping is categorical now (C0/DEL/C1 + U+2028/9), so this is a class, not a list."""
+        for hostile in ("\x1b[GOURS", "abc\x08\x08\x08OURS", "a\x00b", "\x9bGOURS"):
+            with self.subTest(hostile=repr(hostile)):
+                rows = self._rows(hostile)
+                for text in (peers.render(rows), peers.porcelain(rows)):
+                    self.assertNotIn("\x1b", text)
+                    self.assertNotIn("\x08", text)
+                    self.assertNotIn("\x00", text)
+                    self.assertEqual([l for l in text.split("\n") if l.startswith(peers.OURS)], [])
 
     def test_the_HUMAN_form_cannot_be_forged_either(self):
         """SHIPPED DEFECT. `porcelain()` was hardened and `render()` was not — and render() is the
