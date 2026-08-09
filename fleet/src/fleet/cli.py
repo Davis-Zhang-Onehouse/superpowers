@@ -72,7 +72,8 @@ from fleet.identity import ROOT_BASE, InstantName, resolve
 from fleet.layout import INFO, VIOLATION
 from fleet.pool import Pool, ReapReport
 from fleet.profiles import Profile
-from fleet.reconcile import COMPLETE, KIND_WORKER, RUNNING, needs_a_human, reconcile
+from fleet.reconcile import (COMPLETE, KIND_WORKER, PHASE_AWAITING_CI, RUNNING, needs_a_human,
+                             reconcile)
 from fleet.release import (CANDIDATE, DEV, HISTORY_COLUMNS, META_DIR, RELEASE_RETENTION, RELEASED, Releases, Version,
                            actor, tree_sha, utc_now)
 from fleet.release_git import Repo, changelog_section
@@ -1215,6 +1216,107 @@ def _do_resume(ctx: Ctx, parsed: Parsed) -> int:
 # --- declare / park / unpark ----------------------------------------------------------------------
 
 
+def _watcher_for_claim(ctx: Ctx, child: Path, attested=None) -> tuple:
+    """What is armed to wake this instant, as `(watchers, ungated_because)`. Raises `Refused` when nothing is.
+
+    `FI-255`, raised by the operator: *"instants can claim AWAITING-CI while not armed with any watchers
+    monitoring the CI"*. Measured — two workers in the IDENTICAL declared phase rendered byte-identically as
+    `declared awaiting-ci; not consuming attention` while one was mid-turn with its own monitor and the other
+    had been stopped for 1h28m with nothing that would ever restart it. `awaiting-ci` establishes only *"stop
+    counting me against the cap"* and was silently also read as *"somebody is watching"*, which nothing
+    established.
+
+    The check sits AT THE MOMENT OF THE CLAIM and not in a sweep somebody has to remember to run, which is
+    the operator's framing and the better one: *"a check you must remember to run fails the same way as the
+    thing it checks"*. Only the exact phase `awaiting-ci` is gated, and the WIP cap's treatment of it is
+    untouched — that is load-bearing elsewhere and is not the bug.
+
+    Four outcomes, and the last two are the ones that took the thinking:
+
+      - a claude pane with an indicator     -> the watchers, allowed
+      - a claude pane with none             -> `Refused`; the reported defect
+      - the capture FAILED                  -> `Refused`, and a DIFFERENT sentence. `FI-7`: a failed
+        observation is not a negative observation, and a guard whose failure mode is "go ahead" is not a
+        guard. This is the direction that authorised tearing down a live pane once already.
+      - no record, no session, or not claude -> ALLOWED, with the reason RETURNED so the caller can print
+        it. The gate has no subject here (an instant that was never dispatched into a session, a test
+        store, a shell pane), and refusing would fire on every legitimate non-dispatched use. It is stated
+        rather than silent because *a scope that narrows in silence reads as a pass* (`OBS-49`) — the
+        caller emits an `ungated` row, so a claim that skipped the gate never looks like one that passed it.
+    """
+    #: THE ESCAPE HATCH, and it is here rather than absent because a guard with no override is routed
+    #: around, and routing around this one is trivial: `declare.json` is a file, and `--phase` takes free
+    #: text, so a worker meeting a refusal it believes is wrong can write the phase directly or invent a
+    #: spelling. Both leave NO record that a judgement was made. This flag makes the override the cheapest
+    #: honest path and the only one that writes down who claimed what.
+    #:
+    #: It is not a hole, because it does not buy silence: the attestation is stored verbatim, `fleet brief`
+    #: reports it, and `--watcher ""` is refused the way `park --question ""` is. The predicate genuinely
+    #: cannot see a cron, a `ScheduleWakeup`, an external watchdog or a peer session watching on this
+    #: instant's behalf — those are REAL watchers, and refusing them would be a false positive landing on a
+    #: stranger who did nothing wrong.
+    #:
+    #: ⛔ THE REQUIRED TEXT IS THE CONTROL. DO NOT REPLACE THIS WITH A BARE `--force` OR `--no-watcher`.
+    #: Measured in the field on w17, the first real worker to meet this gate. It was refused, it had the
+    #: flag available, and it did NOT use it — because using it meant typing a sentence it knew to be
+    #: false: *"nothing is watching me, because there is nothing left to watch. Passing it would have
+    #: recorded a true-looking attestation that was FALSE, to buy a cap exclusion I am not entitled to."*
+    #: Its own conclusion: *"the refusal only worked because the hatch required me to type a sentence I
+    #: knew to be untrue. A hatch that took a flag with no attestation text would have been used."*
+    #:
+    #: So the friction is not ceremony to be optimised away — it is the whole mechanism. A bare override
+    #: costs one word and would be typed reflexively; naming a watcher that does not exist requires an
+    #: assertion the claimant has to knowingly falsify, and that is a much higher bar than any check this
+    #: tool could run. The audit that deletes this as boilerplate removes the guard, not the paperwork.
+    if attested is not None:
+        if not str(attested).strip():
+            raise BadInput(
+                "--watcher names the watcher this tool cannot see; an empty attestation is not an "
+                "attestation. Give the mechanism — 'cron 0,30 * * * * gh-run-poll', 'coordinator "
+                "child-watchdog.sh' — or arm a Monitor and drop the flag.")
+        return f"attested: {' '.join(str(attested).split())}", ""
+    record = _record_for(ctx, child)
+    pane = getattr(record, "tmux", None) if record else None
+    if not pane:
+        return "", ("no dispatch record names a session for this instant, so there is no pane to read; "
+                    "an instant that was never dispatched into a session is outside this gate's subject")
+    if not ctx.sessions.alive(pane):
+        return "", (f"no live session {pane!r}; this gate reads a running pane and there is not one")
+    captured = ctx.sessions.capture(pane)
+    text = captured or ""
+    if captured is None and not ctx.sessions.is_claude_process(pane):
+        raise Refused(
+            f"{pane} is alive but nothing about it could be read: the capture FAILED and no live claude "
+            f"process is attributed to it. That is a FAILED OBSERVATION, not an observation that nothing "
+            f"is watching — and this claim is refused rather than allowed on it, because a guard that "
+            f"treats 'I could not look' as 'go ahead' is not a guard (FI-7).",
+            clears_when="the pane can be read again — re-run the same command, and if it persists check "
+                        "FLEET_TMUX_SOCKET names the server the instant was dispatched on",
+            clears_who="the declaring instant")
+    if not _is_claude(ctx.sessions, text, pane):
+        return "", (f"{pane} is alive and is not a claude pane, so there is no status line to read and no "
+                    f"harness watcher to arm; outside this gate's subject")
+    watchers = ctx.sessions.watchers(text)
+    if watchers:
+        return watchers, ""
+    raise Refused(
+        f"nothing is armed to wake {pane}, so declaring awaiting-ci here would mean 'stop counting me "
+        f"against the WIP cap' and nothing else. Its status line shows no monitor and no background shell, "
+        f"so when CI finishes NOTHING re-invokes this session: the run completes, the pane stays stopped, "
+        f"and the milestone waits on a worker that will never be woken. That is FI-255, measured on a "
+        f"worker stopped 1h28m in exactly this state. Note that being mid-turn is NOT a watcher — `declare` "
+        f"runs inside the claiming turn, so every claimant is mid-turn and it distinguishes nothing.",
+        clears_when="arm something that re-invokes this session and declare again — a Monitor on the run "
+                    "(`gh run watch`/`gh pr checks` emitting a line per terminal state), or a background "
+                    "shell that exits when the run does. Either draws `1 monitor`/`1 shell` on the status "
+                    "line, which is what this gate reads. If the wait is NOT on CI, declare the phase it "
+                    "actually is: any other phase counts against the cap and is not gated. And if the "
+                    "watcher is REAL but this tool cannot see it — a cron, an external watchdog, a peer "
+                    "session — name it with `--watcher '<what it is>'`, which records your attestation "
+                    "instead of refusing rather than making you route around the gate",
+        clears_who="the declaring instant")
+
+
 def _do_declare(ctx: Ctx, parsed: Parsed) -> int:
     """Write the declaration, then RE-READ IT THROUGH THE CONSUMER and print what the consumer sees.
 
@@ -1243,11 +1345,35 @@ def _do_declare(ctx: Ctx, parsed: Parsed) -> int:
             f"rather than stored, because a stored empty phase reads as '(none declared)' to every consumer "
             f"while still suppressing the near-miss lint — silence from the control and no exclusion from the "
             f"cap. Declare a real phase, or leave the instant undeclared.")
+    #: `FI-255`/`i39`. Gated BEFORE `--dry-run` returns, so `--dry-run` answers the question a caller asks
+    #: it — "would this be accepted?" — rather than reporting `would-declare` on a claim the real call
+    #: refuses. `--dry-run` disagreeing with the real call is a documented trap of this CLI already
+    #: (`fleet milestone` exits 0 on a dry run where the real call exits 2); reproducing it in a NEW gate,
+    #: whose whole purpose is to be consulted before acting, would be inexcusable.
+    watchers, ungated_because = "", ""
+    if phase == PHASE_AWAITING_CI:
+        watchers, ungated_because = _watcher_for_claim(ctx, child, parsed.get("watcher"))
+    elif parsed.get("watcher") is not None:
+        #: Refused, not ignored. `awaiting-ci` is the only gated phase, so an attestation anywhere else
+        #: answers a question nobody asked — and silently dropping it would let a worker believe it had
+        #: recorded a watcher when nothing stored one. This package refuses undeclared input for the same
+        #: reason it refuses an undeclared flag: accepting what nothing reads is how a caller comes to
+        #: rely on a no-op.
+        raise BadInput(
+            f"--watcher attests to a watcher, and only `--phase awaiting-ci` is gated on one. Declaring "
+            f"{phase!r} needs no attestation and nothing would read it, so it is refused rather than "
+            f"stored where it would look like a fact. Drop the flag.")
     if ctx.dry_run:
         _emit(ctx, "declare", [("dry-run", "nothing was declared"), ("would-declare", phase),
-                               ("asked", asked)])
+                               ("asked", asked)]
+                              + ([("watchers", watchers)] if watchers else [])
+                              + ([("ungated", ungated_because)] if ungated_because else []))
         return EXIT_OK
     Declarations(child).set_phase(phase)
+    #: Recorded, so the question can be answered AFTER the fact. FI-255's defect was not only that the claim
+    #: was unchecked — it was that the store kept `{"phase": "awaiting-ci"}` and nothing else, so a stopped
+    #: worker and a self-waking one were indistinguishable in the record as well as on the board.
+    Declarations(child).set_watchers(watchers or None)
     consumer = Declarations(child)                       # a FRESH consumer, not the writer's return
     value = consumer.phase()
     if value is None:
@@ -1256,7 +1382,9 @@ def _do_declare(ctx: Ctx, parsed: Parsed) -> int:
             "The acknowledgement is the re-read, so a declaration that cannot be read back is a failure "
             "and not a success with a caveat.")
     _emit(ctx, "declare", [("phase", value), ("asked", asked), ("consumer", str(consumer.path)),
-                           ("instant", str(child))])
+                           ("instant", str(child))]
+                          + ([("watchers", watchers)] if watchers else [])
+                          + ([("ungated", ungated_because)] if ungated_because else []))
     return EXIT_OK
 
 
@@ -2588,9 +2716,28 @@ def _do_brief(ctx: Ctx, parsed: Parsed) -> int:
                             clears_who=COORDINATOR))
 
     declarations = Declarations(child)
-    rows.append(Row(kind="phase", subject=child.name, severity=INFO,
-                    detail=(f"phase={declarations.phase() or '(none declared)'}, "
-                            f"parked={declarations.parked() or '(not parked)'}")))
+    #: `watchers` is on this row because a stored field NOTHING reads is not a record — it is a write-only
+    #: comfort, and `FI-255` is precisely the failure of believing a state was captured when no reader
+    #: could reach it. An audit found this exact shape one field along: the value was written at claim
+    #: time and had ZERO production readers.
+    #:
+    #: `brief` is the honest home for it and NOT a complete fix, which the wording says out loud. This verb
+    #: answers "one row per question you would otherwise guess at", and *"was this claim observed or
+    #: merely asserted?"* is such a question. But `fleet board` — where a COORDINATOR actually looks —
+    #: still renders both identically, because that is `reconcile`'s to change and out of `i39`'s charter.
+    #: `i45` owns it. Saying so here is the difference between a scoped limitation and a silent one.
+    watchers = declarations.watchers()
+    if watchers:
+        seen = ("ATTESTED by the claimant, NOT observed by this tool"
+                if watchers.startswith("attested:") else "OBSERVED on the pane at claim time")
+        detail = (f"phase={declarations.phase() or '(none declared)'}, "
+                  f"parked={declarations.parked() or '(not parked)'}, "
+                  f"watcher={watchers} — {seen}. `fleet board` does NOT yet show this distinction (i45), "
+                  f"so a coordinator reading the board alone cannot tell the two apart")
+    else:
+        detail = (f"phase={declarations.phase() or '(none declared)'}, "
+                  f"parked={declarations.parked() or '(not parked)'}")
+    rows.append(Row(kind="phase", subject=child.name, severity=INFO, detail=detail))
 
     gate = Review(child, now=ctx.now).gate(require_scope="all")
     #: INFO even when the gate would refuse: at the start of the work it always would, and a verb that
@@ -3669,6 +3816,12 @@ VERBS = {spec.name: spec for spec in (
     _verb("declare", _do_declare, False, "declare a phase and print what the CONSUMER now reads", (
         Flag("--instant", True, True, "the declaring instant"),
         Flag("--phase", True, True, "the phase; awaiting-ci is the one the WIP cap excludes"),
+        Flag("--watcher", True, False,
+             "NAME what is watching, when it is real but this tool cannot see it (a cron, an external "
+             "watchdog, a peer session). The test is whether you can TRUTHFULLY name it — not whether "
+             "the refusal feels wrong. Records your attestation verbatim in declare.json and reports it "
+             "on `fleet brief`; `fleet board` does NOT yet distinguish an attested claim from an "
+             "observed one (i45)"),
     )),
     _verb("park", _do_park, False, "record a parked decision as structured state", (
         Flag("--instant", True, True, "the instant"),

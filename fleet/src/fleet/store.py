@@ -171,6 +171,25 @@ class Declarations:
         self._save(data)
         return Declarations(self.dir.parent).phase()      # re-read THROUGH the consumer
 
+    def watchers(self) -> str | None:
+        """What was armed to wake this instant when it last declared a gated phase, or `None`.
+
+        `FI-255`. The claim used to store `{"phase": "awaiting-ci"}` and nothing else, so a self-waking
+        worker and one stopped for 1h28m were indistinguishable in the RECORD as well as on the board —
+        every field was invariant across the event they were supposed to detect.
+        """
+        return self._load().get("watchers")
+
+    def set_watchers(self, watchers: str | None) -> None:
+        data = self._load()
+        if watchers is None:
+            #: Cleared, never left standing: a value from an EARLIER claim read as evidence about THIS one
+            #: is the same lie in slower form, and the phase it described may since have changed.
+            data.pop("watchers", None)
+        else:
+            data["watchers"] = watchers
+        self._save(data)
+
     def parked(self) -> str | None:
         return self._load().get("parked")
 

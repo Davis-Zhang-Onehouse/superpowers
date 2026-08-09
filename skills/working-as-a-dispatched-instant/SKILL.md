@@ -102,6 +102,54 @@ empty, because a proposal with no evidence is a claim rather than a report.
 When the work waits on CI rather than on you, say so: `fleet declare --instant "$INSTANT" --phase awaiting-ci` is the
 phase the WIP cap excludes, so declaring it frees the coordinator to dispatch the next milestone.
 
+**Arm the watcher BEFORE you declare it, because the claim is gated on one.** `awaiting-ci` says *"stop
+counting me against the cap"*, and it was silently also read as *"somebody is watching"* — which nothing
+established. Measured: two workers in the identical declared phase rendered byte-identically while one was
+self-waking and the other had been stopped for **1h28m** with nothing that would ever restart it. So the
+claim now REFUSES unless something is armed that will re-invoke this session with no human in the loop:
+
+```bash
+# a Monitor over the run — one event per terminal state, and it must match failures too, or a crashloop
+# is indistinguishable from "still running"
+Monitor: gh pr checks <pr> --watch   → status line shows `1 monitor`
+# or a background shell that exits when the run does      → status line shows `1 shell`
+```
+
+Three things worth knowing before you argue with it:
+
+- **Being mid-turn is NOT a watcher.** `declare` runs inside your own turn, so every claimant is mid-turn and
+  it distinguishes nothing.
+- **"The coordinator will notice" is not a watcher either** — that is the exact state this gate exists to stop.
+- If the wait is genuinely not on CI, **declare the phase it actually is**. Every other phase is ungated; it
+  simply counts against the cap, which is the honest trade.
+
+**When the watcher is real but this tool cannot see it** — a cron, an external watchdog, a peer session
+watching for you — name it instead of routing around the gate:
+
+```bash
+fleet declare --instant "$INSTANT" --phase awaiting-ci --watcher "cron */10 * * * * gh-run-poll --pr 4211"
+```
+
+**The test is whether you can truthfully name what is watching — not whether the refusal feels wrong for
+your situation.** Those are different questions, and only the first one is yours to answer. If nothing is
+watching because there is nothing left to watch, the honest move is a different phase, not an attestation.
+
+Your attestation is stored verbatim and `fleet brief` reports it, labelled ATTESTED rather than observed.
+⚠️ **`fleet board` does not yet show that distinction** — a coordinator reading the board alone cannot tell
+an attested claim from an observed one (`i45` owns that). So the attestation is only as good as your
+honesty, and nothing downstream will catch it if it is false.
+
+Do not reach for it to skip arming a monitor you could have armed. The flag exists so a *correct* claim the
+predicate cannot see stays cheap and honest — and so nobody is tempted to write `declare.json` by hand,
+which records no judgement at all.
+
+**If your attestation stops being true, say so.** It is a statement about the moment you made it; a cron or
+a peer's monitor can die afterwards, and nothing re-reads your claim to notice.
+
+`--dry-run` answers the same question the real call does, so you can check before you commit to it. The
+refusal names what clears it and who clears it; a claim that skipped the gate says `ungated` and why, so it
+never looks like one that passed.
+
 **Get stuck.** A decision only the operator can make is a parked question, never a stalled pane:
 
 ```bash
