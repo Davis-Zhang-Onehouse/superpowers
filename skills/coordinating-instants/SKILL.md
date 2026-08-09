@@ -95,6 +95,16 @@ full, and `fleet compaction-status` for what is holding dispatch.
 
 ## Two judgements the tool cannot make
 
+**An `AWAITING-CI` row now means a watcher was armed *or attested* — and the board cannot tell you which.**
+Entering the phase is gated: either this tool saw a watcher on the worker's pane, or the worker named one it
+could not see (`--watcher`). Both are recorded on the declaration, but ⚠️ **`fleet board` renders them
+identically** — the distinction lives on `fleet brief --instant <worker>`, and `i45` owns surfacing it here.
+
+So the row buys you less than it appears to. It does **not** promise the watcher is still alive, that it
+watches the right run, or that an attestation was true. A row sitting in `awaiting-ci` far longer than its CI
+takes is still yours to question — `brief` it before you assume either way. Do not read the phase as
+supervision; that assumption is what created this hazard in the first place.
+
 **Act on `attention`, report `info`.** Every checker row carries a severity. A finished milestone and a
 legitimately empty population are `info`. Treating them as alarms is how a green board comes to read as red
 and then gets ignored — along with the real alarm next to it.

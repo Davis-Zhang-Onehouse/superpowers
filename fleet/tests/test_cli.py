@@ -90,6 +90,20 @@ IDLE_PANE = "\n".join(["done", "", '❯ try "fix the failing test"', "  ? for sh
 #: A plain shell. Nothing here is claude, and sending keys to it is a different mistake.
 SHELL_PANE = "\n".join(["ubuntu@box:~$ ls", "src  tests", "ubuntu@box:~$ "])
 
+#: `FI-255`/`i39`. A busy claude pane with a `Monitor` armed. The status line is TRANSCRIBED FROM A LIVE
+#: CAPTURE (`i39` `evidence/02-red/pane-AFTER-monitor.txt`) and not composed here: a decoy invented at
+#: authoring time tests the author's imagination, and this one exists to keep matching what the harness
+#: actually draws. Note that `BUSY_PANE` above is deliberately NOT watched — busy and watched are
+#: independent, `declare` runs inside the claimant's own turn so every claimant is busy, and a fixture
+#: that conflated them would make the gate untestable.
+WATCHED_PANE = "\n".join([
+    "editing src/fleet/cli.py", "Thinking...",
+    "  ⏵⏵ auto mode on · 1 monitor · esc to interrupt · ← for agents · ↓ to manage"])
+#: The other shape the indicator takes: a background shell rather than a monitor.
+WATCHED_PANE_SHELL = "\n".join([
+    "running the build", "Thinking...",
+    "  ⏵⏵ auto mode on · 1 shell · esc to interrupt · ← for agents · ↓ to manage"])
+
 RUNBOOK_OK = "echo verified"
 RUNBOOK_ALSO_OK = "python3 -c 'print(1)'"
 #: A recipe that writes outside the sandbox. `FI-3`/F-14: the real instance was a `RUNBOOK §4` restore
@@ -1220,6 +1234,9 @@ class TestDeclare(CliCase):
         fleet = self.loaded()
         instant = fleet.paths["readyWorker"]
         asked = "AWAITING-CI"
+        #: This case is about the ECHO, not the watcher gate — so it arms one rather than sidestepping the
+        #: gate, and states why. `awaiting-ci` is the phase whose normalisation this test exists to check.
+        fleet.panes["dt-readyWorker"] = WATCHED_PANE
 
         code, out, err = fleet.run(["declare", "--porcelain", "--instant", str(instant),
                                     "--phase", asked])
@@ -2788,6 +2805,7 @@ class TestADeclarationIsNeverEmpty(CliCase):
     def test_an_empty_phase_is_refused(self):
         fleet = self.loaded()
         ready = str(fleet.paths["readyWorker"])
+        fleet.panes["dt-readyWorker"] = WATCHED_PANE    # the standing declaration below is gated (i39)
         fleet.run(["declare", "--instant", ready, "--phase", "AWAITING-CI"])
         before = Declarations(fleet.paths["readyWorker"]).phase()
         self.assertEqual("awaiting-ci", before, "this test needs a standing declaration to be meaningful")
@@ -2862,11 +2880,308 @@ class TestTheNearMissRuleReadsShapeAndRetraction(CliCase):
         """It is a RULE, not a grep: the same line with a declaration behind it is not a near miss."""
         fleet = self.loaded()
         child = fleet.paths["readyWorker"]
-        fleet.run(["declare", "--instant", str(child), "--phase", "AWAITING-CI"])
+        fleet.panes["dt-readyWorker"] = WATCHED_PANE    # the declaration below is gated (i39)
+        code, _, err = fleet.run(["declare", "--instant", str(child), "--phase", "AWAITING-CI"])
+        #: The setup is ASSERTED, not assumed. Without this the gate could start refusing the declaration
+        #: and the case would still pass — a silenced rule and a rule with nothing to fire on look
+        #: identical from here, and this test would have gone quietly vacuous.
+        self.assertEqual(EXIT_OK, code, f"the standing declaration this case needs did not land: {err}")
 
         code, out, err = self._lint(fleet, "## Phase: AWAITING-CI")
 
         self.assertNotIn(cli.NEAR_MISS, out)
+
+
+class TestAwaitingCiRequiresALiveWatcher(CliCase):
+    """`FI-255`/`i39`. Claiming `awaiting-ci` while NOTHING will ever wake you.
+
+    The operator: *"instants can claim AWAITING-CI while not armed with any watchers monitoring the CI.
+    Can we ... ensure there is at least 1 watcher active. Otherwise it will give informative guidance."*
+
+    Measured before the gate existed: two workers in the IDENTICAL declared phase rendered byte-identically
+    as `declared awaiting-ci; not consuming attention` while one was mid-turn with its own monitor and the
+    other had been stopped for 1h28m with nothing that would ever restart it. Phase, board row and park
+    field were ALL invariant across the event they are supposed to detect — CI completing.
+
+    The check is at the MOMENT OF THE CLAIM rather than in a sweep, because a check somebody has to
+    remember to run fails the same way as the thing it checks.
+    """
+
+    def _ready(self, fleet, pane):
+        fleet.panes["dt-readyWorker"] = pane
+        return str(fleet.paths["readyWorker"])
+
+    # --- the two arms, which only mean anything together -------------------------------------------
+
+    def test_a_claim_with_nothing_armed_is_refused(self):
+        """The negative arm: the reported defect."""
+        fleet = self.loaded()
+        ready = self._ready(fleet, BUSY_PANE)          # busy, and NOT watched
+
+        code, out, err = fleet.run(["declare", "--instant", ready, "--phase", "awaiting-ci"])
+
+        self.assertEqual(EXIT_REFUSED, code, f"an unwatched claim was accepted: {out!r}")
+        self.assertIsNone(Declarations(fleet.paths["readyWorker"]).phase(),
+                          "the refusal still stored the phase")
+
+    def test_a_claim_with_a_monitor_armed_succeeds(self):
+        """The positive arm, and it is the one that matters: a guard that refuses everything is
+        indistinguishable from a guard that works."""
+        fleet = self.loaded()
+        ready = self._ready(fleet, WATCHED_PANE)
+
+        code, out, err = fleet.run(["declare", "--instant", ready, "--phase", "awaiting-ci"])
+
+        self.assertEqual(EXIT_OK, code, err)
+        self.assertEqual("awaiting-ci", Declarations(fleet.paths["readyWorker"]).phase())
+
+    def test_a_background_shell_is_a_watcher_too(self):
+        """The other shape the indicator takes. Both re-invoke the session with no human in the loop."""
+        fleet = self.loaded()
+        ready = self._ready(fleet, WATCHED_PANE_SHELL)
+
+        code, out, err = fleet.run(["declare", "--instant", ready, "--phase", "awaiting-ci"])
+
+        self.assertEqual(EXIT_OK, code, err)
+
+    # --- the trap that makes a naive implementation admit everything -------------------------------
+
+    def test_the_agents_own_prose_about_monitors_is_not_a_watcher(self):
+        """THE decoy, and it is derived from live input rather than imagined.
+
+        The capture taken while authoring this gate had the word "monitors" inside `busy`'s 15-row window
+        purely because the agent was WRITING ABOUT monitors. Match the busy window instead of the status
+        line — the obvious implementation — and a session that merely DISCUSSED a watcher reports one.
+        That is a guard that admits everything, which is exactly what it is supposed to detect.
+
+        This case fails the moment anyone widens the match back to the window.
+        """
+        talking = "\n".join([
+            "I armed 1 monitor on the CI run earlier and it emitted 2 monitors worth of events",
+            "Let me check whether 1 shell is still running",
+            "Thinking...",
+            "  ⏵⏵ auto mode on · esc to interrupt · ← for agents"])   # <- status line: nothing armed
+        fleet = self.loaded()
+        ready = self._ready(fleet, talking)
+
+        code, out, err = fleet.run(["declare", "--instant", ready, "--phase", "awaiting-ci"])
+
+        self.assertEqual(EXIT_REFUSED, code,
+                         "prose about monitors was accepted as a watcher; the match is reading the busy "
+                         "window rather than the status line")
+
+    def test_a_prompt_drawn_below_the_status_line_does_not_hide_the_watcher(self):
+        """The false-positive arm, found by measuring rather than by reasoning.
+
+        The first implementation read the LAST rendered row. Anything the harness draws beneath the status
+        line — a tool-approval prompt, a notification — displaces it, so a genuinely watched session was
+        refused. Safe direction, but it lands on somebody who did nothing wrong, and a guard that
+        misfires on the innocent is the one people learn to route around.
+
+        The status line is therefore found by its SIGNATURE, and the marker must share that row.
+        """
+        displaced = "\n".join([
+            "working", "Thinking...",
+            "  ⏵⏵ auto mode on · 1 monitor · esc to interrupt · ← for agents",
+            "  ! approve this tool call?"])
+        fleet = self.loaded()
+        ready = self._ready(fleet, displaced)
+
+        code, out, err = fleet.run(["declare", "--instant", ready, "--phase", "awaiting-ci"])
+
+        self.assertEqual(EXIT_OK, code,
+                         f"an armed watcher was missed because a prompt was drawn below it: {err}")
+
+    def test_being_mid_turn_is_not_a_watcher(self):
+        """`busy` is VACUOUS here and keying on it would admit 100% of claims: `declare` runs as a
+        subprocess of the claiming agent's own turn, so every claimant is mid-turn by construction.
+        Measured on the pane that authored this change — `esc to interrupt` present in BOTH arms."""
+        fleet = self.loaded()
+        ready = self._ready(fleet, BUSY_PANE)
+        self.assertTrue(fleet.sessions.busy(BUSY_PANE), "this case needs a pane that reads BUSY")
+
+        code, out, err = fleet.run(["declare", "--instant", ready, "--phase", "awaiting-ci"])
+
+        self.assertEqual(EXIT_REFUSED, code, "a mid-turn pane was treated as a watched one")
+
+    # --- the refusal has to be usable --------------------------------------------------------------
+
+    def test_the_refusal_names_what_clears_it_and_who(self):
+        """A bare non-zero exit is a fail by the charter's own words: the operator asked for *informative
+        guidance*, and this package's convention is that a refusal names what is wrong, what clears it and
+        who clears it."""
+        fleet = self.loaded()
+        ready = self._ready(fleet, BUSY_PANE)
+
+        code, out, err = fleet.run(["declare", "--instant", ready, "--phase", "awaiting-ci"])
+        said = (out + err).lower()
+
+        self.assertEqual(EXIT_REFUSED, code)
+        self.assertIn("clears when", said, "the refusal does not say what clears it")
+        self.assertIn("clears who", said, "the refusal does not say who clears it")
+        self.assertIn("monitor", said, "the refusal does not name the remedy it expects")
+
+    # --- FI-7: a failed observation is not a negative observation -----------------------------------
+
+    def test_a_failed_capture_refuses_and_does_not_read_as_absence(self):
+        """`FI-7`, one layer along. `capture_pane` returns `None` when tmux fails and `""` when the pane is
+        genuinely empty, and a guard whose failure mode is 'go ahead' is not a guard. The refusal must also
+        be DISTINGUISHABLE from the unwatched one, or the remedy it names is the wrong remedy."""
+        fleet = self.loaded()
+        ready = str(fleet.paths["readyWorker"])
+        fleet.capture_fails.add("dt-readyWorker")
+        fleet.procs[:] = [p for p in fleet.procs if p.name != "dt-readyWorker"]   # nothing attributable
+
+        code, out, err = fleet.run(["declare", "--instant", ready, "--phase", "awaiting-ci"])
+        said = (out + err).lower()
+
+        self.assertEqual(EXIT_REFUSED, code, "a FAILED observation was read as permission")
+        self.assertIn("failed observation", said,
+                      "the failed-capture refusal is worded as though nothing were armed, which sends the "
+                      "reader to the wrong remedy")
+
+    # --- scope: what this gate does NOT govern, said out loud --------------------------------------
+
+    def test_only_awaiting_ci_is_gated(self):
+        """The cap's treatment of `awaiting-ci` is load-bearing elsewhere and is NOT the bug; no other
+        phase is gated, so a worker can always describe what it is really doing."""
+        fleet = self.loaded()
+        ready = self._ready(fleet, BUSY_PANE)
+
+        code, out, err = fleet.run(["declare", "--instant", ready, "--phase", "running"])
+
+        self.assertEqual(EXIT_OK, code, err)
+
+    def test_an_instant_with_no_session_is_ungated_and_says_so(self):
+        """A scope that narrows in silence reads as a pass (`OBS-49`). An instant that was never dispatched
+        into a session has no pane to read, so the gate has no subject — and the claim must say that rather
+        than look like one that passed the gate."""
+        fleet = self.loaded()
+        child = fleet.worker("neverLaunched", live=False)
+
+        code, out, err = fleet.run(["declare", "--instant", str(child), "--phase", "awaiting-ci"])
+
+        self.assertEqual(EXIT_OK, code, err)
+        self.assertIn("ungated", (out + err).lower(),
+                      "the claim skipped the gate silently, which is indistinguishable from passing it")
+
+    # --- what the claim writes down ----------------------------------------------------------------
+
+    def test_the_claim_records_what_was_observed(self):
+        """FI-255's harm was not only the unchecked claim: the store kept `{"phase": "awaiting-ci"}` and
+        nothing else, so a stopped worker and a self-waking one were indistinguishable in the RECORD too."""
+        fleet = self.loaded()
+        ready = self._ready(fleet, WATCHED_PANE)
+
+        fleet.run(["declare", "--instant", ready, "--phase", "awaiting-ci"])
+
+        self.assertEqual("1 monitor", Declarations(fleet.paths["readyWorker"]).watchers())
+
+    def test_a_stale_watcher_record_does_not_outlive_its_claim(self):
+        """A watcher record that survives into an ungated phase is the same lie in slower form."""
+        fleet = self.loaded()
+        ready = self._ready(fleet, WATCHED_PANE)
+        fleet.run(["declare", "--instant", ready, "--phase", "awaiting-ci"])
+
+        fleet.run(["declare", "--instant", ready, "--phase", "running"])
+
+        self.assertIsNone(Declarations(fleet.paths["readyWorker"]).watchers())
+
+    # --- the escape hatch: real watchers this tool cannot see --------------------------------------
+
+    def test_a_named_watcher_this_tool_cannot_see_is_accepted(self):
+        """A cron, an external watchdog and a peer session watching on this instant's behalf are REAL
+        watchers that no pane shows. Refusing them is a false positive landing on somebody who did nothing
+        wrong — and a guard with no override is routed around, which is worse than the original defect
+        because routing around leaves no record that a judgement was made."""
+        fleet = self.loaded()
+        ready = self._ready(fleet, BUSY_PANE)          # nothing visible on the status line
+
+        code, out, err = fleet.run(["declare", "--instant", ready, "--phase", "awaiting-ci",
+                                    "--watcher", "cron */10 * * * * gh-run-poll --pr 4211"])
+
+        self.assertEqual(EXIT_OK, code, err)
+        self.assertEqual("awaiting-ci", Declarations(fleet.paths["readyWorker"]).phase())
+
+    def test_the_watcher_record_has_a_production_reader(self):
+        """A stored field nothing reads is not a record, it is a write-only comfort.
+
+        This is `FI-255`'s own failure one field along, and an audit found it in the first version of this
+        change: `Declarations.watchers()` was written at claim time and had ZERO readers in `fleet/src` —
+        asserted only by tests. So an attested claim and an observed one were byte-identical to every
+        consumer, which is exactly the indistinguishability the milestone exists to remove.
+        """
+        fleet = self.loaded()
+        ready = self._ready(fleet, BUSY_PANE)
+        fleet.run(["declare", "--instant", ready, "--phase", "awaiting-ci",
+                   "--watcher", "cron gh-run-poll"])
+
+        code, out, err = fleet.run(["brief", "--instant", ready])
+
+        self.assertIn("cron gh-run-poll", out, "no production surface reports the watcher record")
+        self.assertIn("ATTESTED", out, "brief does not distinguish an attested claim from an observed one")
+
+    def test_brief_admits_the_board_cannot_show_this(self):
+        """A scoped limitation must be STATED, or it is a silent one. `fleet board` renders an attested
+        claim identically to an observed one — that is `reconcile`'s to fix and out of this charter (i45).
+        The surface that CAN see the difference is the one that has to say the other cannot."""
+        fleet = self.loaded()
+        ready = self._ready(fleet, BUSY_PANE)
+        fleet.run(["declare", "--instant", ready, "--phase", "awaiting-ci", "--watcher", "cron x"])
+
+        code, out, err = fleet.run(["brief", "--instant", ready])
+
+        self.assertIn("i45", out, "the limitation is not named where a reader would meet it")
+
+    def test_the_hatch_buys_permission_and_NOT_silence(self):
+        """The whole reason the hatch is safe. It must be impossible to tell a claim apart from one that
+        passed the gate ONLY if the record says the same thing for both — so the attestation is stored
+        verbatim and labelled, and a reader can always separate ATTESTED from OBSERVED."""
+        fleet = self.loaded()
+        ready = self._ready(fleet, BUSY_PANE)
+
+        fleet.run(["declare", "--instant", ready, "--phase", "awaiting-ci",
+                   "--watcher", "coordinator child-watchdog.sh"])
+
+        recorded = Declarations(fleet.paths["readyWorker"]).watchers()
+        self.assertIn("attested", recorded,
+                      "an attested claim is indistinguishable from an observed one in the record")
+        self.assertIn("child-watchdog.sh", recorded, "the attestation was not kept verbatim")
+
+    def test_an_empty_attestation_is_not_an_attestation(self):
+        """`park --question ""` draws the same line. An override that accepts nothing is a bypass with a
+        flag name, and it would become the thing everyone types."""
+        fleet = self.loaded()
+        ready = self._ready(fleet, BUSY_PANE)
+
+        code, out, err = fleet.run(["declare", "--instant", ready, "--phase", "awaiting-ci",
+                                    "--watcher", "   "])
+
+        self.assertEqual(EXIT_BAD_INPUT, code, "an empty attestation was accepted as a watcher")
+
+    def test_the_refusal_tells_you_the_hatch_exists(self):
+        """A remedy nobody can find is not a remedy: the refusal is where a stranger meets this gate, and
+        if it does not name the override they will route around the gate instead."""
+        fleet = self.loaded()
+        ready = self._ready(fleet, BUSY_PANE)
+
+        code, out, err = fleet.run(["declare", "--instant", ready, "--phase", "awaiting-ci"])
+
+        self.assertIn("--watcher", out + err, "the refusal never mentions the escape hatch")
+
+    # --- the pre-flight must agree with the real call ----------------------------------------------
+
+    def test_dry_run_answers_the_question_it_is_asked(self):
+        """`--dry-run` is consulted precisely to find out whether a claim would be accepted, so a dry run
+        that reports `would-declare` on a claim the real call refuses is worse than no dry run. This CLI
+        already has one verb where the two disagree (`milestone`); a NEW gate must not add another."""
+        fleet = self.loaded()
+        ready = self._ready(fleet, BUSY_PANE)
+
+        dry, _, _ = fleet.run(["declare", "--instant", ready, "--phase", "awaiting-ci", "--dry-run"])
+        real, _, _ = fleet.run(["declare", "--instant", ready, "--phase", "awaiting-ci"])
+
+        self.assertEqual(dry, real, "--dry-run and the real call disagree about the same claim")
 
 
 class TestCloneMakesTheGoldenAnInput(CliCase):

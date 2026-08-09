@@ -184,6 +184,27 @@ _BUSY_MARKERS = (
     "ctrl+c to stop",
 )
 
+#: `FI-255`/`i39`. What the harness draws when something is armed that will RE-INVOKE this session with no
+#: human in the loop: a `Monitor` renders `1 monitor`, a background shell renders `1 shell`, and both
+#: together render `1 shell, 1 monitor`. Measured on a live pane, both arms, in `i39`'s evidence.
+#:
+#: A COUNTED NOUN, not a bare word, and matched on the STATUS LINE alone rather than the busy window. Both
+#: halves of that are load-bearing and both were measured, not reasoned:
+#:
+#:  - the bare word fails because `BUSY_TAIL_LINES` is 15 rows and an agent's own prose lives in them. The
+#:    capture taken while authoring this change has "monitors" inside that window purely because the agent
+#:    was WRITING ABOUT monitors. `"monitor" in window` therefore reports a watcher for a session that
+#:    merely discussed one — a guard that admits everything, which is indistinguishable from a guard that
+#:    works and is the exact failure `i39`'s charter names.
+#:  - the status line is where the harness draws this indicator, and `_rendered` already discards tmux's
+#:    bottom padding, so its last row IS that line.
+_WATCHER_MARKER = re.compile(r"\b\d+\s+(?:monitor|shell)s?\b")
+
+#: What identifies the row as the harness's STATUS LINE rather than any other row on screen. The watcher
+#: indicator shares this row, so requiring both on one line is what separates "the harness is telling me a
+#: watcher is armed" from "the agent typed the word monitor".
+_STATUS_LINE_MARKERS = _BUSY_MARKERS + ("auto mode on", "? for shortcuts", "for agents")
+
 
 @dataclass
 class LiveSession:
@@ -450,6 +471,53 @@ class SessionLayer:
         idle. Stripping first makes the match test what a human would read."""
         window = plain("\n".join(_tail(pane_text, BUSY_TAIL_LINES))).lower()
         return any(marker in window for marker in _BUSY_MARKERS)
+
+    def watching(self, pane_text: str) -> bool:
+        """Whether something is armed that will RE-INVOKE this session with no human in the loop.
+
+        `FI-255`. `awaiting-ci` was taken to mean "somebody is watching" while establishing only "stop
+        counting me against the cap". Two workers in the identical declared phase rendered byte-identically
+        while one was self-waking and the other had been stopped for 1h28m with nothing that would ever
+        restart it — so the phase string, the board row and the park field are ALL invariant across the
+        event they are supposed to detect.
+
+        Anchored to the STATUS LINE — one row — and not to `busy`'s 15-row window, because that window
+        contains the agent's own output and an agent discussing monitors would otherwise report one. See
+        `_WATCHER_MARKER`, where the measurement is recorded.
+
+        Deliberately NOT keyed on `busy`: `declare` runs as a subprocess of the claiming agent's own turn,
+        so `esc to interrupt` is present for EVERY claimant by construction. A guard keyed on it admits
+        100% of claims — measured, both arms, on the pane that authored this change.
+
+        This answers *"will this session wake up?"*, which is the property whose absence FI-255 measured. It
+        does NOT answer *"is the watcher watching CI?"* — a background shell running a build satisfies the
+        first and not the second, and that is not decidable from a pane. Callers must not overclaim it.
+        """
+        return bool(self.watchers(pane_text))
+
+    def watchers(self, pane_text: str) -> str:
+        """What the status line says is armed — `"1 shell, 1 monitor"` — or `""` when nothing is.
+
+        The TEXT and not just the boolean, because the claim RECORDS what it observed. `FI-255`'s harm was
+        that nothing distinguishable was written down at claim time: two opposite states produced one
+        byte-identical row, so the record could not answer the question afterwards. A stored `true` would
+        repeat that mistake one field along.
+        """
+        for row in reversed(_tail(pane_text, BUSY_TAIL_LINES)):
+            #: The status line is found by its SIGNATURE, not by its position, and both halves of that
+            #: matter. Position alone (`rows[-1]`) was the first implementation and it has a measured false
+            #: positive: anything drawn BELOW the status line — a tool-approval prompt, a notification —
+            #: displaces it, and a genuinely watched session is then refused. That direction is safe but it
+            #: lands on somebody who did nothing wrong.
+            #:
+            #: The marker and the signature must appear on the SAME row, which is what keeps this immune to
+            #: the contamination a bare window scan suffers: an agent writing *about* monitors puts the
+            #: word in the window, but not onto a row that is also drawing the interrupt hint.
+            plain_row = plain(row).lower()
+            if not any(marker in plain_row for marker in _STATUS_LINE_MARKERS):
+                continue
+            return ", ".join(match.group(0) for match in _WATCHER_MARKER.finditer(plain_row))
+        return ""
 
     # --- control -----------------------------------------------------------------------------
 
