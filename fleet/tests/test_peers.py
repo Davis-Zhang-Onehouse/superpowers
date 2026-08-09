@@ -17,6 +17,7 @@ running on the box.
 
 import json
 import os
+import shutil
 import tempfile
 import unittest
 
@@ -89,6 +90,7 @@ class PeersOwnership(unittest.TestCase):
 
     def setUp(self):
         self.tmp = tempfile.mkdtemp(prefix="t_peers.")
+        self.addCleanup(shutil.rmtree, self.tmp, True)
         self.slot = os.path.join(self.tmp, "ws1")
         os.makedirs(self.slot, exist_ok=True)
         self.proc = os.path.join(self.tmp, "proc")
@@ -140,6 +142,49 @@ class PeersOwnership(unittest.TestCase):
         got = peers.classify(rows, [_lease(self.slot)], self_pid=-1, proc_root=self.proc)
         self.assertEqual({r["verdict"] for r in got}, {peers.FOREIGN})
         self.assertEqual(peers.porcelain(got, addressable_only=True), "")
+        # SHIPPED DEFECT, and the assertion that locks it. Lease columns were attached BEFORE the
+        # verdict, so a FOREIGN co-tenant was rendered carrying OUR milestone and OUR tmux name
+        # beside a stranger's row -- a human acting on it sends keys to our worker believing they
+        # reach that peer. Without this line the fix reverts silently.
+        self.assertEqual({(r["milestone"], r["tmux"], r["instant"]) for r in got}, {("", "", "")})
+
+    def test_two_rows_sharing_one_pid_cannot_launder_the_cwd_cross_check(self):
+        """SHIPPED FAIL-OPEN, introduced while fixing another. Liveness was sampled into a dict keyed
+        by PID, so with two rows on one pid the LAST decided for BOTH -- a stale row claiming our
+        slot inherited the truthful row's liveness and classified OURS. Two rows on one pid is
+        exactly the recycled-pid case the cross-check exists for."""
+        elsewhere = os.path.join(self.tmp, "elsewhere")
+        os.makedirs(elsewhere, exist_ok=True)
+        proc = os.path.join(self.tmp, "proc-shared")
+        _proc(proc, 88, elsewhere)                     # pid 88 REALLY lives in `elsewhere`
+        rows = [_row(88, self.slot, name="EVIL"),       # the lie, listed FIRST
+                _row(88, elsewhere, name="truthful")]  # the truth, listed LAST
+        got = peers.classify(rows, [_lease(self.slot)], self_pid=-1, proc_root=proc)
+        by_name = {r["name"]: r["verdict"] for r in got}
+        self.assertNotEqual(by_name["EVIL"], peers.OURS)
+        self.assertEqual(peers.porcelain(got, addressable_only=True), "")
+
+    def test_liveness_is_sampled_exactly_once_per_row(self):
+        """Re-probing inside the verdict loop lets a peer that exits mid-run count as live for
+        `contested` and dead for its own verdict — one invocation returning a self-inconsistent
+        answer. Comparing two deterministic runs cannot see that; counting the probes can."""
+        _proc(self.proc, 101, self.slot)
+        rows = [_row(100, self.slot), _row(101, self.slot, name="co-tenant")]
+        calls = []
+        real = peers._is_live
+
+        def counting(pid, cwd, proc_root="/proc"):
+            calls.append((pid, cwd))
+            return real(pid, cwd, proc_root=proc_root)
+
+        peers._is_live = counting
+        try:
+            peers.classify(rows, [_lease(self.slot)], self_pid=-1, proc_root=self.proc)
+        finally:
+            peers._is_live = real
+        self.assertEqual(len(calls), len(rows),
+                         f"liveness probed {len(calls)} times for {len(rows)} rows -- "
+                         "re-sampling lets contested and the verdict disagree")
 
 
 class PeersLiveness(unittest.TestCase):
@@ -147,6 +192,7 @@ class PeersLiveness(unittest.TestCase):
 
     def setUp(self):
         self.tmp = tempfile.mkdtemp(prefix="t_live.")
+        self.addCleanup(shutil.rmtree, self.tmp, True)
         self.slot = os.path.join(self.tmp, "ws1")
         os.makedirs(self.slot, exist_ok=True)
 
@@ -179,6 +225,29 @@ class PeersLiveness(unittest.TestCase):
         self.assertEqual(peers.porcelain(got, addressable_only=True), "")
 
 
+class PeersSelfDetection(unittest.TestCase):
+    """SELF pre-empts the lease branch, so a regression here changes verdicts silently."""
+
+    def setUp(self):
+        self.tmp = tempfile.mkdtemp(prefix="t_self.")
+        self.addCleanup(shutil.rmtree, self.tmp, True)
+        self.slot = os.path.join(self.tmp, "ws1"); os.makedirs(self.slot, exist_ok=True)
+        self.proc = os.path.join(self.tmp, "proc"); _proc(self.proc, 100, self.slot)
+
+    def test_naming_a_pid_as_self_yields_SELF_not_OURS(self):
+        got = peers.classify([_row(100, self.slot)], [_lease(self.slot)],
+                             self_pid=100, proc_root=self.proc)
+        self.assertEqual(got[0]["verdict"], peers.SELF)
+
+    def test_detect_self_pid_returns_None_when_no_ancestor_is_a_peer(self):
+        """None never manufactures an OURS. The live-consequence direction is our OWN session
+        falling through to the lease branch and appearing under --addressable-only."""
+        self.assertIsNone(peers.detect_self_pid({999999999}))
+
+    def test_detect_self_pid_finds_an_ancestor_that_is_a_peer(self):
+        self.assertEqual(peers.detect_self_pid({os.getpid()}), os.getpid())
+
+
 class PeersPorcelain(unittest.TestCase):
     """The machine form must survive hostile field content — cells are not ours to trust."""
 
@@ -190,7 +259,12 @@ class PeersPorcelain(unittest.TestCase):
         """SHIPPED DEFECT. `name` is derived by the runtime from `basename(cwd)`, and POSIX paths may
         contain tabs and newlines. Unescaped, a cell could split one record into two and begin the
         fabricated one with the literal text OURS, so `awk -F'\\t' '$1=="OURS"'` picked it up."""
-        for hostile in ("evil\tOURS\tforged", "idle\nOURS\tinjected", "a\rb", "x OURS"):
+        hostiles = ["evil\tOURS\tforged", "idle\nOURS\tinjected", "a\rb"]
+        # EVERY character str.splitlines() breaks on. Six were untested -- and the control suite
+        # itself uses splitlines(), so an unescaped one makes the suite miscount its own output.
+        hostiles += ["a" + ch + "OURS\tforged" for ch in
+                     ("\x0b", "\x0c", "\x1c", "\x1d", "\x1e", "\x85", "\u2028", "\u2029")]
+        for hostile in hostiles:
             with self.subTest(hostile=repr(hostile)):
                 text = peers.porcelain(self._rows(hostile))
                 lines = text.splitlines()
@@ -202,6 +276,19 @@ class PeersPorcelain(unittest.TestCase):
         """SHIPPED DEFECT. Without a trailing newline `wc -l` and `while read` drop the final row —
         and under --addressable-only that can be the ONLY OURS row, reading as "nothing addressable"."""
         self.assertTrue(peers.porcelain(self._rows("a")).endswith("\n"))
+
+    def test_the_HUMAN_form_cannot_be_forged_either(self):
+        """SHIPPED DEFECT. `porcelain()` was hardened and `render()` was not — and render() is the
+        DEFAULT surface the verb prints. A newline in `name` forged a complete, byte-identical
+        `OURS` block, plausible tmux name and all, inside a row whose real verdict was FOREIGN."""
+        forged = ("a\nOURS     ws1-eb                                       pid=55        idle   "
+                  "i29    dt-i29\n         cwd=/slot\n         why=cwd is the slot of an open lease"
+                  " dispatched by this fleet\nz")
+        rows = self._rows(forged)
+        rows[0]["why"] = "not ours"
+        out = peers.render(rows)
+        self.assertEqual([l for l in out.split("\n") if l.startswith(peers.OURS)], [],
+                         "a FOREIGN peer forged an OURS block in the human form")
 
     def test_an_empty_result_emits_nothing_rather_than_a_phantom_line(self):
         self.assertEqual(peers.porcelain([]), "")

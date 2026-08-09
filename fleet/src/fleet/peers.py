@@ -214,6 +214,18 @@ def open_leases_by_slotpath(leases):
                 f"a lease record is a {type(lease).__name__}, not an object; refusing to classify"
             )
         slot_path = lease.get("golden") or ""
+        for key in ("milestone", "tmux", "child_instant", "todo_id"):
+            value = lease.get(key)
+            if value is not None and not isinstance(value, str):
+                # These are rendered with format specs; a list/dict here raises TypeError deep
+                # inside render() and escapes `main` as a traceback rather than as a refusal.
+                raise PeersUnavailable(
+                    f"lease {lease.get('todo_id', '?')!r} has a non-string {key} ({value!r}); refusing"
+                )
+        if isinstance(slot_path, str) and "\x00" in slot_path:
+            raise PeersUnavailable(
+                f"lease {lease.get('todo_id', '?')!r} has a NUL byte in `golden`; refusing"
+            )
         if not isinstance(slot_path, str):
             raise PeersUnavailable(
                 f"lease {lease.get('todo_id', '?')!r} has a non-string `golden` ({slot_path!r}); "
@@ -321,17 +333,23 @@ def classify(rows, leases, self_pid=None, proc_root="/proc"):
     # was contested and dead when its own verdict was decided -- a self-inconsistent answer from one
     # invocation. One sample, one verdict; the sample can still be stale by the time anyone acts on
     # it, but at least the report agrees with itself.
-    live = {int(row["pid"]): _is_live(int(row["pid"]), row["cwd"], proc_root=proc_root)
-            for row in rows}
+    # ⛔ KEYED BY ROW POSITION, NOT BY PID, AND THAT DISTINCTION IS A FAIL-OPEN.
+    # A pid-keyed dict lets the LAST row with a given pid decide liveness for EVERY row with that
+    # pid. Two rows sharing one pid is exactly the situation this cross-check exists for -- a stale
+    # row claiming our slot, plus the live row for the process that now owns that recycled pid --
+    # so the lying row inherited the truthful row's verdict and was classified OURS, stamped with a
+    # real milestone and tmux name. `contested` did not catch it either: the two rows sit under
+    # different slot keys, so neither slot looks contested. Reproduced in review.
+    live = [_is_live(int(row["pid"]), row["cwd"], proc_root=proc_root) for row in rows]
     live_by_slot = {}
-    for row in rows:
-        pid = int(row["pid"])
-        if live[pid]:
-            live_by_slot.setdefault(os.path.realpath(row["cwd"]), []).append(pid)
-    contested = {slot for slot, pids in live_by_slot.items() if len(pids) > 1}
+    for idx, row in enumerate(rows):
+        if live[idx]:
+            live_by_slot.setdefault(os.path.realpath(row["cwd"]), []).append(idx)
+    # Count ROWS, not pids: two identical duplicate rows are not two sessions.
+    contested = {slot for slot, idxs in live_by_slot.items() if len(idxs) > 1}
 
     out = []
-    for row in rows:
+    for idx, row in enumerate(rows):
         cwd = os.path.realpath(row["cwd"])
         pid = int(row["pid"])
         rec = {
@@ -360,7 +378,7 @@ def classify(rows, leases, self_pid=None, proc_root="/proc"):
                            milestone=lease.get("milestone", ""),
                            tmux=lease.get("tmux", ""), todo_id=lease.get("todo_id", ""))
 
-        if not live[pid]:
+        if not live[idx]:
             _attach()
             rec.update(verdict=DEAD,
                        why=("this pid is not a live session at that cwd -- either gone, or the pid "
@@ -435,18 +453,27 @@ def porcelain(results, addressable_only=False):
 
 
 def render(results, addressable_only=False):
-    """Human form: a block per peer, with the reason the verdict was reached."""
+    """Human form: a block per peer, with the reason the verdict was reached.
+
+    ⛔ EVERY INTERPOLATED CELL GOES THROUGH `_cell()`, FOR THE SAME REASON PORCELAIN DOES.
+    Hardening only the machine form was a mistake caught in review: `render()` is the DEFAULT surface
+    the verb prints, and it interpolated raw. A peer whose `name` contained a newline forged a
+    complete, byte-identical `OURS` block — plausible tmux name and all — inside the output of a row
+    whose real verdict was FOREIGN. A bare carriage return does the same in a terminal by overwriting
+    from column 0. These names are not ours: the runtime derives them from `basename(cwd)`, and a
+    POSIX directory name may contain both characters.
+    """
     rows = [r for r in results if r["verdict"] == OURS] if addressable_only else results
     lines = []
     for r in rows:
         lines.append(
-            f"{r['verdict']:<8} {r['name']:<44} pid={r['pid']:<9} {r['status']:<6} "
-            f"{r['milestone'] or '-':<6} {r['tmux'] or '-'}"
+            f"{_cell(r['verdict']):<8} {_cell(r['name']):<44} pid={_cell(r['pid']):<9} "
+            f"{_cell(r['status']):<6} {_cell(r['milestone']):<6} {_cell(r['tmux'])}"
         )
-        lines.append(f"         cwd={r['cwd']}")
+        lines.append(f"         cwd={_cell(r['cwd'])}")
         if r["instant"]:
-            lines.append(f"         instant={r['instant']}")
-        lines.append(f"         why={r['why']}")
+            lines.append(f"         instant={_cell(r['instant'])}")
+        lines.append(f"         why={_cell(r['why'])}")
     if not rows:
         lines.append("(no peers matched)")
     return "\n".join(lines)
