@@ -86,7 +86,9 @@ def load_peers(json_text=None, runner=subprocess.run):
         argv = [_claude_bin(), "agents", "--json"]
         try:
             done = runner(argv, capture_output=True, text=True, timeout=60)
-        except (OSError, subprocess.SubprocessError) as exc:
+        except (OSError, ValueError, subprocess.SubprocessError) as exc:
+            # ValueError covers UnicodeDecodeError: `text=True` decodes strictly, so a
+            # non-UTF-8 byte on stdout escaped `main` as a traceback, not a refusal.
             raise PeersUnavailable(f"could not run `{' '.join(argv)}`: {exc}")
         if done.returncode != 0:
             raise PeersUnavailable(
@@ -187,7 +189,7 @@ def load_leases(records_dir):
         try:
             with open(path, encoding="utf-8") as fh:
                 leases.append(json.load(fh))
-        except (OSError, json.JSONDecodeError) as exc:
+        except (OSError, ValueError, json.JSONDecodeError) as exc:  # ValueError: UnicodeDecodeError
             # Skipping an unreadable record would shrink the OURS set silently, turning a
             # data problem into a wrong answer that looks like a clean one.
             raise PeersUnavailable(f"lease record {path} is unreadable ({exc}); refusing to classify")
@@ -345,7 +347,10 @@ def classify(rows, leases, self_pid=None, proc_root="/proc"):
     for idx, row in enumerate(rows):
         if live[idx]:
             live_by_slot.setdefault(os.path.realpath(row["cwd"]), []).append(idx)
-    # Count ROWS, not pids: two identical duplicate rows are not two sessions.
+    # Count ROWS. Two byte-identical duplicate rows therefore contest their slot and BOTH go
+    # FOREIGN. That is deliberate and fail-closed: a duplicated row is a listing we do not
+    # understand, and de-duplicating by pid here is exactly the keying that produced the
+    # laundering fail-open above. Do not 'simplify' this back to a pid key.
     contested = {slot for slot, idxs in live_by_slot.items() if len(idxs) > 1}
 
     out = []
@@ -412,28 +417,37 @@ PEER_COLUMNS = ("verdict", "name", "pid", "status", "milestone", "tmux", "cwd", 
 
 def _cell(value):
     """
-    One porcelain cell, with the field and record separators made harmless.
+    One rendered cell, with every control character made inert.
 
-    ⛔ WITHOUT THIS, A FOREIGN PEER'S FIELD CONTENT CAN FORGE AN `OURS` ROW. The cells are not ours:
-    `name` is derived by the runtime from `basename(cwd)`, and a POSIX directory name may contain
-    tabs and newlines. A tab injects extra columns; a newline splits one record into two — and the
-    fabricated second record can begin with the literal text `OURS`, so a consumer doing
-    `awk -F'\\t' '$1=="OURS"'` puts an attacker-chosen name in its addressable list while the row
-    that got split is silently truncated. Both were reproduced in review.
+    ⛔ ESCAPE BY CATEGORY, NEVER BY ENUMERATION. This function has now been widened three times, and
+    each widening was a defect found in review:
+      1. tab/newline unescaped  -> a peer's `name` forged an extra porcelain row reading `OURS`.
+      2. only 4 of the 12 characters `str.splitlines()` breaks on -> the same forgery through
+         \x0b \x0c \x1c \x1d \x1e \x85 U+2028 U+2029.
+      3. line breaks escaped but CURSOR CONTROL not -> `ESC [ G` (CHA, cursor-to-column-1) and
+         backspace repaint a line in a terminal exactly as a bare `\r` does, so a FOREIGN peer
+         painted itself over the verdict column as `OURS` on the DEFAULT human surface. NUL survived
+         too, and truncates a cell for mawk-family consumers.
 
-    Escaped rather than stripped, so the value stays legible and no two distinct cells collapse
-    into the same output.
+    The cells are not ours: the runtime derives `name` from `basename(cwd)`, and a POSIX directory
+    name may contain ANY byte except `/` and NUL. So the rule is now categorical -- C0, DEL, C1 and
+    the Unicode line/paragraph separators all become visible escapes -- rather than a list of the
+    characters somebody happened to think of. A list is only ever safe against the reader who wrote
+    it; that is this function's whole history.
     """
     text = "-" if value is None or value == "" else str(value)
-    text = text.replace("\\", "\\\\").replace("\t", "\\t").replace("\n", "\\n").replace("\r", "\\r")
-    # ⚠️ `\t\n\r` ARE NOT THE ONLY SEPARATORS THAT MATTER. Python's str.splitlines() also breaks on
-    # \x0b \x0c \x1c \x1d \x1e \x85 U+2028 U+2029 -- so a cell containing any of them still forged an
-    # extra `OURS`-leading record for any consumer using splitlines(), which includes this module's
-    # own control suite. Shell consumers were safe (they split on \n), but "safe for the reader I
-    # happened to imagine" is how the first version of this escaping passed review.
-    for ch in ("\x0b", "\x0c", "\x1c", "\x1d", "\x1e", "\x85", "\u2028", "\u2029"):
-        text = text.replace(ch, "\\x%02x" % ord(ch) if ord(ch) < 0x100 else "\\u%04x" % ord(ch))
-    return text
+    out = [] 
+    for ch in text:
+        code = ord(ch)
+        if ch == "\\":
+            out.append("\\\\")
+        elif code < 0x20 or code == 0x7F or 0x80 <= code <= 0x9F:
+            out.append("\\x%02x" % code)          # C0, DEL, C1: includes NUL, ESC, BS, CR, LF, TAB
+        elif ch in ("\u2028", "\u2029"):
+            out.append("\\u%04x" % code)
+        else:
+            out.append(ch)
+    return "".join(out)
 
 
 def porcelain(results, addressable_only=False):
