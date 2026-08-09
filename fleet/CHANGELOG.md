@@ -1,5 +1,17 @@
 # fleet — changelog
 
+## fleet/v0.3.15 — 2026-08-09T17:54:24Z
+Cut from 16fa45c on `live` (upstream base pre-merge-fleet-skills-20260731). 4 commit(s) since fleet/v0.3.14.
+
+Every release ships the whole repository — all skills, `commands/`, `hooks/` and the plugin manifest, not only `fleet/`.
+Payload: fleet (6 files), skills (3 files).
+Skills changed: coordinating-instants, using-fleet, working-as-a-dispatched-instant.
+
+- f026ef2 tests: behavioural coverage for `fleet peers`, so its gate is not a folder nobody runs
+- d6a00ac peers: close the fail-open review round 3 found, and lock every fix with an assertion
+- 9cdc31a peers: escape control characters by CATEGORY, and stop a vacuous ancestry test
+- 16fa45c fleet declare: awaiting-ci refuses when nothing is armed to wake the claimant
+
 ## fleet/v0.3.14 — 2026-08-08T22:13:03Z
 Cut from f40676b on `live` (upstream base pre-merge-fleet-skills-20260731). 1 commit(s) since fleet/v0.3.13.
 
