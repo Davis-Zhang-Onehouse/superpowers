@@ -77,7 +77,7 @@ Mutating. Each has `--dry-run`.
 | `fleet milestone` | the coordinator puts a milestone ON the roadmap — the only way work becomes dispatchable |
 | `fleet propose` | the worker's status proposal; never a roadmap write |
 | `fleet apply` | the coordinator applies a proposal; the single writer of a status |
-| `fleet declare` | declare a phase, and print what the consumer now reads |
+| `fleet declare` | declare a phase, and print what the consumer now reads; `awaiting-ci` is REFUSED unless a watcher is armed |
 | `fleet park` / `fleet unpark` | record or clear a parked decision as structured state |
 | `fleet review` | record a structured round and report the gate |
 | `fleet complete` | pass the gate, then rename the folder `-complete-` |
