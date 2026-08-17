@@ -72,6 +72,11 @@ finalize_live() { # finalize_live NEWTAG RESULT — adopt sync-rebase into live,
   log_event "$result" "$newtag" "$stamp"
   prune_history; prune_snapshots
   if [ -n "${SPSYNC_REFRESH_CMD:-}" ]; then
-    eval "$SPSYNC_REFRESH_CMD" || log_event refresh-failed "$newtag" "$stamp"
+    # Run from $REPO, not from wherever the caller stood: the STATUS banner tells you to
+    # `cd $WORKTREE` before running finish.sh, and that worktree was deleted a few lines up.
+    # A refresh subprocess inheriting a deleted cwd dies before doing anything (claude
+    # reports "ENOENT: Bun could not find a file"), so every documented conflict
+    # resolution logged refresh-failed and left the plugin cache stale.
+    ( cd "$REPO" && eval "$SPSYNC_REFRESH_CMD" ) || log_event refresh-failed "$newtag" "$stamp"
   fi
 }
