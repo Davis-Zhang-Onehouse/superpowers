@@ -144,6 +144,38 @@ class StampingCase(unittest.TestCase):
         self.assertNotIn("gemini-extension.json", [path for path, _, _ in changed])
         self.assertEqual(len(changed), 3)
 
+    def test_a_declared_manifest_that_is_not_json_is_stamped_too(self):
+        """Upstream 6.3.0 added `.hermes-plugin/plugin.yaml` to `.version-bump.json`. The stamp parsed
+        every declared file as JSON, so the first cut carrying that upstream bump refused outright:
+        "declares a version field but is not readable as JSON". WHICH files carry the version is the
+        repository's declaration, not this module's — a manifest spelled in YAML is still a manifest."""
+        config = json.loads((self.tmp / VERSION_CONFIG).read_text())
+        config["files"].append({"path": ".hermes-plugin/plugin.yaml", "field": "version"})
+        (self.tmp / VERSION_CONFIG).write_text(json.dumps(config, indent=2) + "\n")
+        manifest = self.tmp / ".hermes-plugin" / "plugin.yaml"
+        manifest.parent.mkdir(parents=True, exist_ok=True)
+        manifest.write_text("name: superpowers\nversion: 6.2.0\ndescription: skills for Hermes\n")
+
+        changed = stamp_plugin_version(self.tmp, "0.3.8")
+
+        self.assertIn(".hermes-plugin/plugin.yaml", [path for path, _, _ in changed])
+        self.assertEqual(manifest.read_text(),
+                         "name: superpowers\nversion: 6.2.0+fleet.0.3.8\ndescription: skills for Hermes\n")
+
+    def test_an_ambiguous_version_field_in_a_non_json_manifest_is_refused_too(self):
+        """The "exactly one occurrence, or REFUSED" rule is what makes a textual stamp safe; a manifest
+        that happens not to be JSON must not be the way around it."""
+        config = json.loads((self.tmp / VERSION_CONFIG).read_text())
+        config["files"].append({"path": ".hermes-plugin/plugin.yaml", "field": "version"})
+        (self.tmp / VERSION_CONFIG).write_text(json.dumps(config, indent=2) + "\n")
+        manifest = self.tmp / ".hermes-plugin" / "plugin.yaml"
+        manifest.parent.mkdir(parents=True, exist_ok=True)
+        manifest.write_text("version: 6.2.0\nengine:\n  version: 6.2.0\n")
+        with self.assertRaises(BadInput) as caught:
+            stamp_plugin_version(self.tmp, "0.3.8")
+        self.assertIn("plugin.yaml", str(caught.exception))
+        self.assertIn("spelled", str(caught.exception))     # refused as ambiguous, not as unparseable
+
 
 class CutFootprintCase(unittest.TestCase):
     """The trap. Stamping seven more files on every cut must not kill the exemption gate.

@@ -92,6 +92,39 @@ def _read_field(body: dict, field: str):
     return cursor if isinstance(cursor, str) else None
 
 
+def _read_textual_field(text: str, field: str, path: Path):
+    """One `leaf: value` field out of a manifest that does not parse as JSON, or None.
+
+    `.version-bump.json` declares WHICH files carry the version, and upstream 6.3.0 put a YAML manifest
+    (`.hermes-plugin/plugin.yaml`) on that list. Reading it as text rather than adding a YAML parser keeps
+    this module a leaf — and the write half was always textual anyway, for formatting's sake.
+
+    A dotted field is refused rather than walked: nesting cannot be established from a flat text scan, and
+    guessing which `version:` a path meant is the one thing `_rewrite` refuses to do.
+    """
+    if "." in field:
+        raise BadInput(f"{path} declares the nested field {field!r} but does not parse as JSON; a nested "
+                       f"field cannot be located in a file this module can only read as flat text.")
+    found = re.findall(rf'^[ \t]*"?{re.escape(field)}"?[ \t]*:[ \t]*(.+?)[ \t]*$', text, re.MULTILINE)
+    if len(found) > 1:
+        raise BadInput(f"{path} has {len(found)} field(s) spelled \"{field}\"; a cut stamps exactly one. "
+                       f"Which one was meant cannot be decided from the file, and stamping the first "
+                       f"would rewrite the wrong line without saying so.")
+    if not found:
+        return None
+    return found[0].strip().strip('"').strip("'") or None
+
+
+def _declared_value(path: Path, field: str):
+    """The manifest's current version, however the manifest happens to be spelled."""
+    text = path.read_text()
+    try:
+        body = json.loads(text)
+    except ValueError:
+        return _read_textual_field(text, field, path)
+    return _read_field(body, field)
+
+
 def _rewrite(path: Path, field: str, old: str, new: str, dry_run: bool = False) -> None:
     """Replace one `"leaf": "old"` occurrence in the raw text, preserving every other byte.
 
@@ -103,7 +136,10 @@ def _rewrite(path: Path, field: str, old: str, new: str, dry_run: bool = False) 
     apart from the text, and stamping the first would silently rewrite the wrong one.
     """
     leaf = field.rsplit(".", 1)[-1]
-    pattern = re.compile(rf'("{re.escape(leaf)}"\s*:\s*)"{re.escape(old)}"')
+    #: The quotes are optional and the closing one must match the opening one, so `"version": "6.2.0"` and
+    #: a YAML `version: 6.2.0` are both matched by one pattern -- and a half-quoted value by neither.
+    pattern = re.compile(
+        rf'(?P<lead>"?{re.escape(leaf)}"?\s*:\s*)(?P<quote>["\']?){re.escape(old)}(?P=quote)(?=\s|,|$)')
     text = path.read_text()
     found = pattern.findall(text)
     if len(found) != 1:
@@ -113,7 +149,11 @@ def _rewrite(path: Path, field: str, old: str, new: str, dry_run: bool = False) 
             f"would rewrite the wrong line without saying so.")
     if dry_run:
         return
-    path.write_text(pattern.sub(lambda match: f'{match.group(1)}"{new}"', text, count=1))
+    #: Re-emit the quoting the file already used: stamping a YAML manifest must not leave a JSON string
+    #: behind it, and a manifest's own formatting is the thing this function exists to preserve.
+    path.write_text(pattern.sub(
+        lambda match: f'{match.group("lead")}{match.group("quote")}{new}{match.group("quote")}',
+        text, count=1))
 
 
 def stamp_plugin_version(repo_path, fleet_version, dry_run: bool = False) -> list:
@@ -138,11 +178,7 @@ def stamp_plugin_version(repo_path, fleet_version, dry_run: bool = False) -> lis
         path = root / relative
         if not path.is_file():
             continue
-        try:
-            body = json.loads(path.read_text())
-        except ValueError as broken:
-            raise BadInput(f"{path} declares a version field but is not readable as JSON ({broken}).")
-        old = _read_field(body, field)
+        old = _declared_value(path, field)
         if old is None:
             raise BadInput(f"{path} does not carry the field {field!r} that {VERSION_CONFIG} declares "
                            f"for it. Refused rather than skipped: a declared file that has quietly lost "
