@@ -1,5 +1,34 @@
 # fleet — changelog
 
+## fleet/v0.3.16 — 2026-08-17T22:12:48Z
+Cut from 3845d27 on `live` (upstream base snapshot/2026-08-17-221146). 19 commit(s) since fleet/v0.3.15.
+
+Every release ships the whole repository — all skills, `commands/`, `hooks/` and the plugin manifest, not only `fleet/`.
+Payload: fleet (3 files), skills (13 files), plugin-manifests (1 file), scripts (5 files), tests (10 files), docs (6 files), other (2 files).
+Skills changed: brainstorming, finishing-a-development-branch, requesting-code-review, subagent-driven-development, using-superpowers, writing-plans, writing-skills.
+
+> fleet/v0.3.15 is no longer an ancestor of `live` — an upstream rebase rewrote the commits between. This delta was computed by patch-id, not by ancestry.
+
+- 44c9b2d docs: remove the "We're Hiring" section from the README
+- b36e082 Release v6.3.0: Devin CLI and Hermes Agent support, brainstorming three-path router, SDD/Codex efficiency fixes (#2125)
+- 287c51f import fleet into this repo: the coordination infrastructure the new skills are built on
+- e0581a7 fleet fixture: archive the dummy-project repos, and stop baking an absolute path into facts.env
+- 4f56d8a harness: establish box-local baselines on first run, and give §H a virgin store
+- a02be37 the four fleet skills, each carrying tests that prove its factual claims
+- 1582e13 IT sweep complete in the new home: 221 PASS / 0 FAIL across every runner
+- 693f95a fleet v0.3.8
+- 218bd6f fleet v0.3.9
+- 11e4a15 fleet v0.3.10
+- dfa0ff5 it: §i7's rows never reached the closeout register, and the pins dirty every cut
+- 15e917b fleet v0.3.11
+- 2d31536 fleet+it: a named destination is whole, and the isolation check can see the instants directory
+- f553fab fleet v0.3.12
+- 639b79f fleet v0.3.13
+- 1c08983 fleet v0.3.14
+- 4ef1781 fleet v0.3.15
+- 54d023f sync: the refresh ran from the worktree it had just deleted, and a merge on live replayed itself
+- 3845d27 release-cut: upstream 6.3.0 brought a YAML manifest, and the stamp only knew JSON
+
 ## fleet/v0.3.15 — 2026-08-09T17:54:24Z
 Cut from 16fa45c on `live` (upstream base pre-merge-fleet-skills-20260731). 4 commit(s) since fleet/v0.3.14.
 
