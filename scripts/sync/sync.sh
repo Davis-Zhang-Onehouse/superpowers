@@ -50,8 +50,13 @@ g "$REPO" worktree add -f -B sync-rebase "$WORKTREE" "$LIVE_BRANCH" >/dev/null
 
 # rerere-aware rebase: auto-continue when rerere resolved everything; pause on new conflicts.
 rebase_step() {
+  # --rebase-merges: live can carry a merge that reconciled a diverged copy of the fork, whose
+  # two parents hold the same work twice. Linearising that replays every commit of the second
+  # parent on top of its own already-applied twin — one conflict per duplicate, and a silent
+  # revert wherever the stale patch still applies. Preserving the merge replays each parent
+  # onto the new base exactly once. For linear history it behaves like a plain rebase.
   g "$WORKTREE" -c rerere.enabled=true -c rerere.autoupdate=true \
-     rebase --onto "$NEW" "$BASE_TAG" sync-rebase
+     rebase --rebase-merges --onto "$NEW" "$BASE_TAG" sync-rebase
 }
 continue_step() { GIT_EDITOR=true g "$WORKTREE" rebase --continue; }
 
