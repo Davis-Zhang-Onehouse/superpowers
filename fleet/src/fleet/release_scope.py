@@ -69,7 +69,8 @@ CUT_STAMPED = "fleet/src/fleet/__init__.py"
 #: design, because the decision that gates a release must be a pure function of a list of strings.
 #: `test_release_payload` asserts the two agree, so the duplication cannot drift in silence.
 CUT_MANIFESTS = ("package.json", ".claude-plugin/plugin.json", ".cursor-plugin/plugin.json",
-                 ".codex-plugin/plugin.json", ".kimi-plugin/plugin.json",
+                 ".codex-plugin/plugin.json", ".kimi-plugin/plugin.json", ".devin-plugin/plugin.json",
+                 ".hermes-plugin/plugin.yaml",
                  ".claude-plugin/marketplace.json", "gemini-extension.json")
 
 #: `__version__ = "X.Y.Z"`, however it is spaced or quoted. Matched rather than parsed, because the only
