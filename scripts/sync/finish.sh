@@ -44,8 +44,14 @@ while rebase_in_progress; do
   if [ "$steps" -gt "$maxsteps" ]; then
     echo "Rebase not converging after $steps steps — inspect $WORKTREE manually."; exit 1
   fi
-  if ! GIT_EDITOR=true g "$WORKTREE" rebase --continue >/dev/null 2>&1; then
-    echo "git rebase --continue failed with no unmerged files — inspect $WORKTREE."; exit 1
+  # Keep git's own output: it is the only thing that says WHY the continue failed (commit
+  # became empty, object store unwritable, a hook or signer refused). Discarding it leaves
+  # the one-line "inspect the worktree" message and nothing to act on.
+  if ! continue_out="$(GIT_EDITOR=true g "$WORKTREE" rebase --continue 2>&1)"; then
+    echo "git rebase --continue failed with no unmerged files — inspect $WORKTREE."
+    echo "git said:"
+    printf '%s\n' "$continue_out" | sed 's/^/    /'
+    exit 1
   fi
 done
 
