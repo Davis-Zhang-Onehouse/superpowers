@@ -89,14 +89,14 @@ digraph new_op {
 Plus three register/reconciliation rules:
 - **Registers append, never rewrite; living docs reconcile, never accrete.** DECISIONS/ISSUES/ASSUMPTIONS are append-only registers (accrete with stable IDs + dates; a superseded entry is *marked* superseded, never deleted). HANDOFF and RUNBOOK are LIVING — when the plan changes you **edit the affected section in place** and mark the old content HISTORICAL/superseded; you do **not** leave two co-equal versions. The classic failure: RUNBOOK ends up with two build recipes and a resumer runs the dead one.
 - **DECISIONS is the tie-breaker.** When docs disagree, the **latest ACTIVE `DECISIONS` entry wins** — it is the authoritative, dated timeline. Do **not** resolve conflicts by "newer doc wins": a file's top-of-file `Updated:` date does not mean every *section* inside was refreshed (a RUNBOOK header can say today while its recipe body is stale). Trust the register, then fix the living doc to match.
-- **The charter is sacred** (goal/scope/acceptance/constraints/raw-prompts written once, edited deliberately, so your partner never re-pastes them).
+- **The charter is sacred** (goal/scope/acceptance/constraints written once, edited deliberately, so your partner never re-pastes them).
 
 ## Canonical Layout (fixed names inside each instant)
 
 ```
 <instant>/
   HANDOFF.md      ← ENTRY POINT. TWO parts: (A) CURRENT STATE — where-we-are + live snapshot + what-code-where + HOW each artifact was built & tested (reviewer guide: artifact→built-by→provenance/CI-run→tested-by→version-used-where) + repo→branch→githash→PR(full URL)→CI table; (B) HANDOFF (designated pickup section) — resume cmd + session log + delivered PR stack + pointers to scripts (→RUNBOOK) + where each AC's proof lives (→evidence/INDEX) + index. Points, never duplicates.
-  CHARTER.md      ← DURABLE. Setup-to-begin-with · first-3-raw-prompts · acceptance(NL→proof→self-review) · Setup-to-end-up-with (the up-front PROMISE) · rules · env
+  CHARTER.md      ← DURABLE. Setup-to-begin-with · acceptance(NL→proof→self-review) · Setup-to-end-up-with (the up-front PROMISE) · rules · env
   RUNBOOK.md      ← runnable commands ONLY (build / run / repro / prove-it-ran; modes matrix if >1 mode). NO reviewer narrative — HANDOFF links here for the commands. LIVING: superseded recipes are marked HISTORICAL, never left co-equal.
   DECISIONS.md    ← DURABLE, append-only register. ONE SECTION PER DECISION (D-1, D-2, …): Context · Decision · Rationale · Consequences · Status(ACTIVE|SUPERSEDED by D-x). The authoritative decision timeline / tie-breaker.
   ISSUES.md       ← DURABLE. append-only register; ONE SUB-SECTION PER ISSUE (Symptom/Root cause/Action taken/Status) — not a table
@@ -119,7 +119,6 @@ No new top-level doc per concern — resist it. **"current state + how each arti
 The charter is the anti-re-paste card. It is organized as the instant's lifecycle so a cold reader sees where the work starts, what "done" means, and what it hands off:
 
 - **Setup to begin with** — the starting state: `Empty`, or the branch set / base instant this one forks from (mirrors `base_instant` in the name).
-- **First 3 raw prompts** — the session's first three prompts, **verbatim**, in their own section. This preserves the partner's original framing that scope/acceptance were distilled from.
 - **Acceptance criteria** — each one is **NL statement → executable proof → self-review**:
   - Start in natural language.
   - Translate into something the **code itself executes** to decide pass/fail: a green test run, a script that greps for a beacon runtime log, a GitHub CI run. Not "I believe it works" — the run says so.
@@ -164,7 +163,7 @@ When the effort **hands off a working, validated thing** (a tool, a pipeline, a 
 
 1. **Identify the instant** — from the base dir, pick the target instant (latest `inflight`, or the one your partner named). Read its name: base/state/opType tell you lineage and whether it's live.
 2. Read `HANDOFF.md` → both parts: current state (working set, PR stack, where-we-are, live snapshot — don't re-elicit branches/PRs) and the handoff section (workspace folder + resume command(s), session log, next action, index).
-3. Read `CHARTER.md` → stay in scope; the acceptance criteria (with proofs + self-review) and raw prompts are here — don't re-ask.
+3. Read `CHARTER.md` → stay in scope; the acceptance criteria (with proofs + self-review) are here — don't re-ask.
 4. Open `RUNBOOK.md` → rebuild, rerun validation, invoke each mode without re-pasting commands. If a recipe looks stale or contradicts HANDOFF, **check the latest ACTIVE `DECISIONS` entry — it wins** — don't just run the first command you see.
 5. Glance `ASSUMPTIONS.md` + `ISSUES.md` → know open risks and what's deferred (don't re-propose a REFUTED approach).
 6. Check `evidence/INDEX.md` → know which claims are proven, by which artifact, how to re-derive.
@@ -206,7 +205,6 @@ The companion skill **`superpowers:reviewing-workspace`** (command `/review-work
 | No PR/branch-stack table (or only in HANDOFF prose) | The PR/branch-stack table is REQUIRED even for one PR; it lives in `HANDOFF.md`'s current-state part. |
 | CI recorded as a standalone run-id, not reachable from its PR | CI cell = the PR checks page `[#N checks](…/pull/N/checks)` + dated conclusion (+ optional run link). |
 | Acceptance criterion is an opinion ("looks done") | It must be a run the code executes: green test / grep beacon log / CI run. |
-| Charter distilled scope but dropped the partner's words | Keep the **first 3 raw prompts** verbatim in CHARTER. |
 | Issues crammed into a table | One sub-section per issue: Symptom / Root cause / Action taken / Status. |
 | Proof logs in `/tmp` | `evidence/<date>-<name>.log`, referenced by relative path. |
 | Compact instant with no record of what it folded | `COMPACTED.md`: included instants · one stacked PR chain · union acceptance (all MET) · evidence disposition · lingering-issue reconciliation. See compaction.md. |

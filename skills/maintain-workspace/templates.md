@@ -91,11 +91,6 @@ Instant: <base_instant>-<curr_instant>-<state>-<opType>-<instantName>
 - Base instant: <main | parent curr_instant>   # mirrors base_instant in the folder name
 - Branches / checkouts at start: <Empty | e.g. gluten=mor_prod@c879c42, velox=mor_prod@…>
 
-## First 3 raw prompts (verbatim — the partner's original framing)
-1. > <first prompt, exactly as sent>
-2. > <second prompt>
-3. > <third prompt>
-
 ## Scope
 - IN:  <e.g. Hudi MOR v9, commit-time ordering, schema-on-write only>
 - OUT: <e.g. schema-on-read, position-based, python/datafusion, ARM dims>
