@@ -1,5 +1,15 @@
 # fleet — changelog
 
+## fleet/v0.3.17 — 2026-08-27T20:46:17Z
+Cut from b4c66cf on `live` (upstream base snapshot/2026-08-17-221146). 2 commit(s) since fleet/v0.3.16.
+
+Every release ships the whole repository — all skills, `commands/`, `hooks/` and the plugin manifest, not only `fleet/`.
+Payload: skills (3 files).
+Skills changed: maintain-workspace, reviving-dead-panes.
+
+- 75ee3b4 skills: reviving a dead pane had no procedure, and every session on the box died at once
+- b4c66cf maintain-workspace: drop the first-3-raw-prompts capture from CHARTER
+
 ## fleet/v0.3.16 — 2026-08-17T22:12:48Z
 Cut from 3845d27 on `live` (upstream base snapshot/2026-08-17-221146). 19 commit(s) since fleet/v0.3.15.
 
