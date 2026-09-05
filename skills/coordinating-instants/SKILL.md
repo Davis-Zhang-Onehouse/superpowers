@@ -93,6 +93,24 @@ the pid named in the refusal to exit, then `harvest` (`FI-11`).
 Two verbs answer specific questions when the loop is not enough: `fleet status --id <todo>` for one subject in
 full, and `fleet compaction-status` for what is holding dispatch.
 
+## When a phase has a routine
+
+The loop above is the mechanism. Four of its phases have a worked routine of their own, and a
+multi-milestone effort delivering a stacked chain of PRs should be run from the umbrella rather than from
+this table alone:
+
+| You are about to | Load |
+|---|---|
+| stand up or resume the whole effort | `superpowers:running-a-stacked-effort` |
+| put several workers on one shared base | `superpowers:dispatching-a-wave` |
+| turn the wave's siblings into one PR chain | `superpowers:integrating-a-pr-stack` |
+| gate, close and empty a finished worker | `superpowers:harvesting-an-instant` |
+| raise, retire or re-rank milestones | `superpowers:maintaining-a-roadmap` |
+| reconstruct what a dispatch contributed | `superpowers:auditing-a-dispatch-history` |
+
+This skill stays the authority on the verbs, the refusals and the nine phases; the routines above are what
+those phases look like when the effort is large enough to have waves.
+
 ## Two judgements the tool cannot make
 
 **An `AWAITING-CI` row now means a watcher was armed *or attested* — and the board cannot tell you which.**
