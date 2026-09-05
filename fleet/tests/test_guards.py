@@ -135,7 +135,8 @@ class Fleet:
         path = self.tmp / "profiles" / kind
         path.mkdir(parents=True, exist_ok=True)
         (path / "profile.json").write_text(json.dumps({"kind": kind}))
-        (path / "charter.md").write_text("Run `fleet declare phase awaiting-ci` while CI runs.\n")
+        (path / "charter.md").write_text(
+            "Run `fleet declare --instant \"$INSTANT\" --phase awaiting-ci` while CI runs.\n")
         return Profile.load(path)
 
     def ctx(self, **kw) -> Context:

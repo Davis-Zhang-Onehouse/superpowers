@@ -17,7 +17,7 @@ A compaction restacks PRs, so it waits on CI more than most work does. The momen
 are waiting on a run, declare it:
 
 ```bash
-fleet declare phase awaiting-ci --instant {{INSTANT}}
+fleet declare --instant {{INSTANT}} --phase awaiting-ci
 ```
 
 The phase is **structured state** and it is what the coordinator's admission rules read. A line of

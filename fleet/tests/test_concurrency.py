@@ -57,7 +57,8 @@ class Fixture:
         self.profile_dir = self.tmp / "profiles" / "worker"
         self.profile_dir.mkdir(parents=True)
         (self.profile_dir / "profile.json").write_text(json.dumps({"kind": "worker"}))
-        (self.profile_dir / "charter.md").write_text("# {{TITLE}}\n\nRun `fleet declare phase awaiting-ci`.\n")
+        (self.profile_dir / "charter.md").write_text(
+            "# {{TITLE}}\n\nRun `fleet declare --instant \"$INSTANT\" --phase awaiting-ci`.\n")
         (self.profile_dir / "seed.txt").write_text("Read CHARTER.md.\n")
 
     def context(self):

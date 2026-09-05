@@ -307,8 +307,9 @@ class Fleet:
         path.mkdir(exist_ok=True)
         (path / "profile.json").write_text(json.dumps({"kind": kind}))
         (path / "charter.md").write_text(
-            "# {{TITLE}}\n\nRun `fleet declare phase awaiting-ci` when CI is queued.\n")
-        (path / "seed.txt").write_text("Read CHARTER.md. Run `fleet declare phase awaiting-ci`.\n")
+            "# {{TITLE}}\n\nRun `fleet declare --instant \"$INSTANT\" --phase awaiting-ci` when CI is queued.\n")
+        (path / "seed.txt").write_text(
+            "Read CHARTER.md. Run `fleet declare --instant \"$INSTANT\" --phase awaiting-ci`.\n")
         return path
 
     def worker(self, name, *, optype="append", state="inflight", pane=BUSY_PANE, live=True,

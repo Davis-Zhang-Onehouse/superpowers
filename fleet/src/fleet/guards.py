@@ -204,7 +204,7 @@ class WipCap(Guard):
 
     Excludes declared CI-waiters and nothing else. **The declaration is the whole bargain**: at a cap of
     1, an undeclared waiter holds the effort's only dev slot for the length of a CI queue, so the
-    exclusion is bought by running `fleet declare phase awaiting-ci` and by nothing else — not by a quiet
+    exclusion is bought by running `fleet declare --instant <instant> --phase awaiting-ci` and by nothing else — not by a quiet
     pane, and not by a line of `AWAITING-CI` prose in a handoff (`RCF-9`). That is the stated direction:
     it under-triggers, so its worst day is a coordinator asking a question, never a silent slot leak.
     """
@@ -237,9 +237,9 @@ class WipCap(Guard):
             allowed=False, guard=self.name,
             reason=(f"the WIP cap is {cap} and {len(counted)} active-dev subject(s) hold it: {held}. "
                     f"{population}"),
-            clears_when=("one of those subjects completes, or declares `fleet declare phase "
-                         "awaiting-ci` — the declaration is the only channel; prose and a quiet pane "
-                         "are not"),
+            clears_when=("one of those subjects completes, or declares `fleet declare --instant "
+                         "<instant> --phase awaiting-ci` — the declaration is the only channel; prose "
+                         "and a quiet pane are not"),
             clears_who=held,
             blocker=held)
 
