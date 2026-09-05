@@ -62,7 +62,7 @@
 
 **Content source:** spec §"The shared spine" and §1.
 
-- [ ] **Step 1: Write the failing test**
+- [x] **Step 1: Write the failing test**
 
 Create `skills/running-a-stacked-effort/tests/lint-self.sh`:
 
@@ -86,12 +86,12 @@ exit 1
 
 Then `chmod +x skills/running-a-stacked-effort/tests/lint-self.sh`.
 
-- [ ] **Step 2: Run test to verify it fails**
+- [x] **Step 2: Run test to verify it fails**
 
 Run: `bash skills/running-a-stacked-effort/tests/lint-self.sh`
 Expected: FAIL — the linter exits 2 because the skill directory has no `SKILL.md`.
 
-- [ ] **Step 3: Write the skill**
+- [x] **Step 3: Write the skill**
 
 `skills/running-a-stacked-effort/SKILL.md`, frontmatter verbatim:
 
@@ -117,7 +117,7 @@ Cite `H9` for the carry-across claim and `H1` for derived readiness. Every "cann
 
 Write `references/chartering.md` (the AC table shape, worked from the source effort's nine ACs) and `references/chain-manifest.md` (what a position records: ordinal, repo, branch, PR number, tip sha, parent, and **each paired repo's pinned sha**; ancestry checked with `git merge-base --is-ancestor`, never stored; grade state stored with the sha it graded, because it is not derivable later).
 
-- [ ] **Step 4: Run test to verify it passes**
+- [x] **Step 4: Run test to verify it passes**
 
 Run: `bash skills/running-a-stacked-effort/tests/lint-self.sh`
 Expected: `PASS: every fleet verb named in a code span is registered, and every refusal claim cites a passing case`
@@ -126,12 +126,12 @@ Then check citation relevance:
 Run: `python3 skills/using-fleet/tools/lint-skill.py skills/running-a-stacked-effort --show`
 Expected: each `slug -> CASE-ID` prints beside the case's own note; confirm the note is about the claim.
 
-- [ ] **Step 5: Run the whole selftest**
+- [x] **Step 5: Run the whole selftest**
 
 Run: `bin/superpowers-selftest`
 Expected: `VERDICT: GREEN — every discovered suite passed`, with the discovered count one higher than before.
 
-- [ ] **Step 6: Commit**
+- [x] **Step 6: Commit**
 
 ```bash
 git add skills/running-a-stacked-effort
@@ -152,16 +152,16 @@ git commit -m "skills: running-a-stacked-effort, the coordinator's project arc"
 
 **Content source:** spec §2.
 
-- [ ] **Step 1: Write the failing test**
+- [x] **Step 1: Write the failing test**
 
 Create `skills/dispatching-a-wave/tests/lint-self.sh` with the same content as Task 1 Step 1 (the script is location-independent; it derives `SKILL` from its own path). `chmod +x` it.
 
-- [ ] **Step 2: Run test to verify it fails**
+- [x] **Step 2: Run test to verify it fails**
 
 Run: `bash skills/dispatching-a-wave/tests/lint-self.sh`
 Expected: FAIL — no `SKILL.md` yet.
 
-- [ ] **Step 3: Write the skill**
+- [x] **Step 3: Write the skill**
 
 Frontmatter verbatim:
 
@@ -176,7 +176,7 @@ Body: the six-step routine table from spec §2 verbatim, then the two expanded s
 
 Required citations: `F1` for the cap refusal, `F2`/`F3` for declaration-versus-prose freeing the cap, `F4` for the compaction freeze, `LB2` for a done-claim from the wrong base. Mark any verb you name that does not exist with `<!-- v1-proposed: -->`.
 
-- [ ] **Step 4: Run test to verify it passes**
+- [x] **Step 4: Run test to verify it passes**
 
 Run: `bash skills/dispatching-a-wave/tests/lint-self.sh`
 Expected: PASS.
@@ -184,7 +184,7 @@ Expected: PASS.
 Run: `python3 skills/using-fleet/tools/lint-skill.py skills/dispatching-a-wave --show`
 Expected: `F1` prints a note about a second dispatch exiting 4 under the default cap — confirm it sits beside the cap claim, not beside something else.
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add skills/dispatching-a-wave
@@ -204,7 +204,7 @@ git commit -m "skills: dispatching-a-wave, k workers onto one shared base"
 
 **Why this task is separate:** the lint proves the skill names real verbs; it cannot prove the *sequence* works. A skill can name only real verbs and still order them impossibly. This is the same reason `coordinating-instants` has both `lint-self.sh` and `loop.sh`.
 
-- [ ] **Step 1: Write the failing test**
+- [x] **Step 1: Write the failing test**
 
 Create `skills/dispatching-a-wave/tests/wave-sequence.sh`:
 
@@ -264,19 +264,19 @@ echo "FAIL: $fails check(s) failed"; exit 1
 
 Then `chmod +x skills/dispatching-a-wave/tests/wave-sequence.sh`.
 
-- [ ] **Step 2: Run it and read the result**
+- [x] **Step 2: Run it and read the result**
 
 Run: `bash skills/dispatching-a-wave/tests/wave-sequence.sh`
 Expected: `PASS: the wave sequence runs in the documented order`.
 
 If the `SI-47` check fails, that means `roadmap` now names ready rows — the gap is closed. Do not "fix" the test: update `dispatching-a-wave/SKILL.md` step 1 to read the row directly, then update this assertion to match, and note the change in `docs/superpowers/fleet-infra-backlog.md` by marking `SI-47` closed.
 
-- [ ] **Step 3: Confirm discovery**
+- [x] **Step 3: Confirm discovery**
 
 Run: `bin/superpowers-selftest`
 Expected: GREEN, discovered count one higher than after Task 2.
 
-- [ ] **Step 4: Commit**
+- [x] **Step 4: Commit**
 
 ```bash
 git add skills/dispatching-a-wave/tests/wave-sequence.sh
@@ -298,16 +298,16 @@ git commit -m "skills: prove the wave sequence runs, and pin SI-47 while it is o
 
 **Content source:** spec §3.
 
-- [ ] **Step 1: Write the failing test**
+- [x] **Step 1: Write the failing test**
 
 Create `skills/integrating-a-pr-stack/tests/lint-self.sh` with the Task 1 Step 1 content. `chmod +x` it.
 
-- [ ] **Step 2: Run test to verify it fails**
+- [x] **Step 2: Run test to verify it fails**
 
 Run: `bash skills/integrating-a-pr-stack/tests/lint-self.sh`
 Expected: FAIL — no `SKILL.md`.
 
-- [ ] **Step 3: Write the skill**
+- [x] **Step 3: Write the skill**
 
 Frontmatter verbatim:
 
@@ -324,12 +324,12 @@ Body: the eight-step table from spec §3 verbatim; then the two expanded section
 
 This skill names mostly `git` and `gh` commands rather than `fleet` verbs, so V1 has little to check — that is expected. V2 still applies to any "cannot/refuses" sentence.
 
-- [ ] **Step 4: Run test to verify it passes**
+- [x] **Step 4: Run test to verify it passes**
 
 Run: `bash skills/integrating-a-pr-stack/tests/lint-self.sh`
 Expected: PASS.
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add skills/integrating-a-pr-stack
@@ -350,16 +350,16 @@ git commit -m "skills: integrating-a-pr-stack, siblings into one chain with the 
 
 **Content source:** spec §4.
 
-- [ ] **Step 1: Write the failing test**
+- [x] **Step 1: Write the failing test**
 
 Create `skills/harvesting-an-instant/tests/lint-self.sh` with the Task 1 Step 1 content. `chmod +x` it.
 
-- [ ] **Step 2: Run test to verify it fails**
+- [x] **Step 2: Run test to verify it fails**
 
 Run: `bash skills/harvesting-an-instant/tests/lint-self.sh`
 Expected: FAIL — no `SKILL.md`.
 
-- [ ] **Step 3: Write the skill**
+- [x] **Step 3: Write the skill**
 
 Frontmatter verbatim:
 
@@ -382,12 +382,12 @@ Then the five-row Red Flags table.
 
 Required citations: `H3` for apply carrying evidence and consuming the proposal, `H4` for empty evidence being refused at both doors, `G7` for a phase and a parked question surviving the rename.
 
-- [ ] **Step 4: Run test to verify it passes**
+- [x] **Step 4: Run test to verify it passes**
 
 Run: `bash skills/harvesting-an-instant/tests/lint-self.sh`
 Expected: PASS.
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add skills/harvesting-an-instant
@@ -407,7 +407,7 @@ git commit -m "skills: harvesting-an-instant, close out and carry the knowledge 
 
 **Why this task is separate:** the skill tells a coordinator to check the inbox before applying, because nothing else will. That instruction is only worth carrying while it is true. This suite asserts the hazard still exists, so the day `SI-48` is fixed the suite fails and the skill gets corrected instead of quietly over-warning.
 
-- [ ] **Step 1: Write the test**
+- [x] **Step 1: Write the test**
 
 Create `skills/harvesting-an-instant/tests/regression-trap.sh`:
 
@@ -471,17 +471,17 @@ exit 0
 
 Then `chmod +x skills/harvesting-an-instant/tests/regression-trap.sh`.
 
-- [ ] **Step 2: Run it**
+- [x] **Step 2: Run it**
 
 Run: `bash skills/harvesting-an-instant/tests/regression-trap.sh`
 Expected: `PASS: the hazard is live — m1 regressed done -> awaiting-ci at rc=0, and m2 went back to not-ready`
 
-- [ ] **Step 3: Confirm discovery**
+- [x] **Step 3: Confirm discovery**
 
 Run: `bin/superpowers-selftest`
 Expected: GREEN.
 
-- [ ] **Step 4: Commit**
+- [x] **Step 4: Commit**
 
 ```bash
 git add skills/harvesting-an-instant/tests/regression-trap.sh
@@ -502,16 +502,16 @@ git commit -m "skills: pin the SI-48 apply-regression hazard the harvest skill w
 
 **Content source:** spec §5.
 
-- [ ] **Step 1: Write the failing test**
+- [x] **Step 1: Write the failing test**
 
 Create `skills/maintaining-a-roadmap/tests/lint-self.sh` with the Task 1 Step 1 content. `chmod +x` it.
 
-- [ ] **Step 2: Run test to verify it fails**
+- [x] **Step 2: Run test to verify it fails**
 
 Run: `bash skills/maintaining-a-roadmap/tests/lint-self.sh`
 Expected: FAIL — no `SKILL.md`.
 
-- [ ] **Step 3: Write the skill**
+- [x] **Step 3: Write the skill**
 
 Frontmatter verbatim:
 
@@ -526,12 +526,12 @@ Body, the six numbered rules from spec §5, with rule 1 (title width) first and 
 
 Required citations: `H1` for derived readiness, `H9` for carry-across running on `fleet milestone`.
 
-- [ ] **Step 4: Run test to verify it passes**
+- [x] **Step 4: Run test to verify it passes**
 
 Run: `bash skills/maintaining-a-roadmap/tests/lint-self.sh`
 Expected: PASS.
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add skills/maintaining-a-roadmap
@@ -552,16 +552,16 @@ git commit -m "skills: maintaining-a-roadmap, keep the registry exactly as wide 
 
 **Content source:** spec §6.
 
-- [ ] **Step 1: Write the failing test**
+- [x] **Step 1: Write the failing test**
 
 Create `skills/auditing-a-dispatch-history/tests/lint-self.sh` with the Task 1 Step 1 content. `chmod +x` it.
 
-- [ ] **Step 2: Run test to verify it fails**
+- [x] **Step 2: Run test to verify it fails**
 
 Run: `bash skills/auditing-a-dispatch-history/tests/lint-self.sh`
 Expected: FAIL — no `SKILL.md`.
 
-- [ ] **Step 3: Write the skill**
+- [x] **Step 3: Write the skill**
 
 Frontmatter verbatim:
 
@@ -574,12 +574,12 @@ description: Use when making a dispatch auditable as it happens, or reconstructi
 
 Body, per spec §6: the forward direction (what every dispatch leaves, in one place), the backward direction (milestone → instants → evidence → PR positions), a pointer handing the human-facing board to `superpowers:rendering-task-board`, and the two rules the audit machinery itself must obey — a check that returns zero states what it examined, and a long delegation produces incremental artifacts. Then the three-row Red Flags table.
 
-- [ ] **Step 4: Run test to verify it passes**
+- [x] **Step 4: Run test to verify it passes**
 
 Run: `bash skills/auditing-a-dispatch-history/tests/lint-self.sh`
 Expected: PASS.
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add skills/auditing-a-dispatch-history
@@ -597,7 +597,7 @@ git commit -m "skills: auditing-a-dispatch-history, both directions of the trail
 - Consumes: all six skill names from Tasks 1–8.
 - Produces: nothing further.
 
-- [ ] **Step 1: Add the routing section**
+- [x] **Step 1: Add the routing section**
 
 Insert after the loop table in `skills/coordinating-instants/SKILL.md`, before "Two judgements the tool cannot make":
 
@@ -621,12 +621,12 @@ This skill stays the authority on the verbs, the refusals and the nine phases; t
 what those phases look like when the effort is large enough to have waves.
 ```
 
-- [ ] **Step 2: Verify the modified skill still lints**
+- [x] **Step 2: Verify the modified skill still lints**
 
 Run: `bash skills/coordinating-instants/tests/lint-self.sh`
 Expected: PASS. The new section names no `fleet` verb in a code span and makes no refusal claim, so neither V1 nor V2 should have new work.
 
-- [ ] **Step 3: Verify every new skill is discovered and green**
+- [x] **Step 3: Verify every new skill is discovered and green**
 
 Run: `bin/superpowers-selftest`
 Expected: `VERDICT: GREEN` and `19 passed, 0 failed, of 19 discovered`.
@@ -635,7 +635,7 @@ The baseline measured 2026-09-05 is **11 discovered suites**; this plan adds **8
 `wave-sequence.sh` + `regression-trap.sh`). If the baseline has moved because other work landed, the
 invariant to check is +8, not the literal 19.
 
-- [ ] **Step 4: Verify the frontmatter of all six parses**
+- [x] **Step 4: Verify the frontmatter of all six parses**
 
 Run:
 ```bash
@@ -647,7 +647,7 @@ done
 ```
 Expected: `ok` on all six, and each `name:` matching its directory.
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add skills/coordinating-instants/SKILL.md
@@ -661,3 +661,35 @@ git commit -m "coordinating-instants: route to the six routine skills"
 - **Spec coverage.** Spec §"shared spine" → Task 1 step 3 section 4. §1 → Task 1. §2 → Tasks 2–3. §3 → Task 4. §4 → Tasks 5–6. §5 → Task 7. §6 → Task 8. §"How these skills get verified" → the `lint-self.sh` in every task, the two V3 suites, and the Global Constraints' cite-by-symbol rule. §"Infra dependencies" → not implemented by design; Tasks 3 and 6 pin two of them so the skills self-correct when they are fixed.
 - **Naming consistency.** `lint-self.sh` is the same script in six places by design — it derives its own skill path, so it is genuinely identical, not near-duplicated. The two V3 suites have distinct names (`wave-sequence.sh`, `regression-trap.sh`) because `superpowers-selftest` discovers by path glob and prints the filename in its verdict.
 - **The two hazard-pinning suites are deliberately inverted tests.** They pass while a defect exists and fail when it is fixed. Each prints, on failure, the exact remedial edit and the file to mark. This is unusual and is called out in both scripts so a future reader does not "repair" them.
+
+---
+
+## Execution record — 2026-09-05
+
+All nine tasks executed inline (`superpowers:executing-plans`), on `live`. Final state:
+**`19 passed, 0 failed, of 19 discovered` — VERDICT: GREEN**, matching the predicted 11 + 8.
+
+**Deviation.** The five remaining `tests/lint-self.sh` harnesses were created in one batch after Task 1
+rather than one per task. The red half of each task was still observed individually (each reported
+`lint-skill: no SKILL.md`), but `bin/superpowers-selftest` was legitimately RED between Tasks 3 and 9,
+because four skills had a discovered suite and no `SKILL.md` yet. Task 3's step 3 expected GREEN and got
+RED for that reason. No behaviour changed; the intermediate signal was noisier than the plan described.
+
+**Three corrections the lint forced**, each caught before the work was called done:
+
+1. `integrating-a-pr-stack` — a prose sentence used "cannot" and tripped V2 with no `fleet` refusal to
+   cite. Reworded rather than cited: attaching an unrelated passing case is the "green and irrelevant"
+   pairing `lint-skill.py`'s own docstring warns it cannot detect.
+2. `harvesting-an-instant` — `H4` (empty evidence refused) was cited beside a claim about an open finding
+   blocking a `READY` verdict. Replaced with `I2`, which is that claim exactly.
+3. `maintaining-a-roadmap` — `H10` was cited for milestone-id uniqueness and is about the
+   milestone↔instant join. No integration case covers id uniqueness, so the citation was removed and the
+   sentence now says where the guarantee actually is proven (`fleet`'s hermetic suite). The file-level V2
+   check would have passed on the other two citations; that is the loophole, not a licence.
+
+**Both inverted suites pass, meaning both hazards are still live:**
+
+- `wave-sequence.sh` — 7/7, including "SI-47 still open: no roadmap row names a ready milestone" and
+  "an init-created coordinator does not count against the cap".
+- `regression-trap.sh` — "the hazard is live — m1 regressed done -> awaiting-ci at exit 0, and m2 went
+  back to not-ready".
