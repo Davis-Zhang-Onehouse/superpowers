@@ -141,7 +141,7 @@ class TestLint(unittest.TestCase):
         # The non-compliant fixture DOES contain the literal token, so a lint that greps for
         # AWAITING-CI passes it. The clause is the `fleet declare` command, not the token.
         self.assertIn("AWAITING-CI", missing.charter)
-        self.assertNotIn("fleet declare phase awaiting-ci", missing.charter)
+        self.assertNotIn("fleet declare --instant", missing.charter)
         self.assertEqual(len(flagged(lint(missing), "awaiting-ci-clause")), 1)
         self.assertEqual(flagged(lint(compliant), "awaiting-ci-clause"), [])
         # None of the profiles declares the clause in its own `requires_clauses`, so the rule
@@ -212,7 +212,7 @@ class TestTheSHIPPEDProfilesSatisfyOurOwnRules(unittest.TestCase):
     """`FI-13` — `lint` is run against a user's profile and never against the ones fleet ships.
 
     `profiles.lint` mandates, unconditionally, that every worker-facing profile instruct the worker to run
-    `fleet declare phase awaiting-ci` — and the rule's own comment says why it is unconditional: *"a
+    `fleet declare --instant <instant> --phase awaiting-ci` — and the rule's own comment says why it is unconditional: *"a
     profile that forgot the clause is exactly the profile that also forgot to require it."* Both profiles
     fleet SHIPS forgot it. Measured: 0 occurrences across `charter.md` and `seed.txt` for both `worker`
     and `compaction`.

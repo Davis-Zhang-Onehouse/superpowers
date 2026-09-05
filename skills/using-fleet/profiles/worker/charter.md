@@ -23,7 +23,7 @@
 The moment your work is pushed and you are waiting on a CI run, declare it:
 
 ```bash
-fleet declare phase awaiting-ci --instant {{INSTANT}}
+fleet declare --instant {{INSTANT}} --phase awaiting-ci
 ```
 
 The phase is **structured state**, and it is what the coordinator's admission rules read. A line of

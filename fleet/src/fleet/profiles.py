@@ -53,7 +53,16 @@ ARTIFACTS = ("charter.md", "seed.txt")
 #: `fleet declare` command and not the token `AWAITING-CI` — the profiles that shipped the failure all
 #: contained the token, in a sentence telling the worker to write it into `HANDOFF.md` as prose
 #: (`AC-9`/DA-6 drop 3). A lint that greps for the token passes exactly the files that are wrong.
-AWAITING_CI_CLAUSE = "fleet declare phase awaiting-ci"
+#:
+#: I-6: this clause used to read `fleet declare phase awaiting-ci` — a spelling `parse` REFUSES
+#: (`declare` declares no positionals, exit 2), so the lint required profiles to teach a command that
+#: could never succeed. It is now two substrings, both required in the SAME artifact, because the
+#: instant value between them varies per profile (`{{INSTANT}}` in a template, `"$INSTANT"` in a seed):
+#: one substring alone is either too weak (`fleet declare --instant` passes a charter that never says
+#: which phase) or unmatchable (no single stable spelling spans the instant value).
+AWAITING_CI_PARTS = ("fleet declare --instant", "--phase awaiting-ci")
+#: The display form for messages; the check matches `AWAITING_CI_PARTS`, never this string.
+AWAITING_CI_CLAUSE = "fleet declare --instant <instant> --phase awaiting-ci"
 
 #: Flags whose omission changes the TARGET of an invocation rather than its options. Omitting one is
 #: not a smaller version of the command; it is a different command pointed somewhere else.
@@ -206,7 +215,8 @@ def lint(profile: Profile) -> list:
     # never conditional on the profile declaring the clause itself — a profile that forgot the clause
     # is exactly the profile that also forgot to require it.
     if profile.kind in WORKER_FACING:
-        if not any(AWAITING_CI_CLAUSE in text.lower() for _, text in profile.artifacts()):
+        if not any(all(part in text.lower() for part in AWAITING_CI_PARTS)
+                   for _, text in profile.artifacts()):
             out.append(Violation(
                 path=str(profile.path), rule="awaiting-ci-clause",
                 detail=(f"a {profile.kind}-kind profile must instruct the worker to run "
