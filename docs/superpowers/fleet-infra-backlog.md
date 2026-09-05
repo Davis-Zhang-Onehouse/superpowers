@@ -218,3 +218,51 @@ comment — a good mitigation, and a **worker-side** one. Nothing on the coordin
 
 **Closed when:** a charter whose scope is still a placeholder cannot silently reach a worker — either
 because the marker is detectable, or because a check between render and seed refuses it.
+
+---
+
+## SI-47 — the dispatchable frontier is not enumerable; `roadmap` prints every row EXCEPT the ready ones
+
+**Status:** OPEN. **Blocks:** `dispatching-a-wave` (its first step is "which rows are ready?").
+
+**Measured 2026-09-05** against a scratch store (`FLEET_HOME`/`FLEET_INSTANTS` under a scratchpad), with
+three milestones raised: `m1` ready, `m2` ready, `m3` blocked on `m1`.
+
+```
+$ fleet roadmap --instant "$I" --porcelain
+not-ready   m3   info  dep(s) exist but have not LANDED ...  'm1' has status=ready
+population  ...  info  examined 3 milestone(s) of which 2 ready, 0 pending proposal(s), from ...
+```
+
+**`m1` and `m2` are named in no row.** Confirmed across the observation surface: piping
+`brief --porcelain`, `board --porcelain` and `roadmap --porcelain` together and grepping for `m1` as a
+whole field returns **0**.
+
+`Roadmap.report()` (`roadmap.py:496`) emits exactly three kinds: `not-ready` (and only where a blocker
+exists — `if blocker is None: continue`), `pending-proposal`, and one `population` row. A `Roadmap.ready()`
+method exists and is called, but only to compute the **count** interpolated into the population row's
+prose: `f"examined {len(milestones)} milestone(s) of which {len(self.ready())} ready"`.
+
+**Why it matters.** The coordinator's whole job at the top of the loop is *dispatch the ready rows*, and
+the skill's own standing rule is **"read columns, never prose."** To learn which rows are ready, the
+coordinator must parse a number out of an English sentence and then re-derive the set by hand. That the
+count is present makes it worse, not better: it is enough to make the answer feel available.
+
+`quantonOnSpark4V2` hit this and recorded it in its `HANDOFF.md` as *"⛔ THE BOARD HIDES THE ENTIRE
+DISPATCHABLE FRONTIER — set equality, re-derived"*. `roadmap.py`'s own `retire()` docstring names the same
+mechanism from the other side, as the reason a superseded milestone becomes invisible: *"`roadmap
+--porcelain` prints `not-ready` rows but not ready ones — so a superseded milestone is a phantom."* The
+consequence was known at the point of writing; the row kind was never added.
+
+**What a fix must decide.**
+1. A `ready` row kind at `severity=info`, or a `--ready` filter? A row kind composes with the existing
+   parse (`awk -F'\t' '$1=="ready"'`) and needs no new flag. Preferred.
+2. Does a ready row carry the claim state? A row that is ready **and already claimed** by an inflight
+   dispatch is not dispatchable, and that distinction is the one a coordinator acts on. It should be a
+   field, not something the reader joins against `board` by hand.
+3. Severity. `info` is right — a ready row is not an alarm — but it must survive the standing
+   "act on `attention`, report `info`" filter, so the skill's guidance has to say the frontier is read,
+   not alerted.
+
+**Closed when:** `fleet roadmap --porcelain` names every ready-and-unclaimed milestone as its own row, and
+the count in the population row is derivable from rows the same command emitted.
