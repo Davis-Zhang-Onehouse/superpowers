@@ -2645,7 +2645,7 @@ def near_miss_rows(child: Path) -> list:
                         f"{Declarations(child).path} declares no phase, so the line is read by NOTHING. "
                         "RCF-9: a worker wrote exactly this, exactly as its brief worded it, and at a WIP "
                         "cap of 1 it held the effort's only dev slot for the length of a CI queue."),
-                clears_when=("the worker runs `fleet declare phase <value>`, or the line is deleted from "
+                clears_when=("the worker runs `fleet declare --instant <instant> --phase <value>`, or the line is deleted from "
                              "the document"),
                 clears_who="the worker that wrote the line"))
     rows.append(Row(

@@ -129,8 +129,9 @@ class Fleet:
         path = self.profiles_dir / kind
         path.mkdir(exist_ok=True)
         (path / "profile.json").write_text(json.dumps({"kind": kind}))
-        (path / "charter.md").write_text("# {{TITLE}}\n\nRun `fleet declare phase awaiting-ci`.\n")
-        (path / "seed.txt").write_text("Run `fleet declare phase awaiting-ci`.\n")
+        (path / "charter.md").write_text(
+            "# {{TITLE}}\n\nRun `fleet declare --instant \"$INSTANT\" --phase awaiting-ci`.\n")
+        (path / "seed.txt").write_text("Run `fleet declare --instant \"$INSTANT\" --phase awaiting-ci`.\n")
         return path
 
     def spare(self, name: str = "wsSpare") -> pathlib.Path:
