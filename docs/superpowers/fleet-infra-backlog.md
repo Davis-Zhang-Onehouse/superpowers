@@ -266,3 +266,64 @@ consequence was known at the point of writing; the row kind was never added.
 
 **Closed when:** `fleet roadmap --porcelain` names every ready-and-unclaimed milestone as its own row, and
 the count in the population row is derivable from rows the same command emitted.
+
+---
+
+## SI-48 — `fleet apply` silently regresses a `done` milestone, and the readiness cascade goes with it
+
+**Status:** OPEN. **Severity: highest in this register** — it un-lands landed work with rc=0.
+**Blocks:** `harvesting-an-instant`. **Field id:** `FI-415`.
+
+**Reproduced 2026-09-05** in a scratch store, start to finish:
+
+```
+propose m1 -> done      ; apply  =>  applied m1 -> done          rc=0
+propose m1 -> awaiting-ci (a stale proposal from an earlier round)
+apply                   =>  applied m1 -> awaiting-ci            rc=0     <-- no refusal, no warning
+```
+
+The roadmap afterwards reads `[('m1','awaiting-ci'), ('m2','ready'), ('m3','blocked')]`, and the damage is
+not confined to the row that moved:
+
+```
+not-ready  m1  status=awaiting-ci: it is already in flight, held by the coordinator
+not-ready  m3  dep(s) ... have not LANDED: 'm1' has status=awaiting-ci
+population     examined 3 milestone(s) of which 1 ready        <-- was 2
+```
+
+**`m3` was ready and is now blocked.** Because readiness is derived, regressing one row silently
+re-blocks every row that depends on it — correct behaviour given a wrong input, which is what makes the
+missing input check matter.
+
+**Root cause.** `Roadmap.apply` (`roadmap.py:458`) validates exactly two things: that the status is a
+known name (`_check_status`) and that the evidence resolves (`_check_evidence`). There is **no
+monotonicity rule** — nothing compares the incoming status to the one already on the row. The module
+already has the vocabulary: `TERMINAL` is defined and used by `retire()` to refuse retiring a milestone
+that has finished. `apply` does not consult it.
+
+The docstring is the sharpest evidence that this is an oversight rather than a decision:
+
+> *"Validation happens here rather than only in `propose`, because a proposal can be hand-built or
+> **replayed from a file**: a gate that only guards the polite path is not a gate."*
+
+A replayed proposal is precisely the case that regresses, and it is the one case not guarded.
+
+**How it presents in the field.** `FI-415`: a coordinator found a pending proposal that had sat in the
+inbox **13 days**, whose last row would have landed `awaiting-ci` on a milestone the roadmap already
+carried as `done` — from an instant that had since completed. It was caught by reading the inbox by hand
+before applying. Nothing would have stopped it.
+
+**What a fix must decide.**
+1. **Refuse, or require an override?** A regression is occasionally legitimate — work found to be wrong
+   after landing. `--override <reason>` already exists on `dispatch` as the pattern for "the rule is right
+   and this case is the exception", and it records the reason.
+2. **Which transitions are regressions?** The cheap, defensible rule: refuse any apply onto a row whose
+   current status is in `TERMINAL` unless overridden. Ordering the non-terminal states is a bigger
+   argument and is not needed to close this.
+3. **Should a stale proposal expire?** The 13-day proposal was stale by age *and* by origin — its instant
+   had completed. Either signal could warrant a warning row on `roadmap` before anyone types `apply`,
+   which is the detect-half that pairs with the prevent-half above.
+
+**Closed when:** applying a proposal that would move a milestone out of a terminal status is refused with
+a reason naming both statuses, an override path exists and records why, and the integration suite covers
+the replay case.
