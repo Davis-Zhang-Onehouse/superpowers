@@ -1,4 +1,5 @@
 # tests/sync/test_apply.sh — apply.sh commits, snapshots, and (would) refresh on manual edits
+# shellcheck shell=bash
 DIR="$(cd "$(dirname "$0")" && pwd)"; . "$DIR/harness.sh"
 make_upstream; make_fork; make_config; . "$CTRL/config"
 g "$FORK" checkout -q live

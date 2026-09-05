@@ -1,4 +1,5 @@
 # tests/sync/test_conflict_finish.sh
+# shellcheck shell=bash
 DIR="$(cd "$(dirname "$0")" && pwd)"; . "$DIR/harness.sh"
 make_upstream; make_fork; make_config; . "$CTRL/config"
 # custom commit edits the SAME line upstream will change → conflict

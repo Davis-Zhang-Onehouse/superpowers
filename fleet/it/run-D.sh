@@ -194,7 +194,7 @@ d_kill_private_sessions() {
 
 d_leave() {
   d_kill_private_sessions
-  local after_claude after_tmux added removed
+  local after_claude after_tmux
   after_claude="$(d_claude_pids)"
   after_tmux="$(d_live_tmux)"
   printf '%s\n' "$after_tmux" > "$EV/out/live-tmux-after.txt"

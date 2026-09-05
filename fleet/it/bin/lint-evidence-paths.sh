@@ -14,7 +14,7 @@ set -uo pipefail
 # own evidence; scanning the whole skills repo would flag unrelated documents that legitimately quote an
 # absolute path, and a control that reports other people's files gets switched off.
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
-cd "$ROOT"
+cd "$ROOT" || { echo "cannot enter $ROOT" >&2; exit 2; }
 bad=0
 while IFS= read -r f; do
   [ -f "$f" ] || continue

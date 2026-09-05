@@ -538,7 +538,7 @@ e6_concurrent_harvest_two_workers() {
     # Each worker earns its gate, renames its own folder, and its pane is closed first: `harvest`
     # releases the slot NON-forced, and a live pid in the slot is a correct refusal (OBS-48), not
     # this case's subject.
-    local ok_setup=1 idx=0 newpath=()
+    local ok_setup=1 newpath=()
     for k in 0 1; do
       fleet review --instant "${paths[k]}" --scope all --verdict READY > "$CD/review-$k.out" 2>&1
       fleet complete --instant "${paths[k]}" > "$CD/complete-$k.out" 2>&1 || ok_setup=0

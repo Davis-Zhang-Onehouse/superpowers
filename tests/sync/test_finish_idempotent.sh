@@ -1,4 +1,5 @@
 # tests/sync/test_finish_idempotent.sh — re-running finish after a wedge clears STATUS
+# shellcheck shell=bash
 DIR="$(cd "$(dirname "$0")" && pwd)"; . "$DIR/harness.sh"
 make_upstream; make_fork; make_config; . "$CTRL/config"
 g "$FORK" checkout -q live

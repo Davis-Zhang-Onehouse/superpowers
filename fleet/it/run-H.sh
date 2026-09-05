@@ -59,7 +59,7 @@ WORKER="$(h_init "worker$TAG")"
 #: `Roadmap.add` had no verb, so the mechanism `SD-5` made load-bearing was unreachable from a command line
 #: and §H proved a property of the library while saying nothing about the coordinator's actual surface.
 {
-  fleet milestone --instant "$COORD" --id m1 --title "enabling" --status done \
+  fleet milestone --instant "$COORD" --id m1 --title "enabling" --status "done" \
         --evidence "evidence/INDEX.md" --porcelain
   fleet milestone --instant "$COORD" --id m2 --title "middle" --dep m1 --porcelain
   fleet milestone --instant "$COORD" --id m3 --title "tail"   --dep m2 --porcelain
@@ -100,7 +100,7 @@ before_mtime="$(stat -c '%Y.%N' "$COORD/.fleet/roadmap.json")"
 
 # The worker proposes a status for a milestone in the COORDINATOR's roadmap. `--instant` is documented as
 # "the proposing instant", so the worker names ITSELF; the roadmap it is proposing INTO is the coordinator's.
-fleet propose --instant "$WORKER" --to "$COORD" --milestone m2 --status done \
+fleet propose --instant "$WORKER" --to "$COORD" --milestone m2 --status "done" \
       --evidence "evidence/INDEX.md" --porcelain > "$OUT/H2-propose.out" 2>&1
 h2_rc=$?
 cat "$OUT/H2-propose.out"
@@ -158,7 +158,7 @@ fi
 
 # H4: empty evidence. Asserted at the LIBRARY, because the CLI's --evidence is repeatable and an empty
 # string is the reachable shape of "empty" there; both doors are checked.
-fleet propose --instant "$WORKER" --to "$COORD" --milestone m3 --status done --evidence "" \
+fleet propose --instant "$WORKER" --to "$COORD" --milestone m3 --status "done" --evidence "" \
       > "$OUT/H4-cli.out" 2>&1
 h4_cli_rc=$?
 py "$COORD" > "$OUT/H4-lib.out" 2>&1 <<'PY'
@@ -225,7 +225,7 @@ h9_rc=0
   echo "== 2. its blocker is NAMED, so it cannot be silently dispatched early =="
   fleet roadmap --instant "$COORD" --porcelain | grep '^not-ready.carried' || h9_rc=1
   echo "== 3. m3 lands, through the two-party protocol =="
-  fleet propose --instant "$WORKER" --to "$COORD" --milestone m3 --status done \
+  fleet propose --instant "$WORKER" --to "$COORD" --milestone m3 --status "done" \
         --evidence "evidence/INDEX.md" --porcelain || h9_rc=1
   fleet apply --instant "$COORD" --milestone m3 --porcelain || h9_rc=1
   echo "== 4. and NOW the carried item is ready — derived, nobody set a flag =="
@@ -278,7 +278,6 @@ cp -r "$INSTANT/tests/fixtures/profiles/workerCompliant" "$H10/profile"
         --from "$COORD" --milestone j1 --porcelain || h10_rc=1
 } > "$H10/dispatch.out" 2>&1
 J_CHILD="$(awk -F'\t' '$1=="instant"{print $2}' "$H10/dispatch.out")"
-J_TODO="$(awk -F'\t' '$1=="todo_id"{print $2}' "$H10/dispatch.out")"
 
 # Side 1: the RECORD names the milestone.  Side 2: the CHILD records its coordinator and milestone.
 # Side 3: the MILESTONE names the instant executing it — and its STATUS is untouched, because `apply` is
@@ -313,7 +312,7 @@ before_pending="$(python3 -c "
 import json,pathlib,sys
 p=pathlib.Path(sys.argv[1])/'.fleet'/'proposals.json'
 print(len(json.loads(p.read_text())['pending']) if p.is_file() else 0)" "$COORD")"
-fleet propose --instant "$J_CHILD" --milestone j1 --status done --evidence "evidence/INDEX.md" \
+fleet propose --instant "$J_CHILD" --milestone j1 --status "done" --evidence "evidence/INDEX.md" \
       --porcelain > "$H10/propose.out" 2>&1
 after_pending="$(python3 -c "
 import json,pathlib,sys

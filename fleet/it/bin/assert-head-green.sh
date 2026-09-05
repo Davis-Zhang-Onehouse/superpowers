@@ -22,7 +22,7 @@ git -C "$ROOT" rev-parse --git-dir >/dev/null 2>&1 || { echo "$ROOT is not a git
 OFFSET="${PKG#"$ROOT"/}"; [ "$OFFSET" = "$PKG" ] && OFFSET="."
 T="$(mktemp -d)"; trap 'rm -rf "$T"' EXIT
 git -C "$ROOT" archive "$REV" | tar -x -C "$T" || { echo "cannot export $REV" >&2; exit 2; }
-cd "$T/$OFFSET"
+cd "$T/$OFFSET" || { echo "cannot enter $T/$OFFSET" >&2; exit 2; }
 if ! PYTHONPATH=src python3 -c 'import fleet.cli' 2>"$T/.imp"; then
   echo "RED($REV): the export does not import — $(tail -1 "$T/.imp")"; exit 2
 fi

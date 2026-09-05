@@ -44,6 +44,7 @@ PY
 # --- THE core property: the view must not disagree with the product ----------------------------------
 # Every subject `fleet board --porcelain` reports must appear, with the SAME state. A view that quietly
 # drops a row is worse than no view: the row it drops is the one nobody then chases.
+# shellcheck disable=SC2034  # positional field: named so `state` and `rest` land correctly
 while IFS=$'\t' read -r ident kind state rest; do
   [ -n "${ident:-}" ] || continue
   v="$(FLEET_VIEW_WIDTH=200 python3 "$VIEW" board --wide 2>/dev/null)"

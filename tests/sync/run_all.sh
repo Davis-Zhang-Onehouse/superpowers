@@ -1,4 +1,5 @@
 # tests/sync/run_all.sh
+# shellcheck shell=bash
 set -e
 DIR="$(cd "$(dirname "$0")" && pwd)"
 fail=0

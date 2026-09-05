@@ -131,6 +131,8 @@ A_NVERBS="$(python3 -c 'from fleet.cli import VERBS; print(len(VERBS))')"
 A_VERBS_ALL="$(python3 -c 'from fleet.cli import VERBS; print(" ".join(sorted(VERBS)))')"
 A_MUTATING="$(python3 -c 'from fleet.cli import VERBS
 print(" ".join(sorted(n for n, s in VERBS.items() if not s.read_only)))')"
+# shellcheck disable=SC2034  # A1 asserts the MUTATING verbs refuse; the read-only counterpart is
+# derived here but never asserted on. See SI-50.
 A_READONLY="$(python3 -c 'from fleet.cli import VERBS
 print(" ".join(sorted(n for n, s in VERBS.items() if s.read_only)))')"
 
@@ -489,7 +491,7 @@ print("OUTSIDE_SECOND_CHECKOUT:", outside)
 assert not outside, outside
 print("OK A3b")
 PY
-  ( cd "$d/wd" && A3_CO="$A3_CO" env -u PYTHONPATH PYTHONPATH="$A3_CO" \
+  ( cd "$d/wd" && env -u PYTHONPATH PYTHONPATH="$A3_CO" \
     FLEET_HOME="$d/home" FLEET_INSTANTS="$d/instants" A3_CO="$A3_CO" \
     python3 "$PY_DIR/a3b.py" > "$OUT/A3b.out" 2>&1 )
   local rc_b=$?
