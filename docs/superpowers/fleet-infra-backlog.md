@@ -135,3 +135,86 @@ second instance of the pattern (rule 1's lineage base, "enforced at dispatch tim
 **Closed when:** a dependency learned after a row was raised can be recorded on that row (or on an
 explicitly-superseding row) without losing history, and `PRIORITIES.md` no longer has to carry a "MUST land
 before" rule in prose.
+
+---
+
+## SI-45 — an operator-authored profile cannot be linted by any command
+
+**Status:** OPEN. **Blocks:** `dispatching-a-wave` (profile authoring is part of the routine).
+
+**Measured 2026-09-05** at `fleet 0.3.18`. `fleet/src/fleet/profiles.py:190` defines `lint(profile)` with
+six rules — `authoring-placeholder`, `static-sha`, `baseline-disagreement`, `awaiting-ci-clause`,
+`required-clause`, `invocation-target-flag` — plus a `population` row so a narrowed scope cannot read as a
+pass. It is a careful, well-designed check.
+
+**Nothing on the CLI calls it.** `cli.py:74` imports `Profile` and not `lint`; the only importers in the
+whole tree are `fleet/tests/test_contracts.py:40` and `fleet/tests/test_profiles.py:11`. The verb named
+`lint` is `fleet lint --instant`, which checks *an instant's* layout matrix, watched-source registry and
+near-miss rule — a different subject entirely. `fleet verify` executes an instant's documented recipes;
+`fleet selftest` runs fleet's own suites. Neither reads a profile.
+
+**Why it matters.** Authoring a profile is part of the coordinator's routine, not an internal fleet
+concern: `quantonOnSpark4V2` carries three (`dispatch/profile-v2stack`, `dispatch/profile-fleetinfra`,
+`profiles/ansi-gap-closure`). Its `PRIORITIES.md` describes the last of these as *"lint-clean, 14 required
+clauses"* — and that claim, which is about a profile every subsequent worker is dispatched with, **is not
+re-derivable by any command a coordinator can type.** The `requires_clauses` list really does hold 14
+entries; there is simply no way to check them from outside the test suite.
+
+This is the shape `SI-33`'s own design doc warns about under a different name: *"for each thing your role
+must do, ask: what do I type?"* — four capabilities existed, were tested, and could not be invoked.
+
+**What a fix must decide.**
+1. A new verb (`fleet profile-lint --profile <dir>`) or a flag on an existing one? A new verb is clearer;
+   the verb population is already 40-odd and `lint` is taken by a different subject.
+2. Does `dispatch` lint the profile it is about to render, and refuse on a violation? That closes the gap
+   without anyone remembering to run anything — the *detect vs prevent* distinction this codebase applies
+   elsewhere. The cost is that a violation then blocks a dispatch, so the severity split has to be right.
+
+**Closed when:** a coordinator can lint a profile they authored with one command, and the "lint-clean"
+claim in an effort's own priorities file is a re-derivable measurement rather than an assertion.
+
+---
+
+## SI-46 — the placeholder detector cannot see the placeholder convention the profiles actually use
+
+**Status:** OPEN. **Depends on `SI-45`** — while the lint is unreachable, this gap is unobservable.
+
+**Measured 2026-09-05.** `profiles.py:81`:
+
+```python
+_AUTHORING = re.compile(r"the-[a-z][a-z-]*-in-your-[A-Z]{3,}|FILL-?ME|TODO-?FILL|<[A-Z_]{3,}>")
+```
+
+Run against the real `profiles/ansi-gap-closure/charter.md`: **0 hits.** That charter contains **2**
+coordinator-authoring blocks, in the form the effort standardised on:
+
+```
+<!-- COORDINATOR: replace this comment with the requirement. One block per behavior in scope, each a
+     GIVEN line (ANSI on; the table, the column types, the config), a WHEN line ... -->
+```
+
+So the profile lints clean on the `authoring-placeholder` rule while shipping a charter whose §1 Scope and
+§3 acceptance criteria are placeholders.
+
+**Why it matters — this is the structural half of `FI-387`.** `dispatch` writes the rendered charter
+(`cli.py:1053`) and the launcher shim then waits up to 180s for a seed
+(`scripts/fleet-dispatch-launcher.sh:128`, falling through at :133 to *"an interactive session rather than
+a blank prompt"*). The coordinator fills the real scope into the child's `CHARTER.md` inside that window.
+Measured in the field: a worker read a charter **growing under it**, 28,609 → 37,401 bytes, and filed a
+decision on the premise that its scope and acceptance criteria were empty. They were mid-write.
+
+The profile carries a §0 self-check telling the worker to `fleet park` if §1 has no `GIVEN` outside a
+comment — a good mitigation, and a **worker-side** one. Nothing on the coordinator's side can see it.
+
+**What a fix must decide — and the honest framing is that this may not be fleet's bug.**
+1. Should the **profile** adopt a marker the existing regex already detects (`<COORDINATOR_SCOPE>` matches
+   `<[A-Z_]{3,}>` today), or should the **detector** learn the HTML-comment convention? The first is a
+   one-line change to each profile and needs no fleet release; the second makes every profile written this
+   way safe by default.
+2. Is "a rendered child charter still holds a placeholder" a *lint* question or a *gate* question? It is
+   the second: the useful moment is between rendering the charter and releasing the seed, which is a state
+   only the coordinator is in. That suggests a check on the **child instant**, not on the profile — which
+   is `fleet lint --instant`'s subject, and it does not currently have this rule.
+
+**Closed when:** a charter whose scope is still a placeholder cannot silently reach a worker — either
+because the marker is detectable, or because a check between render and seed refuses it.
