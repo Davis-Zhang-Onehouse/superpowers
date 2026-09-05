@@ -79,7 +79,7 @@ render() {                        # render <session> <frame-file>
   #: reported `10` and the report was a correct verdict about the wrong fixture.
   local sess="$1"
   local frame="$2"
-  local script="$OUT/$(basename "$frame").sh"
+  local script; script="$OUT/$(basename "$frame").sh"
   cat > "$script" <<EOS
 #!/usr/bin/env bash
 printf '\033[2J\033[H'
@@ -230,7 +230,7 @@ fi
 #               rc=10 is a number; being unable to close a finished worker is what it cost.
 # --------------------------------------------------------------------------------------------------
 close_case() {                    # close_case <label> <slot> <session> -> echoes the todo id
-  local label="$1" slot="$2" sess="$3" inst todo
+  local label="$1" slot="$2" sess="$3" inst
   mkdir -p "$SLOTS/$slot"
   fleet enroll --slot "$SLOTS/$slot" --porcelain > "$OUT/i7-enroll-$label.out" 2>&1
   inst="$(fleet init --base 00000000 --name "$label" --porcelain 2>&1 \

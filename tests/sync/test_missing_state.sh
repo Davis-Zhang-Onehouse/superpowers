@@ -1,4 +1,5 @@
 # tests/sync/test_missing_state.sh — missing BASE_TAG fails loudly, doesn't corrupt live
+# shellcheck shell=bash
 DIR="$(cd "$(dirname "$0")" && pwd)"; . "$DIR/harness.sh"
 make_upstream; make_fork; make_config
 fork_custom "skills/mine/SKILL.md" "x"

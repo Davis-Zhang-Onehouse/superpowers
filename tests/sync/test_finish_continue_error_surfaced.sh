@@ -7,6 +7,7 @@
 # git itself is stubbed for this one call: --continue failures are environment-dependent
 # (git 2.34 silently drops now-empty commits), so a stub is the only deterministic way to
 # reach the error path. Everything else in the run is real git.
+# shellcheck shell=bash
 DIR="$(cd "$(dirname "$0")" && pwd)"; . "$DIR/harness.sh"
 make_upstream; make_fork; make_config; . "$CTRL/config"
 

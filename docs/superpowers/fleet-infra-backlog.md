@@ -327,3 +327,81 @@ before applying. Nothing would have stopped it.
 **Closed when:** applying a proposal that would move a milestone out of a terminal status is refused with
 a reason naming both statuses, an override path exists and records why, and the integration suite covers
 the replay case.
+
+---
+
+## SI-49 — `releasing-fleet` ships unlinted, and the coverage test only guards four skills
+
+**Status:** OPEN. **Blocks:** nothing today; it is a hole in the checks, not a defect a routine works around.
+
+**Cost.** Nothing yet, which is the point: nobody has looked. Widening `lint-skill.py` to cover a skill's
+whole shipped documentation surfaced that `skills/releasing-fleet/` carries no `tests/lint-self.sh`, so
+neither V1 nor V2 has ever run over it. Pointing the lint at it by hand reports two V1 findings and ten
+V2 claims with no citation.
+
+**Both V1 findings are false positives, and that is the blocker.** `COMMAND` matches `fleet` followed by
+whitespace and a lowercase word inside a code span. Two spans in that skill fit the shape without being
+commands:
+
+- `` `fleet vX.Y.Z` `` — a **git tag name**, read as the verb `v`.
+- `` `<upstream core>+fleet.<fleet version>` `` — a **version-string template**, read as the verb `version`.
+
+Marking them `<!-- v1-proposed: v -->` would be a lie: neither is a verb anybody intends to build. So
+enabling the lint here means either tightening `COMMAND` (excluding a following uppercase letter or `>`)
+or giving the lint a way to say *this span is not a command*.
+
+**A second, quieter half.** `skills/using-fleet/tests/every-skill-linted.sh` names four skills in `WANT`
+and asserts each carries a lint suite. Ten now do. Its own PASS line still says "all four fleet skills",
+so the six added since are unguarded: delete one of their `lint-self.sh` files and nothing notices.
+
+**What a fix must decide.**
+1. **Tighten `COMMAND`, or add a span-level opt-out?** Tightening is invisible and risks a real verb
+   stopping being seen. An opt-out marker is explicit but is one more thing to write.
+2. **Should `WANT` be a hand-kept list at all?** The list exists to catch *deletion*, which a glob cannot
+   do — a glob over skills that have suites is vacuously true. Some enumeration has to be maintained; the
+   question is whether it is enumerated here or derived from a manifest.
+
+**Closed when:** `releasing-fleet` carries `tests/lint-self.sh` and passes it, no citation in it is a
+lie, and the coverage test names every fleet skill that carries a suite.
+
+---
+
+## SI-50 — the IT suite measures two things it never asserts on
+
+**Status:** OPEN. **Blocks:** nothing; it weakens two cases in the release gate rather than any skill.
+
+**Cost.** Found by clearing `SC2034` across the repo: an "unused variable" in a test is not dead code, it
+is usually **a measurement nobody checks**, and all three here sit inside cases whose own wording claims
+exactly what the unchecked value would have proved.
+
+This nearly went wrong in the sweep that found it: `f3_instants` was first deleted as dead, and only a
+re-read of F3's pass message caught that the sentence *"and no instant was created"* had no other source.
+**An unused variable in a test is a claim looking for its assertion; deleting it deletes the evidence that
+the assertion is missing.**
+
+**`f5_cap_room` — `fleet/it/run-F.sh`.** F5 is titled *"the cap has room AND the dispatch is still
+refused"*. It computes `f5_cap_room` from the guard's own output, then gates on `f5_declared` and
+`f5_still_refused` and never reads it. The "cap has room" half is asserted only indirectly, via *the
+compaction declared `awaiting-ci`* — which is the input the cap is supposed to respond to, not the cap's
+answer. A change that broke the cap's accounting while leaving the declaration intact would pass F5.
+
+**`f3_instants` — `fleet/it/run-F.sh`.** F3's pass message ends *"and no instant was created"*. The gate is `exit != 0 && output mentions cap|wip`. The instant count is measured on the line above and never read, so the second half of that sentence is asserted by nothing. A dispatch that refused with the right message *and still created the folder* would pass F3 and read, in the register, as proof that it had not.
+
+**`A_READONLY` — `fleet/it/run-A.sh`.** A1 asserts every **mutating** verb refuses with `FLEET_HOME`
+unset. `A_MUTATING` and `A_READONLY` are derived side by side from `VERBS`; only the first is used. The
+symmetric claim — that a read-only verb is **not** refused — is never made, so a change that made every
+verb refuse would leave A1 green.
+
+Both are the shape this repo already has a name for: *absence is never success*. A value computed and not
+compared reads, to anyone skimming, exactly like a value that was checked.
+
+**What a fix must decide.**
+1. **Assert, or delete?** Asserting is the point, but adding an assertion to a gate that currently passes
+   can turn it red on the first run, and that has to be a deliberate act with someone watching — not a
+   side effect of a lint sweep. That is why both were left in place with a citation rather than fixed here.
+2. **Is the read-only half of A1 even true?** It needs measuring before it is asserted; a read-only verb
+   with no store may legitimately refuse for a different reason.
+
+**Closed when:** each of the three values is either read by the assertion whose wording depends on it, or
+deleted together with the clause it was supposed to support — and F3's and F5's stated claims match what
+F3 and F5 actually check.

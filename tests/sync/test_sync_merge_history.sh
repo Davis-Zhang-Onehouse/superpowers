@@ -12,6 +12,7 @@
 # resolution per duplicate: the cost has to track real divergence, not the duplicated history.
 # The setup merge is made with rerere OFF on purpose — with a recorded resolution rerere
 # quietly patches over the duplicate replay and the bug looks harmless.
+# shellcheck shell=bash
 DIR="$(cd "$(dirname "$0")" && pwd)"; . "$DIR/harness.sh"
 make_upstream; make_fork; make_config; . "$CTRL/config"
 

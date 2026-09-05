@@ -44,18 +44,27 @@ assert_not_contains() {
     fi
 }
 
+# shellcheck disable=SC2088  # literal needle, see note above
+# The "~/.config/superpowers/worktrees" strings below are LITERAL NEEDLES searched for inside skill
+# prose -- the whole point is that the docs no longer mention that path. Expanding the tilde to $HOME
+# would search for a different string, and the assertions would pass without checking anything.
+# shellcheck disable=SC2088
 echo "=== Worktree Path Policy Test ==="
 echo ""
 
+# shellcheck disable=SC2088  # literal needle, see note above
 assert_not_contains "$USING_SKILL" "~/.config/superpowers/worktrees" "using-git-worktrees does not mention old global path"
 assert_not_contains "$USING_SKILL" "global legacy" "using-git-worktrees does not use unclear global legacy shorthand"
 assert_not_contains "$USING_SKILL" "Global path" "using-git-worktrees has no global path quick-reference row"
 assert_contains "$USING_SKILL" 'default to `.worktrees/` at the project root' "using-git-worktrees defaults new manual worktrees to .worktrees/"
 
+# shellcheck disable=SC2088  # literal needle, see note above
 assert_not_contains "$FINISHING_SKILL" "~/.config/superpowers/worktrees" "finishing-a-development-branch does not treat old global path as owned"
 assert_contains "$FINISHING_SKILL" '`.worktrees/` or `worktrees/`' "finishing-a-development-branch keeps project-local cleanup ownership"
 
+# shellcheck disable=SC2088  # literal needle, see note above
 assert_not_contains "$ROTOTILL_SPEC" "~/.config/superpowers/worktrees" "rototill spec does not preserve old global path policy"
+# shellcheck disable=SC2088  # literal needle, see note above
 assert_not_contains "$ROTOTILL_PLAN" "~/.config/superpowers/worktrees" "rototill plan does not preserve old global path policy"
 assert_not_contains "$ROTOTILL_PLAN" "legacy path compat" "rototill plan does not advertise legacy path compatibility"
 

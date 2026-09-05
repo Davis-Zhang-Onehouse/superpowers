@@ -1,4 +1,5 @@
 # Shared helpers. Caller must have already sourced $SPSYNC_CONFIG.
+# shellcheck shell=bash
 g() { git -C "$1" "${@:2}"; }
 
 # Portable "N days ago" in UTC. BSD/macOS date uses -v; GNU/Linux date uses -d.
@@ -6,6 +7,7 @@ days_ago_utc() { # days_ago_utc DAYS FORMAT   e.g. days_ago_utc 90 +%s
   date -u -v-"$1"d "$2" 2>/dev/null || date -u -d "-$1 days" "$2"
 }
 
+# shellcheck source=/dev/null  # a run-time state file the sync writes; it does not exist in the repo
 load_state() { [ -f "$STATE_FILE" ] && . "$STATE_FILE" || true; }
 
 set_state() { # set_state KEY VALUE  (idempotent rewrite)

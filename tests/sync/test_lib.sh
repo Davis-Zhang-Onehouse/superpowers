@@ -1,8 +1,10 @@
 # tests/sync/test_lib.sh
+# shellcheck shell=bash
 DIR="$(cd "$(dirname "$0")" && pwd)"; . "$DIR/harness.sh"
 make_upstream; make_fork; make_config
 export SPSYNC_CONFIG="$CTRL/config"
 
+# shellcheck source=/dev/null  # written by the harness into a sandbox
 . "$SPSYNC_CONFIG"; . "$SCRIPTS/lib.sh"
 load_state
 assert_eq "$BASE_TAG" "v1.0.0" base

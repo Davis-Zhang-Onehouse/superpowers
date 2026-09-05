@@ -176,6 +176,7 @@ fleet() {
 }
 
 it_pass() { printf '%s\tPASS\t%s\t%s\n' "$1" "${2:-}" "${3:-}" >> "$RESULTS"; printf 'PASS %s %s\n' "$1" "${3:-}"; }
+# shellcheck disable=SC2034  # read by each runner's own exit gate (e.g. run-G.sh) after lib.sh is sourced in
 it_fail() { printf '%s\tFAIL\t%s\t%s\n' "$1" "${2:-}" "${3:-}" >> "$RESULTS"; printf 'FAIL %s %s\n' "$1" "${3:-}" >&2; IT_FAILED=1; }
 it_skip() { printf '%s\tSKIP\t%s\t%s\n' "$1" "${2:-}" "${3:-cannot run — reason must be stated}" >> "$RESULTS"
             printf 'SKIP %s %s\n' "$1" "${3:-}" >&2; }
@@ -216,8 +217,8 @@ it_expect_contains() {    # it_expect_contains <case> <needle> <cmd...>
 # A zero-delta assertion that catches a TRANSIENT write, not just a net change: content AND mtimes.
 # The guards implementer showed a claim-then-release restores bytes exactly while still touching mtimes.
 it_manifest() { find "$@" -mindepth 0 2>/dev/null | sort | while read -r f; do
-                  printf '%s %s %s\n' "$(sha256sum "$f" 2>/dev/null | cut -d' ' -f1 || echo dir)" \
-                                      "$(stat -c '%Y.%n' "$f" 2>/dev/null)"; done; }
+                  printf '%s %s\n' "$(sha256sum "$f" 2>/dev/null | cut -d' ' -f1 || echo dir)" \
+                                   "$(stat -c '%Y.%n' "$f" 2>/dev/null)"; done; }
 
 it_zero_delta() {         # it_zero_delta <case> <cmd...>   over FLEET_HOME + slots
   local case="$1"; shift

@@ -1,4 +1,5 @@
 # tests/sync/harness.sh — source this from each test. Builds an isolated sandbox.
+# shellcheck shell=bash
 set -euo pipefail
 
 SANDBOX="$(mktemp -d)"

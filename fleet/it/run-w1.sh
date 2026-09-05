@@ -258,6 +258,7 @@ mkdir -p "$OUT/w1-11"
   RESULTS="$OUT/w1-11/negative-control.tsv"; : > "$RESULTS"
   # Repointed COPIES, never the shared files — the same discipline as W1-7, and for the same reason: a
   # concurrent runner reading a real baseline inside this window would compare against a fiction.
+  # shellcheck disable=SC2034  # lib.sh reads this when resolving ambient instants
   IT_AMBIENT_INSTANTS="$W11_LIVE"
   LIVE_INSTANTS_SNAPSHOT="$OUT/w1-11/instants-baseline.txt"; rm -f "$LIVE_INSTANTS_SNAPSHOT"
   LIVE_TMUX_SNAPSHOT="$OUT/w1-11/tmux-baseline.txt"; cp "$IT_ROOT/live-tmux-sessions.txt" "$LIVE_TMUX_SNAPSHOT"

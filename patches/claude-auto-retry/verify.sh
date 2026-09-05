@@ -55,6 +55,7 @@ console.log(JSON.stringify(tmuxArgv(['capture-pane','-p'])));
 " 2>&1)" || { note "FAIL tmux.js does not export tmuxArgv (patch missing): $out"; fails=1; }
 
 if [ "$fails" = 0 ]; then
+  # shellcheck disable=SC1007  # the empty value IS the case under test: the socket var set but blank
   unset_out="$(CLAUDE_AUTO_RETRY_TMUX_SOCKET= "$NODE" --input-type=module -e "
 import { tmuxArgv } from '$CAR/src/tmux.js';
 console.log(JSON.stringify(tmuxArgv(['capture-pane','-p'])));")"

@@ -94,6 +94,8 @@ printf '\n## Phase: AWAITING-CI\n\nThe worker believes it is waiting on CI.\n' >
 fleet dispatch --profile "$OUT/profile" --title "secondB" --base 00000000 --optype append \
       > "$OUT/F3-dispatch.out" 2>&1
 f3_rc=$?
+# shellcheck disable=SC2034  # F3 claims "no instant was created"; this is the measurement for that
+# half of the claim, and the gate below never reads it. See SI-50.
 f3_instants="$(find "$FLEET_INSTANTS" -maxdepth 1 -mindepth 1 -type d | wc -l)"
 if [ "$f3_rc" != 0 ] && grep -qiE 'cap|wip' "$OUT/F3-dispatch.out"; then
   it_pass F3 "fleet/it/F/out/F3-dispatch.out" \
@@ -295,7 +297,10 @@ fi
 
 # ---- F5: the cap has room AND the dispatch is still refused ----
 f5_rc="$(ex F5_EXIT)"
+# shellcheck disable=SC2034  # F5's title claims 'the cap has room', but the gate below asserts on
+# f5_declared/f5_still_refused only -- this measurement is never checked. See SI-50.
 f5_cap_room=0
+# shellcheck disable=SC2034  # see the note above: measured, never asserted. SI-50.
 sec F5_CAP_START F5_EXIT= | grep -qiE 'no compaction|examined' && f5_cap_room=1
 f5_still_refused=0; [ "$f5_rc" = 4 ] && f5_still_refused=1
 f5_declared=0; sec F5_DECLARE_START F5_CAP_START | grep -qi 'awaiting-ci' && f5_declared=1

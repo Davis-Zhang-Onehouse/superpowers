@@ -3,6 +3,7 @@
 # SPSYNC_CONFIG set. That copy-paste must work for a control dir living anywhere,
 # not just $HOME/.superpowers-sync — so each script defaults its config to the one
 # beside itself, the way bootstrap.sh lays them out.
+# shellcheck shell=bash
 DIR="$(cd "$(dirname "$0")" && pwd)"; . "$DIR/harness.sh"
 make_upstream; make_fork; make_config
 fork_custom "skills/mine/SKILL.md" "my custom skill"

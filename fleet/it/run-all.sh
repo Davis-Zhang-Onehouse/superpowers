@@ -29,7 +29,6 @@
 # Run: bash fleet/it/run-all.sh
 set -uo pipefail
 IT_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-INSTANT="$(cd "$IT_ROOT/../.." && pwd)"
 LOG="$IT_ROOT/FULL-RUN-closeout.log"
 : > "$LOG"
 
@@ -42,7 +41,9 @@ printf 'case\tverdict\tevidence\tnote\n' > "$IT_RESULTS"
 export IT_RESULTS
 # shellcheck disable=SC1091
 . "$IT_ROOT/lib.sh"
+# shellcheck disable=SC2034  # consumed by lib.sh's it_fail, sourced just above
 IT_FAILED=0
+# shellcheck disable=SC2034  # consumed by lib.sh's per-section helpers
 SECTION=ALL
 it_own_cases 'ISOLATION-ALL-(enter|leave)'
 it_assert_isolation ALL-enter

@@ -121,10 +121,10 @@ cmd_key()   { local s="$1"; check_name "$s"; shift; ptmux send-keys -t "=$s:" "$
 # — rc 10 is "there is text in the box" — so the contract is: type, poll until the box has it, then
 # Enter. A fixed `sleep` would be the same bug with a bigger constant, wrong on a loaded box.
 cmd_submit() {
-  local session="$1" text="$2" i g
+  local session="$1" text="$2" g
   check_name "$session"
   cmd_type "$session" "$text"
-  for i in $(seq 1 50); do                      # 50 x 0.2s = 10s, generous for a keystroke to land
+  for _ in $(seq 1 50); do                      # 50 x 0.2s = 10s, generous for a keystroke to land
     g="$(cmd_guard "$session")" || true
     [ "$g" = 10 ] && break
     sleep 0.2

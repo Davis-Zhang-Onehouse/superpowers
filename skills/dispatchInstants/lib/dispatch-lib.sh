@@ -56,7 +56,8 @@ dl_resolve_instant() { # <recorded child path> -> current basename ("" if unreso
   pre="$(printf '%s' "$b" | grep -oE '^[0-9]{8}-[0-9]{8}' || true)"
   rest="$(printf '%s' "$b" | sed -E 's/^[0-9]{8}-[0-9]{8}-(inflight|complete|abort)-//')"
   if [ -n "$pre" ] && [ -n "$rest" ] && [ -d "$d" ]; then
-    m="$(ls -1 "$d" 2>/dev/null | grep -E "^${pre}-(inflight|complete|abort)-${rest}$" | head -1)"
+    m="$(find "$d" -maxdepth 1 -mindepth 1 -printf '%f\n' 2>/dev/null \
+           | grep -E "^${pre}-(inflight|complete|abort)-${rest}$" | sort | head -1)"
     [ -n "$m" ] && { printf '%s' "$m"; return 0; }
   fi
   printf '%s' "$b"

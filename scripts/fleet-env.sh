@@ -17,6 +17,7 @@
 # reads the same store to decide which finished workers to stop auto-resuming. `fleet`'s read-only verbs
 # already default here; it is stated anyway because a WRITE with no store named is refused outright, and
 # "no default for a write" is much easier to live with when the read path and the write path agree.
+# shellcheck shell=bash
 export FLEET_HOME="${FLEET_HOME:-$HOME/.fleet}"
 
 # The tmux SERVER dispatched sessions live on. Not the default server, deliberately:
