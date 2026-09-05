@@ -1,5 +1,14 @@
 # fleet — changelog
 
+## fleet/v0.3.18 — 2026-09-05T16:56:55Z
+Cut from e1af9a6 on `live` (upstream base snapshot/2026-08-17-221146). 1 commit(s) since fleet/v0.3.17.
+
+Every release ships the whole repository — all skills, `commands/`, `hooks/` and the plugin manifest, not only `fleet/`.
+Payload: fleet (16 files), skills (2 files).
+Skills changed: using-fleet.
+
+- e1af9a6 profiles: the awaiting-ci clause taught a command `parse` refuses
+
 ## fleet/v0.3.17 — 2026-08-27T20:46:17Z
 Cut from b4c66cf on `live` (upstream base snapshot/2026-08-17-221146). 2 commit(s) since fleet/v0.3.16.
 
