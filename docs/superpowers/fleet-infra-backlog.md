@@ -238,7 +238,7 @@ population  ...  info  examined 3 milestone(s) of which 2 ready, 0 pending propo
 `brief --porcelain`, `board --porcelain` and `roadmap --porcelain` together and grepping for `m1` as a
 whole field returns **0**.
 
-`Roadmap.report()` (`roadmap.py:496`) emits exactly three kinds: `not-ready` (and only where a blocker
+`Roadmap.report()` (`roadmap.py:497`) emits exactly three kinds: `not-ready` (and only where a blocker
 exists — `if blocker is None: continue`), `pending-proposal`, and one `population` row. A `Roadmap.ready()`
 method exists and is called, but only to compute the **count** interpolated into the population row's
 prose: `f"examined {len(milestones)} milestone(s) of which {len(self.ready())} ready"`.
