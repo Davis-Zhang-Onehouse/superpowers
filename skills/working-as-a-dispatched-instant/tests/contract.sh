@@ -47,7 +47,7 @@ expect no-evidence 2 "$FLEET" propose --instant "$W" --milestone c1 --status run
 
 # CLAIM: a worker cannot bring a milestone into existence by proposing about it.
 expect invented-milestone 2 "$FLEET" propose --instant "$W" --milestone neverAdded \
-                            --status done --evidence evidence/INDEX.md
+                            --status "done" --evidence evidence/INDEX.md
 
 # CLAIM: completing with no review round is UNDECIDABLE, not "not ready". The distinction matters: nothing has
 # been judged, and a gate that says "not ready" invites the reader to argue with a verdict it never reached.

@@ -101,7 +101,7 @@ else
   fleet propose --instant "$W" --milestone L1 --status running --evidence "evidence/INDEX.md" \
         > "$OUT/LB2-running.out" 2>&1
   lb2_running_rc=$?
-  fleet propose --instant "$W" --milestone L1 --status done --evidence "evidence/INDEX.md" \
+  fleet propose --instant "$W" --milestone L1 --status "done" --evidence "evidence/INDEX.md" \
         > "$OUT/LB2-done.out" 2>&1
   lb2_done_rc=$?
   fleet complete --instant "$W" > "$OUT/LB2-complete.out" 2>&1
@@ -129,7 +129,7 @@ else
   git -C "$SLOT/alpha" checkout -q --detach "$L" 2>>"$OUT/LB3-checkout.err"
   fleet base-check --id "$TODO" --porcelain > "$OUT/LB3-basecheck.tsv" 2>&1
   lb3_bc_rc=$?
-  fleet propose --instant "$W" --milestone L1 --status done --evidence "evidence/INDEX.md" \
+  fleet propose --instant "$W" --milestone L1 --status "done" --evidence "evidence/INDEX.md" \
         > "$OUT/LB3-done.out" 2>&1
   lb3_done_rc=$?
   lb3_at_base=0; grep -qF "at the base" "$OUT/LB3-basecheck.tsv" && lb3_at_base=1

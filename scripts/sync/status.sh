@@ -11,6 +11,7 @@ SPSYNC_SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 # path with no SPSYNC_CONFIG set — which is how the paused-rebase STATUS
 # instructions tell you to run finish.sh.
 : "${SPSYNC_CONFIG:=$SPSYNC_SCRIPT_DIR/config}"
+# shellcheck source=/dev/null  # generated at install time; there is no file in the repo to follow
 . "$SPSYNC_CONFIG"
 . "$SPSYNC_SCRIPT_DIR/lib.sh"
 load_state

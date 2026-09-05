@@ -1,4 +1,5 @@
 # tests/sync/test_sync_noop_dirty.sh
+# shellcheck shell=bash
 DIR="$(cd "$(dirname "$0")" && pwd)"; . "$DIR/harness.sh"
 make_upstream; make_fork; make_config
 run_sync                                            # no new tag → no-op

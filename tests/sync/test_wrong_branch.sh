@@ -1,4 +1,5 @@
 # tests/sync/test_wrong_branch.sh — sync refuses to run when repo is not on live
+# shellcheck shell=bash
 DIR="$(cd "$(dirname "$0")" && pwd)"; . "$DIR/harness.sh"
 make_upstream; make_fork; make_config
 fork_custom "skills/mine/SKILL.md" "x"

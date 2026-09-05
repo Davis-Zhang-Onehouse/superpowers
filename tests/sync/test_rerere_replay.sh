@@ -1,4 +1,5 @@
 # tests/sync/test_rerere_replay.sh — same conflict twice auto-resolves the 2nd time
+# shellcheck shell=bash
 DIR="$(cd "$(dirname "$0")" && pwd)"; . "$DIR/harness.sh"
 make_upstream; make_fork; make_config; . "$CTRL/config"
 g "$FORK" config rerere.enabled true

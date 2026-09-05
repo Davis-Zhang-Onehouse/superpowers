@@ -52,7 +52,7 @@ fi
 
 # ---- Raise: the only way work becomes dispatchable ------------------------------------------------
 step raise-m1 0 "$FLEET" milestone --instant "$C" --id m1 --title "the enabling work" \
-                  --status done --evidence evidence/INDEX.md
+                  --status "done" --evidence evidence/INDEX.md
 step raise-m2 0 "$FLEET" milestone --instant "$C" --id m2 --title "the real work" --dep m1
 step raise-m3 0 "$FLEET" milestone --instant "$C" --id m3 --title "the tail" --dep m2
 # A dep that is not on the roadmap is refused where the name is typed, not discovered later as a milestone
@@ -84,7 +84,7 @@ step dispatch-ready   0 "$FLEET" dispatch --profile "$PROFILE" --title real --ba
                         --optype append --from "$C" --milestone m2 --dry-run
 
 # ---- Receive: propose then apply, and readiness must RECOMPUTE ------------------------------------
-step propose 0 "$FLEET" propose --instant "$C" --milestone m2 --status done --evidence evidence/INDEX.md
+step propose 0 "$FLEET" propose --instant "$C" --milestone m2 --status "done" --evidence evidence/INDEX.md
 step apply   0 "$FLEET" apply --instant "$C" --milestone m2
 after="$("$FLEET" roadmap --instant "$C" --porcelain | awk -F'\t' '$1=="not-ready"{print $2}' | tr '\n' ' ')"
 case " $after " in

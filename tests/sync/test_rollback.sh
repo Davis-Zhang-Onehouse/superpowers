@@ -1,4 +1,5 @@
 # tests/sync/test_rollback.sh
+# shellcheck shell=bash
 DIR="$(cd "$(dirname "$0")" && pwd)"; . "$DIR/harness.sh"
 make_upstream; make_fork; make_config
 fork_custom "skills/mine/SKILL.md" "v-a"

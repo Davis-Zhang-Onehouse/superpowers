@@ -36,6 +36,7 @@ mkdir -p "$EV"
 # A2c. This runner needs no FLEET_HOME — it only reads source trees — but it must still prove it touched
 # nothing, so the isolation contract is asserted directly. `SECTION` is set because the check names its
 # per-section dt- record from it.
+# shellcheck disable=SC2034  # consumed by lib.sh's per-section helpers
 SECTION=M9mut
 it_assert_isolation M9mut-enter
 

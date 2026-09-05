@@ -56,7 +56,6 @@ it_fresh_fixture() {      # call immediately after it_section, before anything w
   mkdir -p "$FLEET_HOME" "$SLOTS"
 }
 
-CLAUDE_BEFORE="$(pgrep -x claude | wc -l | tr -d ' ')"
 CLAUDE_PIDS_BEFORE="$(it_claude_pids)"      # the set, for it_assert_no_new_claude (see the leave assertion)
 
 # --- the exact implementation these results describe ----------------------------------------------
@@ -366,7 +365,7 @@ recs = sorted((Path(os.environ["L7H"]) / "records").glob("*.json"))
 print(json.loads(recs[0].read_text())["todo_id"] if recs else "")
 PY
 )"
-  fleet propose --home "$L7H" --instant "$INSTP" --milestone M1 --status done \
+  fleet propose --home "$L7H" --instant "$INSTP" --milestone M1 --status "done" \
         --evidence "$EV/L7-setup.out" >> "$EV/L7-setup.out" 2>&1
   mkdir -p "$EV/profile"
   printf '{"kind": "worker"}\n' > "$EV/profile/profile.json"
@@ -590,7 +589,7 @@ if not road.milestones():
 print("milestones:", [m.id for m in road.milestones()])
 PY
   python3 "$PY_DIR/msetup.py" >> "$EV/M-setup.out" 2>&1
-  fleet propose --instant "$INSTP" --milestone M1 --status done --evidence "$EV/M-setup.out" \
+  fleet propose --instant "$INSTP" --milestone M1 --status "done" --evidence "$EV/M-setup.out" \
         >> "$EV/M-setup.out" 2>&1
   export INSTP TODO
 
@@ -1247,7 +1246,7 @@ PY
 
   # ---- M12 --------------------------------------------------------------------------------------
   fleet init --name m12probe > "$EV/M12-setup.out" 2>&1
-  M12INST="$(ls "$FLEET_HOME/instants" | grep m12probe | head -1)"
+  M12INST="$(find "$FLEET_HOME/instants" -maxdepth 1 -name '*m12probe*' -printf '%f\n' | sort | head -1)"
   M12P="$FLEET_HOME/instants/$M12INST"
   OUTSIDE="$EV/m12-should-not-exist.txt"
   rm -f "$OUTSIDE" 2>/dev/null
@@ -1549,7 +1548,7 @@ PY
   mkdir -p "$SLOTS/ns2"
   fleet enroll --slot "$SLOTS/ns2" >> "$EV/N-setup.out" 2>&1
   fleet init --name nOwned > "$EV/N9-setup.out" 2>&1
-  N9INST="$FLEET_HOME/instants/$(ls "$FLEET_HOME/instants" | grep nowned | head -1)"
+  N9INST="$(find "$FLEET_HOME/instants" -maxdepth 1 -name '*nowned*' | sort | head -1)"
   fleet resume --instant "$N9INST" --slot ns2 --tmux "$OWN" >> "$EV/N9-setup.out" 2>&1
   N9TODO="$(python3 - <<'PY'
 import json, os

@@ -3,6 +3,7 @@
 # finalize_live deletes that worktree before running SPSYNC_REFRESH_CMD — so the refresh
 # subprocess inherits a deleted cwd and dies (`claude` reports "ENOENT: Bun could not find a
 # file"), logging refresh-failed on every conflict resolution done the documented way.
+# shellcheck shell=bash
 DIR="$(cd "$(dirname "$0")" && pwd)"; . "$DIR/harness.sh"
 make_upstream; make_fork; make_config; . "$CTRL/config"
 cat >> "$CTRL/config" <<EOF

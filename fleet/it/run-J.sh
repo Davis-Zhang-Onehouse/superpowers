@@ -99,7 +99,7 @@ else
   {
     echo "== the worker's own roadmap, its report, its review round, and the rename =="
     fleet milestone --instant "$W" --id j-m1 --title "the work this worker was sent to do" --porcelain
-    fleet propose --instant "$W" --milestone j-m1 --status done --evidence "evidence/INDEX.md" --porcelain
+    fleet propose --instant "$W" --milestone j-m1 --status "done" --evidence "evidence/INDEX.md" --porcelain
     fleet review --instant "$W" --scope all --verdict READY \
           --finding "F-1:Minor:applied:src/fleet/cli.py:usage is derived:none" --porcelain
     fleet complete --instant "$W" --porcelain
@@ -305,7 +305,7 @@ if [ -z "$CW" ] || [ ! -d "$CW" ]; then
 else
   {
     fleet milestone --instant "$CW" --id j-m9 --title "work interrupted by a crash" --porcelain
-    fleet propose --instant "$CW" --milestone j-m9 --status done --evidence "evidence/INDEX.md" --porcelain
+    fleet propose --instant "$CW" --milestone j-m9 --status "done" --evidence "evidence/INDEX.md" --porcelain
     fleet review --instant "$CW" --scope all --verdict READY \
           --finding "F-1:Minor:applied:src/fleet/cli.py:usage is derived:none" --porcelain
     fleet complete --instant "$CW" --porcelain
@@ -361,7 +361,7 @@ PY
   }
 
   j9_verdict() {                  # j9_verdict <where> -> "killed stamped slot_held forbidden"
-    local w="$1" f="$OUT/J9-$1-state.txt" rc stamped held killed
+    local f="$OUT/J9-$1-state.txt" rc stamped held killed
     rc="$(awk -F': ' '/^driver_rc:/{print $2}' "$f")"
     killed=0; [ "$rc" -ge 128 ] 2>/dev/null && killed=1
     stamped=0; grep -qE '^harvested_at: 20' "$f" && stamped=1
@@ -385,7 +385,7 @@ EOF
   RSLOT="$(awk -F'\t' '$1=="slot"{print $2}' "$OUT/J9b-dispatch.out")"
   {
     fleet milestone --instant "$RW" --id j-m9b --title "crash at the release" --porcelain
-    fleet propose --instant "$RW" --milestone j-m9b --status done --evidence "evidence/INDEX.md" --porcelain
+    fleet propose --instant "$RW" --milestone j-m9b --status "done" --evidence "evidence/INDEX.md" --porcelain
     fleet review --instant "$RW" --scope all --verdict READY \
           --finding "F-1:Minor:applied:src/fleet/cli.py:usage is derived:none" --porcelain
     fleet complete --instant "$RW" --porcelain
@@ -418,8 +418,6 @@ fleet dispatch --profile "$OUT/profile" --title "j1Lifecycle" --base 00000000 --
       --cap 9 --porcelain > "$J1_OUT/dispatch.out" 2>&1
 J1W="$(awk -F'\t' '$1=="instant"{print $2}' "$J1_OUT/dispatch.out")"
 J1TODO="$(awk -F'\t' '$1=="todo_id"{print $2}' "$J1_OUT/dispatch.out")"
-J1TMUX="$(awk -F'\t' '$1=="tmux"{print $2}' "$J1_OUT/dispatch.out")"
-J1SLOT="$(awk -F'\t' '$1=="slot"{print $2}' "$J1_OUT/dispatch.out")"
 j1_step() { local l="$1"; shift; "$@" > "$J1_OUT/$l.out" 2>&1; printf '%s=%s\n' "$l" "$?" >> "$J1_OUT/rc"; }
 : > "$J1_OUT/rc"
 if [ -z "$J1W" ] || [ ! -d "$J1W" ]; then
@@ -526,7 +524,6 @@ for r in Store(pathlib.Path(sys.argv[1])).all():
         print(r.tmux)
 PY
 sort)"
-j5_orphans="$(comm -23 <(printf '%s\n' "$j5_live" | grep -c . >/dev/null && printf '%s\n' "$j5_live" | sort) <(printf '%s\n' "$j5_claimed" | sort) 2>/dev/null | grep -c . || echo 0)"
 j5_harvested_gone=1
 it_tmux has-session -t "$TMUXN" 2>/dev/null && j5_harvested_gone=0
 if [ "$j5_harvested_gone" = 1 ]; then
