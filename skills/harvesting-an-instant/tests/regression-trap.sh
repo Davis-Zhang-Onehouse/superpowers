@@ -29,7 +29,7 @@ print(next(m['status'] for m in d['milestones'] if m['id']==sys.argv[2]))" "$I/.
 "$FLEET" milestone --instant "$I" --id m1 --title "the landed one" --status ready >/dev/null 2>&1
 "$FLEET" milestone --instant "$I" --id m2 --title "depends on m1"  --dep m1       >/dev/null 2>&1
 
-"$FLEET" propose --instant "$I" --milestone m1 --status done \
+"$FLEET" propose --instant "$I" --milestone m1 --status "done" \
   --evidence "$I/evidence/p.txt" --note "the real report" >/dev/null 2>&1
 "$FLEET" apply --instant "$I" --milestone m1 >/dev/null 2>&1
 [ "$(status_of m1)" = "done" ] || { echo "FAIL: setup did not land m1 (got '$(status_of m1)')"; exit 1; }
