@@ -657,8 +657,10 @@ marker (`R6`) **or** exported as `FLEET_HOME` (`R6b`), cites `SI-56`, and create
 
 ## SI-57 — `fleet-env.sh` carries the previous root's store across a `cd` between roots
 
-**Status:** OPEN. Found while provisioning `davis2_root` at `0.5.2`, by reading the file rather than by a
-failing check — there is no control that would have caught it.
+**Status:** **FIXED** on 2026-09-06, in the checkout — `scripts/fleet-env.sh` is sourced by path from the
+shell rc, not through `current`, so it is not carried by a release. Found while provisioning `davis2_root`
+at `0.5.2`, by reading the file rather than by a failing check — there was no control that would have
+caught it, and there is one now.
 **Field id:** none yet; this has not been observed damaging a run, only shown to be reachable.
 
 **Measured 2026-09-06 at `0.5.2`.** `scripts/fleet-env.sh:56` sets the store as a DEFAULT:
@@ -689,9 +691,28 @@ release."*
 3. `FLEET_INSTANTS` is NOT in scope: it is set only from an explicit argument, never defaulted.
 4. The duplicated walk in `fleet.root` is unaffected; only the export tier changes.
 
-**Closed when:** a shell that sources the file in one root and then sources it in another addresses the
-second root's store, socket and release area — while a value the operator exported before the first
-sourcing still survives both. `scripts/tests/fleet-env-derives-root.sh` asserts both halves.
+**Closed when:** met. A shell that sources the file in one root and then in another addresses the second
+root's store, socket and release area; a value the operator exported before the first sourcing survives
+both. `scripts/tests/fleet-env-derives-root.sh` asserts both directions of the `cd`, the operator's
+export, and the two by-construction reclaims below.
+
+**How it was fixed.** Three companion variables (`_FLEET_ENV_HOME`, `_FLEET_ENV_SOCKET`,
+`_FLEET_ENV_RELEASES`) record what the last sourcing DERIVED — and only what it derived: a value this file
+merely passed through is not recorded, or the next sourcing would re-derive over the operator's own
+export. A current value equal to its companion is ours and is dropped so the default can fire again;
+anything else is somebody's decision and is left alone.
+
+Two values are stale **by construction** and need no companion. `$HOME/.fleet` can never be a root's store,
+because the walk stops below `$HOME`; the bare socket `fleet` can never be a root's server, because a
+root's is always `fleet-<name>`. Both are the pre-isolation box-wide values, still exported by every shell
+started before the marker migration, and dropping them here is what lets those shells heal on their next
+`cd` rather than on a restart nobody schedules. The socket is the one that costs more: `close`, `abort`
+and `harvest` kill sessions BY NAME, so a stale shell that healed its store while keeping the shared
+server would kill by name across both roots.
+
+Measured before the fix, on the real box: sourcing in `davis_root/ws1` then in `davis2_root/ws1` left
+`FLEET_HOME=/home/ubuntu/davis_root/.fleet` and `FLEET_TMUX_SOCKET=fleet-davis`. After it, each `cd`
+lands on its own root's values, in both directions.
 
 ---
 
