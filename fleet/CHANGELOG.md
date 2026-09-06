@@ -1,5 +1,17 @@
 # fleet — changelog
 
+## fleet/v0.5.3 — 2026-09-06T17:17:06Z
+Cut from f535cfb on `live` (upstream base snapshot/2026-08-17-221146). 4 commit(s) since fleet/v0.5.2.
+
+Every release ships the whole repository — all skills, `commands/`, `hooks/` and the plugin manifest, not only `fleet/`.
+Payload: fleet (13 files), skills (1 file), scripts (2 files), docs (1 file).
+Skills changed: using-fleet.
+
+- ccbde10 register: SI-57 and SI-58, both found while provisioning the second root
+- 09df8a3 SI-57: a cd between roots no longer keeps the first root's store and socket
+- 787fcbe fleet root-init: make a directory a fleet root, under $HOME and nowhere else
+- f535cfb SI-59: a record names its tmux server, and no verb acts across servers
+
 ## fleet/v0.5.2 — 2026-09-06T06:03:15Z
 Cut from 0073be5 on `live` (upstream base snapshot/2026-08-17-221146). 1 commit(s) since fleet/v0.5.1.
 
