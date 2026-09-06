@@ -30,13 +30,34 @@ export FLEET_INSTANTS=/path/to/instants   # where instant folders live
 export FLEET_TMUX_SOCKET=itfleet-mine     # optional: a PRIVATE tmux server
 ```
 
-A **mutating** verb with neither `--home` nor `FLEET_HOME` refuses rather than inventing a destination, and
-says which flag to pass. Read-only verbs keep a default, because "nothing is enrolled" is a real answer to a
-real question.
+A verb with neither `--home` nor `FLEET_HOME` resolves its store from the **`.fleet-root` marker** at or
+above the working directory — the way `git` finds `.git` — and **refuses** when it finds none, naming the
+directory it searched and what would clear it.
 <!-- v2-cite: mutating-verb-names-its-store A1 -->
 
 That refusal exists for a measured reason: before it, four mutating verbs wrote a real store under
 `$HOME/.fleet` and exited 0 without mentioning it, and two of them renamed instants there.
+
+⚠️ **Read-only verbs used to keep that `$HOME/.fleet` default**, on the ground that *"nothing is enrolled"*
+is a real answer to a real question. **They no longer do.** Once a box runs more than one fleet, a
+permissive read is not answering about no fleet — it is answering about a **different root's** fleet,
+confidently and with a population row. So a read refuses too. The visible cost: `fleet board` in an
+unmarked directory prints a refusal rather than an empty board.
+
+Each root is one directory under `$HOME` carrying `.fleet-root`, whose declared name gives that root its
+tmux server:
+
+```
+~/davis_root/.fleet-root      {"name": "davis"}     -> store ~/davis_root/.fleet,  socket fleet-davis
+~/davis2_root/.fleet-root     {"name": "davis2"}    -> store ~/davis2_root/.fleet, socket fleet-davis2
+```
+
+Two roots share no record, no slot, no server and no release area. Enrolling a workspace that belongs to
+another root is refused, and so is a dispatch whose instants directory points out of its own root.
+
+**Where instants are created is still named, never derived.** `--instants-dir` or `FLEET_INSTANTS`, or the
+verb refuses: `$FLEET_HOME/instants` used to be a default and it planted a dispatched child outside its
+effort tree at rc=0 with every guard green, invisible until an endgame compaction could not find it.
 
 `FLEET_TMUX_SOCKET` selects the tmux **server**. Set it before anything that could start a session:
 `fleet dispatch` launches a real `claude` in a session named `dt-<name>`, and on the default server that is
