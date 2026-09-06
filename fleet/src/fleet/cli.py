@@ -658,8 +658,19 @@ def default_context(parsed: Parsed, out, err) -> Ctx:
     print(f"root {shown} ({home_source})", file=err)
 
     sessions = SessionLayer(default_probes(tmux_socket=resolve_socket(parsed, environ, cwd)))
-    pool = Pool(home, cwd_probe=_cwd_holders, alive=sessions.alive,
-                fleet_root=resolved_root.path if resolved_root is not None else None)
+
+    #: `G3` binds the pool to a root ONLY when this store IS that root's store. The same rule as the
+    #: dispatch containment check, for the same reason and found by the same failure: a caller who named
+    #: some other store (`--home /tmp/sandbox`, an IT section's `FLEET_HOME`, a skill's own suite) has
+    #: named a destination out loud, and constraining THEIR pool by a root they never mentioned is a
+    #: value the caller did not type out-ranking one they did (`I2-11` in reverse).
+    #:
+    #: Measured: without this, `enroll --slot /tmp/.../slotA` was refused on any marked box, so
+    #: `wave-sequence.sh`'s dispatch then failed with `pool-capacity: none is enrolled` — a refusal three
+    #: steps downstream of its cause, which is the expensive kind.
+    owning_root = (resolved_root.path if resolved_root is not None
+                   and Path(home).resolve() == resolved_root.store.resolve() else None)
+    pool = Pool(home, cwd_probe=_cwd_holders, alive=sessions.alive, fleet_root=owning_root)
     return Ctx(home=home, instants_dir=instants, store=Store(home), pool=pool, sessions=sessions,
                harvest=Harvest(home), out=out, err=err, dry_run=parsed.on("dry-run"),
                porcelain=parsed.on("porcelain"), git=default_git(), runner=_default_runner())
@@ -1080,10 +1091,21 @@ def _do_dispatch(ctx: Ctx, parsed: Parsed) -> int:
     #: `G1`. The instants directory must be inside this root, or one root's worker lands in another
     #: root's tree — invisible afterwards, because every verb resolves the child through its record.
     #:
+    #: Applied ONLY when the store in use IS this root's own store. A caller who named some other store
+    #: — `--home /tmp/sandbox`, or an IT section's `FLEET_HOME` — has named a destination out loud, and
+    #: measuring their instants directory against a root they never mentioned is `I2-11` in reverse: a
+    #: value the caller did not type out-ranking one they did. Found by `wave-sequence.sh`, which exports
+    #: a sandbox store and ran from inside a marked root; without this the guard refused every explicit
+    #: sandbox on a marked box, which is most of the suite.
+    #:
+    #: Note this is STRICTER than "skip the check when --home was named": a caller who says
+    #: `--home <root>/.fleet --instants-dir <other-root>/instants` still names this root's store, so the
+    #: comparison still runs and still refuses.
+    #:
     #: The SLOT needs no check here: `G3` refuses to ENROL a workspace outside the root, which is
     #: strictly earlier and cheaper than refusing a lease, so a leased slot cannot be foreign.
     _dispatch_root = active_root(parsed)
-    if _dispatch_root is not None:
+    if _dispatch_root is not None and Path(ctx.home).resolve() == _dispatch_root.store.resolve():
         assert_within_root(ctx.instants_dir, _dispatch_root.path, "instants directory")
     profile = Profile.load(Path(parsed.get("profile")))
     optype = parsed.get("optype", "append")
