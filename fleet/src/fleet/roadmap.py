@@ -120,6 +120,15 @@ class Milestone:
     #: has no such key and `milestones()` builds each entry with `Milestone(**d)` — a field without a
     #: default turns every existing roadmap into a TypeError. Empty for anything never retired.
     retired_reason: str = ""
+    #: `SI-51`. Why the CURRENT lack of an owner happened, when it happened by release rather than by
+    #: never having been claimed. Same defaulting argument as `retired_reason` and the same reason for
+    #: existing: an owner that silently became `None` is indistinguishable, a week later, from one that
+    #: was never claimed — and the nine hand-edits this field exists to replace were each performed
+    #: because nothing on the roadmap could say what had happened to the claim.
+    #:
+    #: Cleared by `claim`, deliberately: a milestone carrying a sentence about why its CURRENT owner does
+    #: not own it is worse than one carrying nothing.
+    disowned_reason: str = ""
 
 
 @dataclass(frozen=True)
@@ -404,20 +413,45 @@ class Roadmap:
                     f"milestone {milestone_id!r} is not ready, so nothing may be dispatched onto it: "
                     f"{blocker}")
             found["owner"] = str(owner)
+            #: `SI-51`. The release reason belongs to the release, not to the milestone. Left in place it
+            #: would sit beside a live owner explaining why that owner does not own it.
+            found["disowned_reason"] = ""
             self._save(self.path, data)
             return Milestone(**found)
 
-    def disown(self, milestone_id: str) -> None:
-        """Give a claim back. Called only from `dispatch`'s rollback, so a dispatch that failed after
-        claiming does not leave a milestone owned by an instant that was never launched — `SI-21`'s lesson
-        (a rollback must not strand state it created) applied to the roadmap."""
+    def disown(self, milestone_id: str, expect_owner: str = None, reason: str = "") -> None:
+        """Give a claim back. `SI-21`'s lesson (a rollback must not strand state it created) applied to the
+        roadmap — and, since `SI-51`, the same function `abort` uses to release work that stopped.
+
+        `expect_owner` is the caller SAYING whose claim it is releasing, and it is the difference between a
+        repair and a second defect. `abort` acts on one instant and must never free a milestone a
+        *different* instant is running; `dispatch`'s rollback made the claim itself moments earlier and has
+        no second party to protect against, so it passes nothing and the check does not apply.
+
+        Idempotent when the milestone has no owner: `abort` calls this after the folder has already been
+        renamed, so a second pass — or an abort of an instant that claimed nothing — must be a no-op and
+        not a failure that reports the abort as broken. Nothing is recorded in that case either: writing a
+        release reason onto a milestone nobody claimed invents an event.
+        """
         with held_for_update(self.path):
             data = self._load()
             for entry in data["milestones"]:
-                if entry["id"] == milestone_id:
-                    entry["owner"] = None
-                    self._save(self.path, data)
+                if entry["id"] != milestone_id:
+                    continue
+                held = entry.get("owner")
+                if not held:
                     return
+                if expect_owner is not None and str(held) != str(expect_owner):
+                    raise BadInput(
+                        f"milestone {milestone_id!r} is claimed by {held!r}, not by {str(expect_owner)!r}, "
+                        f"so this release would free work somebody else is running. Refused. If {held!r} "
+                        f"is gone, release it with `fleet milestone --instant <coordinator> --id "
+                        f"{milestone_id} --disown --reason <why>`, which checks whether that owner still "
+                        f"has an open record before it clears anything.")
+                entry["owner"] = None
+                entry["disowned_reason"] = str(reason or "")
+                self._save(self.path, data)
+                return
             raise BadInput(f"no milestone {milestone_id!r} in {self.path}")
 
     def blocker_of(self, milestone_id: str) -> str:

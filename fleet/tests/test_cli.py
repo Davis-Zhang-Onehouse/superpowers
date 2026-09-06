@@ -2460,6 +2460,198 @@ class PositionedGit:
         return 0, ""
 
 
+class TestAbortReleasesTheClaim(CliCase):
+    """`SI-51`. `abort` did everything a completion transaction does except the one thing the roadmap
+    needed: it never gave the milestone back.
+
+    `Roadmap.disown` existed, was correct and had exactly one caller — `dispatch`'s rollback — so a
+    milestone claimed by a dispatch that was later aborted stayed owned by an `-abort-` folder forever.
+    Every documented escape was measured and none worked: `--override` overrides admission rules and not
+    ownership, `harvest` refuses an aborted instant, and `abort` refuses to run twice. `claim`'s own
+    refusal sent the reader to the remedy that did not work — *"the work is released by aborting it with a
+    reason"* — and the live coordinator ended up editing `roadmap.json` by hand nine times, which is the
+    single act the two-party protocol exists to prevent.
+    """
+
+    def _dispatched_onto(self, fleet, milestone="M9", title="claimant"):
+        """Dispatch a real worker onto a real milestone, and hand back (coordinator, child path)."""
+        coordinator = fleet.paths["readyWorker"]
+        Roadmap(coordinator).add(Milestone(id=milestone, title="carried work", status="blocked",
+                                           deps=[], evidence=[]))
+        code, out, err = fleet.run(["dispatch", "--porcelain", "--profile", str(fleet.profile("worker")),
+                                    "--title", title, "--base", "00000000", "--optype", "append",
+                                    "--from", str(coordinator), "--milestone", milestone])
+        self.assertEqual(0, code, err)
+        child = [line.split("\t")[1] for line in out.splitlines() if line.startswith("instant\t")][0]
+        self.assertEqual(child, Roadmap(coordinator).milestone(milestone).owner,
+                         "the fixture did not claim the milestone: every assertion below is vacuous")
+        return coordinator, pathlib.Path(child)
+
+    def test_aborting_a_claimed_milestone_gives_the_claim_back(self):
+        fleet = self.loaded()
+        coordinator, child = self._dispatched_onto(fleet)
+
+        code, out, err = fleet.run(["abort", "--porcelain", "--instant", str(child),
+                                    "--reason", "the baseline moved under it"])
+
+        self.assertEqual(EXIT_OK, code, err)
+        back = Roadmap(coordinator).milestone("M9")
+        self.assertIsNone(back.owner,
+                          "the aborted instant still owns the milestone: it is now claimed by an "
+                          "`-abort-` folder and no verb can release it")
+        self.assertIn("the baseline moved under it", back.disowned_reason,
+                      f"the release recorded no reason, so the roadmap cannot say what happened: {back}")
+        printed = dict(line.split("\t", 1) for line in out.splitlines())
+        self.assertEqual("M9", printed.get("milestone"),
+                         f"abort does not report the milestone it acted on: {out!r}")
+        self.assertTrue((printed.get("milestone_released") or "").startswith("yes"),
+                        f"abort does not report that it released the claim: {out!r}")
+
+    def test_abort_leaves_a_milestone_claimed_by_a_DIFFERENT_instant_alone(self):
+        """The hazard of putting a roadmap write on `abort`. The origin says M9; the roadmap says M9 is
+        being run by somebody else. The abort must still complete — refusing would strand the instant it
+        was asked to abandon — and it must not free work a live sibling is doing."""
+        fleet = self.loaded()
+        coordinator, child = self._dispatched_onto(fleet)
+        sibling = str(fleet.paths["solo"])
+        roadmap = Roadmap(coordinator)
+        roadmap.disown("M9")
+        roadmap.claim("M9", sibling)
+
+        code, out, err = fleet.run(["abort", "--porcelain", "--instant", str(child),
+                                    "--reason", "wrong worker"])
+
+        self.assertEqual(EXIT_OK, code, f"the abort itself was refused, stranding the instant: {err}")
+        self.assertFalse(child.exists(), "the instant was not aborted")
+        self.assertEqual(sibling, Roadmap(coordinator).milestone("M9").owner,
+                         "abort freed a milestone a different instant is running")
+        printed = dict(line.split("\t", 1) for line in out.splitlines())
+        released = printed.get("milestone_released", "")
+        self.assertTrue(released.startswith("no"),
+                        f"abort reported a release it did not perform: {out!r}")
+        self.assertIn(sibling, released,
+                      f"abort does not say WHOSE claim it left alone, so the reader cannot tell which of "
+                      f"the two is stale: {out!r}")
+
+    def test_aborting_an_instant_with_no_coordinator_is_unchanged(self):
+        """`fleet init` produces instants with no origin at all, and they must abort exactly as before."""
+        fleet = self.loaded()
+        instant = fleet.paths["doomed"]
+        self.assertIsNone(origin_mod.read(instant), "this fixture is supposed to have no coordinator")
+
+        code, out, err = fleet.run(["abort", "--porcelain", "--instant", str(instant),
+                                    "--reason", "unfoldable"])
+
+        self.assertEqual(EXIT_OK, code, err)
+        printed = dict(line.split("\t", 1) for line in out.splitlines())
+        self.assertEqual("(none)", printed.get("milestone"),
+                         f"abort invented a milestone for an instant that has no coordinator: {out!r}")
+
+    def test_a_roadmap_write_that_fails_is_REPORTED_and_the_abort_still_completes(self):
+        """`dispatch`'s rollback already answers this shape: never mask the outcome that already happened,
+        and name what has to be cleared by hand. The rename is irreversible and has already run."""
+        fleet = self.loaded()
+        coordinator, child = self._dispatched_onto(fleet)
+        (coordinator / ".fleet" / "roadmap.json").write_text("{ not json")
+
+        code, out, err = fleet.run(["abort", "--porcelain", "--instant", str(child),
+                                    "--reason", "the roadmap is broken too"])
+
+        self.assertEqual(EXIT_OK, code,
+                         f"a failed roadmap write turned the abort itself into a failure: {err}")
+        self.assertFalse(child.exists(), "the instant was not aborted")
+        self.assertIn("M9", err, f"the milestone that stayed claimed is not named: {err!r}")
+        self.assertRegex(err, r"(?i)warn", f"the failure was swallowed rather than reported: {err!r}")
+
+
+class TestReleasingAStrandedClaim(CliCase):
+    """`SI-51`, the other half. Fixing `abort` reaches none of the milestones stranded BEFORE the fix —
+    `abort` refuses to run twice, so those instants are already `-abort-` and there is no second pass.
+
+    `--disown` is the repair, and it is on the coordinator's own verb beside `--retire` for the same
+    reason: same actor, same file, same authority, and one more verb is one more row in three IT fixture
+    matrices (`II-4`).
+    """
+
+    def _stranded(self, fleet, owner, milestone="M9"):
+        coordinator = fleet.paths["readyWorker"]
+        roadmap = Roadmap(coordinator)
+        roadmap.add(Milestone(id=milestone, title="carried work", status="blocked", deps=[], evidence=[]))
+        roadmap.claim(milestone, str(owner))
+        return coordinator
+
+    def test_a_claim_whose_owner_is_gone_can_be_released(self):
+        fleet = self.loaded()
+        gone = fleet.instants / "00000000-07300099-abort-append-longGone"
+        coordinator = self._stranded(fleet, gone)
+
+        code, out, err = fleet.run(["milestone", "--porcelain", "--instant", str(coordinator),
+                                    "--id", "M9", "--disown",
+                                    "--reason", "aborted before abort released claims"])
+
+        self.assertEqual(EXIT_OK, code, err)
+        back = Roadmap(coordinator).milestone("M9")
+        self.assertIsNone(back.owner, "the stranded claim was not released")
+        self.assertIn("aborted before abort", back.disowned_reason)
+
+    def test_releasing_a_claim_held_by_a_worker_that_is_still_OPEN_is_refused(self):
+        """The safety. `claim` refuses two instants on one milestone; a `--disown` that ignored a live
+        owner would put the second one there by another door."""
+        fleet = self.loaded()
+        live = fleet.paths["solo"]
+        coordinator = self._stranded(fleet, live)
+
+        code, out, err = fleet.run(["milestone", "--instant", str(coordinator), "--id", "M9",
+                                    "--disown", "--reason", "I want the slot"])
+
+        self.assertEqual(EXIT_REFUSED, code, f"a live worker's milestone was released: {out}")
+        self.assertIn(str(live), err, f"the refusal does not name the owner it protected: {err!r}")
+        self.assertEqual(str(live), Roadmap(coordinator).milestone("M9").owner)
+
+    def test_disown_needs_a_reason(self):
+        fleet = self.loaded()
+        gone = fleet.instants / "00000000-07300098-abort-append-alsoGone"
+        coordinator = self._stranded(fleet, gone)
+
+        code, out, err = fleet.run(["milestone", "--instant", str(coordinator), "--id", "M9", "--disown"])
+
+        self.assertEqual(EXIT_BAD_INPUT, code, f"a reasonless release was accepted: {out}")
+        #: `parse` refuses an undeclared flag with the same exit code and appends a usage dump, so the
+        #: code alone would pass this test before `--disown` existed at all. The refusal has to be ABOUT
+        #: the reason.
+        self.assertNotIn("is not a flag", err,
+                         f"this passed because --disown is undeclared, not because a reason is required: "
+                         f"{err!r}")
+        self.assertRegex(err, r"(?i)reason", f"the refusal does not name the missing reason: {err!r}")
+        self.assertEqual(str(gone), Roadmap(coordinator).milestone("M9").owner)
+
+    def test_disowning_a_milestone_nobody_claimed_says_so_rather_than_reporting_a_release(self):
+        fleet = self.loaded()
+        coordinator = fleet.paths["readyWorker"]
+        Roadmap(coordinator).add(Milestone(id="M9", title="unclaimed", status="blocked", deps=[],
+                                           evidence=[]))
+
+        code, out, err = fleet.run(["milestone", "--instant", str(coordinator), "--id", "M9",
+                                    "--disown", "--reason", "tidying"])
+
+        self.assertEqual(EXIT_BAD_INPUT, code,
+                         f"releasing a claim that does not exist reported success: {out}")
+        self.assertRegex(err + out, r"(?i)(no owner|not claimed|nobody)",
+                         f"the answer does not say the milestone was already unowned: {err!r}")
+
+    def test_disown_does_not_write_under_dry_run(self):
+        fleet = self.loaded()
+        gone = fleet.instants / "00000000-07300097-abort-append-dryGone"
+        coordinator = self._stranded(fleet, gone)
+
+        code, out, err = fleet.run(["milestone", "--dry-run", "--instant", str(coordinator), "--id", "M9",
+                                    "--disown", "--reason", "rehearsal"])
+
+        self.assertEqual(EXIT_OK, code, err)
+        self.assertEqual(str(gone), Roadmap(coordinator).milestone("M9").owner,
+                         "--dry-run released the claim")
+
+
 class TestTheLineageGate(CliCase):
     """`SI-32`, mechanism B: a claim of DONE from the wrong base is refused.
 

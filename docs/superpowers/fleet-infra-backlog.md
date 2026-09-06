@@ -410,7 +410,8 @@ F3 and F5 actually check.
 
 ## SI-51 — `abort` does not disown the milestone, and the refusal names a remedy that does not work
 
-**Status:** OPEN. **Blocks:** `dispatching-a-wave`, `maintaining-a-roadmap`. **Field ids:** `FI-383`, `FI-393`.
+**Status:** **FIXED in `0.5.0`** — `abort` releases the claim it can prove is its own, and
+`fleet milestone --disown` releases one stranded before that existed. **Field ids:** `FI-383`, `FI-393`.
 
 **Measured 2026-09-06** at `0.4.0`. `Roadmap.disown` (`roadmap.py:410`) has exactly **one** caller in the
 package — `cli.py:1337`, inside `dispatch`'s rollback. `_do_abort` (`cli.py:2114`) writes the reason, kills
