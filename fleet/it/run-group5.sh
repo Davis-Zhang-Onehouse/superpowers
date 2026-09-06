@@ -917,9 +917,15 @@ pkg = INSTANT / "src" / "fleet"
 #: The hermetic registry is now the AUTHORITY for "is this site argued for", because that is where the
 #: prose lives. Imported, never restated. If it cannot be imported the audit FAILS — a cross-check that
 #: silently skips when its input is missing is the shape of control this whole instant exists to remove.
-sys.path.insert(0, str(INSTANT / "tests"))
+#: Imported as a PACKAGE member (`tests.test_cli`), with the instant root on the path — not as a loose
+#: module with `tests/` on the path. `0.5.1` gave the suite a `tests/__init__.py` (the hermetic-environment
+#: fixture) and `test_cli.py` began with `from tests import hermetic_environment`; under the old spelling
+#: that import had no package to resolve against and this audit died of `ModuleNotFoundError`. A
+#: cross-check that reaches into another component's tree has to import it the way that component is
+#: actually assembled, or it breaks on changes that are correct.
+sys.path.insert(0, str(INSTANT))
 try:
-    from test_cli import OUTWARD_CALL_SITES, SPAWN_SEAMS
+    from tests.test_cli import OUTWARD_CALL_SITES, SPAWN_SEAMS
 except Exception as exc:                                    # noqa: BLE001 - reported, never swallowed
     raise AssertionError(
         f"M9 could not import the hermetic registry from {INSTANT}/tests/test_cli.py: {exc!r}. "
