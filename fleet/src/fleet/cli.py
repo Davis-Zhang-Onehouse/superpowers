@@ -774,18 +774,31 @@ def _resolve_instant(ctx: Ctx, raw) -> Path:
     return found
 
 
-def _record(ctx: Ctx, parsed: Parsed) -> Record:
-    record = ctx.store.read(ctx.store.resolve_id(parsed.get("id")))
-    #: `G1`'s secondary half. Containment at dispatch cannot see a store COPIED or restored between
-    #: roots, which is the only way to reach this state — so it is cheap insurance rather than a live
-    #: defence, and it is written as such. An unnamed root is NOT MEASURED (`root_mismatch`).
-    resolved = active_root(parsed)
+def _refuse_foreign_root(record: Record, parsed: Parsed = None) -> Record:
+    """`G1`'s secondary half, applied wherever a verb ACTS on one named record.
+
+    Deliberately NOT applied on the read path (`store.all()`, which `board`, `status` and `reconcile`
+    enumerate through). A single stray record would make the board refuse outright, and a gate that is
+    permanently red is one that gets read past — taking the genuine alarm beside it down too (`FI-402`).
+    A record naming another root is surfaced there as a row, and refused only when something is about to
+    act on it.
+
+    The state is reachable only by COPYING a store between roots: containment at dispatch and `G3` at
+    enrolment prevent it being created. So this is cheap insurance, and saying so is the point — a guard
+    described as a live defence when it is not is how a reader stops checking the ones that are.
+    """
+    resolved = active_root(parsed if parsed is not None else Parsed(verb=""))
     if resolved is not None and root_mismatch(record, str(resolved.path)):
         raise BadInput(
             f"record {record.todo_id!r} was written under root {record.root} and this call resolved "
             f"{resolved.path}. Refusing: a store reached from the wrong root reports another fleet's "
             f"work as this one's. Clears when: run from {record.root}, or pass `--root {record.root}`.")
     return record
+
+
+def _record(ctx: Ctx, parsed: Parsed) -> Record:
+    record = ctx.store.read(ctx.store.resolve_id(parsed.get("id")))
+    return _refuse_foreign_root(record, parsed)
 
 
 def _child_of(ctx: Ctx, record: Record) -> Path:
@@ -814,10 +827,15 @@ def _record_for(ctx: Ctx, child: Path) -> Record:
         if not record.child_instant:
             continue
         try:
-            if InstantName.parse(Path(record.child_instant).name).stable_key() == want:
-                return record
+            matches = InstantName.parse(Path(record.child_instant).name).stable_key() == want
         except FleetError:
             continue
+        #: OUTSIDE the try, and that placement is the whole point: `_refuse_foreign_root` raises
+        #: `BadInput`, which IS a `FleetError`, so raising it one line up would be caught by the
+        #: `continue` that exists to skip an unparseable record — and the guard would silently do
+        #: nothing while reading as installed. Found by asking what the except clause catches.
+        if matches:
+            return _refuse_foreign_root(record)
     return None
 
 
