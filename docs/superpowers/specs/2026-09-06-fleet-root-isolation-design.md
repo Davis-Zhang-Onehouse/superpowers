@@ -129,6 +129,21 @@ deleted is narrower: when `home` was resolved at tier 4 or 5 and no instants dir
 tier, `fleet` **refuses** instead of deriving `$FLEET_HOME/instants`. That is `SI-56` closed, and it is
 closed by removing a fallback rather than by re-pointing it.
 
+> **Corrected during implementation, 2026-09-06.** Two things this section originally got wrong, both
+> found by tests rather than by review.
+>
+> **`SI-56` is not fixed by isolation, and this document implied it was.** Under isolation the stray
+> child lands at `$ROOT/.fleet/instants` — the *right* root and still the *wrong* tree. `FI-382`'s harm
+> was always intra-root: the endgame compaction enumerates the effort's instants directory and the worker
+> is not in it. Only refusing to invent a destination closes it, which is what shipped.
+>
+> **The refusal cannot live in the resolver.** Written there it refused `board`, because `reconcile` and
+> `guards.blocking_compactions` read the instants directory on the READ path too. It sits instead at the
+> two handlers that call `layout.bootstrap`, with an AST check asserting every bootstrapping handler
+> reaches it — the `DELETE_ALLOWLIST` pattern, because `fleet/CLAUDE.md`'s add-a-verb checklist exists
+> precisely because hand-maintained parallel lists drift. A read that enumerates a derived directory
+> harms nobody; a CREATE into one nobody named is the defect.
+
 ### Tier 6 applies to reads
 
 This revises `SI-15`, which established that a *mutating* verb with no store named refuses while a read-only
@@ -288,8 +303,9 @@ R7 is the case that matters most for confidence and the one most likely to be sk
 - **`SI-51` … `SI-56`** — the six live fleet defects measured while mining the coordinator's register
   (`abort` not disowning a milestone; `seed-check` calling a healthy worker foreign; no `--seed-extra`;
   `pane-guard` keyed on `--pane`; no positive channel for a send-keys delivery; and `SI-56` itself). Only
-  `SI-56` is touched here, and only because deleting the instants fallback closes it for free. The rest stay
-  queued.
+  `SI-56` is touched here — and not "for free", as an earlier draft of this document claimed: it needed its
+  own guard at the two instant-creating handlers, because isolation moves the stray into the right root
+  without putting it in the right tree. The rest stay queued.
 - **The script-offload shortlist** — `fleet lint --carry-across` and the rest. Separate work, after this
   lands.
 - **A box-wide concurrency ceiling.** Pools are fully per-root with no shared cap, chosen deliberately. The
