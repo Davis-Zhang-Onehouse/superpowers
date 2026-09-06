@@ -27,7 +27,11 @@
 # Idempotent: arm and disarm each converge to the same end state no matter how often run.
 set -u
 
-DAVIS="/home/ubuntu/davis_root"
+# The root this watchdog belongs to. DERIVED from the script's own location — `scripts/` sits in
+# `<root>/superpowers/` — rather than named as a constant. It was `/home/ubuntu/davis_root` literally,
+# and that is `FI-421`'s class exactly: a path that was true when written, dead the day the process
+# moved, and silent in between. A second root running this file would have driven the first root's tool.
+DAVIS="${CLAUDE_WATCHDOG_DAVIS:-$(cd "$(dirname "$(readlink -f "$0")")/../.." && pwd)}"
 ROOT="${CLAUDE_WATCHDOG_ROOT:-$DAVIS}"
 NODE_BIN="$DAVIS/opt/node/bin"
 CAR="$DAVIS/opt/car/node_modules/.bin/claude-auto-retry"
@@ -80,7 +84,13 @@ DISPATCH_SESSIONS="${CLAUDE_WATCHDOG_SESSIONS_TOOL:-$DAVIS/superpowers/scripts/f
 # leaving this unset would work — and would mean the watchdog's exclusion silently followed whatever
 # `FLEET_HOME` happened to be exported into the shell that armed the daemon, which is a different store per
 # operator and per effort. A daemon that reconciles every 300s for weeks must not depend on that.
-FLEET_HOME="${FLEET_HOME:-$HOME/.fleet}"; export FLEET_HOME
+# ⚠️ `$DAVIS/.fleet`, not `$HOME/.fleet`. Per-root isolation moved the store INTO the root, and `fleet`
+# no longer has a `$HOME/.fleet` fallback at all — it refuses instead (tier 6). Left as it was, this
+# daemon would have kept naming a path that, once the migration symlink is dropped, resolves to nothing:
+# `finished_dispatch_pids` would then return empty, the exclusion would read "exclude nothing", and
+# auto-resume would silently start typing into finished workers' panes again. The failure is quiet, which
+# is why the store is STATED here rather than inherited.
+FLEET_HOME="${FLEET_HOME:-$DAVIS/.fleet}"; export FLEET_HOME
 
 # `finished_dispatch_pids` treats EVERY failure as "exclude nothing". That is the right default — excluding a
 # pid in error costs an auto-resume that should have happened, and there is no error channel back to a caller
@@ -207,7 +217,20 @@ cmd_daemon() {  # internal: the loop. Single-instance guarded.
 # `fleet dispatch` uses, and an opt-in list is a list somebody forgets on the day it matters.
 #
 # Needs the local socket patch in the vendored package; see superpowers/patches/claude-auto-retry.
-CLAUDE_WATCHDOG_TMUX_SOCKETS="${CLAUDE_WATCHDOG_TMUX_SOCKETS-fleet}"
+# ⚠️ DERIVED from this root's marker, not the literal `fleet`. Under per-root isolation each root's
+# sessions live on `fleet-<name>`, so a hardcoded `fleet` here becomes a list of ONE WRONG NAME — and the
+# comment three lines up says why that is the worst possible outcome: this default exists precisely
+# because "an opt-in list is a list somebody forgets on the day it matters". A list that silently names a
+# server nobody uses is that failure with the reassurance still attached. Falls back to `fleet` when the
+# root has no marker, which is the pre-migration shape.
+_wd_name="$(python3 -c 'import json,sys
+try:
+    print((json.load(open(sys.argv[1])).get("name") or "").strip())
+except Exception:
+    pass' "$DAVIS/.fleet-root" 2>/dev/null)"
+CLAUDE_WATCHDOG_TMUX_SOCKETS="${CLAUDE_WATCHDOG_TMUX_SOCKETS-${_wd_name:+fleet-$_wd_name}}"
+CLAUDE_WATCHDOG_TMUX_SOCKETS="${CLAUDE_WATCHDOG_TMUX_SOCKETS:-fleet}"
+unset _wd_name
 
 # Run one reconcile per server. The monitor `reconcile` spawns inherits its environment, so the socket
 # reaches the monitor without touching its argv — which matters, because `monitor.js <pane> <pid>` is
