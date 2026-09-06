@@ -52,6 +52,45 @@ except Exception:
     pass' "$_fleet_root/.fleet-root" 2>/dev/null)"
 
   if [ -n "$_fleet_name" ]; then
+    # --- SI-57: drop values THIS FILE exported for a DIFFERENT root ---------------------------------
+    #
+    # Every setting below is a default (`${VAR:-...}`) and that stays deliberate: 1291 explicit call sites
+    # depend on an exported value out-ranking a derived one. But the shared shell rc sources this file from
+    # a `chpwd` hook, so a `cd` from one root to another re-enters here with the PREVIOUS root's values
+    # already exported — by this file, for the other root — and `:-` cannot tell those from a choice
+    # somebody made. The shell then stands in one root while addressing the other's store, on the other's
+    # tmux server, which is exactly what this file's header promises cannot happen.
+    #
+    # The companion variables carry the distinction nothing in the environment otherwise records: they hold
+    # what the LAST sourcing set. A current value equal to one of them is ours and gets re-derived below;
+    # any other value is somebody's decision and is left alone. Re-deriving unconditionally would be the
+    # cheap fix and would break every one of those call sites.
+    [ -n "${FLEET_HOME:-}" ] && [ "$FLEET_HOME" = "${_FLEET_ENV_HOME:-}" ] && unset FLEET_HOME
+    [ -n "${FLEET_TMUX_SOCKET:-}" ] && [ "$FLEET_TMUX_SOCKET" = "${_FLEET_ENV_SOCKET:-}" ] && unset FLEET_TMUX_SOCKET
+    [ -n "${FLEET_RELEASES:-}" ] && [ "$FLEET_RELEASES" = "${_FLEET_ENV_RELEASES:-}" ] && unset FLEET_RELEASES
+
+    # `$HOME/.fleet` is stale BY CONSTRUCTION rather than by comparison, so it needs no companion: the walk
+    # above stops BELOW $HOME, so no root can ever have it as a store. It is the pre-isolation box-wide
+    # path, still exported by every shell started before the marker migration, and while it resolves —
+    # through the compatibility symlink `scripts/fleet-migrate-root.sh` leaves — such a shell reaches one
+    # root's store from inside the other. Dropping it here is what lets those shells heal on their next
+    # `cd` instead of on a restart nobody schedules.
+    [ "${FLEET_HOME:-}" = "$HOME/.fleet" ] && unset FLEET_HOME
+
+    # The socket has the same by-construction case, and it is the one that costs more: a root's server is
+    # always `fleet-<name>`, so the bare `fleet` of the pre-isolation box is a name no root can own. A
+    # stale shell that healed its store but kept that socket would `close`, `abort` and `harvest` BY NAME
+    # on a server shared with the other root, and the loser dies with no diagnostic. A socket somebody
+    # chose on purpose — the IT harness names `itfleet-*` on every section — is not touched.
+    [ "${FLEET_TMUX_SOCKET:-}" = "fleet" ] && unset FLEET_TMUX_SOCKET
+
+    # What survived the two checks above is somebody ELSE's choice, and the companion must not claim it —
+    # remembering a value this file only passed through would make the NEXT sourcing re-derive over it,
+    # which is the very thing the operator's export is supposed to prevent.
+    _fleet_had_home="${FLEET_HOME:-}"
+    _fleet_had_socket="${FLEET_TMUX_SOCKET:-}"
+    _fleet_had_releases="${FLEET_RELEASES:-}"
+
     # The record + pool store for THIS root.
     export FLEET_HOME="${FLEET_HOME:-$_fleet_root/.fleet}"
 
@@ -81,6 +120,14 @@ except Exception:
       esac
     fi
     unset _fleet_bin
+
+    # What THIS sourcing derived, so the next one can tell its own values from somebody else's. Exported
+    # because a `cd` in a subshell or a child shell re-sources this file and faces the same question. A
+    # value that was already set is cleared instead of recorded — see `_fleet_had_*` above.
+    if [ -z "$_fleet_had_home" ];     then export _FLEET_ENV_HOME="$FLEET_HOME";            else unset _FLEET_ENV_HOME; fi
+    if [ -z "$_fleet_had_socket" ];   then export _FLEET_ENV_SOCKET="$FLEET_TMUX_SOCKET";   else unset _FLEET_ENV_SOCKET; fi
+    if [ -z "$_fleet_had_releases" ]; then export _FLEET_ENV_RELEASES="$FLEET_RELEASES";    else unset _FLEET_ENV_RELEASES; fi
+    unset _fleet_had_home _fleet_had_socket _fleet_had_releases
   else
     echo "fleet-env.sh: $_fleet_root/.fleet-root declares no name; nothing was set." >&2
   fi
