@@ -72,6 +72,12 @@ RUNNERS=(
   "K:bash $IT_ROOT/run-group3.sh K"
   "group5:bash $IT_ROOT/run-group5.sh L M N"
   "E:bash $IT_ROOT/run-group3.sh E"
+  #: In the DEFAULT roster for the same reason `i7` is, and it was in `FULL_EXTRA` for one run before
+  #: this comment existed. §R is the section that proves per-root isolation HOLDS — two stores, two tmux
+  #: servers, and the four refusals that keep one root out of another's tree. It costs about fifteen
+  #: seconds. Left under `--full` it would be, in this file's own words, "a control that is mostly not
+  #: running" — and the thing it guards is the one a second root silently violates.
+  "R:bash $IT_ROOT/run-R.sh"
 )
 
 # The sections added after this orchestrator was written. No prerequisites — checked per runner: each
@@ -84,7 +90,6 @@ FULL_EXTRA=(
   "J:bash $IT_ROOT/run-J.sh"
   "O:bash $IT_ROOT/run-O.sh"
   "LB:bash $IT_ROOT/run-lineage.sh"
-  "R:bash $IT_ROOT/run-R.sh"
 )
 
 IT_FULL=no
