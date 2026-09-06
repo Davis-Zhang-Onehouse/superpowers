@@ -329,3 +329,47 @@ class TestContainment(ResolutionCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class TestReleasesTier(ResolutionCase):
+    """The release area. Its old read-only default was `~/.fleet-releases`, a path that does not exist on
+    this box — the real one is `<root>/fleet-releases`. So root derivation replaces a PHANTOM default with
+    a correct one, rather than merely moving a working one.
+    """
+
+    def releases_of(self, parsed, env=None, cwd=None):
+        return cli.resolve_releases(parsed, env or self.env(), cwd or self.cwd)
+
+    def test_the_flag_wins(self):
+        named = self.tmp / "rel"
+        self.assertEqual(self.releases_of(self.parsed("release-status", "--releases", str(named))).root,
+                         named)
+
+    def test_the_env_wins_over_the_marker(self):
+        """REGRESSION: `fleet-env.sh` exports FLEET_RELEASES for every davis_root shell today."""
+        named = self.tmp / "rel"
+        self.assertEqual(
+            self.releases_of(self.parsed("release-status"), self.env(FLEET_RELEASES=str(named))).root,
+            named)
+
+    def test_it_derives_from_the_marker(self):
+        self.assertEqual(self.releases_of(self.parsed("release-status")).root,
+                         self.root / "fleet-releases")
+
+    def test_no_fallback_to_the_phantom_home_default(self):
+        bare = self.tmp / "bare"
+        bare.mkdir()
+        with self.assertRaises(BadInput) as cm:
+            self.releases_of(self.parsed("release-status"), cwd=bare)
+        self.assertIn(str(bare), str(cm.exception))
+
+    def test_a_mutating_verb_with_no_root_still_says_there_is_no_default_for_a_write(self):
+        bare = self.tmp / "bare"
+        bare.mkdir()
+        self.assertFalse(cli.VERBS["release-promote"].read_only, "or this case is vacuous")
+        #: `--version` supplied because `parse` refuses a missing required flag BEFORE any resolver runs,
+        #: and appends a usage dump that names `--releases ... overrides $FLEET_RELEASES`. Third instance
+        #: of that trap in this file; each one made an assertion match the usage text rather than the code.
+        with self.assertRaises(BadInput) as cm:
+            self.releases_of(self.parsed("release-promote", "--version", "v0.0.1"), cwd=bare)
+        self.assertIn("no default for a write", str(cm.exception))

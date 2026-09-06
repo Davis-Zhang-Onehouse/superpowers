@@ -3375,20 +3375,31 @@ def _do_selftest(ctx: Ctx, parsed: Parsed) -> int:
 # every mutating verb here: driven with no flags, these verbs exit 2 and mutate nothing.
 
 
-def _releases(ctx: Ctx, parsed: Parsed) -> Releases:
-    """The release area, named or refused. Same rule as `FLEET_HOME` (`SI-15`): a mutating verb that
-    invents a destination is how shared state gets written by a command aimed somewhere else.
+def resolve_releases(parsed: Parsed, environ: dict, cwd) -> Releases:
+    """The release area: `--releases`, `$FLEET_RELEASES`, the root's own, or refused.
 
-    A READ-ONLY verb keeps the default for the same reason `default_context` does — "nothing is released"
-    is a real answer to a real question, and a read of an area that does not exist costs nothing.
+    `SI-15`'s rule for a WRITE is unchanged — a mutating verb that invents a destination is how shared
+    state gets written by a command aimed somewhere else. What changed is the READ default. It used to be
+    `~/.fleet-releases`, **a path that does not exist on this box**: the real area is
+    `<root>/fleet-releases`, named only by an export in `fleet-env.sh`. So deriving it from the marker
+    replaces a phantom default with a correct one rather than merely relocating a working one.
     """
-    named = parsed.get("releases") or os.environ.get("FLEET_RELEASES")
+    named = parsed.get("releases") or environ.get("FLEET_RELEASES")
+    if named:
+        return Releases(Path(named))
+    resolved = resolve_root(parsed, environ, cwd)
+    if resolved is not None:
+        return Releases(resolved.releases)
     spec = VERBS.get(parsed.verb)
-    if not named and spec is not None and not spec.read_only:
+    if spec is not None and not spec.read_only:
         raise BadInput(
-            f"{parsed.verb!r} writes to a release area and none was named: pass `--releases <path>` or "
-            f"export FLEET_RELEASES. There is no default for a write.")
-    return Releases(Path(named or (Path.home() / ".fleet-releases")))
+            f"{parsed.verb!r} writes to a release area and none was named: pass `--releases <path>`, "
+            f"export FLEET_RELEASES, or run from inside a fleet root. There is no default for a write.")
+    raise BadInput(root_mod.refusal(Path(cwd), Path(environ.get("HOME") or Path.home()), parsed.verb))
+
+
+def _releases(ctx: Ctx, parsed: Parsed) -> Releases:
+    return resolve_releases(parsed, dict(os.environ), Path.cwd())
 
 
 def _refuse_if_self_deployed(rel: Releases, parsed: Parsed) -> None:
