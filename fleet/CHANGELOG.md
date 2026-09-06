@@ -1,5 +1,13 @@
 # fleet — changelog
 
+## fleet/v0.5.2 — 2026-09-06T06:03:15Z
+Cut from 0073be5 on `live` (upstream base snapshot/2026-08-17-221146). 1 commit(s) since fleet/v0.5.1.
+
+Every release ships the whole repository — all skills, `commands/`, `hooks/` and the plugin manifest, not only `fleet/`.
+Payload: fleet (1 file), docs (1 file).
+
+- 0073be5 M9: import the hermetic registry as a package member, not a loose module
+
 ## fleet/v0.5.1 — 2026-09-06T05:12:04Z
 Cut from 53d7dbf on `live` (upstream base snapshot/2026-08-17-221146). 1 commit(s) since fleet/v0.5.0.
 
