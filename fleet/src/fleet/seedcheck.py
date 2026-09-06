@@ -55,6 +55,13 @@ VERIFIED = "VERIFIED"
 FOREIGN = "FOREIGN"
 NOT_DELIVERED = "NOT-DELIVERED"
 
+#: `SI-52`. WHICH process may be the source of a delivered briefing. `/proc/<pid>/comm` is the executable's
+#: name, and this is the SAME notion `session.default_probes` already uses to find workers at all
+#: (`pgrep -x claude` matches comm exactly) — deliberately not a second, looser idea of "looks like a
+#: worker". A basename-of-argv[0] match would also accept a launcher named `claude`, which is more
+#: permissive, and permissive here means the DESTRUCTIVE verdict becomes reachable again.
+WORKER_COMM = "claude"
+
 #: An instant folder as it appears inside a seed: `<...>/<base>-<stamp>-<state>-<optype>-<name>`. Used only
 #: to make a FOREIGN verdict SAY WHOSE briefing arrived, which is the difference between an alarm a reader
 #: can act on and one they have to investigate from scratch.
@@ -178,13 +185,42 @@ class Probes:
     """The seam between this module and /proc. Injected, so the suite never needs a real process."""
 
     read_cmdline: Callable[[int], Optional[bytes]]
+    #: `SI-52`. WHAT this process is, so a long argv on something that is not the worker is not read as a
+    #: briefing. REQUIRED, with no default, and that is the point: a default would have to be either
+    #: `None` — which turns every injected seam into "no worker anywhere", silently disabling the check
+    #: that this module exists to perform — or `"claude"`, which restores the defect for every caller that
+    #: forgets. Neither is a decision a default may make on a caller's behalf, so every seam answers it.
+    comm_of: Callable[[int], Optional[str]] = None
     children_of: Callable[[int], list] = field(default=lambda pid: [])
 
+    def __post_init__(self):
+        if self.comm_of is None:
+            raise TypeError(
+                "Probes needs `comm_of`: without it a long argv on a NON-worker descendant (a CI waiter "
+                "is exactly that shape) is read as a delivered briefing and reported FOREIGN, whose "
+                "remedy is to dispatch the worker again (`SI-52`).")
 
-def default_probes() -> Probes:
+
+def is_worker(pid: int, probes: Probes) -> bool:
+    """Is this process the worker itself? `SI-52`.
+
+    False for everything it cannot confirm, and the direction is the whole point: `FOREIGN` KILLS the
+    session inside `dispatch`, so a probe that could not read a process must degrade to "not delivered"
+    (unverifiable) rather than to the verdict that authorises destroying it.
+    """
+    return (probes.comm_of(pid) or "").strip() == WORKER_COMM
+
+
+def default_probes(process_name: str = WORKER_COMM) -> Probes:
     def read_cmdline(pid: int):
         try:
             return Path(f"/proc/{pid}/cmdline").read_bytes()
+        except OSError:
+            return None
+
+    def comm_of(pid: int):
+        try:
+            return Path(f"/proc/{pid}/comm").read_text().strip() or None
         except OSError:
             return None
 
@@ -200,7 +236,7 @@ def default_probes() -> Probes:
             return []
         return out
 
-    return Probes(read_cmdline=read_cmdline, children_of=children_of)
+    return Probes(read_cmdline=read_cmdline, comm_of=comm_of, children_of=children_of)
 
 
 def delivered_argv(pid: int, probes: Probes, depth: int = 2) -> tuple:
@@ -209,6 +245,18 @@ def delivered_argv(pid: int, probes: Probes, depth: int = 2) -> tuple:
     One generation down by default, because whether the launcher `exec`s or forks is the launcher's business
     and not a fact this check may depend on. A shim that `exec`s leaves the briefing on the pane pid itself;
     one that forks leaves it on a child.
+
+    **Only a WORKER process may be the source (`SI-52`).** This walk used to return the first process at
+    any depth holding any non-flag argument over `MIN_PAYLOAD_CHARS`, and nothing asked what that process
+    was. A worker in `awaiting-ci` runs a CI waiter — a shell holding a long inline script — as a child of
+    the claude process, which is exactly that shape: `carries()` was then false and the verdict was
+    `FOREIGN`, whose printed remedy is to dispatch the worker again. The check fired on the population it
+    is most often pointed at and told the reader to throw a healthy worker away.
+
+    The narrowing does not weaken the detection it exists for. The 2026-08-07 misdelivery was a shim that
+    `exec`d the real binary with a foreign seed in argv, so the process holding the briefing WAS the
+    worker — still visible here, and still `FOREIGN`. Non-worker processes are still DESCENDED THROUGH, so
+    a launcher shell that forks claude is reached exactly as before; only their own argv is disregarded.
     """
     frontier, seen, fallback = [pid], set(), (pid, [])
     for _ in range(max(1, depth)):
@@ -218,7 +266,7 @@ def delivered_argv(pid: int, probes: Probes, depth: int = 2) -> tuple:
                 continue
             seen.add(candidate)
             raw = probes.read_cmdline(candidate)
-            if raw:
+            if raw and is_worker(candidate, probes):
                 argv = split_argv(raw)
                 if payload(argv) is not None:
                     return candidate, argv
@@ -234,7 +282,17 @@ def delivered_argv(pid: int, probes: Probes, depth: int = 2) -> tuple:
 def check_session(session: str, pid: int, rendered: str, probes: Probes) -> Verdict:
     """The whole check for one live worker."""
     found_pid, argv = delivered_argv(pid, probes)
-    return classify(rendered, argv, session=session, pid=found_pid or pid)
+    verdict = classify(rendered, argv, session=session, pid=found_pid or pid)
+    #: `SI-52`. "Nothing was delivered" and "I never found the worker to ask" are different facts and the
+    #: remedies differ, so the second one SAYS so. Without this the reader is told a briefing was looked
+    #: for in a process that was never examined — which is the shape (`FI-417`) of a check reporting a
+    #: number about a population it could not see.
+    if verdict.state == NOT_DELIVERED and not is_worker(found_pid or pid, probes):
+        verdict.detail += (
+            f". No `{WORKER_COMM}` process was found at or below pid {found_pid or pid}, so nothing about "
+            f"this session's delivery was examined at all. A long argument on a non-worker descendant — a "
+            f"CI waiter is exactly that shape — is deliberately not read as a briefing (`SI-52`)")
+    return verdict
 
 
 def collisions(verdicts: list) -> list:
