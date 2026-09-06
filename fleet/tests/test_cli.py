@@ -36,6 +36,7 @@ import subprocess
 import sys
 import tempfile
 import unittest
+from unittest import mock
 
 from fleet import (EXIT_ATTENTION, EXIT_BAD_INPUT, EXIT_CODES, EXIT_NO_CAPACITY, EXIT_OK,
                    EXIT_REFUSED)
@@ -1389,6 +1390,79 @@ class TestPaneGuard(CliCase):
                              f"pane-guard {pane} does not name its verdict: {out!r}")
         self.assertEqual(cli.PANE_GUARD_CODES[cli.PANE_SAFE], "safe")
 
+    # ---- `SI-54`: keyed the way every other verb is keyed ------------------------------------------
+
+    def test_pane_guard_answers_about_a_RECORD_when_given_one(self):
+        """`SI-54`. This was the only verb on the surface keyed on `--pane <session>`; `close`, `harvest`,
+        `status` and `seed-check` all take `--id <todo>`. The two differ by a timestamp suffix, so the
+        natural transcription is wrong — and the answer to a wrong pane name is `13`, whose detail reads
+        *"no live process and no session answer"*: a sentence about a HEALTHY worker that reads as a dead
+        one. This is the verb an external monitor calls before every send (`FD-10`), so its argument is
+        retyped more often than any other and its failure mode is the one that most looks like a finding.
+        """
+        fleet = self.loaded()
+        fleet.panes["dt-solo"] = IDLE_PANE
+
+        by_id, out, err = fleet.run(["pane-guard", "--porcelain", "--id", fleet.ids["solo"]])
+        by_pane, out2, _ = fleet.run(["pane-guard", "--porcelain", "--pane", "dt-solo"])
+
+        self.assertEqual(cli.PANE_SAFE, by_id, f"--id did not reach the record's pane: {out}{err}")
+        self.assertEqual(by_pane, by_id, "the same pane answers differently by --id and by --pane")
+        printed = dict(line.split("\t", 1) for line in out.splitlines())
+        self.assertEqual("dt-solo", printed.get("pane"),
+                         f"the answer does not name the pane it resolved to: {out!r}")
+
+    def test_pane_guard_by_id_reports_the_same_non_safe_codes(self):
+        """The codes are the contract (`FD-10`); only how the pane is NAMED changes."""
+        fleet = self.loaded()
+        fleet.worker("queuedById", slot="ws4", pane=QUEUED_PANE)
+
+        code, out, err = fleet.run(["pane-guard", "--porcelain", "--id", fleet.ids["queuedById"]])
+
+        self.assertEqual(cli.PANE_QUEUED_TEXT, code, f"{out}{err}")
+        printed = dict(line.split("\t", 1) for line in out.splitlines())
+        self.assertTrue(printed.get("queued_text"),
+                        f"the queued text field is empty on the --id path: {out!r}")
+
+    def test_a_record_that_names_no_session_says_so_instead_of_answering_13(self):
+        """`13` means *this pane does not exist*. A record with no session at all is a different fact with
+        a different remedy, and collapsing them is how a healthy fleet reads as a dead one."""
+        fleet = self.loaded()
+        fleet.worker("noSession", live=False)
+        record = fleet.store.read(fleet.ids["noSession"])
+        record.tmux = ""
+        fleet.store.write(record)
+
+        code, out, err = fleet.run(["pane-guard", "--id", fleet.ids["noSession"]])
+
+        self.assertEqual(EXIT_BAD_INPUT, code,
+                         f"a record with no session was answered with a pane code: {out}{err}")
+        #: `parse` refuses an undeclared flag with the same exit code, so without this the case passes
+        #: before `--id` exists at all.
+        self.assertNotIn("is not a flag", err, f"vacuous: --id is undeclared: {err!r}")
+        self.assertNotIn(str(cli.PANE_UNKNOWN), out,
+                         f"the unknown-pane code was reported for a record that names no pane: {out!r}")
+
+    def test_naming_both_a_pane_and_a_record_is_refused(self):
+        """Two identifiers that could disagree is a third failure mode. Neither is not a question."""
+        fleet = self.loaded()
+
+        code, out, err = fleet.run(["pane-guard", "--pane", "dt-solo", "--id", fleet.ids["solo"]])
+
+        self.assertEqual(EXIT_BAD_INPUT, code, f"both identifiers were accepted: {out}")
+        self.assertNotIn("is not a flag", err, f"vacuous: --id is undeclared: {err!r}")
+        self.assertIn("--id", err)
+        self.assertIn("--pane", err)
+
+    def test_naming_neither_is_refused_and_the_refusal_names_both_flags(self):
+        fleet = self.loaded()
+
+        code, out, err = fleet.run(["pane-guard"])
+
+        self.assertEqual(EXIT_BAD_INPUT, code, f"pane-guard ran with no subject: {out}")
+        self.assertIn("--pane", err)
+        self.assertIn("--id", err)
+
     def test_a_pane_whose_evidence_could_not_be_READ_is_never_reported_not_claude(self):
         """`FI-7` — the transient `12` that authorises destroying a live pane.
 
@@ -2458,6 +2532,134 @@ class PositionedGit:
         if args[0] == "cat-file":
             return (0, "commit\n") if self.position in ("present", "descendant") else (1, "")
         return 0, ""
+
+
+class TestSeedExtra(CliCase):
+    """`SI-53`. The seed window was a race the coordinator kept losing.
+
+    `dispatch` renders the seed, writes it, and starts the worker; the launcher reads it on a ~180s timer.
+    A coordinator with one dispatch-specific sentence to add had exactly one place to put it: `seed.txt`,
+    AFTER `dispatch` returned and BEFORE the launcher read. Pre-writing is structurally impossible — the
+    `i2-dispatch-seed-integrity` control refuses a seed file that exists before the dispatch that renders
+    it, correctly, since a pre-written seed cannot contain a seed that does not exist yet.
+
+    `FI-387` lost that race by about a second: the worker started on the briefing without the addition,
+    and nothing said so. Putting the addition INSIDE the transaction makes the window zero.
+    """
+
+    def _dispatch(self, fleet, *extra, title="extraWorker"):
+        return fleet.run(["dispatch", "--porcelain", "--profile", str(fleet.profile("worker")),
+                          "--title", title, "--base", "00000000", "--optype", "append", *extra])
+
+    def _seed_of(self, out):
+        child = [line.split("\t")[1] for line in out.splitlines() if line.startswith("instant\t")][0]
+        return pathlib.Path(child) / ".fleet" / "seed.txt"
+
+    def test_the_addition_is_in_the_seed_the_worker_is_briefed_from(self):
+        fleet = self.loaded()
+        extra = fleet.tmp / "extra.md"
+        extra.write_text("Coordinate with dt-solo before touching the shared fixture.\n")
+
+        code, out, err = self._dispatch(fleet, "--seed-extra", str(extra))
+
+        self.assertEqual(EXIT_OK, code, err)
+        seed = self._seed_of(out).read_text()
+        self.assertIn("Coordinate with dt-solo", seed,
+                      f"the addition never reached the seed the worker is briefed from: {seed!r}")
+        self.assertIn("Read CHARTER.md", seed,
+                      "the addition REPLACED the profile's seed instead of extending it")
+
+    def test_the_seed_says_where_the_addition_came_from(self):
+        """A worker reading two paragraphs that disagree needs to know which one is specific to it."""
+        fleet = self.loaded()
+        extra = fleet.tmp / "extra.md"
+        extra.write_text("Build on the q6d tip, not main.\n")
+
+        code, out, err = self._dispatch(fleet, "--seed-extra", str(extra))
+
+        self.assertEqual(EXIT_OK, code, err)
+        seed = self._seed_of(out).read_text()
+        self.assertIn(str(extra), seed,
+                      f"the seed does not name the file the addition came from: {seed!r}")
+
+    def test_the_delivered_seed_check_compares_the_COMBINED_text(self):
+        """Otherwise `--seed-extra` would make every dispatch report NOT-DELIVERED against a seed that no
+        longer matches the file — the addition would defeat the integrity control it rides inside."""
+        fleet = self.loaded()
+        extra = fleet.tmp / "extra.md"
+        extra.write_text("Coordinate with dt-solo before touching the shared fixture.\n")
+        seen = []
+
+        with mock.patch.object(cli, "_verify_seed_delivery",
+                               side_effect=lambda ctx, tmux, seed, **kw: seen.append(seed)):
+            code, out, err = self._dispatch(fleet, "--seed-extra", str(extra))
+
+        self.assertEqual(EXIT_OK, code, err)
+        self.assertEqual(1, len(seen), "the delivery check was not reached at all: this is vacuous")
+        self.assertIn("Coordinate with dt-solo", seen[0],
+                      "the delivery check compares against the seed WITHOUT the addition, so a correct "
+                      "delivery of the combined briefing would be reported as unverified")
+        self.assertEqual(self._seed_of(out).read_text(), seen[0],
+                         "the file written and the text checked are not the same seed")
+
+    def test_a_missing_file_is_refused_BEFORE_anything_is_claimed(self):
+        fleet = self.loaded()
+        held_before = sorted(d.name for d in fleet.pool.leases.iterdir())
+        instants_before = sorted(p.name for p in fleet.instants.iterdir())
+
+        code, out, err = self._dispatch(fleet, "--seed-extra", str(fleet.tmp / "nope.md"))
+
+        self.assertEqual(EXIT_BAD_INPUT, code, f"a missing seed addition was accepted: {out}")
+        self.assertNotIn("is not a flag", err,
+                         f"this passed because --seed-extra is undeclared, not because the file is "
+                         f"missing: {err!r}")
+        self.assertIn("nope.md", err, f"the refusal does not name the file it could not read: {err!r}")
+        self.assertEqual(held_before, sorted(d.name for d in fleet.pool.leases.iterdir()),
+                         "a refused dispatch left a slot claimed")
+        self.assertEqual(instants_before, sorted(p.name for p in fleet.instants.iterdir()),
+                         "a refused dispatch created an instant")
+
+    def test_an_empty_file_is_refused(self):
+        """An empty addition is a caller believing something was added. Silence there is the whole defect
+        class this flag exists inside."""
+        fleet = self.loaded()
+        extra = fleet.tmp / "blank.md"
+        extra.write_text("   \n\n")
+
+        code, out, err = self._dispatch(fleet, "--seed-extra", str(extra))
+
+        self.assertEqual(EXIT_BAD_INPUT, code, f"an empty seed addition was accepted: {out}")
+        self.assertNotIn("is not a flag", err, f"vacuous: --seed-extra is undeclared: {err!r}")
+
+    def test_without_the_flag_the_seed_is_byte_for_byte_what_it_was(self):
+        fleet = self.loaded()
+
+        code, out, err = self._dispatch(fleet)
+
+        self.assertEqual(EXIT_OK, code, err)
+        seed = self._seed_of(out).read_text()
+        self.assertEqual((fleet.profile("worker") / "seed.txt").read_text(), seed,
+                         "dispatch without --seed-extra no longer renders what it rendered before")
+
+    def test_dry_run_reports_the_addition_and_writes_nothing(self):
+        fleet = self.loaded()
+        extra = fleet.tmp / "extra.md"
+        extra.write_text("Build on the q6d tip.\n")
+        #: Not `snapshot(fleet.tmp)`: the fixture's own `profile()` helper rewrites the profile directory
+        #: every time it is called, so a whole-tree snapshot would fail on the harness rather than on the
+        #: verb. The tree this verb must not touch is the instants directory, the records and the pool.
+        before = snapshot(fleet.instants)
+        records, pool = fleet.record_state(), fleet.pool_state()
+
+        code, out, err = self._dispatch(fleet, "--dry-run", "--seed-extra", str(extra))
+
+        self.assertIn(code, EXIT_CODES, err)
+        printed = dict(line.split("\t", 1) for line in out.splitlines())
+        self.assertIn(str(extra), printed.get("seed_extra", ""),
+                      f"--dry-run does not report the addition it would make: {out!r}")
+        self.assertEqual(before, snapshot(fleet.instants), "--dry-run created or changed an instant")
+        self.assertEqual(records, fleet.record_state(), "--dry-run wrote a record")
+        self.assertEqual(pool, fleet.pool_state(), "--dry-run claimed a slot")
 
 
 class TestAbortReleasesTheClaim(CliCase):

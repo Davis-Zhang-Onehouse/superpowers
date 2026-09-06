@@ -1093,6 +1093,34 @@ def _do_seed_check(ctx: Ctx, parsed: Parsed) -> int:
 # --- dispatch -------------------------------------------------------------------------------------
 
 
+def _read_seed_extra(path) -> str:
+    """The text `--seed-extra` names, stripped of trailing whitespace; `""` when the flag was not passed.
+
+    `SI-53`. Every refusal here happens before `dispatch` claims anything, which is the point of reading it
+    this early: a missing file discovered after the claim costs a slot to report a typo.
+
+    An EMPTY file is refused rather than treated as "no addition". A caller who passed the flag believes
+    something was added, and quietly adding nothing is the same silence — a dispatch that reads as
+    carrying the sentence and does not — that this flag exists to end.
+    """
+    if not path:
+        return ""
+    source = Path(path)
+    try:
+        text = source.read_text()
+    except OSError as exc:
+        raise BadInput(
+            f"--seed-extra {path!r} could not be read ({exc.strerror or exc}). Refused before anything "
+            f"was claimed. It names the file whose text is appended to this dispatch's seed, so a path "
+            f"that is not there would mean the worker is briefed WITHOUT the sentence you meant to add "
+            f"— which is the exact failure this flag replaces.") from exc
+    if not text.strip():
+        raise BadInput(
+            f"--seed-extra {path!r} is empty (or only whitespace). Passing the flag says an addition was "
+            f"meant; appending nothing would leave the dispatch reading as though it carried one.")
+    return text.strip()
+
+
 def _do_dispatch(ctx: Ctx, parsed: Parsed) -> int:
     """Gates → claim → **gates again, holding the claim** → render → write the tree → record → launch.
 
@@ -1181,6 +1209,11 @@ def _do_dispatch(ctx: Ctx, parsed: Parsed) -> int:
             f"given. Pass --lineage-base 'repo=sha,...' — refused rather than ignored, because a mode "
             f"recorded with nothing to check reads like a base that is being enforced.")
 
+    #: `SI-53`. Read BEFORE anything is claimed, so a typo'd path costs a refusal and not a slot. The
+    #: content is carried to the render below rather than written here: the seed is ONE artifact, and a
+    #: second writer appending to `seed.txt` after `dispatch` wrote it is precisely the race this replaces.
+    seed_extra = _read_seed_extra(parsed.get("seed-extra"))
+
     gctx = ctx.guard_ctx(parsed, base=base, cap=cap, profile=profile, optype=optype,
                          override_reason=parsed.get("override"))
     verdicts = guards.evaluate_all(gctx, "dispatch")
@@ -1192,7 +1225,10 @@ def _do_dispatch(ctx: Ctx, parsed: Parsed) -> int:
                  ("milestone", milestone_id or "(none — this dispatch is not about a roadmap row)"),
                  ("lineage_base", parsed.get("lineage-base") or "(none — no git lineage is recorded, so "
                                                                 "nothing gates a claim of done)"),
-                 ("lineage_mode", lineage_mode or "(none)")]
+                 ("lineage_mode", lineage_mode or "(none)"),
+                 ("seed_extra", (f"{parsed.get('seed-extra')} ({len(seed_extra)} chars would be appended "
+                                 f"to the rendered seed)") if seed_extra else
+                  "(none — the seed is exactly what the profile renders)")]
         rows += _verdict_kv(verdicts)
         _emit(ctx, "dispatch", rows)
         return _guard_code(ctx, verdicts, gctx)
@@ -1260,6 +1296,14 @@ def _do_dispatch(ctx: Ctx, parsed: Parsed) -> int:
                                    "LINEAGE_BASE": parsed.get("lineage-base") or "",
                                    "LINEAGE_MODE": lineage_mode or "",
                                    "CHECKOUT": _checkout_instruction(lineage, lineage_mode)})
+        #: `SI-53`. Appended HERE, before the seed is written and before the delivery check reads it, so
+        #: there is one seed and not two: `seed.txt`, `_verify_seed_delivery` and `seed-check` all compare
+        #: against the same combined text. Marked with its source path because a worker reading two
+        #: paragraphs that disagree has to know which one was written for it specifically.
+        if seed_extra:
+            rendered["seed"] = (f"{rendered['seed'].rstrip()}\n\n"
+                                f"--- dispatch-specific briefing, from {parsed.get('seed-extra')} ---\n\n"
+                                f"{seed_extra}\n")
         record = Record(todo_id=todo_id, child_instant=str(child), base_instant=base,
                         slot=lease.slot, tmux=tmux, profile=str(profile.path),
                         golden=str(lease.path), lineage_base=parsed.get("lineage-base") or "",
@@ -3353,6 +3397,42 @@ def _is_claude(sessions, text: str, name: str = "") -> bool:
     return sessions.busy(text) or sessions.unsubmitted(text) is not None
 
 
+def _pane_subject(ctx: Ctx, parsed: Parsed) -> str:
+    """WHICH pane `pane-guard` is being asked about — `SI-54`.
+
+    This was the only verb on the surface keyed on `--pane <session>` while `close`, `harvest`, `status`
+    and `seed-check` all take `--id <todo>`. The two identifiers differ by a timestamp suffix, so the
+    natural transcription is wrong, and the answer to a wrong pane name is `13`, whose detail reads *"no
+    live process and no session answer"* — a sentence about a HEALTHY worker that reads as a dead one.
+    This is the verb an external monitor must call before every send (`FD-10`), so its argument is retyped
+    more often than any other and its failure mode is the one that most looks like a real finding.
+
+    Exactly one, and both refusals are the point. Two identifiers that could disagree is a third failure
+    mode; neither is not a question. Neither refusal returns a pane-guard CODE: a caller branching on the
+    number must never read "you did not say what to look at" as an observation of a pane.
+    """
+    named_pane, named_id = parsed.get("pane"), parsed.get("id")
+    if named_pane and named_id:
+        raise BadInput(
+            f"`--pane {named_pane!r}` and `--id {named_id!r}` both name the subject, and they can "
+            f"disagree. Pass one: `--id` when you have the record (it resolves the session the same way "
+            f"`close` does), `--pane` when you have only the session name.")
+    if not named_pane and not named_id:
+        raise BadInput(
+            "pane-guard needs a subject: `--id <todo>` (the key every other verb takes) or "
+            "`--pane <session>`.")
+    if named_pane:
+        return named_pane
+    record = _record(ctx, parsed)
+    if not record.tmux:
+        raise BadInput(
+            f"record {record.todo_id!r} names no tmux session, so there is no pane to guard. Refused "
+            f"rather than answered `{PANE_UNKNOWN} {PANE_GUARD_CODES[PANE_UNKNOWN]}`: that code means "
+            f"*this pane does not exist*, and a record that never had one is a different fact with a "
+            f"different remedy — `fleet resume --instant <instant> --tmux <session>` attaches one.")
+    return record.tmux
+
+
 def _do_pane_guard(ctx: Ctx, parsed: Parsed) -> int:
     """The contract the external monitor is REQUIRED to call before any send-keys (FD-10).
 
@@ -3361,7 +3441,7 @@ def _do_pane_guard(ctx: Ctx, parsed: Parsed) -> int:
     `0` safe · `10` queued text · `11` mid-turn · `12` not-claude · `13` unknown pane — and a caller
     branches on the number, never on the sentence.
     """
-    pane = parsed.get("pane")
+    pane = _pane_subject(ctx, parsed)
     if not ctx.sessions.alive(pane):
         code, detail = PANE_UNKNOWN, (f"no live process and no session answer for {pane!r}; sending keys "
                                       "to a pane nobody can name is the send with no target")
@@ -4156,6 +4236,12 @@ VERBS = {spec.name: spec for spec in (
         Flag("--slot", True, False, "a specific enrolled slot instead of the first free one"),
         Flag("--cap", True, False, "the WIP cap, said out loud"),
         Flag("--override", True, False, "override the refusing rules WITH A STATED REASON"),
+        #: `SI-53`. A FILE, not an inline string: a briefing addition with newlines typed through a shell
+        #: argument is how quoting bugs enter a worker's contract.
+        Flag("--seed-extra", True, False,
+             "a file whose text is appended to this dispatch's rendered seed, inside the transaction. "
+             "For the sentence that is specific to THIS dispatch; the alternative was editing seed.txt "
+             "in the window between dispatch returning and the launcher reading it"),
     )),
     _verb("resume", _do_resume, False, "adopt an existing conforming instant; NO admission rule (FD-9)", (
         Flag("--instant", True, True, "the instant to adopt"),
@@ -4316,7 +4402,14 @@ VERBS = {spec.name: spec for spec in (
     _verb(PANE_GUARD, _do_pane_guard, True,
           "the send-keys contract: 0 safe / 10 queued / 11 mid-turn / 12 not-claude / 13 unknown / "
           "14 indeterminate (could not read; wait)", (
-        Flag("--pane", True, True, "the pane (session) name"),
+        #: `SI-54`. Neither is parser-required and exactly one is required by the handler: the parser can
+        #: say "required" but not "exactly one of", and `--pane` staying mandatory would make `--id`
+        #: unreachable. Both name the same subject, so accepting both is refused rather than resolved.
+        Flag("--pane", True, False, "the pane (session) name"),
+        Flag("--id", True, False,
+             "the record whose session to ask about — the same key `close`, `harvest` and `status` take. "
+             "Resolved through the record's `tmux` field; use it instead of retyping a session name that "
+             "differs from the todo id by a timestamp suffix"),
     )),
     _verb("compaction-status", _do_compaction_status, True,
           "whether a compaction is holding every dispatch", checker=True, flags=(
