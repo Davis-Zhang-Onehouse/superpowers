@@ -454,7 +454,8 @@ true.
 
 ## SI-52 — `seed-check` calls a healthy worker `foreign`, and the remedy it names is destructive
 
-**Status:** OPEN. **Blocks:** `dispatching-a-wave`, `reviving-dead-panes`. **Field id:** `FI-402`.
+**Status:** **FIXED in `0.5.0`** — only a `claude` process may be the source of a delivered
+briefing, and an unreadable identity degrades to `NOT-DELIVERED`. **Field id:** `FI-402`.
 
 **Measured 2026-09-06** at `0.4.0`. `seedcheck.delivered_argv(pid, probes, depth=2)` walks one generation
 of descendants and returns **the first process carrying any non-flag argument of ≥200 characters**
