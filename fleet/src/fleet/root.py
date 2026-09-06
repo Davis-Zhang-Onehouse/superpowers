@@ -109,14 +109,24 @@ def load(root_dir) -> Root:
             f'{{"name": "davis"}}. The name is DECLARED rather than derived from the directory because it '
             f"becomes this root's tmux socket, and a socket name must not change when somebody renames a "
             f"directory (FI-421).")
-    name = str(body["name"]).strip()
+    return Root(path=root_dir.resolve(), name=check_name(str(body["name"]).strip(), marker))
+
+
+def check_name(name: str, where) -> str:
+    """The charset rule, shared by the reader and the creator.
+
+    Extracted so `root-init` refuses a name BEFORE writing it rather than writing a marker that `load`
+    will then reject — a root that exists on disk and cannot be loaded is the one state neither side has
+    a remedy for.
+    """
+    name = str(name).strip()
     bad = sorted(set(name) - _NAME_OK)
     if bad:
         raise BadInput(
-            f"{marker} declares name {name!r}, which contains {bad}. The name becomes the tmux socket "
+            f"{where} declares name {name!r}, which contains {bad}. The name becomes the tmux socket "
             f"`fleet-{name}`, and `tmux -L` reads a name containing `/` as a PATH — a different thing that "
             f"silently works. Use letters, digits, `_`, `-` or `.`.")
-    return Root(path=root_dir.resolve(), name=name)
+    return name
 
 
 def discover(cwd, home):
@@ -146,3 +156,62 @@ def refusal(cwd, home, verb: str) -> str:
             f"home directory makes every root the same root, which looks exactly like isolation working "
             f"and behaves exactly like isolation absent. Put it at {home}/<root>/{MARKER} instead.")
     return " ".join(parts)
+
+
+def check_new_root(path, home) -> pathlib.Path:
+    """Every reason `path` cannot become a root, refused BEFORE anything is written. Returns it resolved.
+
+    The rules are here rather than in the handler because they are the same rules `find` and `load` read
+    the other way round, and a creator that does not share the finder's definition of a root will happily
+    write a marker the finder can never honour. That is the failure this function exists to make
+    impossible, so each refusal below names the `find` behaviour it mirrors.
+    """
+    path = pathlib.Path(path)
+    home = pathlib.Path(home).resolve()
+    if not path.is_dir():
+        raise BadInput(
+            f"{path} is not an existing directory. `root-init` MARKS a directory; it does not create one, "
+            f"because a path that is not there is far more often a typo than an intention. `mkdir -p "
+            f"{path}` first.")
+    resolved = path.resolve()
+
+    #: The `$HOME` rule, and it is a refusal rather than a warning because `find` stops AT `$HOME`: a
+    #: marker written here is never read, so the verb would report success over a root that does not
+    #: exist as far as every other verb is concerned.
+    if resolved == home:
+        raise BadInput(
+            f"{resolved} is your home directory, and a marker there is never honoured — the walk that "
+            f"finds a root stops at $HOME. A root there would make every root the same root, which looks "
+            f"exactly like isolation working and behaves exactly like isolation absent. Put the root in a "
+            f"subdirectory: {home}/<name>_root.")
+    #: Resolved on BOTH sides before comparing, because a symlink under `$HOME` pointing outside it is the
+    #: interesting case and comparing the unresolved paths would call it contained. `find` resolves for
+    #: the same reason.
+    if home not in resolved.parents:
+        raise BadInput(
+            f"{resolved} is not inside {home}. A root is found by walking UP from a working directory to "
+            f"$HOME, so a marker outside $HOME is never reached and the root would be invisible to every "
+            f"verb." + (f" ({path} resolves to {resolved}.)" if resolved != path.resolve(strict=False)
+                        or str(path) != str(resolved) else ""))
+
+    if (resolved / MARKER).is_file():
+        try:
+            existing = load(resolved).name
+        except BadInput:
+            existing = "an unreadable marker"
+        raise BadInput(
+            f"{resolved / MARKER} already exists and declares {existing!r}. This directory is already a "
+            f"root. Edit the marker by hand to rename it — renaming is not this verb's job, because the "
+            f"name IS the tmux socket and moving it strands every session already on the old one.")
+
+    #: An ancestor that is already a root. Nested roots are not refused by anything else — `find` returns
+    #: the NEAREST marker, so a `cd` deeper would silently pick the inner root while the slots, records
+    #: and sessions of the work already running there belong to the outer one.
+    above = find(resolved.parent, home) if resolved.parent != home else None
+    if above is not None:
+        raise BadInput(
+            f"{resolved} is inside {above}, which is already a fleet root ({above / MARKER}). Roots do not "
+            f"nest: the walk stops at the NEAREST marker, so work started from inside {resolved} would "
+            f"use a different store, pool and tmux server than the same work started one directory up — "
+            f"with nothing to say why. Put the new root beside {above}, not under it.")
+    return resolved

@@ -11,6 +11,7 @@ import tempfile
 import unittest
 
 from fleet import cli
+from fleet import root as root_mod
 from fleet.errors import BadInput
 from fleet.root import MARKER
 
@@ -410,3 +411,163 @@ class TestReleasesTier(ResolutionCase):
         with self.assertRaises(BadInput) as cm:
             self.releases_of(self.parsed("release-promote", "--version", "v0.0.1"), cwd=bare)
         self.assertIn("no default for a write", str(cm.exception))
+
+
+class TestRefusingABadNewRoot(ResolutionCase):
+    """`check_new_root` — the rules a directory must satisfy to BECOME a root.
+
+    Every case here mirrors a `find`/`load` behaviour, because the failure this function exists to prevent
+    is a creator whose definition of a root differs from the finder's: a marker written somewhere the walk
+    never reaches is a root that reports success and is invisible to every verb.
+    """
+
+    def refuse(self, path):
+        with self.assertRaises(BadInput) as caught:
+            root_mod.check_new_root(path, self.home)
+        return str(caught.exception)
+
+    def test_home_itself_is_refused_because_the_walk_stops_there(self):
+        message = self.refuse(self.home)
+        self.assertIn(str(self.home), message)
+        self.assertIn("never honoured", message)
+
+    def test_a_directory_outside_home_is_refused(self):
+        outside = self.tmp / "elsewhere"
+        outside.mkdir()
+        self.assertIn(str(outside), self.refuse(outside))
+
+    def test_a_symlink_under_home_resolving_OUTSIDE_it_is_refused(self):
+        """The case that makes the check resolve both operands. Compared unresolved, this path is inside
+        `$HOME` and the marker would be written outside it — where the walk never reaches."""
+        outside = self.tmp / "elsewhere"
+        outside.mkdir()
+        link = self.home / "looks_inside"
+        link.symlink_to(outside)
+        message = self.refuse(link)
+        self.assertIn(str(outside), message, "the refusal does not name where the path actually leads")
+
+    def test_a_directory_that_does_not_exist_is_refused_rather_than_created(self):
+        message = self.refuse(self.home / "not_there")
+        self.assertIn("mkdir", message, "the refusal does not say what would clear it")
+
+    def test_a_directory_that_is_already_a_root_is_refused_and_names_it(self):
+        message = self.refuse(self.root)
+        self.assertIn("davis", message, "the refusal does not say which root this already is")
+
+    def test_a_directory_INSIDE_an_existing_root_is_refused(self):
+        """Nothing else refuses this. `find` returns the NEAREST marker, so work started inside the inner
+        root would silently use a different store, pool and tmux server than the same work one directory
+        up."""
+        inner = self.root / "ws1" / "nested"
+        inner.mkdir(parents=True)
+        message = self.refuse(inner)
+        self.assertIn(str(self.root), message, "the refusal does not name the root it would nest inside")
+
+    def test_a_fresh_sibling_directory_is_accepted_and_returned_resolved(self):
+        """The accept direction, which cannot be red first — paired with the refusals above so that a
+        rule which refused everything would be caught here rather than looking like five passes."""
+        fresh = self.home / "davis3_root"
+        fresh.mkdir()
+        self.assertEqual(root_mod.check_new_root(fresh, self.home), fresh.resolve())
+
+
+class TestCreatingARoot(ResolutionCase):
+    """`fleet root-init`, end to end through `main`.
+
+    `main` reads the REAL `os.environ` and the REAL cwd, so these patch both — the same reasoning
+    `TestRootLine` records, and the same failure if they do not: the case measures the developer's own
+    exported fleet instead of the one under test.
+    """
+
+    def setUp(self):
+        super().setUp()
+        import os
+        from unittest import mock
+        clean = {k: v for k, v in os.environ.items()
+                 if k not in ("FLEET_HOME", "FLEET_INSTANTS", "FLEET_ROOT", "FLEET_TMUX_SOCKET")}
+        clean["HOME"] = str(self.home)
+        patcher = mock.patch.dict(os.environ, clean, clear=True)
+        patcher.start()
+        self.addCleanup(patcher.stop)
+        here = os.getcwd()
+        self.addCleanup(os.chdir, here)
+        self.fresh = self.home / "davis3_root"
+        self.fresh.mkdir()
+
+    def run_main(self, argv, cwd=None):
+        import os
+        os.chdir(cwd or self.cwd)
+        out, err = io.StringIO(), io.StringIO()
+        code = cli.main(argv, stdout=out, stderr=err)
+        return code, out.getvalue(), err.getvalue()
+
+    def init(self, *extra, cwd=None):
+        return self.run_main(["root-init", "--path", str(self.fresh), "--name", "davis3", *extra], cwd=cwd)
+
+    def test_it_writes_a_marker_the_walk_can_then_find(self):
+        code, out, _ = self.init()
+        self.assertEqual(code, 0, out)
+        found = root_mod.find(self.fresh / "deeper", self.home) if (self.fresh / "deeper").is_dir() \
+            else root_mod.find(self.fresh, self.home)
+        self.assertEqual(found, self.fresh)
+        self.assertEqual(root_mod.load(self.fresh).name, "davis3")
+
+    def test_it_is_findable_from_a_SUBDIRECTORY_which_is_how_it_will_be_used(self):
+        self.init()
+        deeper = self.fresh / "ws1"
+        deeper.mkdir()
+        self.assertEqual(root_mod.find(deeper, self.home), self.fresh)
+
+    def test_it_creates_the_store_skeleton_and_the_release_area(self):
+        self.init()
+        for part in ("records", "pool", "harvest"):
+            self.assertTrue((self.fresh / ".fleet" / part).is_dir(), f".fleet/{part} was not created")
+        self.assertTrue((self.fresh / "fleet-releases").is_dir())
+
+    def test_it_does_NOT_create_an_instants_directory(self):
+        """`SI-56` / `FI-382`. `$FLEET_HOME/instants` is the directory a dispatch planted a stray child in
+        for two releases. Creating it here would hand that trap a home in every new root."""
+        self.init()
+        self.assertFalse((self.fresh / ".fleet" / "instants").exists(),
+                         "root-init created the derived instants directory SI-56 exists to refuse")
+
+    def test_share_releases_makes_it_a_symlink_to_the_named_area(self):
+        shared = self.root / "fleet-releases"
+        shared.mkdir()
+        code, out, _ = self.init("--share-releases", str(shared))
+        self.assertEqual(code, 0, out)
+        link = self.fresh / "fleet-releases"
+        self.assertTrue(link.is_symlink(), "fleet-releases is not a symlink")
+        self.assertEqual(link.resolve(), shared.resolve())
+
+    def test_share_releases_refuses_a_target_that_does_not_exist(self):
+        code, _, err = self.init("--share-releases", str(self.home / "nowhere"))
+        self.assertEqual(code, 2, err)
+        self.assertIn("nowhere", err)
+        self.assertNotIn("is not a flag", err, "this is the parser refusing an undeclared flag, not the "
+                                               "verb refusing a missing release area")
+        self.assertFalse((self.fresh / ".fleet-root").exists(), "it refused and marked the root anyway")
+
+    def test_dry_run_creates_nothing(self):
+        code, out, _ = self.init(cli.DRY_RUN)
+        self.assertEqual(code, 0, out)
+        self.assertEqual(list(self.fresh.iterdir()), [], f"--dry-run left {list(self.fresh.iterdir())}")
+
+    def test_it_works_from_an_UNMARKED_directory_which_is_the_whole_point(self):
+        """The first root on a box is created by somebody standing where there is no root. Every other
+        verb refuses there — `resolve_home` has no tier left — so this verb has to be answerable before
+        the store is resolved, or it could only ever create the SECOND root."""
+        code, out, err = self.init(cwd=self.home)
+        self.assertEqual(code, 0, f"out={out} err={err}")
+        self.assertEqual(root_mod.load(self.fresh).name, "davis3")
+
+    def test_a_refusal_names_the_path_and_is_not_the_parser_talking(self):
+        code, _, err = self.run_main(["root-init", "--path", str(self.home), "--name", "davis3"])
+        self.assertEqual(code, 2, err)
+        self.assertIn(str(self.home), err)
+        self.assertNotIn("is not a flag", err)
+        self.assertNotIn("is not a fleet verb", err)
+
+    def test_a_refusal_leaves_the_directory_untouched(self):
+        self.run_main(["root-init", "--path", str(self.root), "--name", "again"])
+        self.assertEqual(root_mod.load(self.root).name, "davis", "the refused init rewrote the marker")

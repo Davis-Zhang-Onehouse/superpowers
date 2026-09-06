@@ -298,6 +298,12 @@ class Fleet:
         self.procs = [proc for proc in self.procs if proc.name != name]
         self.panes.pop(name, None)
 
+    def new_root(self, name: str = "freshRoot") -> pathlib.Path:
+        """A directory under this fixture's `$HOME` that is not yet a root. `root-init` marks it."""
+        made = self.tmp / name
+        made.mkdir(exist_ok=True)
+        return made
+
     def spare(self, name: str = "wsSpare") -> pathlib.Path:
         """A real workspace directory that is NOT enrolled. Enrolment is opt-in, so the un-enrolled
         directory is half of what `enroll` has to be tested against."""
@@ -395,7 +401,7 @@ class Fleet:
         #: The environment is the fixture's, never the operator's. `cli.main` reads `os.environ` at parse
         #: time, so without this the suite measured whatever the person running it had exported — 33 cases
         #: passed on an ambient `FLEET_HOME` and failed inside `release-verify`, which runs with it unset.
-        with hermetic_environment(self.instants):
+        with hermetic_environment(self.instants, home=self.tmp):
             code = cli.main(list(argv), stdout=out, stderr=err, context=self.context())
         return code, out.getvalue(), err.getvalue()
 
@@ -486,6 +492,10 @@ class CliCase(unittest.TestCase):
             "harvest": ["--id", fleet.ids["harvestable"]],
             #: A path that does NOT exist: `clone` refuses an existing target by design.
             "clone": ["--slot", str(fleet.tmp / "cloned-slot")],
+            #: A fresh directory under the fixture's `$HOME` — which the fixture sets to its own tmp, so
+            #: this drives the verb for REAL rather than tripping its "outside $HOME" refusal. Nothing
+            #: else in the table needs a home directory; this verb is defined in terms of one.
+            "root-init": ["--path", str(fleet.new_root()), "--name", "fixtureRoot"],
             "enroll": ["--slot", str(fleet.spare())],
             "unenroll": ["--slot", "ws8"],
             "reap": ["--base", OURS],

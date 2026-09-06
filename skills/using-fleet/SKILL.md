@@ -107,6 +107,7 @@ Mutating. Each has `--dry-run`.
 | `fleet close` | shut a pane this store owns and stamp the record |
 | `fleet seed-delivered` | record what was actually sent to a worker's pane — the positive channel for a send-keys delivery, which leaves nothing in argv |
 | `fleet reap` | free every stale lease this base owns; name the ones it does not |
+| `fleet root-init` | make a directory a fleet root: its `.fleet-root` marker, store skeleton and release area. Refuses anything that is not a directory strictly under `$HOME`, and anything already inside a root — the walk stops at `$HOME` and at the nearest marker, so either would be a root no verb could find. `--share-releases <dir>` points it at an existing release area so both roots resolve one `current` |
 | `fleet enroll` / `fleet unenroll` | put an existing workspace into the pool, or take it out |
 | `fleet set-golden` | declare the golden workspace; there is deliberately no fallback |
 | `fleet clone` | duplicate the declared golden into a new slot and enrol it |

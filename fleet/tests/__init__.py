@@ -19,7 +19,7 @@ FLEET_ENV = ("FLEET_HOME", "FLEET_INSTANTS", "FLEET_RELEASES", "FLEET_TMUX_SOCKE
 
 
 @contextlib.contextmanager
-def hermetic_environment(instants):
+def hermetic_environment(instants, home=None):
     """The environment a fixture-driven `cli.main` sees: this fixture's instants directory, and NOTHING
     the operator happened to export.
 
@@ -35,4 +35,11 @@ def hermetic_environment(instants):
         for name in FLEET_ENV:
             os.environ.pop(name, None)
         os.environ["FLEET_INSTANTS"] = str(instants)
+        #: `$HOME` too, when the fixture has one to offer. It is not a `FLEET_` variable, but it decides
+        #: the same kind of answer: `root.find` walks up to it and `root-init` refuses outside it, so a
+        #: test that leaves it pointing at the operator's real home is measuring their box. The variable
+        #: is only SET when a fixture names one, because most cases have no notion of a home directory and
+        #: inventing one for them would be this file's own failure in the other direction.
+        if home is not None:
+            os.environ["HOME"] = str(home)
         yield
