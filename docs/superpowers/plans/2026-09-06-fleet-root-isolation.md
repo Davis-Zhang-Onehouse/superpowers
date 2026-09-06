@@ -1166,6 +1166,30 @@ fleet release-cut --repo "$PWD"
 
 ---
 
+## Execution record — 2026-09-06
+
+Executed inline. Every task landed; the deviations below are the ones a reader of this plan needs, because
+each was a plan defect found by a test rather than by review.
+
+| # | deviation | why |
+|---|---|---|
+| 2 | `resolve_instants` was split into a resolver plus `require_named_instants` at the two `layout.bootstrap` handlers | as planned it refused `board`: `reconcile` and `guards.blocking_compactions` read the instants directory on the READ path. An AST check now asserts every bootstrapping handler reaches the guard |
+| 2 | `_releases` shipped one commit late | the commit message for the resolver work claimed it and the code did not do it. Corrected in `7d49110` rather than left standing |
+| 4/5 | Task 5 was pulled ahead of Task 4 | `default_context` constructs the `Pool`, so `fleet_root=` had to exist before the context could be built. The plan sequenced them backwards |
+| 5 | the parameter is `fleet_root`, not `root` | `Pool.root` already means the pool directory; reusing the name would have silently rebound it |
+| 7 | R3b drives `base-check`, not `status`, and additionally asserts `board` still exits 0 | `status` reads through `subjects()` → `store.all()`, never `_record`. Pushing the refusal down there would let one stray record make the board permanently unreadable (`FI-402`), so the limit is tested rather than closed |
+| 7 | `run-A.sh`'s `A1b` anchor was updated | it matched `SI-15`'s exact sentence, which tier 6 replaced. It now accepts either sentence — still two exact sentences, never the flag name (`II-10`) |
+| 8 | `bin/fleet-view` gained a refusal path | it rendered `(no subjects)` over a non-zero `fleet`. Reachable before only via a bad `--home`; isolation makes it the default in any unmarked directory, and this tool's contract says it cannot hide a refusal |
+
+**Three defects I introduced and the suite caught**, recorded because a fix's own bugs are the interesting
+part: a string replace that moved `return record` outside its `if`, so `_record_for` returned the first
+record in the store regardless of match (13 tests); the same guard raising `BadInput` inside
+`except FleetError: continue`, where it would have been swallowed and read as installed while doing nothing;
+and a test that passed before the fix existed because `parse` refuses a missing required flag first and
+appends a usage dump containing the very string the assertion matched.
+
+---
+
 ## Self-Review
 
 **Spec coverage.** Marker + declared name → Task 1. The walk and its `$HOME` boundary → Task 1. Precedence
