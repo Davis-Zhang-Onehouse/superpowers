@@ -281,6 +281,15 @@ class TestRootLine(ResolutionCase):
         self.assertNotIn("root ", out)
         self.assertIn("root ", err)
 
+    def test_porcelain_emits_no_root_line_on_either_stream(self):
+        """`--porcelain` is declared as "machine form on stdout: tab-separated, NO BANNER", and a
+        resolved-root line is banner content. Asserted on BOTH streams because 102 porcelain call sites in
+        the IT harness merge stderr with `2>&1`; §C1 counts that merged file's rows and failed on the
+        extra line, and 88 more sites redirect the same way without counting."""
+        out, err = self.run_main(["board", "--home", str(self.tmp / "s"), "--porcelain"])
+        self.assertNotIn("root ", out)
+        self.assertNotIn("root ", err)
+
     def test_a_derived_root_prints_the_marker_it_came_from(self):
         _, err = self.run_main(["board"])
         self.assertIn(str(self.root / MARKER), err)
