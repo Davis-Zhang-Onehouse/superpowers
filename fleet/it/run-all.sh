@@ -78,6 +78,12 @@ RUNNERS=(
   #: seconds. Left under `--full` it would be, in this file's own words, "a control that is mostly not
   #: running" — and the thing it guards is the one a second root silently violates.
   "R:bash $IT_ROOT/run-R.sh"
+  #: Default roster, for the reason `i7` and `R` are: it costs about forty seconds and it guards the one
+  #: verdict in the product that DESTROYS something. `S6` reproduces `SI-52` — a plain `sh` pane holding a
+  #: long argument classified `foreign`, which is the verdict `dispatch` kills a session on, and the shape
+  #: every `awaiting-ci` worker's CI waiter has. A control that only runs under `--full` is a control that
+  #: is mostly not running.
+  "S:bash $IT_ROOT/run-S.sh"
 )
 
 # The sections added after this orchestrator was written. No prerequisites — checked per runner: each
