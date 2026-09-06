@@ -654,8 +654,20 @@ def default_context(parsed: Parsed, out, err) -> Ctx:
     #:
     #: On stderr, beside the cadence line, for the reason that line is there: stdout carries a column
     #: contract that `--porcelain` consumers parse byte-for-byte.
-    shown = home.parent if home.name == ".fleet" else home
-    print(f"root {shown} ({home_source})", file=err)
+    #: SUPPRESSED under `--porcelain`, and this is the contract rather than a concession: that flag is
+    #: declared as "machine form on stdout: tab-separated, NO BANNER", and a resolved-root line is banner
+    #: content. Measured after shipping it unconditionally: 102 porcelain call sites in the IT harness
+    #: merge stderr into the same file with `2>&1`, and `§C1` counts that file's rows with `grep -c .` —
+    #: so an unconditional line became a third lease row and failed the case. One site noticed; 88 more
+    #: redirect the same way and simply did not happen to count.
+    #:
+    #: The human path keeps it, which is where `FI-421`'s lesson actually applies: its second defect — a
+    #: function written to remove a silent fallback shipping WITH one — was caught only by PRINTING the
+    #: resolved path. A machine consumer reads the store it named; a person needs to be told which one
+    #: five tiers chose.
+    if not parsed.on("porcelain"):
+        shown = home.parent if home.name == ".fleet" else home
+        print(f"root {shown} ({home_source})", file=err)
 
     sessions = SessionLayer(default_probes(tmux_socket=resolve_socket(parsed, environ, cwd)))
 
