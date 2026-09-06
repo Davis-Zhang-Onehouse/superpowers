@@ -223,6 +223,12 @@ def _worker_subject(rec, pool, sessions, instants_dir: Path, idle_after_s: int, 
         "folder_state": folder_state or "missing",
         "liveness": "process" if sess is not None else ("session" if live else "none"),
         "tmux": rec.tmux,
+        #: `SI-59`. The SERVER beside the session name, because a name is not an address. Empty means the
+        #: record predates the field — NOT MEASURED, never "the default server" — and the reader is told
+        #: which server this command was talking to either way, so "no session answers" can be read as the
+        #: local claim it is.
+        "tmux_socket": rec.tmux_socket,
+        "asked_server": getattr(sessions, "socket", "") or "",
         "pid": str(sess.pid) if sess is not None else (str(holder) if holder else ""),
         "slot": rec.slot if holds else "",
         #: `SI-27`. Joined here rather than looked up per view, so `board` and `status` cannot disagree
@@ -279,6 +285,20 @@ def _state_of(rec, folder_state, live, phase, parked, pane, sessions, instant, i
                 f"pid {slot_holder} is live and holds this record's slot, but no session answers for "
                 f"{rec.tmux or 'it'} — the process is running and its SESSION is unreachable from here. "
                 f"Usually the wrong tmux server: export FLEET_TMUX_SOCKET to the one it was dispatched on.")
+        #: `SI-59`. The record NAMES a server, and it is not the one we looked on. `SI-39` gave this
+        #: situation its own state because DEAD is an ACTIONABLE claim — the response is `reap` — and a
+        #: wrong DEAD invites a human to free a slot out from under running work. That state needed a live
+        #: pid holding the slot to fire; this needs nothing but the record, because the record already
+        #: says where to look. No probe is run here on purpose: `reconcile` visits every record, and one
+        #: `has-session` per server per record would put dozens of subprocesses in front of a healthy
+        #: board. The verbs that ACT do search, which is where the cost buys something.
+        if rec.tmux_socket and rec.tmux_socket != getattr(sessions, "socket", ""):
+            return UNREACHABLE, (
+                f"no session answers for {rec.tmux or 'it'} HERE, and this record was dispatched on tmux "
+                f"server {rec.tmux_socket!r} while this command is talking to "
+                f"{getattr(sessions, 'socket', '') or 'the default server'!r}. Nothing has been observed "
+                f"about whether the work is alive: export FLEET_TMUX_SOCKET={rec.tmux_socket} and ask "
+                f"again.")
         if rec.launched_at is None:
             # READ from an absent field, never stamped. Back-filling it here is exactly the defect that
             # made the predecessor's report a writer.

@@ -67,6 +67,18 @@ class Record:
     #: answer is `FI-417`, where a grep that could not see 15 issue sections reported zero and the zero
     #: was believed.
     root: str = ""
+    #: `SI-59`. Which tmux SERVER this session was created on, by socket name. The record already carried
+    #: `tmux` — a session NAME — and a name is not an address: every later reader resolved the server from
+    #: whatever `$FLEET_TMUX_SOCKET` happened to be, so a record could be read from the wrong server and
+    #: answered about anyway. Measured: `fleet close` against a live worker from a shell pointed at another
+    #: server returned rc=0, reported `closed dt-<name>`, stamped `closed_at` and disarmed the monitor,
+    #: while the session was still running.
+    #:
+    #: Defaulted and `SCHEMA_VERSION` NOT bumped, for the reason `root` states one field above: a bump
+    #: would refuse every record already in the live store. EMPTY means "written before this field", which
+    #: is NOT MEASURED — never "the default server" — because reading absence as an answer is `FI-417`,
+    #: and the two records this was found on are exactly the ones that carry no value.
+    tmux_socket: str = ""
     launched_at: str | None = None
     gate_verdict: str | None = None
     harvested_at: str | None = None

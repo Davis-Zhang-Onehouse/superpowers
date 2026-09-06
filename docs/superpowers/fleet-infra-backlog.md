@@ -766,3 +766,86 @@ exist is the same sentence about a fleet that does not exist at all.
 write verb, the refusal names the path and the tier, a marker-derived store is still created on first
 write, and an IT case drives it through the real binary from inside a root — the shape the stale exports
 on this box actually have.
+
+---
+
+## SI-59 — a record names the tmux SESSION but not the SERVER, and `close` false-greens across servers
+
+**Status:** **FIXED in `0.5.3`**.
+**Field id:** reported from the product environment as a `fleet-view` display complaint —
+*"looks like a cosmetic issue"* — which it was not.
+
+**Measured 2026-09-06 at `0.5.2`.** Two live workers reported `UNREACHABLE`. Their sessions were alive on
+tmux server `fleet`, created that afternoon at 15:54 and 16:04; `fleet-davis`, the server this root
+derives, did not exist at all. The records were correct about everything else: both carried
+`"root": "/home/ubuntu/davis_root"` and lived in that root's store.
+
+The workers' environments carried `FLEET_TMUX_SOCKET=fleet` and `FLEET_HOME=/home/ubuntu/.fleet`
+alongside `_FLEET_ENV_SOCKET=fleet-davis` — so `scripts/fleet-env.sh` derived the right values and
+something exported the pre-isolation pair over them. That something is the effort tree's own frozen
+instructions: the live coordinator instant `00000000-07310348-inflight-append-v2stackcoordinator` carries
+`export FLEET_TMUX_SOCKET=fleet` in its RUNBOOK, CHARTER, HANDOFF and five `tools/*.sh`, all written
+before per-root isolation existed.
+
+**That is the trigger. The cause is that the record does not say where the session is.** It carries
+`tmux: dt-<subject>` — a session NAME — and every later reader resolves the server from whatever
+`$FLEET_TMUX_SOCKET` happens to be. Reproduced in a sandbox, one record, one live session, nothing
+different between the two reads but the socket:
+
+```
+FLEET_TMUX_SOCKET=repro-old  fleet status --id …  ->  state RUNNING
+FLEET_TMUX_SOCKET=repro-new  fleet status --id …  ->  state DEAD
+    "launched at … and no session is alive: the work stopped without renaming its folder"
+```
+
+And then the one that is not cosmetic at all:
+
+```
+FLEET_TMUX_SOCKET=repro-new  fleet close --id …   ->  rc=0
+    closed     dt-reprosubject
+    closed_at  2026-09-06T16:51:04Z
+    disarmed   the monitor's arm set is recomputed from the join; this pane is no longer in it
+
+tmux -L repro-old ls  ->  dt-reprosubject: 1 windows   (STILL ALIVE)
+record closed_at      ->  2026-09-06T16:51:04Z          (STAMPED)
+```
+
+`close` did not fail to find the pane. It reported success for a pane it never touched, stamped the
+record closed and disarmed the monitor, leaving a running worker unmonitored and recorded as finished.
+`fleet-view` showed the softer UNREACHABLE only because it additionally checks the slot-holding pid and
+searches other sockets; the verbs underneath do neither. **The display was the only place this announced
+itself.**
+
+`SI-39` had already given this shape its own state, for this exact reason — *"DEAD is an ACTIONABLE claim
+… a wrong DEAD invites a human to free a slot out from under running work"* — but that state needs a live
+pid holding the slot to fire, and it protects the REPORT rather than the verbs that act.
+
+**How it was fixed.**
+
+1. **The record carries the server.** `Record.tmux_socket`, written by `dispatch` and `resume` at the one
+   moment it is known for certain — the layer writing it is the layer creating the session. Defaulted,
+   `SCHEMA_VERSION` deliberately not bumped, for the reason `root` states one field above. Empty means
+   *written before this field*, which is NOT MEASURED and never "the default server" (`FI-417`).
+2. **The verbs that act fail closed.** `close` and `abort` refuse when the named session answers on a
+   different server, naming the server they looked on, the server it is on, and the one export that
+   clears it. Three answers kept apart because their remedies differ (`FI-195`): alive here → proceed;
+   found elsewhere → refuse; found nowhere **or not searchable** → proceed, because a finished worker must
+   stay closable and a caller with no probe has not looked. `servers_with` returns `None` for the
+   unobservable case and `[]` for the observed-empty one, and the guard reads the LIVE servers rather than
+   `tmux_socket` — a check that trusted the new field could not fire on the two records that motivated it
+   (`FI-303`).
+3. **The report stops claiming DEAD about a server it never looked at.** When the record names a server
+   other than the one in hand, `reconcile` returns `UNREACHABLE` with both names. No probe runs there on
+   purpose: `reconcile` visits every record, and one `has-session` per server per record would put dozens
+   of subprocesses in front of a healthy board. The verbs that act do search, which is where the cost buys
+   something.
+
+**Closed when:** met — `S8` drives two tmux servers, records a session on one and calls `close` from the
+other, and asserts the refusal names both servers, the session is still alive, and the record carries no
+`closed_at`. Run against `fleet/v0.5.2` it fails with `refused=0(rc=0) session-still-alive=1
+record-unstamped=0 socket-recorded=0`, which is the defect itself.
+
+**Still open, deliberately.** `bin/fleet-view` keeps its own socket search. It is a second implementation
+of the enumeration now in `session.default_probes`, and it should read the product's answer instead —
+but it is a view, it shells out to `fleet` rather than importing it, and collapsing the two is a change
+to a different component than the one this entry is about.
