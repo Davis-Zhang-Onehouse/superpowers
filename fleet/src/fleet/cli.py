@@ -1431,6 +1431,10 @@ def _do_dispatch(ctx: Ctx, parsed: Parsed) -> int:
                         #: was wrong here, and it has to outlive the terminal it was typed into.
                         override_reason=parsed.get("override") or "",
                         milestone=milestone_id, root=active_root_str(parsed),
+                        #: `SI-59`. The SERVER, beside the session name. Written at the one moment it is
+                        #: known for certain — this is the layer that is about to create the session — so
+                        #: no later reader has to infer it from whatever the shell happened to export.
+                        tmux_socket=ctx.sessions.socket,
                         dispatched_at=ctx.now())
         # `SI-32`. Each repo's HEAD as the slot was leased — read-only, and read BEFORE the worker exists.
         # This is what the prebuilt native artifacts were built from, and the only way to answer later
@@ -1594,6 +1598,9 @@ def _do_resume(ctx: Ctx, parsed: Parsed) -> int:
                     override_reason=existing.override_reason if existing else "",
                     golden_base=existing.golden_base if existing else "",
                     title=name.name, root=active_root_str(parsed),
+                    #: `SI-59`. `resume` ADOPTS a session, so the server it is talking to is the server
+                    #: that session is on — the same fact as at dispatch, learned the same way.
+                    tmux_socket=ctx.sessions.socket,
                     dispatched_at=existing.dispatched_at if existing else ctx.now(),
                     launched_at=ctx.now() if ctx.sessions.alive(tmux) else
                     (existing.launched_at if existing else None))
@@ -2339,6 +2346,46 @@ def _do_complete(ctx: Ctx, parsed: Parsed) -> int:
 # reached by hand, which is how a rename becomes an untracked mutation.
 
 
+def _refuse_a_session_on_another_server(ctx: Ctx, record) -> None:
+    """`SI-59`. Refuse to ACT on a session that answers on a different tmux server than this one.
+
+    Measured before this existed: `fleet close --id <live worker>` from a shell pointed at another server
+    returned **rc=0**, printed `closed dt-<name>`, stamped `closed_at` and reported the monitor disarmed —
+    while the session was still running. It did not fail to find the pane. It reported success for a pane
+    it never touched and left a running worker unmonitored and recorded as finished.
+
+    Fail-CLOSED, and the three answers are kept apart because their remedies differ (`FI-195`):
+
+    * alive HERE — proceed; this is the ordinary path and costs no search.
+    * found on ANOTHER server — refuse, naming both. The caller is pointed at the wrong server and the
+      remedy is one export, not a `--force`.
+    * found NOWHERE, or NOT SEARCHABLE — proceed. A worker that really has finished must still be
+      closable, and a caller with no search probe has not looked, so it must not claim it did. `None`
+      from `servers_with` is that second case and is deliberately not the empty list (`FI-417`).
+
+    The guard reads the LIVE servers rather than `record.tmux_socket`, and that is on purpose: the two
+    records this defect was found on carry no socket and never will, so a check that trusted the field
+    would be unable to fire on the very records that motivated it (`FI-303`).
+    """
+    name = record.tmux
+    if not name or ctx.sessions.alive(name):
+        return
+    here = ctx.sessions.socket
+    found = ctx.sessions.servers_with(name)
+    if not found:
+        return
+    others = [server for server in found if server != here]
+    if not others:
+        return
+    where = ", ".join(repr(server) for server in others)
+    raise FleetError(
+        f"{name!r} is not on the tmux server this command is talking to "
+        f"({here or 'the default server'!r}), but it IS alive on {where}. Acting now would report success "
+        f"for a pane it never touched: `close` would stamp the record closed and disarm the monitor while "
+        f"the worker kept running. · clears when: `export FLEET_TMUX_SOCKET={others[0]}` and run it again "
+        f"· clears who: whoever is running this command")
+
+
 def _do_abort(ctx: Ctx, parsed: Parsed) -> int:
     """Abandon an inflight instant, WITH A RECORDED REASON, as one transaction.
 
@@ -2387,6 +2434,12 @@ def _do_abort(ctx: Ctx, parsed: Parsed) -> int:
     if target.exists():
         raise BadInput(f"{target} already exists; an instant may hold only one state (OBS-14)")
     record = _record_for(ctx, child)
+    #: `SI-59`, and it belongs here — among the fallible steps, BEFORE the rename. Abort's own ordering
+    #: rule is that every step that can refuse happens before the irreversible one; a caller pointed at the
+    #: wrong tmux server would otherwise rename a running worker's folder to `-abort-` on the strength of a
+    #: session it could not see.
+    if record is not None:
+        _refuse_a_session_on_another_server(ctx, record)
     body = {"reason": reason, "at": ctx.now(), "from": child.name, "to": target.name,
             "todo_id": record.todo_id if record is not None else ""}
 
@@ -2506,6 +2559,10 @@ def _do_close(ctx: Ctx, parsed: Parsed) -> int:
     guard with no override is an alarm that blocks the fix (FD-9).
     """
     record = _record(ctx, parsed)
+    #: Before `--force` is even consulted. `--force` overrides the pane's own two refusals — a busy pane,
+    #: a queued pane — which are judgements about work in progress. Being pointed at the wrong server is
+    #: not a judgement to override; forcing it would kill nothing and stamp the record anyway.
+    _refuse_a_session_on_another_server(ctx, record)
     refusal = None if parsed.on("force") else _pane_refusal(ctx, record)
 
     if ctx.dry_run:

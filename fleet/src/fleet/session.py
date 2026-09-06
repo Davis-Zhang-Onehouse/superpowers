@@ -237,6 +237,15 @@ class Probes:
     #: working. A caller that does not supply it gets None, which `SessionLayer.pane_pid` reports as "not
     #: observable" rather than as "no process", because those are different facts.
     pane_pid: Optional[Callable[[str], Optional[int]]] = None
+    #: `SI-59`. The socket these probes talk to, or `""` for the default server. Carried as DATA because
+    #: a reader has to be able to say which server it looked on: "no session is alive" and "no session is
+    #: alive HERE" are different claims, and only the second one is true when the record names another.
+    socket: str = ""
+    #: `SI-59`. Every tmux server on this box that has a session by this name, or `None` when the caller
+    #: supplied no probe. `None` is NOT the empty list, and the distinction is the whole point: a missing
+    #: probe means UNOBSERVED, and reporting "found nowhere" for it would be `FI-417` — the same shape as
+    #: the DEAD this field exists to stop being claimed.
+    session_servers: Optional[Callable[[str], list]] = None
 
 
 #: tmux's exact-match marker. A BARE target is resolved by PREFIX: with only `itfleet-N-pre-ab` alive,
@@ -359,6 +368,25 @@ class SessionLayer:
 
     def __init__(self, probes: Probes):
         self.probes = probes
+
+    @property
+    def socket(self) -> str:
+        """Which tmux SERVER this layer talks to; `""` is the default server."""
+        return getattr(self.probes, "socket", "") or ""
+
+    def servers_with(self, name: str):
+        """Every server on this box holding a session called `name`, or `None` when unobservable.
+
+        `SI-59`. Called only when a session did NOT answer on this server, which is the only time the
+        answer changes anything and keeps the cost — one `has-session` per server — off the healthy path.
+
+        The `None` return is load-bearing. A caller that cannot distinguish "looked everywhere and found
+        nothing" from "could not look" will state the first while meaning the second, which is the exact
+        false claim this whole field exists to remove.
+        """
+        if self.probes.session_servers is None or not name:
+            return None
+        return list(self.probes.session_servers(name))
 
     # --- enumeration -------------------------------------------------------------------------
 
@@ -684,7 +712,33 @@ def default_probes(process_name: str = "claude", tmux_socket=_FROM_ENV) -> Probe
                 return int(token)
         return None
 
-    return Probes(list_processes=list_processes,
+    def session_servers(name: str) -> list:
+        """Every tmux server on this box with a session called `name`, socket names, sorted.
+
+        `SI-59`. tmux keeps one socket file per server under `$TMUX_TMPDIR|/tmp`/`tmux-<uid>`, so the
+        candidates are simply readable — the same enumeration `bin/fleet-view` was doing on its own, moved
+        in here so the verbs that ACT on a session can ask it too. A view that finds the session while
+        `close` cannot is not a working diagnostic; it is one of two implementations disagreeing.
+
+        The default server is included, spelled `""`, because a record can name it and a caller can be
+        pointed away from it.
+        """
+        directory = os.path.join(os.environ.get("TMUX_TMPDIR") or "/tmp", f"tmux-{os.getuid()}")
+        try:
+            candidates = sorted(os.listdir(directory))
+        except OSError:
+            #: No socket directory at all means no server has ever run for this uid. That IS an
+            #: observation — an empty list — and not the unobservable case `servers_with` returns None for.
+            return []
+        found = []
+        for candidate in candidates:
+            probe = ["tmux", "-L", candidate, "has-session", "-t", exact_session_target(name)]
+            if run(probe).returncode == 0:
+                found.append(candidate)
+        return found
+
+    return Probes(list_processes=list_processes, socket=tmux_socket or "",
+                  session_servers=session_servers,
                   capture_pane=capture_pane,
                   has_session=has_session,
                   start_session=start_session,

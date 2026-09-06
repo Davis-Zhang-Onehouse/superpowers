@@ -26,6 +26,7 @@ the injected `Probes`, an injected git and an injected command runner, and every
 `cli` actually wrote to the streams it was handed (`OBS-62` — never a model of the output).
 """
 import ast
+import dataclasses
 import io
 import json
 import os
@@ -262,12 +263,24 @@ class Fleet:
         #: `FI-7`: a FAILED capture is `None`; a genuinely EMPTY pane is `""`. The fixture has to be able
         #: to express both, or a case cannot tell which one it is testing — which is the defect itself.
         self.capture_fails = set()
+        #: `SI-59`. `socket` is which server this fixture's probes speak for; `elsewhere` maps another
+        #: server's socket name to the sessions living on it, and is empty unless a case says otherwise.
+        self.socket = "fixture-server"
+        self.elsewhere = {}
         probes = Probes(
             list_processes=lambda: [] if self.live_sessions_fail else list(self.procs),
             capture_pane=lambda name: None if name in self.capture_fails else self.panes.get(name, ""),
             has_session=lambda name: name in self.tmux_live,
             start_session=lambda name, cwd, cmd: self.started.append((name, str(cwd), cmd)),
-            kill_session=self._kill)
+            kill_session=self._kill,
+            #: `SI-59`. The fixture IS a server, and it has a name — `elsewhere` is the fixture's model of
+            #: another one. A session on this server answers with this socket; a session the fixture has
+            #: put `elsewhere` answers with that socket and with nothing on this one, which is exactly the
+            #: shape a record dispatched before a socket rename has.
+            socket=self.socket,
+            session_servers=lambda name: ([self.socket] if name in self.tmux_live else [])
+                                         + sorted(s for s, names in self.elsewhere.items()
+                                                  if name in names))
         self.sessions = SessionLayer(probes)
         self.store = Store(self.home)
         self.pool = Pool(self.home,
@@ -322,7 +335,8 @@ class Fleet:
         return path
 
     def worker(self, name, *, optype="append", state="inflight", pane=BUSY_PANE, live=True,
-               base=OURS, slot=None, launched=True, runbook=RUNBOOK, handoff="Updated: now\n"):
+               base=OURS, slot=None, launched=True, runbook=RUNBOOK, handoff="Updated: now\n",
+               server=None):
         self._n += 1
         curr = f"0730{self._n:04d}"
         folder = f"00000000-{curr}-{state}-{optype}-{name}"
@@ -334,11 +348,21 @@ class Fleet:
         self.store.write(Record(
             todo_id=todo_id, child_instant=str(path), base_instant=base, slot=slot or "", tmux=tmux,
             profile=str(self.profile()), golden=str(self.slots_dir), lineage_base="", title=name,
-            dispatched_at=NOW, launched_at=NOW if launched else None))
+            tmux_socket=server or "", dispatched_at=NOW, launched_at=NOW if launched else None))
         if slot:
             self.pool.claim(todo_id=todo_id, tmux=tmux, base_instant=base,
                             child_instant=str(path), slot=slot)
-        if live:
+        if server is not None:
+            #: `SI-59`. Dispatched on ANOTHER tmux server: the process is running and visible to `pgrep`,
+            #: and its session answers on that server and on no other. Nothing here is on THIS server —
+            #: which is the whole point, and the state a record dispatched before a socket rename is in.
+            self.elsewhere.setdefault(server, set()).add(tmux)
+            #: NOT in `procs` either, and that is the machine's own behaviour rather than a simplification:
+            #: `list_processes` joins `pgrep` to tmux PANE OWNERSHIP, and pane ownership can only be read
+            #: from the server the pane is on. Pointed at the wrong one, a live worker is invisible to the
+            #: liveness probe as well as to `has-session` — which is how a running worker gets reported
+            #: DEAD rather than merely unreachable.
+        elif live:
             self.procs.append(LiveSession(pid=1000 + self._n, cwd=path, name=tmux))
             self.panes[tmux] = pane
             self.tmux_live.add(tmux)
@@ -4034,3 +4058,109 @@ class TestANamedDestinationIsWholeNotHalf(unittest.TestCase):
     def test_with_nothing_named_it_derives_from_the_home_that_won(self):
         got = self._instants(["--name", "x"], {"FLEET_HOME": str(self.home)})
         self.assertEqual(self.home / "instants", got)
+
+
+#: A socket name that appears nowhere else in any output. `"fleet"` — the real one — is also this tool's
+#: own name, so asserting on it would pass on almost anything the CLI prints.
+OTHER_SERVER = "someOtherTmuxServer"
+
+
+class TestAVerbThatActsOnASessionOnAnotherServer(CliCase):
+    """`SI-59`. A record carries `tmux` — a session NAME — and a name is not an address.
+
+    Measured on the live box before this guard existed: `fleet close --id <live worker>` from a shell
+    pointed at a different tmux server returned **rc=0**, printed `closed dt-<name>`, stamped `closed_at`
+    and reported the monitor disarmed — while `tmux -L <other> ls` still listed the session. It did not
+    fail to find the pane; it reported success for a pane it never touched, and left a running worker
+    unmonitored and recorded as finished.
+
+    So the guard is fail-CLOSED and it is placed on the verbs that ACT. It has to work for records that
+    carry no socket at all, because the two records this was found on never will.
+    """
+
+    def elsewhere_worker(self, fleet, name="strandedWorker", **over):
+        #: No pool slot on purpose. A slot HOLDER already gets `SI-39`'s UNREACHABLE, so a case that
+        #: claimed one would pass without the guard under test ever running.
+        fleet.worker(name, server=OTHER_SERVER, **over)
+        return fleet.ids[name]
+
+    def test_close_refuses_and_names_both_servers(self):
+        fleet = self.loaded()
+        todo = self.elsewhere_worker(fleet)
+        code, out, err = fleet.run(["close", "--id", todo])
+        self.assertNotEqual(code, EXIT_OK, f"close reported success for a pane on another server: {out}")
+        self.assertIn(OTHER_SERVER, out + err, "the refusal does not name the server the session is on")
+        self.assertIn("fixture-server", out + err, "the refusal does not name the server it looked on")
+        self.assertEqual(fleet.killed, [], "close killed something while refusing")
+        self.assertIsNone(fleet.store.read(todo).closed_at,
+                          "close stamped closed_at for a pane it never touched")
+
+    def test_abort_refuses_and_leaves_the_folder_alone(self):
+        fleet = self.loaded()
+        todo = self.elsewhere_worker(fleet, name="strandedAbort")
+        before = sorted(p.name for p in fleet.instants.iterdir())
+        code, out, err = fleet.run(["abort", "--instant", str(fleet.paths["strandedAbort"]),
+                                    "--reason", "assumed dead"])
+        self.assertNotEqual(code, EXIT_OK, f"abort proceeded against a live session elsewhere: {out}")
+        self.assertEqual(sorted(p.name for p in fleet.instants.iterdir()), before,
+                         "abort renamed the instant folder of a worker that is still running")
+
+    def test_a_session_that_is_on_NO_server_is_still_closable(self):
+        """The guard must not turn every genuinely finished worker into a refusal. Paired with the case
+        above so a rule that refused everything would fail here rather than look like a pass."""
+        fleet = self.loaded()
+        fleet.worker("finishedWorker", live=False)
+        code, out, err = fleet.run(["close", "--id", fleet.ids["finishedWorker"]])
+        self.assertEqual(code, EXIT_OK, f"close refused a session no server has: {out}{err}")
+
+    def test_an_UNOBSERVABLE_search_does_not_refuse(self):
+        """`servers_with` returns None when no probe was supplied, and None is not the empty list. A
+        caller that cannot look must not act as though it looked and found something — in either
+        direction. `FI-417` cuts both ways here."""
+        fleet = self.loaded()
+        fleet.worker("blindWorker", live=False)
+        fleet.sessions.probes = dataclasses.replace(fleet.sessions.probes, session_servers=None)
+        code, out, err = fleet.run(["close", "--id", fleet.ids["blindWorker"]])
+        self.assertEqual(code, EXIT_OK, f"close refused because it could not search: {out}{err}")
+
+
+class TestTheRecordNamesItsServer(CliCase):
+    """`SI-59`. The fix underneath the guard: write the server down, so no later reader has to guess."""
+
+    def test_dispatch_records_the_socket_it_created_the_session_on(self):
+        fleet = self.loaded()
+        code, out, err = fleet.run(["dispatch", "--profile", str(fleet.profile()),
+                                    "--title", "socketRecorded", "--base", FRESH_BASE_DIGITS,
+                                    "--optype", "append"])
+        self.assertEqual(code, EXIT_OK, f"{out}{err}")
+        written = [r for r in fleet.store.all() if r.title == "socketRecorded"]
+        self.assertEqual(len(written), 1, f"expected one record, got {written}")
+        self.assertEqual(written[0].tmux_socket, "fixture-server",
+                         "the dispatch recorded no server, so every later reader has to guess again")
+
+    def test_an_EMPTY_socket_is_not_measured_and_not_the_default_server(self):
+        """The two records this was found on carry no socket and never will. Absence has to stay absence:
+        reading it as "the default server" would manufacture a fact and put the false DEAD back."""
+        fleet = self.loaded()
+        fleet.worker("preFixWorker")
+        self.assertEqual(fleet.store.read(fleet.ids["preFixWorker"]).tmux_socket, "")
+
+
+class TestNotClaimingDEADAboutAnotherServer(CliCase):
+    """`SI-59`, the reporting half. `SI-39` gave a live-pid holder its own state because DEAD is an
+    ACTIONABLE claim and a wrong one invites a human to reap a running worker. A record that NAMES a
+    different server is the same claim with a cheaper proof: no probe is needed, the record says so."""
+
+    def test_a_record_naming_another_server_is_not_reported_DEAD(self):
+        fleet = self.loaded()
+        fleet.worker("otherServerWorker", server=OTHER_SERVER)
+        code, out, err = fleet.run(["status", "--id", fleet.ids["otherServerWorker"], "--porcelain"])
+        rows = dict(line.split("\t")[:2] for line in out.splitlines() if "\t" in line)
+        self.assertNotEqual(rows.get("state"), "DEAD",
+                            f"reported DEAD about a session on a server it never looked at: {out}")
+
+    def test_the_note_names_the_server_the_record_was_dispatched_on(self):
+        fleet = self.loaded()
+        fleet.worker("otherServerNoted", server=OTHER_SERVER)
+        code, out, err = fleet.run(["status", "--id", fleet.ids["otherServerNoted"]])
+        self.assertIn(OTHER_SERVER, out + err, "the report does not name the server to look on")
