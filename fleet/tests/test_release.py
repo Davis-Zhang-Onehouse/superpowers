@@ -1374,8 +1374,27 @@ class CliCase(ReleaseCliFixture, unittest.TestCase):
     # --- the two refusals that carry the design ----------------------------------------------------
 
     def test_a_mutating_release_verb_refuses_when_no_release_area_is_named(self):
+        """`SI-15` for the release area.
+
+        Run from a directory with NO `.fleet-root` at or above it, and that is not decoration: the release
+        area now also derives from a root marker, so on a marked box this case's cwd resolves one and the
+        verb correctly stops refusing. Left as it was, the test passed on an unmarked box and failed the
+        day `~/davis_root/.fleet-root` was written — a case whose verdict depended on the developer's own
+        filesystem. §R's `R7` is written unmarked for the same reason.
+        """
+        import os
+        from unittest import mock
         from fleet import EXIT_BAD_INPUT
-        code = self.run_verb("release-promote", "--version", "0.1.0", "--home", str(self.home))
+        bare = pathlib.Path(self.tmp) / "unmarked-cwd" if hasattr(self, "tmp") else None
+        bare = bare or pathlib.Path(tempfile.mkdtemp()) / "unmarked-cwd"
+        bare.mkdir(parents=True, exist_ok=True)
+        here = os.getcwd()
+        self.addCleanup(os.chdir, here)
+        os.chdir(bare)
+        clean = {k: v for k, v in os.environ.items() if k != "FLEET_ROOT"}
+        clean["HOME"] = str(bare.parent)
+        with mock.patch.dict(os.environ, clean, clear=True):
+            code = self.run_verb("release-promote", "--version", "0.1.0", "--home", str(self.home))
         self.assertEqual(code, EXIT_BAD_INPUT)
         self.assertIn("FLEET_RELEASES", self.err.getvalue())
         self.assertEqual(sorted(p.name for p in self.releases.iterdir()), [],
