@@ -590,6 +590,18 @@ def resolve_socket(parsed: Parsed, environ: dict, cwd):
     return resolved.socket if resolved is not None else None
 
 
+def active_root(parsed: Parsed):
+    """The root this invocation resolved, or `None`. The handler-side companion to `resolve_root`, which
+    takes its environment and cwd as arguments so it stays testable."""
+    return resolve_root(parsed, dict(os.environ), Path.cwd())
+
+
+def active_root_str(parsed: Parsed) -> str:
+    """The active root as a string for `Record.root`, or `""` when there is none."""
+    resolved = active_root(parsed)
+    return "" if resolved is None else str(resolved.path)
+
+
 def assert_within_root(path, root_path, what: str) -> None:
     """Refuse a path that leaves its root, naming BOTH. `G1`.
 
@@ -763,7 +775,17 @@ def _resolve_instant(ctx: Ctx, raw) -> Path:
 
 
 def _record(ctx: Ctx, parsed: Parsed) -> Record:
-    return ctx.store.read(ctx.store.resolve_id(parsed.get("id")))
+    record = ctx.store.read(ctx.store.resolve_id(parsed.get("id")))
+    #: `G1`'s secondary half. Containment at dispatch cannot see a store COPIED or restored between
+    #: roots, which is the only way to reach this state — so it is cheap insurance rather than a live
+    #: defence, and it is written as such. An unnamed root is NOT MEASURED (`root_mismatch`).
+    resolved = active_root(parsed)
+    if resolved is not None and root_mismatch(record, str(resolved.path)):
+        raise BadInput(
+            f"record {record.todo_id!r} was written under root {record.root} and this call resolved "
+            f"{resolved.path}. Refusing: a store reached from the wrong root reports another fleet's "
+            f"work as this one's. Clears when: run from {record.root}, or pass `--root {record.root}`.")
+    return record
 
 
 def _child_of(ctx: Ctx, record: Record) -> Path:
@@ -1037,6 +1059,14 @@ def _do_dispatch(ctx: Ctx, parsed: Parsed) -> int:
     """
     #: `SI-56`. Before anything is created, and before any irreversible step.
     require_named_instants(parsed)
+    #: `G1`. The instants directory must be inside this root, or one root's worker lands in another
+    #: root's tree — invisible afterwards, because every verb resolves the child through its record.
+    #:
+    #: The SLOT needs no check here: `G3` refuses to ENROL a workspace outside the root, which is
+    #: strictly earlier and cheaper than refusing a lease, so a leased slot cannot be foreign.
+    _dispatch_root = active_root(parsed)
+    if _dispatch_root is not None:
+        assert_within_root(ctx.instants_dir, _dispatch_root.path, "instants directory")
     profile = Profile.load(Path(parsed.get("profile")))
     optype = parsed.get("optype", "append")
     base = parsed.get("base", ROOT_BASE)
@@ -1173,7 +1203,8 @@ def _do_dispatch(ctx: Ctx, parsed: Parsed) -> int:
                         #: `SI-34`. Persisted, not merely evaluated: an override is a judgement that a guard
                         #: was wrong here, and it has to outlive the terminal it was typed into.
                         override_reason=parsed.get("override") or "",
-                        milestone=milestone_id, dispatched_at=ctx.now())
+                        milestone=milestone_id, root=active_root_str(parsed),
+                        dispatched_at=ctx.now())
         # `SI-32`. Each repo's HEAD as the slot was leased — read-only, and read BEFORE the worker exists.
         # This is what the prebuilt native artifacts were built from, and the only way to answer later
         # whether the source has moved out from under them. `dispatch` performs no checkout: mechanism B is
@@ -1335,7 +1366,8 @@ def _do_resume(ctx: Ctx, parsed: Parsed) -> int:
                     lineage_mode=existing.lineage_mode if existing else "",
                     override_reason=existing.override_reason if existing else "",
                     golden_base=existing.golden_base if existing else "",
-                    title=name.name, dispatched_at=existing.dispatched_at if existing else ctx.now(),
+                    title=name.name, root=active_root_str(parsed),
+                    dispatched_at=existing.dispatched_at if existing else ctx.now(),
                     launched_at=ctx.now() if ctx.sessions.alive(tmux) else
                     (existing.launched_at if existing else None))
     source = ctx.harvest.record_dispatch(ctx.store, record)

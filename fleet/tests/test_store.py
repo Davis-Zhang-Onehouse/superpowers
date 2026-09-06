@@ -150,3 +150,46 @@ class TestACorruptFileIsRefusedByName(unittest.TestCase):
 
         with self.assertRaises(BadInput):
             Store(self.tmp).all()
+
+
+class TestRecordRoot(unittest.TestCase):
+    """`G1`'s durable half. `SCHEMA_VERSION` stays 1 deliberately: `from_json` refuses BOTH a version
+    mismatch and an unknown field, so bumping it would refuse all 75 records in the live store on the
+    first read — a migration nobody asked for, to add a field with a default.
+    """
+
+    def test_the_schema_version_did_not_move(self):
+        self.assertEqual(SCHEMA_VERSION, 1,
+                         "bumping this refuses every record already on disk; see the class docstring")
+
+    def test_a_record_written_before_isolation_still_loads(self):
+        legacy = rec().to_json()
+        del legacy["root"]
+        self.assertEqual(Record.from_json(legacy).root, "")
+
+    def test_a_root_round_trips(self):
+        self.assertEqual(Record.from_json(rec(root="/home/u/davis_root").to_json()).root,
+                         "/home/u/davis_root")
+
+
+class TestRootMismatch(unittest.TestCase):
+    """`FI-417`: a check that cannot see something must not report an answer about it. A pre-isolation
+    record carries no root, and reading that absence as "a different root" would refuse every one."""
+
+    def test_an_absent_root_is_not_measured_rather_than_a_mismatch(self):
+        from fleet import cli
+        self.assertFalse(cli.root_mismatch(rec(), "/home/u/davis_root"))
+
+    def test_a_matching_root_is_not_a_mismatch(self):
+        from fleet import cli
+        self.assertFalse(cli.root_mismatch(rec(root="/tmp"), "/tmp"))
+
+    def test_a_different_root_is_a_mismatch(self):
+        from fleet import cli
+        self.assertTrue(cli.root_mismatch(rec(root="/tmp"), "/var"))
+
+    def test_an_unknown_active_root_is_not_measured_either(self):
+        """Both directions of absence. Only a record that NAMES a root, against an active root that is
+        also known, can disagree."""
+        from fleet import cli
+        self.assertFalse(cli.root_mismatch(rec(root="/tmp"), ""))

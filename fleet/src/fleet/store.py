@@ -58,6 +58,15 @@ class Record:
     #: about a milestone (a coordinator or a compaction instant is dispatched for a role). Without it
     #: `board` could show N workers and `roadmap` N milestones with nothing connecting them.
     milestone: str | None = None
+    #: `G1`. Which fleet ROOT this dispatch belongs to, resolved and absolute.
+    #:
+    #: Defaulted, and `SCHEMA_VERSION` deliberately NOT bumped: `from_json` refuses both a version
+    #: mismatch and an unknown field, so a bump would refuse all 75 records in the live store on the first
+    #: read — a migration nobody asked for, to add a field that has a default. An EMPTY root means
+    #: "written before isolation", which is NOT MEASURED and never a mismatch: reading absence as an
+    #: answer is `FI-417`, where a grep that could not see 15 issue sections reported zero and the zero
+    #: was believed.
+    root: str = ""
     launched_at: str | None = None
     gate_verdict: str | None = None
     harvested_at: str | None = None
