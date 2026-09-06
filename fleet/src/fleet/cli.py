@@ -72,6 +72,7 @@ from fleet.identity import ROOT_BASE, InstantName, resolve
 from fleet.layout import INFO, VIOLATION
 from fleet.pool import Pool, ReapReport
 from fleet.profiles import Profile
+from fleet import root as root_mod
 from fleet.reconcile import (COMPLETE, KIND_WORKER, PHASE_AWAITING_CI, RUNNING, needs_a_human,
                              reconcile)
 from fleet.release import (CANDIDATE, DEV, HISTORY_COLUMNS, META_DIR, RELEASE_RETENTION, RELEASED, Releases, Version,
@@ -86,7 +87,8 @@ from fleet.review import Finding, Review, exit_code_for
 from fleet import origin as origin_mod
 from fleet.origin import Origin
 from fleet.roadmap import ATTENTION, COORDINATOR, TERMINAL, Milestone, Roadmap
-from fleet.session import SessionLayer, default_probes, plain as pane_plain
+from fleet.session import (TMUX_SOCKET_ENV, SessionLayer, default_probes,
+                           plain as pane_plain)
 from fleet.store import Declarations, Record, Store
 from fleet.workspace import GOLDEN_FILE, Workspace, default_git
 
@@ -136,6 +138,7 @@ HELP_FLAG = Flag(HELP, False, help="print this verb's derived usage and exit 0")
 COMMON_FLAGS = (
     Flag("--home", True, help="the record/pool store root; overrides $FLEET_HOME"),
     Flag("--instants-dir", True, help="where instants live; overrides $FLEET_INSTANTS"),
+    Flag("--root", True, help="the fleet root; its marker supplies home, releases and the tmux socket"),
     Flag("--porcelain", False, help="machine form on stdout: tab-separated, no banner (NFR2-7)"),
     HELP_FLAG,
 )
@@ -466,59 +469,185 @@ class Ctx:
                               instants_dir=self.instants_dir, **over)
 
 
+def resolve_root(parsed: Parsed, environ: dict, cwd):
+    """Which root, by tiers 2, 4 and 5 — `--root`, `$FLEET_ROOT`, then the marker walk. `None` when
+    nothing names one and no marker is found.
+
+    Tiers 1 and 3 name individual COMPONENTS and are handled by the component resolvers below. A caller
+    who says `--home` has named a store without saying anything about a root, and inventing one for them
+    is `I2-11` in the other direction — a value the caller never mentioned deciding a destination they
+    typed out.
+
+    A root that IS named and has no readable marker is refused rather than skipped: falling through to
+    another tier would silently select a different store than the one the caller asked for.
+    """
+    named = parsed.get("root") or environ.get("FLEET_ROOT")
+    if named:
+        return root_mod.load(Path(named))
+    return root_mod.discover(Path(cwd), Path(environ.get("HOME") or Path.home()))
+
+
+def _root_source(parsed: Parsed, environ: dict, resolved) -> str:
+    """Where a derived value came from, for the line `G2` prints."""
+    if parsed.get("root"):
+        return "--root"
+    if environ.get("FLEET_ROOT"):
+        return "$FLEET_ROOT"
+    return f"marker at {resolved.path / root_mod.MARKER}"
+
+
+def resolve_home(parsed: Parsed, environ: dict, cwd) -> tuple:
+    """`(home, source)` — the record/pool store, and where the answer came from.
+
+    `SI-15` used to let a READ-ONLY verb fall back to `$HOME/.fleet`, on the ground that *"nothing is
+    enrolled" is a real answer to a real question*. Under per-root isolation that ground is gone: the
+    fallback does not answer about no fleet, it answers about a **different root's** fleet — confidently,
+    with a population row and everything. That is `FI-417`'s shape, a true sentence answering the wrong
+    question, so the read refuses too and the refusal names the directory it searched from.
+
+    The cost is real and is accepted deliberately: `fleet board` in an unmarked directory no longer prints
+    an empty board, it prints a refusal that says what would fix it.
+    """
+    if parsed.get("home"):
+        return Path(parsed.get("home")), "--home"
+    if environ.get("FLEET_HOME"):
+        return Path(environ["FLEET_HOME"]), "$FLEET_HOME"
+    resolved = resolve_root(parsed, environ, cwd)
+    if resolved is not None:
+        return resolved.store, _root_source(parsed, environ, resolved)
+    raise BadInput(root_mod.refusal(Path(cwd), Path(environ.get("HOME") or Path.home()), parsed.verb))
+
+
+def instants_were_named(parsed: Parsed, environ: dict) -> bool:
+    """Did the caller SAY where instants live, at any tier?"""
+    return bool(parsed.get("instants-dir") or parsed.get("home")
+                or environ.get("FLEET_INSTANTS") or environ.get("FLEET_HOME"))
+
+
+def resolve_instants(parsed: Parsed, environ: dict, cwd) -> Path:
+    """Where instants live. Named, or derived from the store.
+
+    Every verb needs this resolvable — `reconcile` and `guards.blocking_compactions` read it on the READ
+    path too — so it always answers. What it does NOT do is let a verb CREATE an instant somewhere nobody
+    named; that refusal is `require_named_instants`, applied at the two sites that create, because
+    refusing here would refuse `board` as well and a read that enumerates an empty derived directory
+    harms nobody.
+    """
+    if parsed.get("instants-dir"):
+        return Path(parsed.get("instants-dir"))
+    if parsed.get("home"):
+        return Path(parsed.get("home")) / "instants"
+    if environ.get("FLEET_INSTANTS"):
+        return Path(environ["FLEET_INSTANTS"])
+    if environ.get("FLEET_HOME"):
+        return Path(environ["FLEET_HOME"]) / "instants"
+    home, _ = resolve_home(parsed, environ, cwd)
+    return home / "instants"
+
+
+def require_named_instants(parsed: Parsed, environ: dict = None) -> None:
+    """Refuse to CREATE an instant in a directory nobody named. `SI-56` / `FI-382`.
+
+    With `FLEET_INSTANTS` unset, `dispatch` derived `$FLEET_HOME/instants` and planted the child there
+    instead of the effort tree — rc=0, all four guards `allow`. Nothing downstream disagreed, because
+    every verb resolves the child through its record, so the damage was invisible until the endgame
+    compaction enumerated the instants directory and the worker was not in it.
+
+    Note this is NOT fixed by per-root isolation, and the spec's shorthand is worth correcting here: under
+    isolation the stray lands at `$ROOT/.fleet/instants`, which is the RIGHT root and still the WRONG
+    tree. The harm was always intra-root. Only refusing to invent a destination closes it.
+
+    Applied at the creation sites rather than in the resolver, because the resolver also answers for
+    `board`, and a READ that enumerates a derived directory harms nobody. `test_root_resolution` asserts
+    this guard is reached by every handler that calls `layout.bootstrap`, so a third creating verb cannot
+    be added without it.
+    """
+    environ = os.environ if environ is None else environ
+    if instants_were_named(parsed, environ):
+        return
+    raise BadInput(
+        f"{parsed.verb!r} creates an instant and nothing named the directory to create it in. Pass "
+        f"`--instants-dir <path>` or export FLEET_INSTANTS. There is deliberately no derived default for "
+        f"a CREATE: `$FLEET_HOME/instants` used to be one, and it planted a dispatched child outside its "
+        f"effort tree at rc=0 with every guard green — invisible to every verb, because they all resolve "
+        f"the child through its record, until the endgame compaction could not find it (SI-56).")
+
+
+def resolve_socket(parsed: Parsed, environ: dict, cwd):
+    """The tmux SERVER: `$FLEET_TMUX_SOCKET`, else `fleet-<root name>`, else the default server.
+
+    Per-root because `close`, `abort` and `harvest` kill sessions BY NAME and session names are
+    `dt-<subject>` chosen by a coordinator, so two roots on one server can collide and the loser dies with
+    no diagnostic. `fleet-env.sh` already argues a private server over the default one for exactly this
+    reason; this takes the argument one step further.
+
+    The environment still wins, and that is load-bearing rather than a courtesy: `it_section` exports this
+    variable for every IT section, and silently overriding it would point the whole suite at one server.
+    """
+    if environ.get(TMUX_SOCKET_ENV):
+        return environ[TMUX_SOCKET_ENV]
+    resolved = resolve_root(parsed, environ, cwd)
+    return resolved.socket if resolved is not None else None
+
+
+def assert_within_root(path, root_path, what: str) -> None:
+    """Refuse a path that leaves its root, naming BOTH. `G1`.
+
+    Resolved on both sides. During migration `~/.fleet` and `~/davis_root/.fleet` are the same directory
+    reached two ways, and comparing unresolved strings would manufacture a mismatch out of a symlink. It
+    is a PATH comparison rather than a prefix test, because `/x/davis_root2` starts with `/x/davis_root`.
+    """
+    resolved = Path(path).resolve()
+    root_path = Path(root_path).resolve()
+    if root_path != resolved and root_path not in resolved.parents:
+        raise BadInput(
+            f"the {what} {resolved} is outside this fleet's root {root_path}. A dispatch that points out "
+            f"of its own root is how one root's worker ends up in another root's tree, and it is "
+            f"invisible afterwards because every verb resolves the child through its record (SI-56). "
+            f"Clears when: name a path under {root_path}, or run from the root that owns {resolved}.")
+
+
+def root_mismatch(record, active_root: str) -> bool:
+    """True only when the record NAMES a root and it differs from the active one.
+
+    An EMPTY root is NOT MEASURED, never a mismatch. Records written before isolation carry none, and
+    reading that absence as "a different root" would refuse every one of them — `FI-417`'s rule, which is
+    that a check unable to see something must not report an answer about it.
+    """
+    if not record.root or not active_root:
+        return False
+    return Path(record.root).resolve() != Path(active_root).resolve()
+
+
 def default_context(parsed: Parsed, out, err) -> Ctx:
     """The real context: the live probes, the real git, a real command runner.
 
     Nothing in this function is reachable from a handler, which is what lets the outward-state audit hold
     while `verify` and `selftest` still run real commands: a handler calls `ctx.runner`, never a spawner.
+
+    Every destination is resolved by the six-tier chain in `resolve_home` / `resolve_instants` /
+    `resolve_socket`, which is where the reasoning lives. It is spelled once, there, so `SI-15`'s revision
+    and `SI-56`'s deletion cannot drift out of step with each other.
     """
-    # `SI-15`. A MUTATING verb with neither `--home` nor `FLEET_HOME` REFUSES rather than inventing a
-    # destination. Measured before this over all 17 mutating verbs: 4 wrote a real store under
-    # `$HOME/.fleet` and exited 0 — `enroll`, `init`, `resume`, `set-golden` — `complete` and `abort`
-    # RENAMED instants there, and **not one of the 17** mentioned `FLEET_HOME` or `--home` in any
-    # diagnostic. Plan 6's `A1` states the stakes exactly: *"a default that silently writes shared state is
-    # how the live stores get touched."*
-    #
-    # A READ-ONLY verb keeps the default, deliberately. "Nothing is enrolled" is a real answer to a real
-    # question, and refusing it would make discovery impossible for someone who has not yet chosen a store —
-    # a read of a store that does not exist costs nothing, while a WRITE to one nobody named is the defect.
-    # `read_only` is the same flag that already makes `--dry-run` derived rather than remembered, so this
-    # rule cannot drift out of step with the verb table.
-    named_home = parsed.get("home") or os.environ.get("FLEET_HOME")
-    spec = VERBS.get(parsed.verb)
-    if not named_home and spec is not None and not spec.read_only:
-        raise BadInput(
-            f"{parsed.verb!r} writes to a store and no store was named: pass `--home <path>` or export "
-            f"FLEET_HOME. There is no default for a write. Falling back to {Path.home() / '.fleet'} is how "
-            f"a fleet's real state gets touched by a command that meant to work somewhere else, so it is "
-            f"refused rather than guessed.")
-    home = Path(named_home or (Path.home() / ".fleet"))
-    # `I2-11`. Precedence here is ordered by HOW SPECIFICALLY THE CALLER NAMED THE DESTINATION — flags
-    # before environment — and not by which variable happens to hold it. The line this replaced was
-    # `--instants-dir or $FLEET_INSTANTS or home/"instants"`, which reads correctly and is wrong for a
-    # reason four lines up: `named_home` has already COLLAPSED `--home` and `$FLEET_HOME` into one value,
-    # so by the time the instants directory is resolved there is no longer any record that the home was
-    # TYPED rather than inherited. An explicit `--home` was therefore out-ranked, for a component of its
-    # own destination, by an environment variable the caller never mentioned.
-    #
-    # Measured, not reasoned about (2026-08-08): the shared tmux server on this box exports
-    # `FLEET_INSTANTS` globally, so every seeded shell inherits the FIRST effort's tree. `fleet init
-    # --home <sandbox>` wrote its folder into a LIVE effort tree and exited 0. Ten strays reached one that
-    # way and `FI-196` is the instant that came up believing it WAS the coordinator, because it inherited
-    # the coordinator's instants directory. `guards.blocking_compactions()` is the severe consumer: it
-    # reads this path DIRECTLY and counts record-less `*-inflight-compact-*` folders, so one stray of that
-    # shape refuses EVERY dispatch in an effort while `subjects()` stays clean.
-    #
-    # `$FLEET_INSTANTS` is deliberately still ABOVE `home/"instants"`: fifteen IT runners and every script
-    # in the coordinator's tick name the instants directory that way and nothing else, so demoting it
-    # below a DERIVED default would trade this defect for a larger one. It is demoted only below a flag,
-    # and a caller who genuinely wants the store and the instants apart says `--instants-dir` — which is
-    # the tier that has always won, and the remedy that does not have to be remembered as `env -u`.
-    named_instants = parsed.get("instants-dir") or (
-        f"{parsed.get('home')}/instants" if parsed.get("home") else None)
-    instants = Path(named_instants or os.environ.get("FLEET_INSTANTS") or (home / "instants"))
-    sessions = SessionLayer(default_probes())
-    pool = Pool(home, cwd_probe=_cwd_holders, alive=sessions.alive)
+    environ = dict(os.environ)
+    cwd = Path.cwd()
+    home, home_source = resolve_home(parsed, environ, cwd)
+    instants = resolve_instants(parsed, environ, cwd)
+    resolved_root = resolve_root(parsed, environ, cwd)
+
+    #: `G2`, and `FI-421` is why it is unconditional. That finding's SECOND defect — a function written to
+    #: remove a silent fallback shipping WITH one — was caught only by printing the resolved path: "reading
+    #: the code would not have shown it; printing the resolved path did." A chain with five tiers above a
+    #: refusal says where it landed, every call.
+    #:
+    #: On stderr, beside the cadence line, for the reason that line is there: stdout carries a column
+    #: contract that `--porcelain` consumers parse byte-for-byte.
+    shown = home.parent if home.name == ".fleet" else home
+    print(f"root {shown} ({home_source})", file=err)
+
+    sessions = SessionLayer(default_probes(tmux_socket=resolve_socket(parsed, environ, cwd)))
+    pool = Pool(home, cwd_probe=_cwd_holders, alive=sessions.alive,
+                fleet_root=resolved_root.path if resolved_root is not None else None)
     return Ctx(home=home, instants_dir=instants, store=Store(home), pool=pool, sessions=sessions,
                harvest=Harvest(home), out=out, err=err, dry_run=parsed.on("dry-run"),
                porcelain=parsed.on("porcelain"), git=default_git(), runner=_default_runner())
@@ -723,6 +852,8 @@ def _do_init(ctx: Ctx, parsed: Parsed) -> int:
     register the registry points at — a source whose register does not exist is a broken registration,
     which is a different (and worse) failure than an empty one.
     """
+    #: `SI-56`. Before anything is created, and before any irreversible step.
+    require_named_instants(parsed)
     base = parsed.get("base", ROOT_BASE)
     optype = parsed.get("optype", "append")
     name = InstantName.new(base=base, now=_stamp(ctx.now()), optype=optype,
@@ -904,6 +1035,8 @@ def _do_dispatch(ctx: Ctx, parsed: Parsed) -> int:
     while it is held. Admission becomes a property of a won claim rather than of a read, and a refusal at
     that point gives the claim straight back.
     """
+    #: `SI-56`. Before anything is created, and before any irreversible step.
+    require_named_instants(parsed)
     profile = Profile.load(Path(parsed.get("profile")))
     optype = parsed.get("optype", "append")
     base = parsed.get("base", ROOT_BASE)
