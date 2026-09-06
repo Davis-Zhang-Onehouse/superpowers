@@ -247,6 +247,41 @@ else
 fi
 
 # ==================================================================================================
+# R6b — `FI-382`'s OWN configuration, which R6 could not reach.
+#
+#       R6 drives the case where the STORE is derived from the marker. The live incident was not that: it
+#       was a shell with `FLEET_HOME` exported by `scripts/fleet-env.sh` and no `FLEET_INSTANTS`, which is
+#       what every shell on this box has. `0.4.0` shipped the guard accepting an exported `FLEET_HOME` as
+#       "the caller named where instants go", so measured at `0.5.0` a dispatch in that environment still
+#       returned rc=0 and planted the child in `$FLEET_HOME/instants` — the defect intact behind the
+#       control written to stop it (`FI-303`).
+#
+#       The `--home` FLAG still names them, and the second half asserts that: the asymmetry is the fix,
+#       not a side effect. A flag is in the command somebody typed for this invocation; an export was made
+#       by a shell rc nobody re-reads (`I2-11`).
+# ==================================================================================================
+R6B="$EV/r6b-store"; rm -rf "$R6B"; mkdir -p "$R6B"
+( cd "$R1/ws1" && env -u FLEET_INSTANTS -u FLEET_TMUX_SOCKET -u FLEET_ROOT HOME="$RHOME" \
+    FLEET_HOME="$R6B" PYTHONPATH="$INSTANT/src" python3 -m fleet.cli \
+    init --name r6bstray --optype append ) > "$OUT/R6b.out" 2>&1
+r6b_rc=$?
+cat "$OUT/R6b.out"
+r6b_cites=0;   grep -q 'SI-56' "$OUT/R6b.out" && r6b_cites=1
+r6b_nothing=0; [ -z "$(find "$R6B" -name '*r6bstray*' 2>/dev/null)" ] && r6b_nothing=1
+# The accept direction, and the one that keeps the asymmetry honest: the --home FLAG still names them.
+r_fleet "$R1/ws1" init --name r6bnamed --optype append --home "$R6B" \
+        > "$OUT/R6b-flag.out" 2>&1; r6b_flag_rc=$?
+r6b_flag=0; [ "$r6b_flag_rc" = 0 ] \
+  && [ -n "$(find "$R6B/instants" -maxdepth 1 -name '*r6bnamed*' 2>/dev/null)" ] && r6b_flag=1
+if [ "$r6b_rc" != 0 ] && [ "$r6b_cites$r6b_nothing$r6b_flag" = "111" ]; then
+  it_pass R6b "fleet/it/R/out/R6b.out" \
+    "with FLEET_HOME EXPORTED and FLEET_INSTANTS unset — the configuration \`scripts/fleet-env.sh\` produces on every shell on this box, and the one FI-382 happened in — creating an instant is refused (rc=$r6b_rc, cites SI-56) and nothing is planted in \$FLEET_HOME/instants. Measured returning rc=0 and planting the child at 0.5.0, so the control shipped in 0.4.0 could not fire on the defect that motivated it. The \`--home\` FLAG still names the directory and still works, which is the asymmetry rather than a gap: a flag is typed for this invocation, an export was made by a shell rc nobody re-reads"
+else
+  it_fail R6b "fleet/it/R/out/R6b.out" \
+    "rc=$r6b_rc (want non-zero) cites-SI-56=$r6b_cites nothing-created=$r6b_nothing home-flag-still-works=$r6b_flag(rc=$r6b_flag_rc)"
+fi
+
+# ==================================================================================================
 # R7 — THE REGRESSION CASE. 1291 occurrences across 238 files name the store explicitly; tiers 1 and 3
 #      must resolve exactly as they did before. Run from an UNMARKED cwd, so the marker cannot rescue
 #      a broken flag path and make this pass for the wrong reason.

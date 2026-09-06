@@ -519,9 +519,27 @@ def resolve_home(parsed: Parsed, environ: dict, cwd) -> tuple:
 
 
 def instants_were_named(parsed: Parsed, environ: dict) -> bool:
-    """Did the caller SAY where instants live, at any tier?"""
-    return bool(parsed.get("instants-dir") or parsed.get("home")
-                or environ.get("FLEET_INSTANTS") or environ.get("FLEET_HOME"))
+    """Did the caller SAY where instants live, for THIS invocation?
+
+    Three ways, and the one that is missing is the point. `--instants-dir` and `FLEET_INSTANTS` name the
+    directory outright. `--home` names the store in the command somebody typed, and `--home X => instants
+    X/instants` is a documented, relied-on implication.
+
+    ⚠️ An exported **`FLEET_HOME` does NOT count**, and this asymmetry is a fix rather than an oversight.
+    The guard shipped in `0.4.0` accepting it, and `FI-382`'s live configuration is precisely a shell with
+    `FLEET_HOME` exported by `scripts/fleet-env.sh` and no `FLEET_INSTANTS` — so the control could not
+    fire on the defect that motivated it (`FI-303`), and `dispatch` measured at `0.5.0` still returned
+    rc=0 planting the child in `$FLEET_HOME/instants`.
+
+    The inference "you named the store, so you named the instants directory" IS the default `SI-56`
+    deleted. Reading it out of an ambient variable instead of out of the resolver does not turn it into a
+    statement the caller made — `I2-11`: a value the caller never typed must not out-rank one they did.
+    A flag is typed for this invocation; an export was made by a shell rc nobody re-reads.
+
+    `resolve_instants` still derives from `$FLEET_HOME` and is unchanged: reads must always answer, and a
+    read that enumerates a derived directory harms nobody. Only CREATING there is refused.
+    """
+    return bool(parsed.get("instants-dir") or parsed.get("home") or environ.get("FLEET_INSTANTS"))
 
 
 def resolve_instants(parsed: Parsed, environ: dict, cwd) -> Path:

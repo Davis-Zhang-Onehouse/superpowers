@@ -19,6 +19,7 @@ import unittest
 
 from fleet import EXIT_OK, EXIT_REFUSED
 from fleet import cli
+from tests import hermetic_environment
 from fleet.harvest import Harvest
 from fleet.pool import Pool
 from fleet.session import Probes, SessionLayer
@@ -73,7 +74,11 @@ class Fixture:
 
     def run(self, argv):
         out, err = io.StringIO(), io.StringIO()
-        code = cli.main(list(argv), stdout=out, stderr=err, context=self.context())
+        #: The environment is the fixture's, never the operator's. `cli.main` reads `os.environ` at parse
+        #: time, so without this the suite measured whatever the person running it had exported — 33 cases
+        #: passed on an ambient `FLEET_HOME` and failed inside `release-verify`, which runs with it unset.
+        with hermetic_environment(self.instants):
+            code = cli.main(list(argv), stdout=out, stderr=err, context=self.context())
         return code, out.getvalue(), err.getvalue()
 
     def dispatch(self, title, *, cap, base=BASE, slot=None):
