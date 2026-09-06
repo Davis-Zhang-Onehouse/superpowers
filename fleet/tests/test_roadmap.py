@@ -530,3 +530,87 @@ class TestADepThatCanNEVERLandIsActionable(RoadmapCase):
         self.rm.add(ms("s1", status="done"))
         self.rm.add(ms("s2", status="ready", deps=["s1"]))
         self.assertIn("s2", {m.id for m in self.rm.ready()})
+
+
+class TestDisowningAClaim(RoadmapCase):
+    """`SI-51`. `disown` existed, was correct, and had exactly one caller — `dispatch`'s rollback.
+
+    Nothing else could give a claim back, so a milestone claimed by a dispatch that was later ABORTED
+    stayed owned by an `-abort-` folder forever. `claim`'s own refusal sent the coordinator to the one
+    remedy that did not work: *"the work is released by aborting it with a reason."* The escape used nine
+    times on the live effort was editing `roadmap.json` by hand, which is the single thing the two-party
+    protocol exists to prevent.
+
+    Two properties are added here and both are about not making the repair worse than the defect:
+      * a caller may state WHOSE claim it is releasing, so aborting instant A can never release a
+        milestone that instant B is running; and
+      * the release records WHY, because an owner that silently became `None` is indistinguishable, a week
+        later, from one that was never claimed.
+    """
+
+    def test_disown_gives_the_claim_back_and_records_why(self):
+        self.rm.add(ms("m1", status="ready"))
+        self.rm.claim("m1", str(self.worker))
+
+        self.rm.disown("m1", expect_owner=str(self.worker), reason="the baseline moved under it")
+
+        [back] = [m for m in self.rm.milestones() if m.id == "m1"]
+        self.assertIsNone(back.owner, "the claim was not given back")
+        self.assertIn("the baseline moved under it", back.disowned_reason,
+                      f"the release recorded no reason: {back}")
+
+    def test_disown_refuses_to_release_a_claim_held_by_a_DIFFERENT_instant(self):
+        """The whole hazard of putting this on `abort`. Instant A's abort must not free the milestone
+        instant B is running, and the refusal has to name both so the reader can tell which is stale."""
+        self.rm.add(ms("m1", status="ready"))
+        self.rm.claim("m1", str(self.worker))
+        stale = str(self.tasks / "00000000-07300999-inflight-append-someoneElse")
+
+        with self.assertRaises(BadInput) as caught:
+            self.rm.disown("m1", expect_owner=stale)
+
+        message = str(caught.exception)
+        self.assertIn(str(self.worker), message, f"the refusal does not name the ACTUAL owner: {message}")
+        self.assertIn(stale, message, f"the refusal does not name who tried to release it: {message}")
+        self.assertEqual(str(self.worker), self.rm.milestone("m1").owner,
+                         "the refused release cleared the claim anyway")
+
+    def test_disowning_an_unclaimed_milestone_changes_nothing_and_does_not_raise(self):
+        """Idempotent on purpose. `abort` runs this after the folder has already been renamed, so a second
+        pass — or an abort of an instant that never claimed anything — must be a no-op rather than a
+        failure that reports the abort as broken."""
+        self.rm.add(ms("m1", status="ready"))
+
+        self.rm.disown("m1", expect_owner=str(self.worker), reason="nothing to give back")
+
+        back = self.rm.milestone("m1")
+        self.assertIsNone(back.owner)
+        self.assertEqual("", back.disowned_reason,
+                         "a milestone nobody claimed recorded a release reason, which invents an event")
+
+    def test_disown_with_no_expected_owner_still_clears_it(self):
+        """`dispatch`'s rollback calls it this way and must keep working: there the claim was made moments
+        ago by the code doing the rollback, so there is no second party to protect against."""
+        self.rm.add(ms("m1", status="ready"))
+        self.rm.claim("m1", str(self.worker))
+
+        self.rm.disown("m1")
+
+        self.assertIsNone(self.rm.milestone("m1").owner)
+
+    def test_a_new_claim_clears_the_previous_release_reason(self):
+        """Otherwise the roadmap carries a sentence explaining why the CURRENT owner does not own it."""
+        self.rm.add(ms("m1", status="ready"))
+        self.rm.claim("m1", str(self.worker))
+        self.rm.disown("m1", reason="aborted: the stack was unfoldable")
+
+        self.rm.claim("m1", str(self.instant))
+
+        back = self.rm.milestone("m1")
+        self.assertEqual(str(self.instant), back.owner)
+        self.assertEqual("", back.disowned_reason,
+                         f"the new owner inherited the previous release's reason: {back}")
+
+    def test_disown_still_refuses_a_milestone_that_is_not_on_the_roadmap(self):
+        with self.assertRaises(BadInput):
+            self.rm.disown("nosuch")
