@@ -131,6 +131,14 @@ A_NVERBS="$(python3 -c 'from fleet.cli import VERBS; print(len(VERBS))')"
 A_VERBS_ALL="$(python3 -c 'from fleet.cli import VERBS; print(" ".join(sorted(VERBS)))')"
 A_MUTATING="$(python3 -c 'from fleet.cli import VERBS
 print(" ".join(sorted(n for n, s in VERBS.items() if not s.read_only)))')"
+#: The verbs that DECLARE they resolve no store (`VerbSpec.needs_store`). A1b asks whether a mutating
+#: verb refuses when no store is named; `root-init` is the one verb for which the answer is legitimately
+#: no, because it creates the directory a store will live in and the first root on a box is made where
+#: there is no root. Derived from the registry, never listed here: a hand-kept copy is `II-4`'s lesson,
+#: and A1a's artefact check still covers these verbs — being allowed to succeed is not being allowed to
+#: write $HOME/.fleet.
+A_NO_STORE="$(python3 -c 'from fleet.cli import VERBS
+print(" ".join(sorted(n for n, s in VERBS.items() if not s.needs_store)))')"
 # shellcheck disable=SC2034  # A1 asserts the MUTATING verbs refuse; the read-only counterpart is
 # derived here but never asserted on. See SI-50.
 A_READONLY="$(python3 -c 'from fleet.cli import VERBS
@@ -228,6 +236,12 @@ a1_args() {               # every required flag supplied; no value contains a sp
     #: the missing home, which is exit 2 for an unrelated reason — measured, and exactly what A1b's
     #: `inconclusive` bucket is for. A fixture that produces the right exit code for the wrong reason is
     #: not a fixture.
+    #: Runs for REAL, not `--dry-run`: A1 hands every verb its own fake `$HOME`, which is exactly what
+    #: this verb is defined against, so this is the one place in the suite where its whole contract is
+    #: exercised end to end. The target is a subdirectory of that fake home — `$HOME` itself is refused —
+    #: and it is created here because the loop makes the fake home just before asking for these args.
+    root-init)        mkdir -p "$A1_D/fakehome-root-init/newroot"
+                      echo "--path $A1_D/fakehome-root-init/newroot --name a1root" ;;
     release-cut)      echo "--version 9.9.9 --repo $d/relrepo --releases $d/rel" ;;
     release-verify)   echo "--version 9.9.9 --releases $d/rel" ;;
     release-promote)  echo "--version 9.9.9 --releases $d/rel" ;;
@@ -240,8 +254,8 @@ a1_args() {               # every required flag supplied; no value contains a sp
 a1_no_fallback() {
   a1_fixture
   local log="$OUT/A1-per-verb.txt"; : > "$log"
-  local n=0 wrote=0 nonrefusing=0 attributed=0 inconclusive=0 unmapped=0
-  local wrote_list="" nonref_list="" inconc_list="" unmapped_list=""
+  local n=0 wrote=0 nonrefusing=0 attributed=0 inconclusive=0 unmapped=0 exempt=0
+  local wrote_list="" nonref_list="" inconc_list="" unmapped_list="" exempt_list=""
   for v in $A_MUTATING; do
     n=$((n+1))
     local fh="$A1_D/fakehome-$v"; rm -rf "$fh"; mkdir -p "$fh"
@@ -284,7 +298,13 @@ a1_no_fallback() {
     printf '%-12s rc=%-3s created_HOME_dot_fleet=%-3s names_home=%-3s\n' \
            "$v" "$rc" "$created" "$names_home" >> "$log"
     [ "$created" = yes ] && { wrote=$((wrote+1)); wrote_list="$wrote_list $v"; }
-    if [ "$rc" != 2 ]; then
+    #: A verb that DECLARES it resolves no store is exempt from the rc=2 accounting and from nothing
+    #: else. It still had to leave `$fh/.fleet` alone above, which is A1a's property and the one that
+    #: matters: the question A1 exists to ask is whether a verb falls back to the home directory, and
+    #: "it succeeded" is not an answer to that question either way.
+    if printf ' %s ' "$A_NO_STORE" | grep -qF " $v "; then
+      exempt=$((exempt+1)); exempt_list="$exempt_list $v(exit$rc)"
+    elif [ "$rc" != 2 ]; then
       nonrefusing=$((nonrefusing+1)); nonref_list="$nonref_list $v(exit$rc)"
     elif [ "$names_home" = yes ]; then
       attributed=$((attributed+1))
@@ -305,9 +325,9 @@ a1_no_fallback() {
   #: A1b judges the verbs this harness can actually invoke. `$probed`, not `$n` — reporting a verdict
   #: over a population that includes verbs never run is how the unmapped ones got counted as failures
   #: in the first place.
-  local probed=$((n - unmapped))
+  local probed=$((n - unmapped - exempt))
   if [ "$nonrefusing" = 0 ] && [ "$inconclusive" = 0 ]; then
-    a_pass A1b "$log" "$(sq "all $probed probed mutating verbs exited 2 with an attributable store refusal — either SI-15's 'writes to a store and no store was named' or, since per-root isolation, tier 6's 'could not tell which fleet it belongs to' — and NONE created \$HOME/.fleet. Matched on those two exact sentences rather than on the flag name --home, which every verb's usage block also prints on any parse error (II-10, 39 of 39 measured). $unmapped verb(s) had no argv recipe and are A1d's business, not this case's")"
+    a_pass A1b "$log" "$(sq "all $probed probed mutating verbs exited 2 with an attributable store refusal — either SI-15's 'writes to a store and no store was named' or, since per-root isolation, tier 6's 'could not tell which fleet it belongs to' — and NONE created \$HOME/.fleet. Matched on those two exact sentences rather than on the flag name --home, which every verb's usage block also prints on any parse error (II-10, 39 of 39 measured). $unmapped verb(s) had no argv recipe and are A1d's business, not this case's; $exempt verb(s) DECLARE they resolve no store and are excluded from the refusal count by that declaration, never by name:$exempt_list — they were still run, and still had to leave \$HOME/.fleet alone above")"
   elif [ "$nonrefusing" = 0 ]; then
     a_fail A1b "$log" "$(sq "$attributed of $probed probed mutating verbs refused with exit 2 carrying the SI-15 store refusal; $inconclusive exited 2 for an unrelated reason ($inconc_list) so their refusal is NOT attributable to the missing home — the fallback is latent for them, not absent")"
   else
