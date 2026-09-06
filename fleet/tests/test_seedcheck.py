@@ -122,12 +122,29 @@ class TestClassify(unittest.TestCase):
         self.assertEqual(seedcheck.classify(OWN_SEED, argv).state, seedcheck.FOREIGN)
 
 
+#: A CI waiter, as `awaiting-ci` workers actually run one: a shell holding a long inline script. It is a
+#: NON-flag argument well over `MIN_PAYLOAD_CHARS`, which is precisely the shape `payload()` is looking
+#: for — and it is a CHILD of the claude process, which is precisely where `delivered_argv` looks next.
+CI_WAITER = [
+    "/bin/bash", "-c",
+    "while true; do "
+    "  status=$(gh run list --branch \"$BRANCH\" --limit 1 --json status,conclusion --jq '.[0].status'); "
+    "  if [ \"$status\" = completed ]; then gh run view --log-failed | tail -200; break; fi; "
+    "  sleep 30; "
+    "done  # keep this long enough to clear MIN_PAYLOAD_CHARS the way a real waiter does, which is "
+    "the entire point of the fixture: it is not contrived, it is the shortest honest form of the thing.",
+]
+
+
 class TestDeliveredArgv(unittest.TestCase):
-    def _probes(self, table, kids=None):
-        kids = kids or {}
+    def _probes(self, table, kids=None, comms=None):
+        kids, comms = kids or {}, comms or {}
         return seedcheck.Probes(
             read_cmdline=lambda pid: table.get(pid),
             children_of=lambda pid: kids.get(pid, []),
+            #: `SI-52`. Default `claude` so a case that is not ABOUT identity keeps testing what it was
+            #: written to test; the cases that are about it say so.
+            comm_of=lambda pid: comms.get(pid, "claude"),
         )
 
     def test_reads_the_pane_process_when_the_launcher_execd(self):
@@ -186,3 +203,95 @@ class TestCollisions(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class TestOnlyTheWorkerCarriesTheBriefing(unittest.TestCase):
+    """`SI-52`. The walk returned the first process at or below the pane holding ANY long positional, and
+    nothing in this module ever asked whether that process was the worker.
+
+    A worker in `awaiting-ci` runs a CI waiter — a shell holding a long inline script — as a child of the
+    claude process. That is exactly the shape `payload()` looks for, so `carries()` was false and
+    `classify` returned **FOREIGN**, whose remedy is *"the worker is dispatched again"*. The check fired
+    on the population it is most often pointed at, and told the reader to throw away a healthy worker.
+
+    The asymmetry is why this matters more than a wrong label: `NOT_DELIVERED` is deliberately
+    non-refusing, while `FOREIGN` KILLS the session inside `dispatch`. An uncertain probe must not be able
+    to reach the destructive verdict.
+    """
+
+    def _probes(self, table, kids=None, comms=None):
+        kids, comms = kids or {}, comms or {}
+        return seedcheck.Probes(read_cmdline=lambda pid: table.get(pid),
+                                children_of=lambda pid: kids.get(pid, []),
+                                comm_of=lambda pid: comms.get(pid))
+
+    @staticmethod
+    def _raw(argv):
+        return b"\0".join(a.encode() for a in argv)
+
+    def test_a_ci_waiter_under_a_healthy_worker_is_not_read_as_a_briefing(self):
+        """The live defect, in its live shape: a send-keys delivery (nothing in claude's argv) plus a
+        waiter child. The old walk returned the waiter and the answer was FOREIGN."""
+        table = {100: self._raw([CLAUDE, "--permission-mode", "auto"]),
+                 200: self._raw(CI_WAITER)}
+        probes = self._probes(table, kids={100: [200]}, comms={100: "claude", 200: "bash"})
+
+        verdict = seedcheck.check_session("dt-worker", 100, OWN_SEED, probes)
+
+        self.assertNotEqual(seedcheck.FOREIGN, verdict.state,
+                            f"a healthy worker's CI waiter was read as a foreign briefing, and the "
+                            f"remedy printed for that is to dispatch the worker again: {verdict.detail}")
+        self.assertEqual(seedcheck.NOT_DELIVERED, verdict.state, verdict.detail)
+
+    def test_a_foreign_briefing_delivered_to_the_CLAUDE_process_is_still_foreign(self):
+        """The narrowing must not trade one false answer for another. The 2026-08-07 misdelivery was a
+        shim that `exec`d the real binary with somebody else's seed in argv — the process holding the
+        briefing WAS claude, so it is still visible and still refuses."""
+        table = {100: self._raw([CLAUDE, "--permission-mode", "auto", COORD_SEED])}
+        probes = self._probes(table, comms={100: "claude"})
+
+        verdict = seedcheck.check_session("dt-worker", 100, OWN_SEED, probes)
+
+        self.assertEqual(seedcheck.FOREIGN, verdict.state, verdict.detail)
+        self.assertIn(COORD_INSTANT, verdict.detail,
+                      "the alarm does not say whose briefing arrived")
+
+    def test_a_forked_claude_child_is_still_reached(self):
+        table = {1: self._raw(["/bin/sh", "-c", "claude"]),
+                 7: self._raw([CLAUDE, "--permission-mode", "auto", OWN_SEED])}
+        probes = self._probes(table, kids={1: [7]}, comms={1: "sh", 7: "claude"})
+
+        verdict = seedcheck.check_session("dt-worker", 1, OWN_SEED, probes)
+
+        self.assertEqual(seedcheck.VERIFIED, verdict.state, verdict.detail)
+        self.assertEqual(7, verdict.pid, "the verdict names the wrong process")
+
+    def test_a_process_whose_identity_cannot_be_read_is_not_treated_as_the_worker(self):
+        """Fail-safe direction. `FOREIGN` authorises a kill, so 'I could not tell what this is' must
+        degrade to unverifiable and never to the destructive verdict."""
+        table = {100: self._raw(["/bin/bash", "-c", CI_WAITER[2]])}
+        probes = self._probes(table, comms={})            # comm_of answers None for every pid
+
+        verdict = seedcheck.check_session("dt-worker", 100, OWN_SEED, probes)
+
+        self.assertEqual(seedcheck.NOT_DELIVERED, verdict.state, verdict.detail)
+
+    def test_the_detail_says_no_worker_process_was_found_rather_than_implying_one_was_looked_at(self):
+        table = {100: self._raw(["/bin/bash", "-c", CI_WAITER[2]])}
+        probes = self._probes(table, comms={100: "bash"})
+
+        verdict = seedcheck.check_session("dt-worker", 100, OWN_SEED, probes)
+
+        self.assertRegex(verdict.detail, r"(?i)claude",
+                         f"the reader cannot tell that NOTHING was examined: {verdict.detail!r}")
+
+    def test_the_real_probes_answer_comm_for_this_very_process(self):
+        """The injected seam is only as good as the real one behind it. `default_probes` is what every
+        caller in the package actually gets, and a `comm_of` that always answered None would make every
+        session unverifiable while every test above stayed green."""
+        import os
+
+        self.assertTrue(seedcheck.default_probes().comm_of(os.getpid()),
+                        "the real comm probe answers nothing for a process that certainly exists")
+        self.assertIsNone(seedcheck.default_probes().comm_of(0),
+                          "the real comm probe invented an answer for a pid that cannot be read")
