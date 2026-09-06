@@ -229,8 +229,14 @@ class Pool:
     def __init__(self, home: Path,
                  cwd_probe: Callable[[Path], list] = None,
                  alive: Callable[[str], bool] = None,
-                 pid_alive: Callable[[int], bool] = None):
+                 pid_alive: Callable[[int], bool] = None,
+                 fleet_root: Path = None):
         self.home = Path(home)
+        #: `G3`. The FLEET root this pool belongs to, when there is one — not to be confused with
+        #: `self.root` two lines down, which is this pool's own directory. Optional because the hermetic
+        #: suite and every IT section build a pool with no fleet root and enrol sandbox directories that
+        #: legitimately live anywhere on the filesystem.
+        self.fleet_root = None if fleet_root is None else Path(fleet_root)
         self.root = self.home / "pool"
         self.enrolled = self.root / "enrolled"
         self.leases = self.root / "leases"
@@ -251,6 +257,17 @@ class Pool:
                 f"{path} is not an existing directory; a slot is enrolled by pointing at the workspace "
                 "that already exists. Enrolment never creates the workspace."
             )
+        #: `G3`. A slot outside its own root is how one root's worker gets leased into another root's
+        #: workspace — the interference per-root isolation exists to remove. A PATH comparison rather than
+        #: a prefix test, because `/x/davis_root2` starts with `/x/davis_root`.
+        if self.fleet_root is not None:
+            resolved, owner = path.resolve(), self.fleet_root.resolve()
+            if owner != resolved and owner not in resolved.parents:
+                raise BadInput(
+                    f"{resolved} is outside this fleet's root {owner}, so it cannot be enrolled here. A "
+                    f"pool that can lease a workspace belonging to another root is exactly the "
+                    f"interference per-root isolation exists to remove. Enrol it from the root that owns "
+                    f"it.")
         slot = path.name
         if not slot or "/" in slot:
             raise BadInput(f"{path} has no usable slot name (the slot name is the directory's basename)")
