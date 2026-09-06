@@ -596,11 +596,12 @@ observed in the worker's argv.
 
 ## SI-56 — `FLEET_INSTANTS` unset silently planted the child in `$FLEET_HOME/instants`
 
-**Status:** **FIXED in `0.5.1`**. It was recorded CLOSED in `0.4.0` and that was wrong — see below.
+**Status:** **FIXED in `0.5.1`**, with the harness fallout closed in `0.5.2`. It was recorded CLOSED in
+`0.4.0` and that was wrong — see below.
 **Field id:** `FI-382`.
 
 **This entry is kept, and its history left visible, because the corrections are the useful part. There
-were three, and the last one is the one that matters.**
+were four, and the third is the one that matters.**
 
 **Correction 1 — isolation did not close it.** The isolation spec claimed this closed "for free": delete
 the derived `$FLEET_HOME/instants` fallback and the stray child has nowhere to go. Implementing it proved
@@ -634,6 +635,19 @@ suite with `env -u FLEET_HOME`, and 33 tests that pass on a developer's shell fa
 suite was ALSO reading the operator's environment. Chasing why the gate disagreed with the green suite is
 what surfaced the product hole underneath. The suite is now hermetic by construction
 (`fleet/tests/__init__.py`), with a case that drives a creating verb under a hostile ambient environment.
+
+**Correction 4 — making the suite hermetic broke a cross-check that read it.** The `0.5.1` fix gave
+`fleet/tests/` an `__init__.py`, so `tests` became a package and `test_cli.py` opened with `from tests
+import hermetic_environment`. `M9` imports that same module for its `OUTWARD_CALL_SITES` registry, and it
+did so by putting `<instant>/tests` on the path and importing `test_cli` as a loose module — a spelling
+with no package for that new import to resolve against. The `0.5.1` gate came back RED on
+`M9[group5]` and `M9-mut-baseline[m9mut]`, both reporting `ModuleNotFoundError: No module named 'tests'`.
+
+Both did the right thing: the audit is written to FAIL rather than skip when it cannot import its
+authority, and the mutation runner refuses to report kills over a red baseline. `M9` now imports
+`tests.test_cli` with the instant root on the path — a cross-check that reaches into another component's
+tree has to import it the way that component is actually assembled, or it breaks on changes that are
+correct.
 
 **Closed when:** met — a verb that creates an instant refuses whether the store was derived from the
 marker (`R6`) **or** exported as `FLEET_HOME` (`R6b`), cites `SI-56`, and creates nothing; `--home`,
