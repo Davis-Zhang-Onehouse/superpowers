@@ -41,6 +41,7 @@ from unittest import mock
 from fleet import (EXIT_ATTENTION, EXIT_BAD_INPUT, EXIT_CODES, EXIT_NO_CAPACITY, EXIT_OK,
                    EXIT_REFUSED)
 from fleet import cli
+from fleet import seedcheck
 from fleet.harvest import NO_ISSUES_FILED, REGISTER_NAME, UNREADABLE, VACUOUS, Harvest
 from fleet.identity import InstantName
 from fleet.layout import validate as layout_validate
@@ -450,6 +451,14 @@ class CliCase(unittest.TestCase):
         orphan = str(fleet.paths["orphanWork"])
         profile = str(fleet.profile("worker"))
         repo, releases = release_fixture(fleet)
+        #: `SI-55`. `seed-delivered` compares what was sent against the seed `dispatch` rendered, so its
+        #: row needs BOTH to exist — created here rather than assumed, because every mutating row in this
+        #: table has to be admissible or `--dry-run`'s zero-delta case never reaches a side effect.
+        rendered_seed = fleet.paths["solo"] / ".fleet" / "seed.txt"
+        rendered_seed.parent.mkdir(parents=True, exist_ok=True)
+        rendered_seed.write_text("Read CHARTER.md. This is the matrix row's rendered briefing.\n")
+        was_sent = fleet.tmp / "matrix-delivered.txt"
+        was_sent.write_text(rendered_seed.read_text())
         return {
             "init": ["--name", "freshOne", "--base", "00000000"],
             "dispatch": ["--profile", profile, "--title", "a fresh worker",
@@ -496,6 +505,7 @@ class CliCase(unittest.TestCase):
             #: An empty row also drives the empty-population branch, which must report that it examined
             #: NOTHING rather than reporting clean.
             "seed-check": [],
+            "seed-delivered": ["--id", fleet.ids["solo"], "--delivered", str(was_sent)],
             "compaction-status": [],
             "selftest": [],
             #: `--repo` and `--releases` are on every row that needs them, and that is the point rather
@@ -2532,6 +2542,145 @@ class PositionedGit:
         if args[0] == "cat-file":
             return (0, "commit\n") if self.position in ("present", "descendant") else (1, "")
         return 0, ""
+
+
+class TestRecordingASendKeysDelivery(CliCase):
+    """`SI-55`. The positive verdict was reachable by exactly one route — the briefing appearing in
+    `/proc/<pid>/cmdline` — and a seed delivered by `send-keys` never appears in argv at all.
+
+    So a worker rescued by `reviving-dead-panes` read `NOT-DELIVERED` for the life of its instant while a
+    sibling dispatched through a launcher read `VERIFIED`, and `NOT-DELIVERED`'s own detail says, truly,
+    that it is neither evidence of a problem nor evidence of correctness. A row that can never change is a
+    row that stops being read (`FI-402`).
+
+    What the deliverer can supply that is EVIDENCE and not a claim is the bytes it sent. `fleet` digests
+    them and compares against what it rendered, which catches the class this module exists for — the
+    launcher sent the wrong file.
+    """
+
+    SEED = ("Read CHARTER.md before anything else. " * 12) + "\nThen run `fleet brief`.\n"
+
+    def _briefed(self, fleet, name="solo"):
+        instant = fleet.paths[name]
+        seed = instant / ".fleet" / "seed.txt"
+        seed.parent.mkdir(parents=True, exist_ok=True)
+        seed.write_text(self.SEED)
+        return instant, seed
+
+    def _sent(self, fleet, text):
+        path = fleet.tmp / "sent.txt"
+        path.write_text(text)
+        return path
+
+    def test_a_recorded_delivery_is_stored_in_the_instant(self):
+        fleet = self.loaded()
+        instant, _ = self._briefed(fleet)
+        sent = self._sent(fleet, self.SEED)
+
+        code, out, err = fleet.run(["seed-delivered", "--porcelain", "--id", fleet.ids["solo"],
+                                    "--delivered", str(sent)])
+
+        self.assertEqual(EXIT_OK, code, err)
+        recorded = seedcheck.read_delivery(instant)
+        self.assertIsNotNone(recorded, "nothing was written into the instant")
+        self.assertEqual(seedcheck.digest(self.SEED), recorded.rendered_md5)
+        self.assertEqual("send-keys", recorded.channel)
+
+    def test_seed_check_reports_the_recorded_delivery_as_its_own_positive_state(self):
+        fleet = self.loaded()
+        self._briefed(fleet)
+        sent = self._sent(fleet, self.SEED)
+        code, _, err = fleet.run(["seed-delivered", "--id", fleet.ids["solo"], "--delivered", str(sent)])
+        self.assertEqual(EXIT_OK, code, err)
+        #: The pane pid has to be observable or `seed-check` reports `unreadable` and never classifies —
+        #: and the argv it reads must be a claude process carrying NO briefing, which is exactly what a
+        #: send-keys delivery leaves behind.
+        fleet.sessions.probes.pane_pid = lambda name: 4242 if name in fleet.tmux_live else None
+        fake = seedcheck.Probes(read_cmdline=lambda pid: b"claude\0--permission-mode\0auto",
+                                comm_of=lambda pid: "claude", children_of=lambda pid: [])
+
+        with mock.patch.object(cli.seedcheck, "default_probes", lambda: fake):
+            code, out, err = fleet.run(["seed-check", "--porcelain"])
+
+        self.assertIn(code, EXIT_CODES, err)
+        rows = [line.split("\t") for line in out.splitlines()]
+        attested = [r for r in rows if r[0] == seedcheck.ATTESTED.lower()]
+        self.assertTrue(attested,
+                        f"seed-check does not report the recorded delivery at all: {out!r}")
+        detail = "\t".join(attested[0])
+        self.assertIn("send-keys", detail,
+                      f"the row does not name the channel, so it reads like an argv observation: {out!r}")
+        self.assertNotIn("not-delivered", [r[0] for r in rows],
+                         f"the same session is also reported unverifiable: {out!r}")
+
+    def test_a_delivery_that_does_not_carry_the_rendered_seed_is_REFUSED(self):
+        """Compared, not believed. A launcher that sent the wrong file records the wrong file's digest,
+        and that is the whole class this check exists for."""
+        fleet = self.loaded()
+        instant, _ = self._briefed(fleet)
+        sent = self._sent(fleet, "some other instant's briefing entirely. " * 12)
+
+        code, out, err = fleet.run(["seed-delivered", "--id", fleet.ids["solo"], "--delivered", str(sent)])
+
+        self.assertEqual(EXIT_BAD_INPUT, code, f"a mismatched delivery was recorded: {out}")
+        #: Without this the case passes before the verb exists: an unknown verb exits 2 too.
+        self.assertNotIn("is not a fleet verb", err, f"vacuous: the verb is undeclared: {err[:120]!r}")
+        self.assertRegex(err, r"(?i)(md5|digest|does not (contain|carry))",
+                         f"the refusal does not say the delivered text disagreed: {err!r}")
+        self.assertIsNone(seedcheck.read_delivery(instant),
+                          "a refused delivery was written anyway, leaving a bad attestation for a later "
+                          "reader to discover")
+
+    def test_a_delivery_that_PREPENDS_to_the_seed_is_accepted(self):
+        """The same containment rule the argv path uses: a caller may legitimately add a preamble, and
+        what must never happen is a DIFFERENT briefing."""
+        fleet = self.loaded()
+        self._briefed(fleet)
+        sent = self._sent(fleet, "Your slot is ws1 and your instant is <path>.\n\n" + self.SEED)
+
+        code, out, err = fleet.run(["seed-delivered", "--id", fleet.ids["solo"], "--delivered", str(sent)])
+
+        self.assertEqual(EXIT_OK, code, err)
+
+    def test_recording_a_delivery_for_an_instant_with_no_rendered_seed_is_refused(self):
+        fleet = self.loaded()
+        sent = self._sent(fleet, self.SEED)
+
+        code, out, err = fleet.run(["seed-delivered", "--id", fleet.ids["solo"], "--delivered", str(sent)])
+
+        self.assertEqual(EXIT_BAD_INPUT, code,
+                         f"a delivery was recorded against nothing to compare it to: {out}")
+        self.assertNotIn("is not a fleet verb", err, f"vacuous: the verb is undeclared: {err[:120]!r}")
+        self.assertIn("seed.txt", err, f"the refusal does not say what is missing: {err!r}")
+
+    def test_a_re_brief_replaces_the_previous_record(self):
+        """`reviving-dead-panes` briefs a rescued worker again; the latest delivery is the one that
+        describes the pane. Unlike origin.json, this is not written once."""
+        fleet = self.loaded()
+        instant, seed = self._briefed(fleet)
+        sent = self._sent(fleet, self.SEED)
+        self.assertEqual(EXIT_OK, fleet.run(
+            ["seed-delivered", "--id", fleet.ids["solo"], "--delivered", str(sent)])[0])
+        again = fleet.tmp / "sent2.txt"
+        again.write_text("Rescued. Resume where you were.\n\n" + self.SEED)
+
+        code, out, err = fleet.run(["seed-delivered", "--id", fleet.ids["solo"], "--delivered", str(again)])
+
+        self.assertEqual(EXIT_OK, code, err)
+        self.assertEqual(seedcheck.digest(again.read_text()),
+                         seedcheck.read_delivery(instant).delivered_md5,
+                         "the second delivery was not recorded")
+
+    def test_dry_run_records_nothing(self):
+        fleet = self.loaded()
+        instant, _ = self._briefed(fleet)
+        sent = self._sent(fleet, self.SEED)
+
+        code, out, err = fleet.run(["seed-delivered", "--dry-run", "--id", fleet.ids["solo"],
+                                    "--delivered", str(sent)])
+
+        self.assertEqual(EXIT_OK, code, err)
+        self.assertIsNone(seedcheck.read_delivery(instant), "--dry-run wrote the record")
 
 
 class TestSeedExtra(CliCase):
