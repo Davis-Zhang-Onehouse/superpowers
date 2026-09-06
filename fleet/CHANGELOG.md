@@ -1,5 +1,49 @@
 # fleet — changelog
 
+## fleet/v0.4.0 — 2026-09-06T02:55:29Z
+Cut from 6759d19 on `live` (upstream base snapshot/2026-08-17-221146). 36 commit(s) since fleet/v0.3.18.
+
+Every release ships the whole repository — all skills, `commands/`, `hooks/` and the plugin manifest, not only `fleet/`.
+Payload: fleet (28 files), skills (24 files), scripts (12 files), tests (21 files), docs (5 files), other (1 file).
+Skills changed: auditing-a-dispatch-history, coordinating-instants, dispatchInstants, dispatching-a-wave, harvesting-an-instant, integrating-a-pr-stack, maintaining-a-roadmap, running-a-stacked-effort, using-fleet, working-as-a-dispatched-instant.
+
+- fa36305 docs: a standing register for the infra fleet skills have to work around
+- 3155125 docs: two more infra gaps, both measured while verifying the wave routine
+- 425303a docs: SI-47 — the roadmap prints every row except the ready ones
+- 28be6b0 docs: SI-48 — apply silently regresses a done milestone, cascade and all
+- 3885813 docs: design for six coordinator routine skills
+- cb727d7 docs: implementation plan for the six coordinator routine skills
+- 19233dd skills: running-a-stacked-effort, the coordinator's project arc
+- 8001acb skills: dispatching-a-wave, k workers onto one shared base
+- 1e07ff1 skills: prove the wave sequence runs, and pin SI-47 while it is open
+- 2c594e6 skills: integrating-a-pr-stack, siblings into one chain with the pins
+- dfa0c15 skills: harvesting-an-instant, close out and carry the knowledge up
+- 59acd82 skills: pin the SI-48 apply-regression hazard the harvest skill warns about
+- 96d5816 skills: maintaining-a-roadmap, keep the registry exactly as wide as the truth
+- 58d03d9 skills: auditing-a-dispatch-history, both directions of the trail
+- d7f2554 coordinating-instants: route to the six routine skills
+- 4374b92 docs: mark the coordinator-skills plan executed, with its deviation and corrections
+- e21c0b0 regression-trap: quote 'done' so shellcheck stops reading it as a loop keyword
+- d9932ac test-render-graphs: report a missing Graphviz as SKIP, not as five failures
+- ef3d547 lint-skill: reach references/, and stop matching the word "cannot" as a claim
+- e5fa55a lint-shell: take the repo baseline from 79 findings to zero
+- 85427cd docs: design for per-root fleet isolation, discovered by a marker walk
+- 50200bf docs: implementation plan for per-root fleet isolation
+- e76cadc root: a fleet is a directory, found by walking up to its marker
+- e903b85 cli: resolve home, socket and releases through the root, and refuse rather than default
+- 7d49110 releases: derive the release area from the root, replacing a phantom default
+- 163c9f0 dispatch: a record names its root, and may not point outside it
+- dfac6b3 it: two roots side by side, and the guards that keep them apart
+- 0d6e5f4 consumers: derive the root instead of naming davis_root as a constant
+- 7397850 migrate: move the box-wide store into davis_root and mark both roots
+- 08094fa cli: share the foreign-root guard, and keep it out of the swallowing except
+- 98061d1 docs: correct the spec where the implementation refuted it, and record the deviations
+- 7941ac1 docs: the read-only default is gone, and two files still promised it
+- 9f1cd86 guards: a root constrains its OWN store, not every store named from inside it
+- d6e6e9d cli: the resolved-root line is banner content, so --porcelain suppresses it
+- 988cdb5 it: §R belongs in the default roster, and RESULTS.tsv records the full run
+- 6759d19 fleet 0.4.0
+
 ## fleet/v0.3.18 — 2026-09-05T16:56:55Z
 Cut from e1af9a6 on `live` (upstream base snapshot/2026-08-17-221146). 1 commit(s) since fleet/v0.3.17.
 
