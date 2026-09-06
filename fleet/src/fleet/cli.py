@@ -750,6 +750,18 @@ def _emit(ctx: Ctx, verb: str, rows: list) -> None:
         print(line.rstrip(), file=ctx.out)
 
 
+def _one_line(value) -> str:
+    """Any message flattened to ONE line, for use as a FIELD in an emitted row.
+
+    `_emit`'s porcelain form is `"\t".join(cells)` per row, so a value carrying a newline becomes a
+    second row and a value carrying a tab shifts every column after it — and a caller's `cut -f4` then
+    reads the wrong field with nothing anywhere reporting an error. The values that need this are
+    exception messages: a refusal in this package is written as a paragraph, deliberately, because it is
+    read by a human.
+    """
+    return " ".join(str(value).split())
+
+
 def _write(ctx: Ctx, text: str) -> None:
     ctx.out.write(text)
 
@@ -1869,6 +1881,59 @@ def _do_milestone(ctx: Ctx, parsed: Parsed) -> int:
                              "prints ready rows")])
         return EXIT_OK
 
+    #: `SI-51`. The repair door for a claim stranded BEFORE `abort` learned to release one. Fixing `abort`
+    #: reaches none of those: `abort` refuses to run twice, so an instant already renamed `-abort-` has no
+    #: second pass, and the escape actually used on the live effort was editing `roadmap.json` by hand
+    #: nine times.
+    #:
+    #: It writes `owner`, never `status`. `apply` remains the only writer of a status, which is the
+    #: invariant the two-party protocol exists for, and a repair verb that also moved statuses would be a
+    #: second writer wearing a repair's name.
+    if parsed.on("disown"):
+        target = parsed.get("id")
+        current = roadmap.milestone(target)
+        if current is None:
+            raise BadInput(f"no milestone {target!r} on {roadmap.path}")
+        if not current.owner:
+            raise BadInput(
+                f"milestone {target!r} has NO owner, so there is no claim to release. Said rather than "
+                f"passed over: a release that reported success for a milestone nobody claimed would read, "
+                f"in a transcript, exactly like the repair this flag exists to perform.")
+        if not (parsed.get("reason") or "").strip():
+            raise BadInput(
+                f"`--disown` needs `--reason`. An owner that silently became `None` is indistinguishable, "
+                f"a week later, from one that was never claimed — which is the confusion this whole repair "
+                f"exists to end, and it would be reintroduced by the repair itself.")
+        #: THE safety, and the reason this is not simply `Roadmap.disown` behind a flag. `claim` refuses
+        #: two instants on one milestone; a release that ignored a live owner would put the second one
+        #: there by another door. "Open" is the record's own answer — neither harvested nor closed — so
+        #: this asks the store rather than looking for a session, which would call a worker gone whenever
+        #: tmux could not be reached.
+        holder = next((r for r in ctx.store.all()
+                       if r.child_instant == current.owner and not r.harvested_at and not r.closed_at),
+                      None)
+        if holder is not None:
+            raise Refused(
+                f"milestone {target!r} is claimed by {current.owner}, and that instant still has an OPEN "
+                f"record (todo {holder.todo_id!r}): it has been neither harvested nor closed. Releasing "
+                f"the claim now would let a second instant be dispatched onto work that is still running.",
+                clears_when=f"`fleet abort --instant {current.owner} --reason <why>` (which now releases "
+                            f"the claim itself), or `fleet harvest --id {holder.todo_id}`",
+                clears_who=holder.todo_id)
+        if ctx.dry_run:
+            _emit(ctx, "milestone", [("dry-run", "the roadmap was not written"),
+                                     ("would-disown", target), ("owner", current.owner),
+                                     ("reason", parsed.get("reason"))])
+            return EXIT_OK
+        roadmap.disown(target, expect_owner=current.owner, reason=parsed.get("reason"))
+        _emit(ctx, "milestone", [
+            ("milestone", target), ("released-from", current.owner),
+            ("reason", parsed.get("reason")),
+            ("status", roadmap.milestone(target).status),
+            ("dispatchable", "if its deps have landed — releasing a claim returns the milestone to the "
+                             "population `dispatch --milestone` may take; it does NOT change its status")])
+        return EXIT_OK
+
     #: The check the parser used to make. Kept word-for-word in force: `--title` went optional ONLY so
     #: `--retire` could run without one, and an add path that quietly accepts an untitled milestone is a
     #: worse defect than the one being fixed.
@@ -2126,6 +2191,20 @@ def _do_abort(ctx: Ctx, parsed: Parsed) -> int:
     irreversible one, which is FD-14's rule applied to the other end of the lifecycle: a `release` refused
     because a live pid still sits in the slot (`OBS-48`) leaves an instant that is still `-inflight-` and a
     command that can simply be re-run, instead of an `-abort-` folder whose slot is still leased.
+
+    **`SI-51`: the milestone goes back too, and it goes back LAST.** `abort` released the session, the
+    lease and the record and left the roadmap alone, so a milestone claimed by a dispatch that was later
+    aborted stayed owned by an `-abort-` folder permanently — while `claim`'s own refusal named aborting as
+    the remedy. The roadmap write is the one fallible step that is deliberately AFTER the rename, because
+    it is the only one whose failure cannot invalidate the abort: the folder is already `-abort-`, the
+    worker is already gone, and refusing at that point would strand the instant to protect a field. So it
+    follows `dispatch`'s rollback exactly — do it, and if it fails, say so loudly and name what stayed
+    claimed rather than masking an outcome that has already happened.
+
+    It releases the claim it can PROVE is its own: the owner `claim` recorded is this instant's
+    `-inflight-` path, captured before the rename. An abort of instant A must never free a milestone
+    instant B is running, and when the roadmap says somebody else holds it, the abort completes and reports
+    whose it is.
     """
     child = _instant(ctx, parsed)
     name = InstantName.parse(child.name)
@@ -2148,13 +2227,33 @@ def _do_abort(ctx: Ctx, parsed: Parsed) -> int:
     body = {"reason": reason, "at": ctx.now(), "from": child.name, "to": target.name,
             "todo_id": record.todo_id if record is not None else ""}
 
+    #: `SI-51`. WHICH milestone this abort releases, and on whose roadmap — read from the fact `dispatch`
+    #: recorded in the instant rather than retyped by the caller. Absence is a legitimate answer: an
+    #: instant from `fleet init`, or one dispatched for a ROLE rather than a milestone, has nothing to
+    #: release and aborts exactly as it did before.
+    #:
+    #: An UNREADABLE origin is not allowed to fail the abort. `origin.read` refuses a malformed file
+    #: rather than calling it absent, which is right for `propose` — but here it would mean an instant
+    #: could not be abandoned because a JSON file beside it was corrupt, which is a worse outcome than the
+    #: one the refusal protects. It is carried to the report instead.
+    claim_owner, origin_problem = str(child), ""
+    try:
+        origin = origin_mod.read(child)
+    except FleetError as exc:
+        origin, origin_problem = None, _one_line(exc)
+    milestone_id = origin.milestone if origin is not None else None
+    coordinator = Path(origin.coordinator) if (origin is not None and milestone_id) else None
+
     if ctx.dry_run:
         _emit(ctx, "abort", [
             ("dry-run", "nothing was renamed, released, closed or written"),
             ("would-rename", f"{child.name} -> {target.name}"),
             ("would-record", f"{ABORT_FILE}: {reason}"),
             ("would-close", (record.tmux if record is not None and record.tmux else "(no session)")),
-            ("would-release", (record.slot if record is not None and record.slot else "(no slot)"))])
+            ("would-release", (record.slot if record is not None and record.slot else "(no slot)")),
+            ("milestone", milestone_id or "(none)"),
+            ("would-disown", (f"{milestone_id} on {coordinator}" if coordinator is not None
+                              else "(nothing claimed)"))])
         return EXIT_OK
 
     reason_path = child / ".fleet" / ABORT_FILE
@@ -2168,12 +2267,35 @@ def _do_abort(ctx: Ctx, parsed: Parsed) -> int:
     if record is not None:
         record.closed_at = ctx.now()
         ctx.store.write(record)
+
+    #: `SI-51`, and the LAST thing this transaction does — see the docstring on why this one fallible step
+    #: follows the irreversible one.
+    if coordinator is None:
+        released = ("(nothing claimed)" if not origin_problem
+                    else f"no — this instant's origin could not be read: {origin_problem}")
+    else:
+        try:
+            Roadmap(coordinator).disown(milestone_id, expect_owner=claim_owner, reason=reason)
+            released = f"yes — {milestone_id} on {coordinator} is unowned again"
+        except Exception as exc:  # noqa: BLE001 - the abort has already happened; never mask it
+            released = f"no — {_one_line(exc)}"
+            print(f"WARNING: {child.name} was aborted, but milestone {milestone_id!r} on {coordinator} "
+                  f"could NOT be released ({_one_line(exc)}). It stays claimed by an instant that no "
+                  f"longer exists, so nothing may be dispatched onto it until the claim is cleared: "
+                  f"`fleet milestone --instant {coordinator} --id {milestone_id} --disown --reason "
+                  f"<why>`.", file=ctx.err)
+    if origin_problem and coordinator is not None:
+        print(f"WARNING: {origin_mod.path_of(target)} could not be read ({origin_problem}).",
+              file=ctx.err)
+
     _emit(ctx, "abort", [
         ("from", child.name), ("to", target.name), ("path", str(target)),
         ("reason", reason), ("recorded_in", str(target / ".fleet" / ABORT_FILE)),
         ("closed", (record.tmux if record is not None and record.tmux else "(no session)")),
         ("released", (record.slot if record is not None and record.slot else "(no slot)")),
-        ("record", (record.todo_id if record is not None else "(none in this store)"))])
+        ("record", (record.todo_id if record is not None else "(none in this store)")),
+        ("milestone", milestone_id or "(none)"),
+        ("milestone_released", released)])
     return EXIT_OK
 
 
@@ -4069,6 +4191,10 @@ VERBS = {spec.name: spec for spec in (
         Flag("--title", True, False,
              "what the milestone is; required when RAISING one — an untitled milestone cannot be "
              "dispatched. Not needed with --retire, which names an existing milestone"),
+        #: `SI-51`. Beside `--retire` for the same reason it is: same actor, same file, same authority.
+        Flag("--disown", False, False,
+             "release the CLAIM on --id, leaving its status alone. For a milestone stranded by an instant "
+             "that is gone; refused while that instant still has an open record. Needs --reason"),
         Flag("--status", True, False, "blocked|ready|running|awaiting-ci|done|dropped (default: blocked)"),
         Flag("--dep", True, False, "a milestone id this one depends on; repeatable, and each must EXIST"),
         Flag("--evidence", True, False, "an evidence path; repeatable"),
