@@ -64,6 +64,65 @@ pre="$( cd "$TMP/home/alpha_root/ws1" && env -u FLEET_RELEASES -u FLEET_TMUX_SOC
         ". '$ENVSH' >/dev/null 2>&1; printf '%s' \"\$FLEET_HOME\"" )"
 check "an exported FLEET_HOME is not overridden" "$TMP/explicit" "$pre"
 
+# --- SI-57: re-sourcing in a SECOND root ------------------------------------------------------------
+#
+# The shared ~/.zshrc sources this file from a `chpwd` hook, so a shell that has been in one root and then
+# `cd`s to another re-sources it with FLEET_HOME already set — by the PREVIOUS sourcing, for the OTHER
+# root. `${VAR:-...}` cannot tell that value from one the operator exported on purpose, so it kept it, and
+# the shell went on addressing the first root's store on the first root's tmux server while standing in
+# the second. That is the interference this file's own header promises does not exist.
+#
+# One shell, two sourcings, exactly as the hook does it.
+resource() {                    # resource <cwd1> <cwd2> [pre-exported FLEET_HOME] -> "<home>|<releases>|<socket>"
+  local pre="${3:-}"
+  ( env -u FLEET_HOME -u FLEET_RELEASES -u FLEET_TMUX_SOCKET -u FLEET_INSTANTS -u FLEET_ROOT \
+      HOME="$TMP/home" bash -c "
+        ${pre:+export FLEET_HOME='$pre';}
+        cd '$1' && . '$ENVSH' >/dev/null 2>&1
+        cd '$2' && . '$ENVSH' >/dev/null 2>&1
+        printf '%s|%s|%s' \"\${FLEET_HOME:-}\" \"\${FLEET_RELEASES:-}\" \"\${FLEET_TMUX_SOCKET:-}\"" )
+}
+
+ab="$(resource "$TMP/home/alpha_root/ws1" "$TMP/home/beta_root/ws1")"
+check "alpha then beta ends at beta's store"    "$TMP/home/beta_root/.fleet"         "${ab%%|*}"
+check "alpha then beta ends at beta's releases" "$TMP/home/beta_root/fleet-releases" "$(echo "$ab" | cut -d'|' -f2)"
+check "alpha then beta ends on beta's socket"   "fleet-beta"                         "${ab##*|}"
+
+# The other direction too. A fix that only worked one way would be a coincidence of ordering.
+ba="$(resource "$TMP/home/beta_root/ws1" "$TMP/home/alpha_root/ws1")"
+check "beta then alpha ends at alpha's store"  "$TMP/home/alpha_root/.fleet" "${ba%%|*}"
+check "beta then alpha ends on alpha's socket" "fleet-alpha"                 "${ba##*|}"
+
+# And the operator's own export still survives BOTH sourcings. This is the half that makes the fix
+# non-trivial: the file must distinguish a value it exported itself from one somebody else did, and the
+# cheap fix — always re-deriving — would break the 1291 call sites the case above protects.
+keep="$(resource "$TMP/home/alpha_root/ws1" "$TMP/home/beta_root/ws1" "$TMP/explicit")"
+check "an operator's export survives two sourcings" "$TMP/explicit" "${keep%%|*}"
+
+# A store at $HOME ITSELF is stale by construction, never a choice: the walk stops BELOW $HOME, so no root
+# can ever have `$HOME/.fleet` as its store. This is the pre-isolation box-wide export, still carried by
+# long-lived shells started before the marker migration, and it must not survive a sourcing inside a root.
+legacy="$(resource "$TMP/home/alpha_root/ws1" "$TMP/home/beta_root/ws1" "$TMP/home/.fleet")"
+check "the pre-isolation \$HOME/.fleet export is replaced" "$TMP/home/beta_root/.fleet" "${legacy%%|*}"
+
+# The SOCKET has the same by-construction case and it matters more, because `close`, `abort` and `harvest`
+# kill sessions BY NAME. A root's server is always `fleet-<name>`, so the bare `fleet` of the pre-isolation
+# box is a name no root can own — and a stale shell healing its store while keeping that socket would kill
+# by name on a server shared with the other root.
+sock="$( cd "$TMP/home/beta_root/ws1" && env -u FLEET_HOME -u FLEET_RELEASES -u FLEET_INSTANTS \
+         -u FLEET_ROOT -u _FLEET_ENV_HOME -u _FLEET_ENV_SOCKET -u _FLEET_ENV_RELEASES \
+         HOME="$TMP/home" FLEET_TMUX_SOCKET=fleet bash -c \
+         ". '$ENVSH' >/dev/null 2>&1; printf '%s' \"\$FLEET_TMUX_SOCKET\"" )"
+check "the pre-isolation bare 'fleet' socket is replaced" "fleet-beta" "$sock"
+
+# ...and a socket somebody chose for a reason is still theirs. The IT harness names its own servers
+# (`itfleet-*`) on every section, so a rule that reclaimed any exported socket would take those too.
+own="$( cd "$TMP/home/beta_root/ws1" && env -u FLEET_HOME -u FLEET_RELEASES -u FLEET_INSTANTS \
+        -u FLEET_ROOT -u _FLEET_ENV_HOME -u _FLEET_ENV_SOCKET -u _FLEET_ENV_RELEASES \
+        HOME="$TMP/home" FLEET_TMUX_SOCKET=itfleet-Z bash -c \
+        ". '$ENVSH' >/dev/null 2>&1; printf '%s' \"\$FLEET_TMUX_SOCKET\"" )"
+check "a deliberately named socket is left alone" "itfleet-Z" "$own"
+
 # No literal davis_root anywhere in the file. The regression this whole test exists for.
 if grep -q 'davis_root' "$ENVSH"; then
   note "FAIL fleet-env.sh still names davis_root literally:"
