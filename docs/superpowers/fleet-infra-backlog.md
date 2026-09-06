@@ -492,7 +492,8 @@ reports `FOREIGN`; and a candidate whose identity cannot be determined reports `
 
 ## SI-53 — there is no `--seed-extra`, so the seed window is a race the coordinator loses
 
-**Status:** OPEN. **Blocks:** `dispatching-a-wave`. **Field ids:** `FI-387`, `FI-367`, `FI-388`.
+**Status:** **FIXED in `0.5.0`** — `dispatch --seed-extra <file>` appends inside the transaction,
+so the window is zero. **Field ids:** `FI-387`, `FI-367`, `FI-388`.
 
 **Measured 2026-09-06** at `0.4.0`. `dispatch` declares eleven flags (`cli.py:4017`) and **none** of them
 adds anything to the briefing. The seed is whatever `profile.render` produces (`cli.py:1239`), written to
@@ -526,7 +527,8 @@ refused before anything is claimed; and dispatch without the flag renders exactl
 
 ## SI-54 — `pane-guard` is the only verb keyed on `--pane`; everything else takes `--id`
 
-**Status:** OPEN. **Blocks:** `reviving-dead-panes`, `dispatching-subagents`. **Field id:** `FI-396`.
+**Status:** **FIXED in `0.5.0`** — `pane-guard --id <todo>` resolves the pane through the record,
+and a record with no session is refused rather than answered `13`. **Field id:** `FI-396`.
 
 **Measured 2026-09-06** at `0.4.0`. `pane-guard` declares exactly one flag,
 `Flag("--pane", True, True, "the pane (session) name")` (`cli.py:4193`). Every neighbouring verb —
