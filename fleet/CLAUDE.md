@@ -245,10 +245,15 @@ bash scripts/tests/fleet-finished-pids.sh      # ~15s, spends no claude
 It uses a copy of `/bin/sleep` named `claude`, because the CLI builds its probes with `default_probes()` and
 `pgrep -x claude` is not overridable from outside. Run it if you touch either script.
 
-**Which store the watchdog reads.** `FLEET_HOME` is now *stated* in the watchdog (`${FLEET_HOME:-$HOME/.fleet}`)
-rather than inherited. `fleet`'s read-only verbs default to `$HOME/.fleet` anyway, so leaving it unset would
-have worked — and would have meant a daemon that runs for weeks silently followed whatever `FLEET_HOME` was
-exported into the shell that happened to arm it, which differs per effort.
+**Which store the watchdog reads.** `FLEET_HOME` is *stated* in the watchdog (`${FLEET_HOME:-$DAVIS/.fleet}`)
+rather than inherited, so a daemon that runs for weeks does not silently follow whatever was exported into
+the shell that happened to arm it. ⚠️ **It reads `$DAVIS/.fleet`, not `$HOME/.fleet`, and the difference is
+load-bearing since per-root isolation:** the store moved into the root, and `fleet` has no `$HOME/.fleet`
+fallback at all any more — it refuses instead. Left naming the old path, this daemon would name a directory
+that resolves to nothing once the migration symlink is dropped; `finished_dispatch_pids` would return empty,
+the exclusion would read "exclude nothing", and auto-resume would quietly start typing into finished
+workers' panes. `CLAUDE_WATCHDOG_TMUX_SOCKETS` derives from the marker for the same reason — each root's
+sessions live on `fleet-<name>`.
 
 **The exclusion announces its own state, and this is the part worth knowing.** `finished_dispatch_pids` treats
 every failure as "exclude nothing" — right, because excluding a pid in error costs an auto-resume that should
