@@ -522,3 +522,54 @@ class TestAnInterruptedClaimIsReclaimableAndReported(unittest.TestCase):
         self.assertIsNone(_pid_in_staging_name(".lease.json.notapid.123.abcdef123456.tmp"))
         self.assertIsNone(_pid_in_staging_name("lease.json"))
         self.assertEqual(_pid_in_staging_name(".lease.json.777.2058688195526785.f86993c7f39d.tmp"), 777)
+
+
+class TestEnrolmentIsRootScoped(unittest.TestCase):
+    """`G3`. Without it, "davis2 cannot lease a davis_root workspace" is a claim about how people will
+    behave rather than something a command refuses to violate.
+
+    Note the attribute is `fleet_root`, not `root`: `Pool.root` already means the POOL DIRECTORY
+    (`<home>/pool`), and reusing the name would have silently rebound it.
+    """
+
+    def setUp(self):
+        self.tmp = pathlib.Path(tempfile.mkdtemp()).resolve()
+
+    def test_a_workspace_outside_the_root_is_refused_naming_both(self):
+        root = self.tmp / "davis_root"
+        (root / ".fleet").mkdir(parents=True)
+        foreign = self.tmp / "davis2_root" / "ws1"
+        foreign.mkdir(parents=True)
+        pool = Pool(root / ".fleet", fleet_root=root)
+        with self.assertRaises(BadInput) as cm:
+            pool.enroll(foreign)
+        self.assertIn(str(foreign), str(cm.exception))
+        self.assertIn(str(root), str(cm.exception))
+        self.assertEqual(pool.slots(), [], "a refused enrolment must not half-register the slot")
+
+    def test_a_workspace_inside_the_root_is_enrolled(self):
+        root = self.tmp / "davis_root"
+        (root / ".fleet").mkdir(parents=True)
+        ws = root / "ws1"
+        ws.mkdir()
+        pool = Pool(root / ".fleet", fleet_root=root)
+        pool.enroll(ws)
+        self.assertEqual(pool.slots(), ["ws1"])
+
+    def test_a_sibling_with_a_shared_prefix_is_outside(self):
+        """String containment is not path containment: `/x/davis_root2` starts with `/x/davis_root`."""
+        root = self.tmp / "davis_root"
+        (root / ".fleet").mkdir(parents=True)
+        sibling = self.tmp / "davis_root2"
+        sibling.mkdir()
+        with self.assertRaises(BadInput):
+            Pool(root / ".fleet", fleet_root=root).enroll(sibling)
+
+    def test_no_root_means_no_containment_check(self):
+        """REGRESSION: every hermetic test and every IT section builds a Pool with no root and enrols
+        sandbox directories that legitimately live anywhere."""
+        ws = self.tmp / "anywhere" / "ws1"
+        ws.mkdir(parents=True)
+        pool = Pool(self.tmp / "home")
+        pool.enroll(ws)
+        self.assertEqual(pool.slots(), ["ws1"])
