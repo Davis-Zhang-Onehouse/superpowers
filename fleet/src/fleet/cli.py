@@ -65,7 +65,7 @@ from typing import Callable
 
 from fleet import EXIT_ATTENTION, EXIT_BAD_INPUT, EXIT_CODES, EXIT_OK, EXIT_REFUSED, __version__
 from fleet import guards, layout, peers as peers_mod, render, seedcheck
-from fleet.atomic import atomic_write
+from fleet.atomic import atomic_symlink, atomic_write
 from fleet.errors import BadInput, FleetError, Refused
 from fleet.harvest import DEFAULT_MAX_AGE_S, REGISTER_NAME, Harvest
 from fleet.identity import ROOT_BASE, InstantName, resolve
@@ -124,6 +124,12 @@ class VerbSpec:
     read_only: bool
     help: str
     checker: bool = False
+    #: DECLARED, like `checker` and for the same reason. `root-init` creates the directory a store will
+    #: live in, so it is the one verb that must be answerable where `resolve_home` has no tier left —
+    #: otherwise the only root it could ever create is the SECOND one. Said here beside the handler rather
+    #: than inferred from a name in `default_context`, so the exemption is visible to the audits that read
+    #: this registry.
+    needs_store: bool = True
 
 
 #: The flag every verb carries. Declared here once so `--home` is not re-typed twenty times, and declared
@@ -661,7 +667,20 @@ def default_context(parsed: Parsed, out, err) -> Ctx:
     """
     environ = dict(os.environ)
     cwd = Path.cwd()
-    home, home_source = resolve_home(parsed, environ, cwd)
+    #: The refusal `resolve_home` raises is correct for every verb but one. `root-init` exists to create
+    #: the directory a store will live in, and the first root on a box is made by somebody standing where
+    #: there is no root — so refusing here would leave that verb able to create only the SECOND root. The
+    #: exemption is read off the DECLARED `needs_store`, never off the verb's name, and it is the failure
+    #: to resolve that is tolerated: when a root IS resolvable the verb gets a full context like any other.
+    spec = VERBS.get(parsed.verb)
+    try:
+        home, home_source = resolve_home(parsed, environ, cwd)
+    except BadInput:
+        if spec is None or spec.needs_store:
+            raise
+        return Ctx(home=None, instants_dir=None, store=None, pool=None, sessions=None, harvest=None,
+                   out=out, err=err, dry_run=parsed.on("dry-run"), porcelain=parsed.on("porcelain"),
+                   git=default_git(), runner=_default_runner())
     instants = resolve_instants(parsed, environ, cwd)
     resolved_root = resolve_root(parsed, environ, cwd)
 
@@ -4297,8 +4316,70 @@ def _do_release_history(ctx: Ctx, parsed: Parsed) -> int:
 # --- the registry ---------------------------------------------------------------------------------
 
 
+def _do_root_init(ctx: Ctx, parsed: Parsed) -> int:
+    """Make a directory a fleet root: the marker, the store skeleton, and a release area.
+
+    The whole verb is `root.check_new_root` followed by four writes, and that split is deliberate — the
+    rules for what MAY become a root belong beside `find` and `load`, because a creator with its own
+    definition writes markers the finder cannot honour.
+
+    **The marker is written LAST, and nothing is rolled back.** Both halves are the same decision. Until
+    the marker exists the directory is not a root: `find` walks past it, no store resolves to it, and the
+    `.fleet/` and `fleet-releases/` it may already contain are inert. So a failure part-way leaves litter
+    rather than a half-built root, and the litter is what a re-run reuses — every directory here is
+    created with `exist_ok`. `SI-21` asks that a rollback not strand state it created; the answer here is
+    that there is no state to strand, which is a better answer than a delete path this verb would
+    otherwise be the only caller of.
+
+    **`instants/` is deliberately absent.** `$FLEET_HOME/instants` is the directory `FI-382` planted a
+    stray child in for two releases and `SI-56` spent three corrections refusing. Creating it in every new
+    root would hand that trap a home; a dispatch names where instants go, or it is refused.
+    """
+    home = Path(os.environ.get("HOME") or Path.home())
+    target = root_mod.check_new_root(parsed.get("path"), home)
+    name = root_mod.check_name(parsed.get("name"), f"--name for {target}")
+
+    releases = target / "fleet-releases"
+    share = parsed.get("share-releases")
+    shared = None
+    if share is not None:
+        shared = Path(share)
+        if not shared.is_dir():
+            raise BadInput(
+                f"--share-releases {shared} is not an existing directory. Sharing a release area means "
+                f"pointing this root at ANOTHER root's, so that both resolve one `current` and always run "
+                f"the same version; there is nothing to point at yet.")
+        if releases.exists() or releases.is_symlink():
+            raise BadInput(
+                f"{releases} already exists, so it cannot be made a link to {shared}. Move it aside if "
+                f"this root should share {shared} instead of owning its own release area.")
+
+    store = target / ".fleet"
+    plan = [("root", str(target)), ("name", name), ("marker", str(target / root_mod.MARKER)),
+            ("store", str(store)), ("socket", f"fleet-{name}"),
+            ("releases", str(releases) + ("" if shared is None else f" -> {shared}")),
+            ("instants", "(not created — a dispatch names where instants go; SI-56)")]
+
+    if ctx.dry_run:
+        _emit(ctx, "root-init", plan + [("created", "no — --dry-run")])
+        return EXIT_OK
+
+    for part in ("records", "pool", "harvest"):
+        (store / part).mkdir(parents=True, exist_ok=True)
+    if shared is None:
+        releases.mkdir(exist_ok=True)
+    else:
+        atomic_symlink(shared, releases)
+    #: Last, and this is the ordering the docstring argues for: this write is what turns the directory
+    #: above from litter into a root.
+    atomic_write(target / root_mod.MARKER, json.dumps({"name": name}) + "\n")
+
+    _emit(ctx, "root-init", plan + [("created", "yes")])
+    return EXIT_OK
+
+
 def _verb(name: str, handler: Callable, read_only: bool, help_text: str, flags=(),
-          checker: bool = False) -> VerbSpec:
+          checker: bool = False, needs_store: bool = True) -> VerbSpec:
     """Build one spec. `--dry-run` is APPENDED FROM `read_only`, never typed per verb: the next mutating
     verb somebody adds gets an interrogable form whether or not they remembered to ask for one.
 
@@ -4307,7 +4388,7 @@ def _verb(name: str, handler: Callable, read_only: bool, help_text: str, flags=(
     """
     declared = tuple(flags) + COMMON_FLAGS + (() if read_only else (DRY_RUN_FLAG,))
     return VerbSpec(name=name, flags=declared, handler=handler, read_only=read_only, help=help_text,
-                    checker=checker)
+                    checker=checker, needs_store=needs_store)
 
 
 VERBS = {spec.name: spec for spec in (
@@ -4440,6 +4521,17 @@ VERBS = {spec.name: spec for spec in (
              "repos to check HEAD parity on, as `alpha,beta` — named, never inferred, because parity over "
              "'whatever looked like a repo' reports a green it did not measure"),
     )),
+    _verb("root-init", _do_root_init, False,
+          "make a directory a fleet root: its marker, store and release area", (
+        Flag("--path", True, True, "the directory to mark; must be an existing directory under $HOME"),
+        Flag("--name", True, True,
+             "this root's declared name; becomes the tmux socket `fleet-<name>`. Declared rather than "
+             "derived from the directory, because a derived name moves when somebody renames a folder "
+             "and takes every running session's server with it (FI-421)"),
+        Flag("--share-releases", True, False,
+             "point this root's `fleet-releases` at an existing release area instead of creating one, so "
+             "both roots resolve a single `current` and always run the same version"),
+    ), needs_store=False),
     _verb("enroll", _do_enroll, False, "put an EXISTING workspace directory into the pool; opt-in", (
         Flag("--slot", True, True, "the workspace directory; its basename becomes the slot name"),
     )),
@@ -4590,6 +4682,7 @@ PORCELAIN_COLUMNS = {
     "abort": KV_COLUMNS,
     "close": KV_COLUMNS,
     "clone": KV_COLUMNS,
+    "root-init": KV_COLUMNS,
     "enroll": KV_COLUMNS,
     "unenroll": KV_COLUMNS,
     "set-golden": KV_COLUMNS,
@@ -4654,6 +4747,11 @@ def _cadence(ctx: Ctx, verb: str) -> list:
     stderr, never stdout: stdout is machine-parseable data and commentary goes to stderr (`NFR2-7`), so a
     tick piping a porcelain form through `cut` is not broken by an alarm firing behind it.
     """
+    if ctx.harvest is None:
+        #: No store resolved, so there is no watched-source registry to be stale. Silence is right here
+        #: and nowhere else: the `except` below reports a registry it could not READ, which is a different
+        #: fact from a verb that legitimately has none (`root-init`, before its root exists).
+        return []
     try:
         overdue = ctx.harvest.stale(ctx.now(), ctx.max_age_s, ctx.live_work_now())
     except Exception as exc:                       # a broken registry must not break the verb

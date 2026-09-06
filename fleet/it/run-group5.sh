@@ -392,6 +392,13 @@ PY
       complete)  echo "--instant $INSTP --dry-run" ;;
       abort)     echo "--instant $INSTP --reason l7reason --dry-run" ;;
       close)     echo "--id $TODO --dry-run" ;;
+      #: `root-init`. The target is a real directory inside the section tree so the argv PARSES and
+      #: the verb runs, but the verb refuses it: the section tree lives under the operator's `davis_root`,
+      #: which is already a root, and roots do not nest. That is the right outcome for §L, whose
+      #: properties are the cadence line, the porcelain column count and flag handling — none of which
+      #: needs the verb to succeed. The verb's own contract is exercised end to end in §A1, which is the
+      #: one place in the suite that hands each verb its own `$HOME`.
+      root-init) mkdir -p "$EV/l7root"; echo "--path $EV/l7root --name l7root" ;;
       seed-delivered) echo "--id $TODO --delivered $EV/l7-delivered.txt --dry-run" ;;
       harvest)   echo "--dry-run" ;;
       enroll)    echo "--slot $SLOTS/s1 --dry-run" ;;
@@ -625,6 +632,13 @@ PY
       complete)  echo "--instant $INSTP --dry-run" ;;
       abort)     echo "--instant $INSTP --reason mreason --dry-run" ;;
       close)     echo "--id $TODO --dry-run" ;;
+      #: `root-init`. The target is a real directory inside the section tree so the argv PARSES and
+      #: the verb runs, but the verb refuses it: the section tree lives under the operator's `davis_root`,
+      #: which is already a root, and roots do not nest. That is the right outcome for §M, whose
+      #: properties are the cadence line, the porcelain column count and flag handling — none of which
+      #: needs the verb to succeed. The verb's own contract is exercised end to end in §A1, which is the
+      #: one place in the suite that hands each verb its own `$HOME`.
+      root-init) mkdir -p "$EV/m5root"; echo "--path $EV/m5root --name m5root" ;;
       seed-delivered) echo "--id $TODO --delivered $EV/m5-delivered.txt --dry-run" ;;
       harvest)   echo "--dry-run" ;;
       enroll)    echo "--slot $SLOTS/ms1 --dry-run" ;;
