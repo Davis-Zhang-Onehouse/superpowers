@@ -371,6 +371,11 @@ PY
   printf '{"kind": "worker"}\n' > "$EV/profile/profile.json"
   printf 'A charter for {{TITLE}} at {{PATH}}.\n' > "$EV/profile/charter.md"
   printf 'seed for {{INSTANT}}\n' > "$EV/profile/seed.txt"
+  #: `SI-55`. `seed-delivered` compares what was sent against the seed the instant carries, so this row
+  #: needs both to exist — every mutating row in `verb_args` runs for real under `--dry-run`.
+  mkdir -p "$INSTP/.fleet"
+  printf 'seed for %s\n' "$INST" > "$INSTP/.fleet/seed.txt"
+  cp "$INSTP/.fleet/seed.txt" "$EV/l7-delivered.txt"
   export TODO STALE_BASE
 
   verb_args() {   # the valid argv for one verb; mutating verbs run --dry-run so L7 changes nothing
@@ -387,6 +392,7 @@ PY
       complete)  echo "--instant $INSTP --dry-run" ;;
       abort)     echo "--instant $INSTP --reason l7reason --dry-run" ;;
       close)     echo "--id $TODO --dry-run" ;;
+      seed-delivered) echo "--id $TODO --delivered $EV/l7-delivered.txt --dry-run" ;;
       harvest)   echo "--dry-run" ;;
       enroll)    echo "--slot $SLOTS/s1 --dry-run" ;;
       unenroll)  echo "--slot s1 --dry-run" ;;
@@ -591,6 +597,11 @@ PY
   python3 "$PY_DIR/msetup.py" >> "$EV/M-setup.out" 2>&1
   fleet propose --instant "$INSTP" --milestone M1 --status "done" --evidence "$EV/M-setup.out" \
         >> "$EV/M-setup.out" 2>&1
+  #: `SI-55`. See the identical note in §L: the row is driven for real under `--dry-run`, so the rendered
+  #: seed and the delivered text both have to be there.
+  mkdir -p "$INSTP/.fleet"
+  printf 'seed for %s\n' "$INST" > "$INSTP/.fleet/seed.txt"
+  cp "$INSTP/.fleet/seed.txt" "$EV/m5-delivered.txt"
   export INSTP TODO
 
   #: Same reason as §L: `peers` shells out to `claude agents --json`, and M5 appends one extra flag
@@ -614,6 +625,7 @@ PY
       complete)  echo "--instant $INSTP --dry-run" ;;
       abort)     echo "--instant $INSTP --reason mreason --dry-run" ;;
       close)     echo "--id $TODO --dry-run" ;;
+      seed-delivered) echo "--id $TODO --delivered $EV/m5-delivered.txt --dry-run" ;;
       harvest)   echo "--dry-run" ;;
       enroll)    echo "--slot $SLOTS/ms1 --dry-run" ;;
       unenroll)  echo "--slot ms1 --dry-run" ;;

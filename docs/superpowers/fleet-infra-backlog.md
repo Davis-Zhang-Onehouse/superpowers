@@ -596,20 +596,45 @@ observed in the worker's argv.
 
 ## SI-56 — `FLEET_INSTANTS` unset silently planted the child in `$FLEET_HOME/instants`
 
-**Status:** **CLOSED in `0.4.0`** — the guard is `cli.require_named_instants` (`cli.py:548`), applied at
-the two handlers that bootstrap an instant (`cli.py:919`, `cli.py:1102`), with an AST non-drift check
-(`test_root_resolution.py`) so a third creating verb cannot skip it, and IT case `R6`. **Field id:**
-`FI-382`.
+**Status:** **FIXED in `0.5.1`**. It was recorded CLOSED in `0.4.0` and that was wrong — see below.
+**Field id:** `FI-382`.
 
-**Kept in the register rather than deleted, because the correction is the useful part.** The isolation
-spec claimed this closed "for free": delete the derived `$FLEET_HOME/instants` fallback and the stray
-child has nowhere to go. That was wrong, and implementing it proved so. Under isolation the stray lands in
-`$ROOT/.fleet/instants` — **the right root and still the wrong tree**, invisible until an endgame
-compaction cannot find the worker. The harm was always intra-root, so it needed its own refusal.
+**This entry is kept, and its history left visible, because the corrections are the useful part. There
+were three, and the last one is the one that matters.**
 
-The second correction: the refusal could not live in the resolver. Written there it refused `board`,
-because `reconcile` and `guards.blocking_compactions` read the instants directory on the **read** path
-too. Resolution and requirement are different questions, and only the creating verbs ask the second one.
+**Correction 1 — isolation did not close it.** The isolation spec claimed this closed "for free": delete
+the derived `$FLEET_HOME/instants` fallback and the stray child has nowhere to go. Implementing it proved
+otherwise. Under isolation the stray lands in `$ROOT/.fleet/instants` — **the right root and still the
+wrong tree**, invisible until an endgame compaction cannot find the worker. The harm was always
+intra-root, so it needed its own refusal.
 
-**Closed when:** met — a verb that creates an instant with no instants directory named refuses, cites
-`SI-56`, and creates nothing; the same call with `--instants-dir` succeeds.
+**Correction 2 — the refusal could not live in the resolver.** Written there it refused `board`, because
+`reconcile` and `guards.blocking_compactions` read the instants directory on the **read** path too.
+Resolution and requirement are different questions, and only the creating verbs ask the second one.
+
+**Correction 3 — the guard shipped unable to fire on the defect that motivated it.** `0.4.0`'s
+`instants_were_named` accepted an exported **`FLEET_HOME`** as *"the caller named where instants go"*. But
+`FI-382`'s live configuration is exactly that: a shell with `FLEET_HOME` exported by
+`scripts/fleet-env.sh` and no `FLEET_INSTANTS`, which is what **every** shell on this box has. Measured at
+`0.5.0`, `dispatch` in that environment returned **rc=0** and planted the child in `$FLEET_HOME/instants`.
+
+That is `FI-303`'s shape — *a control that cannot fire on the defect that motivated it certifies its own
+blind spot* — and it went unnoticed for two releases because the IT case written for it (`R6`) drives the
+**derived-home** configuration, not the exported one. The register was carrying `SI-56` as CLOSED on that
+evidence.
+
+The fix: naming the STORE in an ambient variable is not naming the instants directory. `--instants-dir`,
+`FLEET_INSTANTS` and the `--home` **flag** still name it; an exported `FLEET_HOME` does not. `I2-11` is
+the reasoning — a value the caller never typed must not out-rank one they did — and a flag is in the
+command somebody typed for this invocation while an export was made by a shell rc nobody re-reads.
+`resolve_instants` is unchanged: reads must always answer.
+
+**How it was found, which is worth as much as the fix.** Not by review. `release-verify` runs the hermetic
+suite with `env -u FLEET_HOME`, and 33 tests that pass on a developer's shell failed there — because the
+suite was ALSO reading the operator's environment. Chasing why the gate disagreed with the green suite is
+what surfaced the product hole underneath. The suite is now hermetic by construction
+(`fleet/tests/__init__.py`), with a case that drives a creating verb under a hostile ambient environment.
+
+**Closed when:** met — a verb that creates an instant refuses whether the store was derived from the
+marker (`R6`) **or** exported as `FLEET_HOME` (`R6b`), cites `SI-56`, and creates nothing; `--home`,
+`--instants-dir` and `FLEET_INSTANTS` each still clear it.

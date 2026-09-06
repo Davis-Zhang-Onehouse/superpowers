@@ -207,6 +207,10 @@ a1_args() {               # every required flag supplied; no value contains a sp
     complete)   echo "--instant $A1_COMP" ;;
     abort)      echo "--instant $A1_ABRT --reason a1reason" ;;
     close)      echo "--id a1probe-00000000" ;;
+    #: `SI-55`. `--delivered` points at a file that exists so the refusal under test is the STORE's and
+    #: not an unreadable-file complaint — A1b's `inconclusive` bucket is for exactly that confusion, and a
+    #: fixture producing the right exit code for the wrong reason is not a fixture.
+    seed-delivered) echo "--id a1probe-00000000 --delivered $A_PROFILE/seed.txt" ;;
     harvest)    echo "" ;;
     enroll)     echo "--slot $d/slotsrc" ;;
     unenroll)   echo "--slot slotsrc" ;;

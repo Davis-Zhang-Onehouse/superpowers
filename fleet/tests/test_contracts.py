@@ -33,6 +33,7 @@ import unittest
 
 from fleet import EXIT_CODES
 from fleet import cli
+from tests import hermetic_environment
 from fleet.guards import Context, evaluate_all, guards_for
 from fleet.harvest import Harvest
 from fleet.layout import validate as layout_validate
@@ -195,7 +196,11 @@ class Fleet:
 
     def run(self, argv):
         out, err = io.StringIO(), io.StringIO()
-        code = cli.main(list(argv), stdout=out, stderr=err, context=self.context())
+        #: The environment is the fixture's, never the operator's. `cli.main` reads `os.environ` at parse
+        #: time, so without this the suite measured whatever the person running it had exported — 33 cases
+        #: passed on an ambient `FLEET_HOME` and failed inside `release-verify`, which runs with it unset.
+        with hermetic_environment(self.instants):
+            code = cli.main(list(argv), stdout=out, stderr=err, context=self.context())
         return code, out.getvalue(), err.getvalue()
 
     def record_state(self) -> dict:
