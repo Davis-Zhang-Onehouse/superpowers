@@ -41,6 +41,7 @@ from unittest import mock
 from fleet import (EXIT_ATTENTION, EXIT_BAD_INPUT, EXIT_CODES, EXIT_NO_CAPACITY, EXIT_OK,
                    EXIT_REFUSED)
 from fleet import cli
+from tests import hermetic_environment
 from fleet import seedcheck
 from fleet.harvest import NO_ISSUES_FILED, REGISTER_NAME, UNREADABLE, VACUOUS, Harvest
 from fleet.identity import InstantName
@@ -391,7 +392,11 @@ class Fleet:
 
     def run(self, argv):
         out, err = io.StringIO(), io.StringIO()
-        code = cli.main(list(argv), stdout=out, stderr=err, context=self.context())
+        #: The environment is the fixture's, never the operator's. `cli.main` reads `os.environ` at parse
+        #: time, so without this the suite measured whatever the person running it had exported — 33 cases
+        #: passed on an ambient `FLEET_HOME` and failed inside `release-verify`, which runs with it unset.
+        with hermetic_environment(self.instants):
+            code = cli.main(list(argv), stdout=out, stderr=err, context=self.context())
         return code, out.getvalue(), err.getvalue()
 
     # ---- the three halves of a delta --------------------------------------------------------------
@@ -522,6 +527,64 @@ class CliCase(unittest.TestCase):
             "release-history": ["--releases", str(releases)],
         }
 
+
+
+class TestTheSuiteDoesNotReadTheOPERATORsEnvironment(CliCase):
+    """The suite was measured NOT being hermetic, and the way it was measured is the reason this class
+    exists rather than a comment.
+
+    `cli.main` reads `os.environ` at parse time — `require_named_instants` asks whether the caller named
+    where instants are created — while the fixture states the same fact by handing `Ctx` an
+    `instants_dir`. Nothing made those two tiers agree. 33 cases passed on this box because the operator's
+    shell exported `FLEET_HOME`, and the SAME 33 failed inside `release-verify`, which runs the suite with
+    `env -u FLEET_HOME`. A green suite and a red release gate over one tree.
+
+    A test that passes because of what the person running it exported is not measuring the product.
+    """
+
+    def test_a_creating_verb_works_with_a_HOSTILE_ambient_environment(self):
+        """Every `FLEET_*` set to somewhere that must never be written. If any of them reached the verb,
+        the dispatch would either be admitted for the wrong reason or plant a child outside the fixture."""
+        fleet = self.loaded()
+        poison = pathlib.Path("/nonexistent-fleet-store-that-must-never-be-touched")
+        hostile = {"FLEET_HOME": str(poison), "FLEET_INSTANTS": str(poison / "instants"),
+                   "FLEET_RELEASES": str(poison / "releases"), "FLEET_TMUX_SOCKET": "not-our-server",
+                   "FLEET_ROOT": str(poison)}
+
+        with mock.patch.dict(os.environ, hostile):
+            code, out, err = fleet.run(["dispatch", "--porcelain", "--profile",
+                                        str(fleet.profile("worker")), "--title", "hostileEnvWorker",
+                                        "--base", "00000000", "--optype", "append"])
+
+        self.assertEqual(EXIT_OK, code, f"an ambient environment changed the verdict: {err}")
+        child = [line.split("\t")[1] for line in out.splitlines() if line.startswith("instant\t")][0]
+        self.assertTrue(str(child).startswith(str(fleet.instants)),
+                        f"the child landed outside the fixture's instants directory: {child}")
+        self.assertFalse(poison.exists(), "the ambient store was reached")
+
+    def test_a_creating_verb_works_with_NO_fleet_variables_at_all(self):
+        """The other direction, and the one `release-verify` runs: nothing exported anywhere."""
+        fleet = self.loaded()
+        with mock.patch.dict(os.environ, {}, clear=False):
+            for name in ("FLEET_HOME", "FLEET_INSTANTS", "FLEET_RELEASES", "FLEET_TMUX_SOCKET",
+                         "FLEET_ROOT"):
+                os.environ.pop(name, None)
+            code, out, err = fleet.run(["dispatch", "--porcelain", "--profile",
+                                        str(fleet.profile("worker")), "--title", "bareEnvWorker",
+                                        "--base", "00000000", "--optype", "append"])
+
+        self.assertEqual(EXIT_OK, code, f"the suite needs a variable the release gate does not set: {err}")
+
+    def test_the_helper_clears_every_variable_it_lists(self):
+        """`FLEET_ENV` is a hand-written list and the defect it guards was ONE unlisted variable reaching
+        a test. Derived here from the module's own constant so the list and the clearing cannot drift."""
+        from tests import FLEET_ENV
+        fleet = self.loaded()
+        with mock.patch.dict(os.environ, {name: "leaked" for name in FLEET_ENV}):
+            with hermetic_environment(fleet.instants):
+                left = {name: os.environ.get(name) for name in FLEET_ENV
+                        if os.environ.get(name) == "leaked"}
+        self.assertEqual({}, left, f"these variables survived into the fixture's environment: {left}")
 
 
 class TestTheFlagSpec(CliCase):

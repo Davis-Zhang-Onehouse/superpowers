@@ -183,6 +183,34 @@ class TestInstantsTier(ResolutionCase):
         self.assertIn("SI-56", str(cm.exception),
                       "must be the guard's refusal, not a usage dump that happens to name the flag")
 
+    def test_an_EXPORTED_store_does_not_say_where_instants_go(self):
+        """`FI-382`'s OWN configuration, and the first version of this guard could not fire on it.
+
+        The live incident was a shell with `FLEET_HOME` exported by `scripts/fleet-env.sh` and no
+        `FLEET_INSTANTS`, and the guard shipped accepting an exported `FLEET_HOME` as "the caller named
+        where instants go". Measured against `0.5.0`: `dispatch` with that environment returned **rc=0**
+        and planted the child in `$FLEET_HOME/instants` — the defect, intact, behind the control written
+        to stop it. `FI-303` is exactly this shape: a control that cannot fire on the defect that
+        motivated it certifies its own blind spot.
+
+        The inference "you named the store, so you named the instants directory" IS the deleted default.
+        Reading it out of an ambient variable rather than out of the resolver does not make it a
+        statement the caller made — which is `I2-11`, that a value the caller never typed must not
+        out-rank one they did.
+        """
+        parsed = self.parsed("dispatch", *self.DISPATCH_REQ)
+        with self.assertRaises(BadInput) as cm:
+            cli.require_named_instants(parsed, self.env(FLEET_HOME=str(self.tmp / "store")))
+        self.assertIn("SI-56", str(cm.exception),
+                      "must be the guard's refusal, not a usage dump that happens to name the flag")
+
+    def test_the_home_FLAG_still_names_them(self):
+        """The asymmetry is the point and it is not a compromise. `--home` is in the command somebody
+        typed for THIS invocation; `FLEET_HOME` was exported by a shell rc read weeks ago. The spec kept
+        `--home X => instants X/instants` and IT sections rely on it."""
+        cli.require_named_instants(
+            self.parsed("dispatch", *self.DISPATCH_REQ, "--home", str(self.tmp / "s")), self.env())
+
     def test_naming_the_instants_directory_clears_the_create_guard(self):
         parsed = self.parsed("dispatch", *self.DISPATCH_REQ, "--instants-dir", str(self.tmp / "i"))
         cli.require_named_instants(parsed, self.env())
