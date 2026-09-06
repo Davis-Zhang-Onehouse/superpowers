@@ -652,3 +652,96 @@ correct.
 **Closed when:** met — a verb that creates an instant refuses whether the store was derived from the
 marker (`R6`) **or** exported as `FLEET_HOME` (`R6b`), cites `SI-56`, and creates nothing; `--home`,
 `--instants-dir` and `FLEET_INSTANTS` each still clear it.
+
+---
+
+## SI-57 — `fleet-env.sh` carries the previous root's store across a `cd` between roots
+
+**Status:** OPEN. Found while provisioning `davis2_root` at `0.5.2`, by reading the file rather than by a
+failing check — there is no control that would have caught it.
+**Field id:** none yet; this has not been observed damaging a run, only shown to be reachable.
+
+**Measured 2026-09-06 at `0.5.2`.** `scripts/fleet-env.sh:56` sets the store as a DEFAULT:
+
+```sh
+export FLEET_HOME="${FLEET_HOME:-$_fleet_root/.fleet}"
+```
+
+and the same shape guards `FLEET_TMUX_SOCKET` (`:71`) and `FLEET_RELEASES` (`:77`). The default is
+deliberate and load-bearing — the file says so, and 1291 explicit call sites across the suites depend on an
+exported value winning. But the shared `~/.zshrc` sources this file from a `chpwd` hook, so a shell that
+has been in `davis_root` and then `cd`s to `davis2_root` re-sources it with `FLEET_HOME` already set — by
+the previous sourcing, for the OTHER root. `${VAR:-...}` cannot tell that value from one the operator
+exported on purpose, so it keeps it. The shell is now standing in `davis2_root` addressing
+`davis_root/.fleet`, on tmux server `fleet-davis`.
+
+That is the interference the isolation work exists to remove, arriving through the file whose own header
+says *"Two roots under `$HOME` then share nothing: not a record, not a slot, not a server, not a
+release."*
+
+**What a fix must decide.**
+
+1. How to tell a value THIS FILE exported from one the operator exported. A companion variable recording
+   what the last sourcing set (`_FLEET_ENV_HOME`) answers it: equal means ours, replace it; different
+   means theirs, keep it. Nothing else in the environment carries that distinction.
+2. Whether the same treatment applies to `FLEET_TMUX_SOCKET` and `FLEET_RELEASES`. It should — a stale
+   socket is worse than a stale store, because `close`/`abort`/`harvest` kill BY NAME.
+3. `FLEET_INSTANTS` is NOT in scope: it is set only from an explicit argument, never defaulted.
+4. The duplicated walk in `fleet.root` is unaffected; only the export tier changes.
+
+**Closed when:** a shell that sources the file in one root and then sources it in another addresses the
+second root's store, socket and release area — while a value the operator exported before the first
+sourcing still survives both. `scripts/tests/fleet-env-derives-root.sh` asserts both halves.
+
+---
+
+## SI-58 — a store the caller NAMED is created silently when it does not exist
+
+**Status:** OPEN. Found while removing the `~/.fleet` compatibility symlink at `0.5.2`.
+**Field id:** none yet.
+
+**Measured 2026-09-06 at `0.5.2`**, standing in `/home/ubuntu/davis2_root`, with a `$FLEET_HOME` naming a
+directory that does not exist:
+
+```
+$ FLEET_HOME=$SCRATCH/ghost fleet leases
+root /…/ghost ($FLEET_HOME)
+slots: 0 enrolled · 0 held · 0 free            # rc=0
+
+$ FLEET_HOME=$SCRATCH/ghost fleet enroll --slot $SCRATCH/ghost-ws
+enrolled  1                                     # rc=0, and $SCRATCH/ghost/pool/enrolled/ now exists
+```
+
+Two failures, one cause. The read answers **zero about a population it cannot see** — `FI-417` exactly,
+and the same sentence a genuinely empty store prints. The write CREATES the named store, so a typo'd path
+or a stale export does not fail, it forks a second fleet that looks healthy from inside.
+
+This is what makes removing `~/.fleet` unsafe today rather than merely overdue. Ten live processes on this
+box still carry `FLEET_HOME=/home/ubuntu/.fleet` from before the marker migration (two of them `claude`
+sessions). While the symlink exists they reach `davis_root`'s store from either root — the interference
+isolation removed, wearing the compatibility layer as a disguise, which
+`scripts/fleet-migrate-root.sh`'s header names in as many words. Remove it and their next write verb
+**recreates** `/home/ubuntu/.fleet` as a fresh empty box-wide store, silently. Neither branch is
+acceptable, and the product is what has to close it.
+
+`resolve_home` already reasoned its way here for the tier BELOW this one: `SI-15`'s read-only fallback to
+`$HOME/.fleet` was deleted because *"the fallback does not answer about no fleet, it answers about a
+different root's fleet — confidently, with a population row and everything."* A named store that does not
+exist is the same sentence about a fleet that does not exist at all.
+
+**What a fix must decide.**
+
+1. Which tiers. `--home` and `$FLEET_HOME` NAME a store; the marker derives one. The named tiers must
+   exist already; the derived tier must still be creatable, or a fresh root cannot be bootstrapped.
+2. Read or write. Both — the read is the `FI-417` half, and refusing only writes leaves the confident
+   zero in place.
+3. What the refusal says: the path, which tier named it, and that a store is created by the root that
+   owns it. A caller who really wants a new store at a named path types one `mkdir`.
+4. Blast radius on the suites, measured rather than assumed: every fixture that passes `--home` or exports
+   `FLEET_HOME` must already create the directory. This is the half that decides whether the rule is
+   affordable.
+
+**Closed when:** a named store root that is not a directory is refused (exit 2) by both a read verb and a
+write verb, the refusal names the path and the tier, a marker-derived store is still created on first
+write, and an IT case drives it through the real binary from inside a root — the shape the stale exports
+on this box actually have.
