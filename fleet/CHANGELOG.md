@@ -1,5 +1,13 @@
 # fleet — changelog
 
+## fleet/v0.5.1 — 2026-09-06T05:12:04Z
+Cut from 53d7dbf on `live` (upstream base snapshot/2026-08-17-221146). 1 commit(s) since fleet/v0.5.0.
+
+Every release ships the whole repository — all skills, `commands/`, `hooks/` and the plugin manifest, not only `fleet/`.
+Payload: fleet (9 files), docs (1 file).
+
+- 53d7dbf SI-56: an exported store does not say where instants go, and the suite stops reading the operator's shell
+
 ## fleet/v0.5.0 — 2026-09-06T04:04:29Z
 Cut from 0500c7a on `live` (upstream base snapshot/2026-08-17-221146). 6 commit(s) since fleet/v0.4.0.
 
