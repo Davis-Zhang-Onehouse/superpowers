@@ -44,6 +44,17 @@ IT_AMBIENT_INSTANTS="${FLEET_INSTANTS:-}"
 #: `$FLEET_HOME/instants`, so that is where a leak would go and it must be watched or the check watches
 #: NOTHING and reports a PASS about it. `SI-1`'s shape, found in review before it shipped.
 IT_AMBIENT_HOME="${FLEET_HOME:-}"
+#: The instants tree of the ROOT this harness sits in, if any — watched as a leak destination alongside the
+#: two ambient variables above. Derived by the same upward walk the product uses, in shell, deliberately: a
+#: watch list that asked `fleet` where it would write would go quiet in exactly the case where `fleet` is
+#: broken. Empty when there is no marker, and `it_live_instants_roots` skips empties.
+IT_AMBIENT_ROOT_INSTANTS=""
+_it_d="$(pwd -P)"
+while [ "$_it_d" != "/" ] && [ "$_it_d" != "$HOME" ]; do
+  if [ -f "$_it_d/.fleet-root" ]; then IT_AMBIENT_ROOT_INSTANTS="$_it_d/.fleet/instants"; break; fi
+  _it_d="$(dirname "$_it_d")"
+done
+unset _it_d
 #: The instants half's FAIL marker, a CONSTANT because a control asserts on it. `W1-11` used to grep
 #: `^ISOLATION-W1-11-injected\tFAIL` alone — but `it_assert_isolation` also FAILs for the stores half
 #: and the tmux half, so a live-stores change during the run would have made the instants decoy pass
@@ -116,9 +127,12 @@ it_section() {            # it_section <name> -> own FLEET_HOME, own slots, own 
   # guarantee you have to remember is the failure mode this whole wave keeps paying for.
   #
   # `$FLEET_HOME/instants` and NOT `$EV/instants`, and the difference is a REGRESSION I measured rather than
-  # a preference. `$FLEET_HOME/instants` is exactly what `cli.default_context` DERIVES when nothing names the
-  # directory, so on a box with `FLEET_INSTANTS` unset this line changes nothing at all — it makes the
-  # existing default explicit, which is what stops an ambient value overriding it. Pointing it at `$EV`
+  # a preference. It USED to be exactly what `cli.default_context` derived when nothing named the directory,
+  # and this comment used to say the line "makes the existing default explicit". ⚠️ There is no longer any
+  # such default: `SI-56` deleted it, and a verb that CREATES an instant now REFUSES when nobody named the
+  # directory (`cli.require_named_instants`). So this line no longer mirrors a default — it SUPPLIES the
+  # value the product refuses to invent, which is why every section still works without naming one.
+  # Pointing it at `$EV`
   # instead moved the directory, and `run-group5.sh` reads the derived path directly (`:1232` and `:1534`,
   # `ls "$FLEET_HOME/instants"`): §M failed with *"cannot access .../M/home/instants: No such file or
   # directory"*. A sandbox that relocates what it is sandboxing is a second defect wearing the fix's badge.
@@ -478,7 +492,14 @@ it_classify_session_delta() {   # it_classify_session_delta <baseline> <after>
 # it would turn every legitimate case into a failure.
 it_live_instants_roots() {
   local root
-  for root in "$IT_AMBIENT_INSTANTS" "${IT_AMBIENT_HOME:+$IT_AMBIENT_HOME/instants}" "$HOME/.fleet/instants"; do
+  # `$IT_AMBIENT_ROOT_INSTANTS` is the per-root store's instants tree, derived from the `.fleet-root`
+  # marker at or above this harness. Without it this watch list goes VACUOUS the moment the box migrates
+  # off the box-wide `~/.fleet` — it would still name a path, that path would no longer be where a leak
+  # lands, and the terminal row would report "unchanged in N live tree(s)" about a tree nobody writes to.
+  # The `~/.fleet` entry stays: during migration it is a symlink to exactly this directory, and after the
+  # symlink is dropped it is simply absent and skipped.
+  for root in "$IT_AMBIENT_INSTANTS" "${IT_AMBIENT_HOME:+$IT_AMBIENT_HOME/instants}" \
+              "${IT_AMBIENT_ROOT_INSTANTS:-}" "$HOME/.fleet/instants"; do
     [ -n "$root" ] || continue
     [ -d "$root" ] || continue
     case "$(cd "$root" && pwd -P)/" in "$IT_ROOT"/*) continue ;; esac

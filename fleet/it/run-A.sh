@@ -266,7 +266,17 @@ a1_no_fallback() {
     #: never fire. A check that cannot tell the refusal it wants from an error it does not want is
     #: not a check.
     names_home=no
-    printf '%s' "$out" | grep -qF 'writes to a store and no store was named' && names_home=yes
+    #: TWO attributable sentences since per-root isolation, and both are the store refusal — the
+    #: difference is only WHICH tier ran out. With no `.fleet-root` at or above the cwd the chain
+    #: reaches tier 6 and refuses for the whole invocation ("could not tell which fleet it belongs to"),
+    #: which is what a mutating verb hits on this fixture; `SI-15`'s original sentence still fires where
+    #: a root resolves but the release area is unnamed. Anchored on the two exact sentences, never on a
+    #: flag name: `II-10` is the record of what happens when this matches `--home`, which every verb's
+    #: usage block prints on ANY parse error (39 of 39, measured).
+    if printf '%s' "$out" | grep -qF 'writes to a store and no store was named' \
+       || printf '%s' "$out" | grep -qF 'could not tell which fleet it belongs to'; then
+      names_home=yes
+    fi
     printf '%-12s rc=%-3s created_HOME_dot_fleet=%-3s names_home=%-3s\n' \
            "$v" "$rc" "$created" "$names_home" >> "$log"
     [ "$created" = yes ] && { wrote=$((wrote+1)); wrote_list="$wrote_list $v"; }
@@ -293,7 +303,7 @@ a1_no_fallback() {
   #: in the first place.
   local probed=$((n - unmapped))
   if [ "$nonrefusing" = 0 ] && [ "$inconclusive" = 0 ]; then
-    a_pass A1b "$log" "$(sq "all $probed probed mutating verbs exited 2 with the SI-15 store refusal ('writes to a store and no store was named'), matched on that sentence rather than on the flag name --home, which every verb's usage block also contains (II-10). $unmapped verb(s) had no argv recipe and are A1d's business, not this case's")"
+    a_pass A1b "$log" "$(sq "all $probed probed mutating verbs exited 2 with an attributable store refusal — either SI-15's 'writes to a store and no store was named' or, since per-root isolation, tier 6's 'could not tell which fleet it belongs to' — and NONE created \$HOME/.fleet. Matched on those two exact sentences rather than on the flag name --home, which every verb's usage block also prints on any parse error (II-10, 39 of 39 measured). $unmapped verb(s) had no argv recipe and are A1d's business, not this case's")"
   elif [ "$nonrefusing" = 0 ]; then
     a_fail A1b "$log" "$(sq "$attributed of $probed probed mutating verbs refused with exit 2 carrying the SI-15 store refusal; $inconclusive exited 2 for an unrelated reason ($inconc_list) so their refusal is NOT attributable to the missing home — the fallback is latent for them, not absent")"
   else
