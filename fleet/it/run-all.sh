@@ -84,6 +84,7 @@ FULL_EXTRA=(
   "J:bash $IT_ROOT/run-J.sh"
   "O:bash $IT_ROOT/run-O.sh"
   "LB:bash $IT_ROOT/run-lineage.sh"
+  "R:bash $IT_ROOT/run-R.sh"
 )
 
 IT_FULL=no
