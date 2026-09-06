@@ -26,6 +26,7 @@ It imports `PORCELAIN_COLUMNS` from the package rather than hardcoding column or
 header row, so a consumer must know the schema; importing the declaration means adding a column to a verb
 does not silently shift this view's fields by one. That is the one coupling worth having.
 """
+import pathlib
 import os
 import re
 import shutil
@@ -284,7 +285,14 @@ def _collapse(rows):
 
 
 def view_board(wide):
-    rows, err, _ = run("board")
+    rows, err, rc = run("board")
+    #: A REFUSAL IS NOT AN EMPTY FLEET. `fleet` exits non-zero and prints why; rendering "(no subjects)"
+    #: over that turns a refusal into a reassuring blank page — the absence-as-success family this
+    #: package's register tracks, and a direct contradiction of this tool's own contract that it "cannot
+    #: hide a refusal". Reachable by default since per-root isolation: any directory with no
+    #: `.fleet-root` above it now refuses rather than reading a shared store.
+    if rc != 0:
+        return ["  " + line for line in (err or "fleet refused and said nothing").splitlines()], ""
     rows = _collapse(rows)
     if not rows:
         return ["  (no subjects)"], err
@@ -310,7 +318,9 @@ def view_board(wide):
 
 
 def view_leases(wide):
-    rows, err, _ = run("leases")
+    rows, err, rc = run("leases")
+    if rc != 0:
+        return ["  " + line for line in (err or "fleet refused and said nothing").splitlines()], ""
     if not rows:
         return ["  (no slots enrolled)"], err
     body = []
@@ -395,6 +405,18 @@ def view_releases(wide):
     return out, err or listing_err or history_err
 
 
+
+def _derived_home_note() -> str:
+    """What `fleet` would resolve, said the way `fleet` says it, or why it would refuse."""
+    here = pathlib.Path.cwd().resolve()
+    home_dir = pathlib.Path(os.environ.get("HOME") or pathlib.Path.home()).resolve()
+    for candidate in (here, *here.parents):
+        if candidate == home_dir or home_dir not in candidate.parents:
+            break
+        if (candidate / ".fleet-root").is_file():
+            return f"{candidate / '.fleet'} (marker at {candidate / '.fleet-root'})"
+    return f"(unset, and no .fleet-root at or above {here} — fleet would REFUSE)"
+
 def main():
     args = [a for a in sys.argv[1:]]
     wide = "--wide" in args;      args = [a for a in args if a != "--wide"]
@@ -405,7 +427,10 @@ def main():
     verb = args[0] if args and not args[0].startswith("-") else "all"
     extra = args[1:] if args and not args[0].startswith("-") else args
 
-    home = os.environ.get("FLEET_HOME", "(unset — defaults to ~/.fleet for reads)")
+    #: No "(defaults to ~/.fleet)" any more — there is no such default. `fleet` resolves its store from
+    #: the `.fleet-root` marker at or above the cwd and REFUSES when it finds none, so the honest header
+    #: names what would actually be used rather than a fallback that no longer exists.
+    home = os.environ.get("FLEET_HOME") or _derived_home_note()
     sock = os.environ.get("FLEET_TMUX_SOCKET")
     head = f"store {home}"
     if sock:
