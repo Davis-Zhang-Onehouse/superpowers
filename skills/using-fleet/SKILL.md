@@ -79,7 +79,7 @@ Read-only. Safe to run at any time; they change nothing.
 | `fleet base-check` | is this workspace positioned on the base its milestone builds on? |
 | `fleet reconcile` | the arm set an external monitor reads, from the one join |
 | `fleet compaction-status` | whether a compaction is holding every dispatch |
-| `fleet pane-guard` | the send-keys contract, as an exit code |
+| `fleet pane-guard` | the send-keys contract, as an exit code; keyed by `--id <todo>` or `--pane <session>` |
 | `fleet seed-check` | is every live worker running the briefing that was rendered FOR it? |
 | `fleet lint` | the layout matrix, the watched-source registry, the near-miss rule |
 | `fleet verify` | EXECUTE every documented recipe in a sandbox |
@@ -95,16 +95,17 @@ Mutating. Each has `--dry-run`.
 | `fleet init` | bootstrap a new instant from the layout matrix |
 | `fleet dispatch` | evaluate every gate, then dispatch one worker |
 | `fleet resume` | adopt an existing conforming instant; evaluates NO admission rule |
-| `fleet milestone` | the coordinator puts a milestone ON the roadmap — the only way work becomes dispatchable |
+| `fleet milestone` | the coordinator puts a milestone ON the roadmap — the only way work becomes dispatchable; `--retire` drops one, `--disown` releases a claim stranded by an instant that is gone |
 | `fleet propose` | the worker's status proposal; never a roadmap write |
 | `fleet apply` | the coordinator applies a proposal; the single writer of a status |
 | `fleet declare` | declare a phase, and print what the consumer now reads; `awaiting-ci` is REFUSED unless a watcher is armed |
 | `fleet park` / `fleet unpark` | record or clear a parked decision as structured state |
 | `fleet review` | record a structured round and report the gate |
 | `fleet complete` | pass the gate, then rename the folder `-complete-` |
-| `fleet abort` | abandon an inflight instant, with a recorded reason |
+| `fleet abort` | abandon an inflight instant, with a recorded reason; RELEASES the milestone it claimed |
 | `fleet harvest` | the close-out transaction, plus the observation tick |
 | `fleet close` | shut a pane this store owns and stamp the record |
+| `fleet seed-delivered` | record what was actually sent to a worker's pane — the positive channel for a send-keys delivery, which leaves nothing in argv |
 | `fleet reap` | free every stale lease this base owns; name the ones it does not |
 | `fleet enroll` / `fleet unenroll` | put an existing workspace into the pool, or take it out |
 | `fleet set-golden` | declare the golden workspace; there is deliberately no fallback |

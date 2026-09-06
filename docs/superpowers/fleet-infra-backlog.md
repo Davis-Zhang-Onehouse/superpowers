@@ -559,7 +559,8 @@ says so instead of answering `13`.
 
 ## SI-55 — a send-keys delivery has no positive channel, so a rescued worker reads `not-delivered` forever
 
-**Status:** OPEN. **Blocks:** `reviving-dead-panes`, `dispatching-a-wave`. **Field id:** `FI-388`.
+**Status:** **FIXED in `0.5.0`** — `fleet seed-delivered` records what was sent, and `seed-check`
+reports a fourth state, `ATTESTED`. **Field id:** `FI-388`.
 
 **Measured 2026-09-06** at `0.4.0`. `seedcheck` has three states and the positive one is reachable by
 exactly one route: the briefing must appear in `/proc/<pid>/cmdline`. A seed delivered by `send-keys` —

@@ -39,10 +39,15 @@ sends its reader to the wrong fix. `NOT_DELIVERED` is emphatically **not** a pas
 for every caller that delivers by send-keys, and it is reported as unverifiable rather than as clean.
 """
 import hashlib
+import json
 import re
-from dataclasses import dataclass, field
+from dataclasses import asdict, dataclass, field
 from pathlib import Path
 from typing import Callable, Optional
+
+from fleet.atomic import atomic_write
+from fleet.errors import BadInput
+from fleet.store import SCHEMA_VERSION
 
 #: A briefing is long. Anything shorter than this in a positional argument is a flag's value or a subcommand,
 #: not a seed — the shipped worker profile renders to 1210 characters before any caller prepends to it.
@@ -54,6 +59,19 @@ MIN_PAYLOAD_CHARS = 200
 VERIFIED = "VERIFIED"
 FOREIGN = "FOREIGN"
 NOT_DELIVERED = "NOT-DELIVERED"
+#: `SI-55`. The briefing was delivered through a channel that leaves NOTHING in argv — `send-keys`, which
+#: is how `reviving-dead-panes` re-briefs a rescued worker — and the actor that delivered it recorded the
+#: bytes it sent, which `fleet` then digested and compared against what it rendered.
+#:
+#: A FOURTH state and not a second spelling of `VERIFIED`, because the two have different failure modes:
+#: `VERIFIED` is an observation of the worker's own argv, this is a comparison against what somebody says
+#: they sent. Collapsing two states whose remedies differ is the `FI-195` error. It IS a pass — a row that
+#: can never change is a row that stops being read (`FI-402`) — and its detail says which channel it came
+#: from so no reader mistakes it for the stronger one.
+ATTESTED = "ATTESTED"
+
+#: Beside `seed.txt` and `origin.json` in the instant's own private directory.
+DELIVERY = "seed-delivery.json"
 
 #: `SI-52`. WHICH process may be the source of a delivered briefing. `/proc/<pid>/comm` is the executable's
 #: name, and this is the SAME notion `session.default_probes` already uses to find workers at all
@@ -137,6 +155,62 @@ def foreign_hint(delivered: str) -> str:
     return f"its first line is {first[0][:90]!r}" if first else "it is empty"
 
 
+@dataclass(frozen=True)
+class Delivery:
+    """What an actor says it delivered to a worker's pane, and when.
+
+    Recorded rather than believed: `rendered_md5` is the digest of the seed `fleet` itself rendered at the
+    moment of recording, so a stale attestation — one written against a different instant's briefing —
+    cannot read as a pass for this one. Overwritable, unlike `origin.json`: a rescued worker is legitimately
+    re-briefed, and the latest delivery is the one that describes the pane.
+    """
+
+    at: str
+    by: str
+    channel: str
+    delivered_chars: int
+    delivered_md5: str
+    rendered_md5: str
+    schema_version: int = SCHEMA_VERSION
+
+
+def delivery_path(instant) -> Path:
+    return Path(instant) / ".fleet" / DELIVERY
+
+
+def write_delivery(instant, delivery: Delivery) -> Path:
+    target = delivery_path(instant)
+    target.parent.mkdir(parents=True, exist_ok=True)
+    atomic_write(target, json.dumps(asdict(delivery), indent=2, ensure_ascii=False))
+    return target
+
+
+def read_delivery(instant) -> Optional[Delivery]:
+    """-> Delivery, or None when nothing was recorded. `None` is a legitimate answer — most deliveries are
+    made by a launcher that records nothing — while a malformed or wrong-version file is REFUSED, for
+    `origin.read`'s reason: "unreadable" and "absent" mean opposite things to the reader."""
+    target = delivery_path(instant)
+    if not target.is_file():
+        return None
+    try:
+        data = json.loads(target.read_text())
+    except (OSError, ValueError) as exc:
+        raise BadInput(
+            f"{target} exists but could not be read as JSON ({exc}). Refused rather than treated as "
+            f"absent: absent means 'nobody recorded a delivery', and guessing that for a file that IS "
+            f"there would report a worker as unverifiable when something did record one.") from exc
+    version = data.get("schema_version")
+    if version != SCHEMA_VERSION:
+        raise BadInput(
+            f"{target} has schema_version={version!r}, this build knows {SCHEMA_VERSION}. Refusing to "
+            f"interpret it (FD-1).")
+    known = set(Delivery.__dataclass_fields__)
+    unknown = set(data) - known
+    if unknown:
+        raise BadInput(f"{target} carries unknown key(s) {sorted(unknown)}; refusing to interpret it.")
+    return Delivery(**data)
+
+
 @dataclass
 class Verdict:
     """What was delivered, judged against what was rendered."""
@@ -152,8 +226,14 @@ class Verdict:
 
     @property
     def ok(self) -> bool:
-        """VERIFIED only. `NOT_DELIVERED` is not a pass — see the module docstring."""
-        return self.state == VERIFIED
+        """The two POSITIVE states. `NOT_DELIVERED` is not a pass — see the module docstring.
+
+        `ATTESTED` counts because the alternative is a row that can never change: a send-keys delivery
+        leaves nothing in argv, so without it a rescued worker reads unverifiable for the life of the
+        instant and the row stops being read (`FI-402`). It is a WEAKER fact than `VERIFIED` and stays a
+        distinct state so a reader can tell which one they have; `detail` names the channel.
+        """
+        return self.state in (VERIFIED, ATTESTED)
 
     def row(self) -> list:
         return [("session", self.session), ("state", self.state), ("pid", str(self.pid)),
@@ -161,23 +241,54 @@ class Verdict:
                 ("detail", self.detail)]
 
 
-def classify(rendered: str, argv: list, session: str = "", pid: int = 0) -> Verdict:
-    """Judge one worker's delivered argv against the seed `dispatch` rendered for it."""
+def classify(rendered: str, argv: list, session: str = "", pid: int = 0,
+             delivery: Optional[Delivery] = None) -> Verdict:
+    """Judge one worker's delivered argv — and, failing that, a recorded delivery — against the seed
+    `dispatch` rendered for it.
+
+    **The order is the point.** argv is evidence about the process itself and outranks anything anybody
+    says; a FOREIGN briefing visible in argv is the incident this module exists for, and a recorded
+    delivery must never be able to hide it (`SI-55`). So: carried in argv is `VERIFIED`; a briefing in
+    argv that is not this one is `FOREIGN` whatever was recorded; and only when argv says nothing at all
+    does a recorded delivery get to answer.
+    """
     base = dict(session=session, pid=pid, rendered_chars=len(rendered), rendered_md5=digest(rendered))
     if carries(rendered, argv):
         got = payload(argv) or ""
         return Verdict(state=VERIFIED, delivered_chars=len(got), delivered_md5=digest(got),
                        detail="the delivered argv carries this instant's rendered seed", **base)
     got = payload(argv)
-    if got is None:
-        return Verdict(state=NOT_DELIVERED, detail=(
-            "no briefing-shaped argument was delivered to this process. fleet renders the seed but does "
-            "not deliver it, so this is what a send-keys delivery looks like from here, and it is ALSO "
-            "what a worker started with no briefing at all looks like. This is NOT a pass: it means the "
-            "delivery could not be verified, not that it was correct"), **base)
-    return Verdict(state=FOREIGN, delivered_chars=len(got), delivered_md5=digest(got), detail=(
-        f"a briefing of {len(got)} chars was delivered and it does NOT contain this instant's rendered "
-        f"seed — {foreign_hint(got)}"), **base)
+    if got is not None:
+        detail = (f"a briefing of {len(got)} chars was delivered and it does NOT contain this instant's "
+                  f"rendered seed — {foreign_hint(got)}")
+        if delivery is not None:
+            detail += (f". A delivery WAS recorded for this instant at {delivery.at} over "
+                       f"{delivery.channel}; the argv disagrees with it, and argv is the evidence")
+        return Verdict(state=FOREIGN, delivered_chars=len(got), delivered_md5=digest(got),
+                       detail=detail, **base)
+    #: `SI-55`. Compared, not believed: the recorded `rendered_md5` must be the digest of the seed being
+    #: judged here, so an attestation written against a different (or since re-rendered) briefing cannot
+    #: read as a pass for this one.
+    if delivery is not None and delivery.rendered_md5 == base["rendered_md5"]:
+        return Verdict(state=ATTESTED, delivered_chars=delivery.delivered_chars,
+                       delivered_md5=delivery.delivered_md5, detail=(
+                           f"nothing was delivered in argv, and the actor that briefed this pane RECORDED "
+                           f"what it sent at {delivery.at} over {delivery.channel} ({delivery.by}); the "
+                           f"text it recorded carries this instant's rendered seed. This is the "
+                           f"send-keys channel, not an observation of the worker's own argv"), **base)
+    detail = (
+        "no briefing-shaped argument was delivered to this process. fleet renders the seed but does "
+        "not deliver it, so this is what a send-keys delivery looks like from here, and it is ALSO "
+        "what a worker started with no briefing at all looks like. This is NOT a pass: it means the "
+        "delivery could not be verified, not that it was correct")
+    if delivery is not None:
+        detail += (f". A delivery WAS recorded at {delivery.at}, but against a different rendered seed "
+                   f"({delivery.rendered_md5} vs {base['rendered_md5']}), so it says nothing about this "
+                   f"briefing — record the delivery again with `fleet seed-delivered`")
+    else:
+        detail += (". If this pane was briefed by send-keys, the actor that sent it can say so with "
+                   "`fleet seed-delivered --id <todo> --delivered <the file it sent>` (`SI-55`)")
+    return Verdict(state=NOT_DELIVERED, detail=detail, **base)
 
 
 @dataclass
@@ -279,10 +390,11 @@ def delivered_argv(pid: int, probes: Probes, depth: int = 2) -> tuple:
     return fallback
 
 
-def check_session(session: str, pid: int, rendered: str, probes: Probes) -> Verdict:
+def check_session(session: str, pid: int, rendered: str, probes: Probes,
+                  delivery: Optional[Delivery] = None) -> Verdict:
     """The whole check for one live worker."""
     found_pid, argv = delivered_argv(pid, probes)
-    verdict = classify(rendered, argv, session=session, pid=found_pid or pid)
+    verdict = classify(rendered, argv, session=session, pid=found_pid or pid, delivery=delivery)
     #: `SI-52`. "Nothing was delivered" and "I never found the worker to ask" are different facts and the
     #: remedies differ, so the second one SAYS so. Without this the reader is told a briefing was looked
     #: for in a process that was never examined — which is the shape (`FI-417`) of a check reporting a

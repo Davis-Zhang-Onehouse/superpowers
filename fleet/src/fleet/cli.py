@@ -1002,6 +1002,74 @@ def _verify_seed_delivery(ctx: Ctx, tmux: str, rendered_seed: str, probes=None, 
     return verdict
 
 
+def _do_seed_delivered(ctx: Ctx, parsed: Parsed) -> int:
+    """Record what was ACTUALLY delivered to a worker's pane. `SI-55`.
+
+    `fleet` renders the seed and does not deliver it. A launcher that `exec`s the binary leaves the
+    briefing in `/proc/<pid>/cmdline`, where `seed-check` can read it — but `send-keys`, which is how
+    `reviving-dead-panes` re-briefs a rescued worker, leaves nothing in argv at all. Those workers read
+    `NOT-DELIVERED` for the life of the instant while a sibling reads `VERIFIED`, and a row that can never
+    change is a row that stops being read (`FI-402`).
+
+    **This records evidence, not a claim.** The caller hands over the bytes it sent; `fleet` digests them
+    itself and compares against the seed it rendered. A launcher that sent the wrong file — the class this
+    whole module exists for — records the wrong file, and the mismatch is refused HERE rather than stored
+    for a later reader to discover. What it cannot prove is that the caller sent what it says it sent,
+    which is why the verdict is `ATTESTED` and not `VERIFIED`, and why its detail names the channel.
+
+    Containment, not equality, for the same reason the argv path uses containment: a caller may
+    legitimately prepend ("your slot is …"). What must never happen is a DIFFERENT briefing.
+
+    Overwritable, unlike `origin.json`: a rescued worker is legitimately briefed again, and the latest
+    delivery is the one that describes the pane.
+    """
+    record = _record(ctx, parsed)
+    child = _child_of(ctx, record)
+    seed_file = child / ".fleet" / "seed.txt"
+    if not seed_file.is_file():
+        raise BadInput(
+            f"{seed_file} does not exist, so there is nothing to compare a delivery against. A recorded "
+            f"delivery is a COMPARISON against the seed `fleet` rendered; without one this would be an "
+            f"unchecked assertion, which is the thing `seed-check` exists not to accept.")
+    source = Path(parsed.get("delivered"))
+    try:
+        delivered = source.read_text()
+    except OSError as exc:
+        raise BadInput(f"--delivered {str(source)!r} could not be read ({exc.strerror or exc}).") from exc
+    rendered = seed_file.read_text()
+    if not seedcheck.carries(rendered, [delivered]):
+        raise BadInput(
+            f"the text in {source} does NOT carry the seed rendered for {record.todo_id!r}: delivered "
+            f"md5 {seedcheck.digest(delivered)} ({len(delivered)} chars) against rendered md5 "
+            f"{seedcheck.digest(rendered)} ({len(rendered)} chars) at {seed_file}. Refused rather than "
+            f"recorded: a stored attestation that disagrees with the seed is a wrong answer waiting for a "
+            f"reader, and this mismatch is exactly the misdelivery class the check exists for. A preamble "
+            f"is fine — the rendered seed must appear WHOLE somewhere in what was sent.")
+    delivery = seedcheck.Delivery(
+        at=ctx.now(), by=parsed.get("by") or record.tmux or record.todo_id,
+        channel=parsed.get("channel") or "send-keys",
+        delivered_chars=len(delivered), delivered_md5=seedcheck.digest(delivered),
+        rendered_md5=seedcheck.digest(rendered))
+    if ctx.dry_run:
+        _emit(ctx, "seed-delivered", [
+            ("dry-run", "nothing was recorded"),
+            ("would-record", str(seedcheck.delivery_path(child))),
+            ("channel", delivery.channel), ("delivered_md5", delivery.delivered_md5),
+            ("rendered_md5", delivery.rendered_md5)])
+        return EXIT_OK
+    written = seedcheck.write_delivery(child, delivery)
+    _emit(ctx, "seed-delivered", [
+        ("record", record.todo_id), ("session", record.tmux or "(none)"),
+        ("channel", delivery.channel), ("by", delivery.by),
+        ("delivered_chars", str(delivery.delivered_chars)),
+        ("delivered_md5", delivery.delivered_md5), ("rendered_md5", delivery.rendered_md5),
+        ("recorded_in", str(written)),
+        ("reads_as", f"`fleet seed-check` now reports {seedcheck.ATTESTED} for this session instead of "
+                     f"{seedcheck.NOT_DELIVERED} — a POSITIVE state, and a weaker one than "
+                     f"{seedcheck.VERIFIED}, which means the briefing was seen in the worker's own argv")])
+    return EXIT_OK
+
+
 def _do_seed_check(ctx: Ctx, parsed: Parsed) -> int:
     """Is every live worker running the briefing that was rendered for it?
 
@@ -1040,8 +1108,18 @@ def _do_seed_check(ctx: Ctx, parsed: Parsed) -> int:
             unreadable.append((session, "the pane pid could not be read, so nothing about this session's "
                                         "delivery was observed. This is NOT a pass"))
             continue
+        #: `SI-55`. A recorded delivery is consulted only where argv says nothing — `classify` enforces
+        #: that order, and it matters: a FOREIGN briefing visible in argv must never be suppressed by an
+        #: attestation. An unreadable delivery file is refused by `read_delivery` rather than treated as
+        #: absent, and that refusal is reported per session instead of failing the whole sweep.
+        try:
+            delivery = seedcheck.read_delivery(Path(record.child_instant))
+        except FleetError as exc:
+            unreadable.append((session, f"a delivery record exists and could not be read: "
+                                        f"{_one_line(exc)}"))
+            continue
         verdict = seedcheck.check_session(session, pid, seed_file.read_text(),
-                                          seedcheck.default_probes())
+                                          seedcheck.default_probes(), delivery=delivery)
         verdicts.append(verdict)
         #: Only FOREIGN is a VIOLATION. NOT-DELIVERED is reported at INFO because `fleet` renders the seed
         #: and does not deliver it, so it is the ordinary appearance of a send-keys delivery — but its
@@ -1072,14 +1150,18 @@ def _do_seed_check(ctx: Ctx, parsed: Parsed) -> int:
     foreign = [v.session for v in verdicts if v.state == seedcheck.FOREIGN]
     unverified = [v.session for v in verdicts if v.state == seedcheck.NOT_DELIVERED]
     verified = [v.session for v in verdicts if v.state == seedcheck.VERIFIED]
+    attested = [v.session for v in verdicts if v.state == seedcheck.ATTESTED]
     rows.append(Row(kind=POPULATION, subject=wanted or "(every live dispatched session)", severity=INFO,
                     detail=(f"{examined} live session(s) examined: "
                             f"{len(verified)} verified {verified or '[]'}; "
+                            f"{len(attested)} attested {attested or '[]'}; "
                             f"{len(foreign)} FOREIGN {foreign or '[]'}; "
                             f"{len(unverified)} unverifiable {unverified or '[]'}; "
                             f"{len(unreadable)} unreadable {[s for s, _ in unreadable] or '[]'}. "
-                            f"Only 'verified' means the delivered briefing was confirmed to be this "
-                            f"instant's own")))
+                            f"'verified' means the briefing was seen in the worker's own argv; "
+                            f"'attested' means the actor that delivered it RECORDED what it sent and that "
+                            f"text carries the rendered seed (`SI-55`) — a positive answer through a "
+                            f"weaker channel, which is why it is counted separately")))
     if examined == 0:
         rows.append(Row(kind="empty-population", subject=wanted or "(every live dispatched session)",
                         severity=INFO,
@@ -4394,6 +4476,15 @@ VERBS = {spec.name: spec for spec in (
           checker=True, flags=(
         Flag("--instant", True, True, "the instant whose recipes are checked"),
     )),
+    _verb("seed-delivered", _do_seed_delivered, False,
+          "record what was actually delivered to a worker's pane; for send-keys, which leaves no argv", (
+        Flag("--id", True, True, "the record whose worker was briefed"),
+        Flag("--delivered", True, True,
+             "a file holding exactly the text that was sent. Compared against the rendered seed and "
+             "REFUSED on a mismatch; a preamble is fine, a different briefing is not"),
+        Flag("--channel", True, False, "how it was delivered (default: send-keys)"),
+        Flag("--by", True, False, "who delivered it (default: the record's session)"),
+    )),
     _verb("seed-check", _do_seed_check, True,
           "is every live worker running the briefing that was rendered FOR it? (seed misdelivery)",
           checker=True, flags=(
@@ -4492,6 +4583,7 @@ PORCELAIN_COLUMNS = {
     "reap": ROW_COLUMNS,
     "reconcile": ROW_COLUMNS,
     "seed-check": ROW_COLUMNS,
+    "seed-delivered": KV_COLUMNS,
     "compaction-status": ROW_COLUMNS,
     "selftest": ROW_COLUMNS,
     "brief": ROW_COLUMNS,
