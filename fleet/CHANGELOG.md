@@ -1,5 +1,19 @@
 # fleet — changelog
 
+## fleet/v0.5.0 — 2026-09-06T04:04:29Z
+Cut from 0500c7a on `live` (upstream base snapshot/2026-08-17-221146). 6 commit(s) since fleet/v0.4.0.
+
+Every release ships the whole repository — all skills, `commands/`, `hooks/` and the plugin manifest, not only `fleet/`.
+Payload: fleet (9 files), skills (1 file), docs (1 file).
+Skills changed: using-fleet.
+
+- cf39f6c docs: the six SI items the coordinator's register earned, written down
+- f3b92ba abort: give the milestone back, and open a door for the ones already stranded
+- 3a402e5 seedcheck: only the worker can be the source of a delivered briefing
+- 679a80a dispatch --seed-extra, and pane-guard keyed the way every other verb is
+- da071a2 seed-check: a positive channel for a delivery that leaves no argv
+- 0500c7a it: §S, the SI-51..SI-55 batch, run RED against 0.4.0 first
+
 ## fleet/v0.4.0 — 2026-09-06T02:55:29Z
 Cut from 6759d19 on `live` (upstream base snapshot/2026-08-17-221146). 36 commit(s) since fleet/v0.3.18.
 
