@@ -10,6 +10,8 @@ The two measurement errors that inverted the answer while this was being written
 below — `test_argv_is_split_on_nul_not_newline` and `test_not_delivered_is_not_a_pass` — because both read
 exactly like "no defect" and both were believed for a while.
 """
+import pathlib
+import shutil
 import unittest
 
 from fleet import seedcheck
@@ -295,3 +297,85 @@ class TestOnlyTheWorkerCarriesTheBriefing(unittest.TestCase):
                         "the real comm probe answers nothing for a process that certainly exists")
         self.assertIsNone(seedcheck.default_probes().comm_of(0),
                           "the real comm probe invented an answer for a pid that cannot be read")
+
+
+class TestAnAttestedDelivery(unittest.TestCase):
+    """`SI-55`. The positive state was reachable by exactly one route — the briefing appearing in
+    `/proc/<pid>/cmdline` — and a seed delivered by `send-keys` never appears in argv at all.
+
+    So a worker rescued by `reviving-dead-panes`, or briefed by any send-keys launcher, read
+    `NOT-DELIVERED` for the life of the instant while its sibling read `VERIFIED`. `NOT-DELIVERED`'s own
+    detail says, correctly, that it is *"not evidence that anything is wrong, and not evidence that
+    anything is right"* — and a row that can never change is a row that stops being read, which is
+    `FI-402`'s shape.
+
+    What the deliverer can supply that is EVIDENCE rather than a claim is the bytes it sent: `fleet`
+    digests them itself and compares against what it rendered, which catches the class the module exists
+    for — the launcher sent the wrong file. It is a DISTINCT state, because observed-in-argv and
+    recorded-by-the-deliverer have different failure modes and collapsing two states whose remedies differ
+    is the `FI-195` error.
+    """
+
+    def _delivery(self, text, channel="send-keys"):
+        return seedcheck.Delivery(at="2026-09-06T00:00:00Z", by="dt-worker", channel=channel,
+                                  delivered_chars=len(text), delivered_md5=seedcheck.digest(text),
+                                  rendered_md5=seedcheck.digest(OWN_SEED))
+
+    def test_a_recorded_delivery_of_this_seed_is_a_distinct_positive_state(self):
+        verdict = seedcheck.classify(OWN_SEED, [CLAUDE], delivery=self._delivery(OWN_SEED))
+
+        self.assertEqual(seedcheck.ATTESTED, verdict.state, verdict.detail)
+        self.assertNotEqual(seedcheck.VERIFIED, verdict.state,
+                            "an attestation was collapsed into VERIFIED; the two have different failure "
+                            "modes and a reader must be able to tell which one they have")
+
+    def test_attested_is_a_pass_and_not_delivered_still_is_not(self):
+        self.assertTrue(seedcheck.classify(OWN_SEED, [CLAUDE],
+                                           delivery=self._delivery(OWN_SEED)).ok)
+        self.assertFalse(seedcheck.classify(OWN_SEED, [CLAUDE]).ok,
+                         "NOT-DELIVERED became a pass")
+
+    def test_the_detail_names_the_channel_rather_than_implying_argv(self):
+        verdict = seedcheck.classify(OWN_SEED, [CLAUDE], delivery=self._delivery(OWN_SEED))
+
+        self.assertIn("send-keys", verdict.detail)
+        self.assertRegex(verdict.detail, r"(?i)record",
+                         f"the detail does not say this was RECORDED rather than observed: "
+                         f"{verdict.detail!r}")
+
+    def test_an_attestation_never_suppresses_a_foreign_observation(self):
+        """The dangerous direction. A briefing visible in argv that is NOT this instant's is the incident
+        this module exists for, and a recorded delivery must not be able to hide it."""
+        verdict = seedcheck.classify(OWN_SEED, [CLAUDE, COORD_SEED], delivery=self._delivery(OWN_SEED))
+
+        self.assertEqual(seedcheck.FOREIGN, verdict.state, verdict.detail)
+
+    def test_a_recorded_delivery_of_a_DIFFERENT_seed_is_not_a_pass(self):
+        """The attestation is compared, not believed."""
+        stale = seedcheck.Delivery(at="2026-09-06T00:00:00Z", by="dt-worker", channel="send-keys",
+                                   delivered_chars=len(COORD_SEED),
+                                   delivered_md5=seedcheck.digest(COORD_SEED),
+                                   rendered_md5=seedcheck.digest(COORD_SEED))
+
+        verdict = seedcheck.classify(OWN_SEED, [CLAUDE], delivery=stale)
+
+        self.assertEqual(seedcheck.NOT_DELIVERED, verdict.state, verdict.detail)
+        self.assertFalse(verdict.ok)
+
+    def test_argv_evidence_still_wins_when_both_agree(self):
+        verdict = seedcheck.classify(OWN_SEED, [CLAUDE, OWN_SEED], delivery=self._delivery(OWN_SEED))
+
+        self.assertEqual(seedcheck.VERIFIED, verdict.state,
+                         "the weaker channel outranked the stronger one")
+
+    def test_a_delivery_round_trips_through_the_instant(self):
+        import tempfile
+        instant = pathlib.Path(tempfile.mkdtemp())
+        try:
+            self.assertIsNone(seedcheck.read_delivery(instant),
+                              "an instant with no recorded delivery must answer None, not raise")
+            written = self._delivery(OWN_SEED)
+            seedcheck.write_delivery(instant, written)
+            self.assertEqual(written, seedcheck.read_delivery(instant))
+        finally:
+            shutil.rmtree(instant, ignore_errors=True)

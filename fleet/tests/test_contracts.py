@@ -303,6 +303,13 @@ class Loaded(unittest.TestCase):
     def argv_for(self, fleet: Fleet) -> dict:
         ready = str(fleet.paths["readyWorker"])
         repo, releases = release_fixture(fleet)
+        #: `SI-55`. `seed-delivered` compares what was sent against the seed `dispatch` rendered, so its
+        #: row needs both to exist: every mutating row here is driven for REAL.
+        rendered_seed = fleet.paths["solo"] / ".fleet" / "seed.txt"
+        rendered_seed.parent.mkdir(parents=True, exist_ok=True)
+        rendered_seed.write_text("Read CHARTER.md. This is the contract row's rendered briefing.\n")
+        was_sent = fleet.tmp / "contract-delivered.txt"
+        was_sent.write_text(rendered_seed.read_text())
         return {
             "init": ["--name", "freshOne", "--base", "00000000"],
             "dispatch": ["--profile", str(fleet.profile()), "--title", "a fresh worker",
@@ -346,6 +353,7 @@ class Loaded(unittest.TestCase):
             "reconcile": [],
             "pane-guard": ["--pane", "dt-solo"],
             "seed-check": [],
+            "seed-delivered": ["--id", fleet.ids["solo"], "--delivered", str(was_sent)],
             "compaction-status": [],
             "selftest": [],
             #: Every row names its repository and its release area. The generated cases drive these for
