@@ -1,5 +1,13 @@
 # fleet — changelog
 
+## fleet/v0.5.4 — 2026-09-07T05:44:32Z
+Cut from c5c6ecf on `live` (upstream base snapshot/2026-08-17-221146). 1 commit(s) since fleet/v0.5.3.
+
+Every release ships the whole repository — all skills, `commands/`, `hooks/` and the plugin manifest, not only `fleet/`.
+Payload: fleet (4 files), docs (1 file).
+
+- c5c6ecf SI-59: follow the address the record carries, for reads and for writes
+
 ## fleet/v0.5.3 — 2026-09-06T17:17:06Z
 Cut from f535cfb on `live` (upstream base snapshot/2026-08-17-221146). 4 commit(s) since fleet/v0.5.2.
 
