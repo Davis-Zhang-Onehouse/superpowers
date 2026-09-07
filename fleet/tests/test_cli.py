@@ -266,7 +266,10 @@ class Fleet:
         #: `SI-59`. `socket` is which server this fixture's probes speak for; `elsewhere` maps another
         #: server's socket name to the sessions living on it, and is empty unless a case says otherwise.
         self.socket = "fixture-server"
+        #: socket -> {session name: (pid, cwd, pane)}. Rich enough to BE a server: a reader that follows a
+        #: record to another server has to get liveness and a pane back from it, not just a yes/no.
         self.elsewhere = {}
+        self.killed_elsewhere = []
         probes = Probes(
             list_processes=lambda: [] if self.live_sessions_fail else list(self.procs),
             capture_pane=lambda name: None if name in self.capture_fails else self.panes.get(name, ""),
@@ -281,6 +284,7 @@ class Fleet:
             session_servers=lambda name: ([self.socket] if name in self.tmux_live else [])
                                          + sorted(s for s, names in self.elsewhere.items()
                                                   if name in names))
+        self.layer_for = self._layer_for
         self.sessions = SessionLayer(probes)
         self.store = Store(self.home)
         self.pool = Pool(self.home,
@@ -334,6 +338,28 @@ class Fleet:
             "Read CHARTER.md. Run `fleet declare --instant \"$INSTANT\" --phase awaiting-ci`.\n")
         return path
 
+    def _layer_for(self, socket):
+        """A `SessionLayer` speaking for one of the fixture's OTHER servers.
+
+        The real factory builds `default_probes(tmux_socket=…)`; this builds the same shape over
+        `self.elsewhere`, so a case can assert what a reader learns by following a record to the server it
+        names — which is a different question from whether the session exists somewhere.
+        """
+        if socket == self.socket or not socket:
+            return self.sessions
+        living = self.elsewhere.get(socket, {})
+        return SessionLayer(Probes(
+            list_processes=lambda: [LiveSession(pid=pid, cwd=cwd, name=n)
+                                    for n, (pid, cwd, _) in sorted(living.items())],
+            capture_pane=lambda n: living[n][2] if n in living else None,
+            has_session=lambda n: n in living,
+            start_session=lambda n, cwd, cmd: None,
+            #: A REAL kill: it records where the kill landed and removes the session. A no-op here would
+            #: let "close acted on the right server" pass on a fixture where nothing can be acted on.
+            kill_session=lambda n: (self.killed_elsewhere.append((socket, n)), living.pop(n, None))[1],
+            socket=socket,
+            session_servers=lambda n: [socket] if n in living else []))
+
     def worker(self, name, *, optype="append", state="inflight", pane=BUSY_PANE, live=True,
                base=OURS, slot=None, launched=True, runbook=RUNBOOK, handoff="Updated: now\n",
                server=None):
@@ -356,7 +382,7 @@ class Fleet:
             #: `SI-59`. Dispatched on ANOTHER tmux server: the process is running and visible to `pgrep`,
             #: and its session answers on that server and on no other. Nothing here is on THIS server —
             #: which is the whole point, and the state a record dispatched before a socket rename is in.
-            self.elsewhere.setdefault(server, set()).add(tmux)
+            self.elsewhere.setdefault(server, {})[tmux] = (1000 + self._n, path, pane)
             #: NOT in `procs` either, and that is the machine's own behaviour rather than a simplification:
             #: `list_processes` joins `pgrep` to tmux PANE OWNERSHIP, and pane ownership can only be read
             #: from the server the pane is on. Pointed at the wrong one, a live worker is invisible to the
@@ -416,7 +442,11 @@ class Fleet:
                            pool=self.pool, sessions=self.sessions, harvest=self.harvest,
                            out=out, err=err, dry_run=parsed.on("dry-run"),
                            porcelain=parsed.on("porcelain"), now=lambda: NOW,
-                           git=self.git, runner=self.runner, live_work=True)
+                           git=self.git, runner=self.runner, live_work=True,
+                           #: `SI-59`. The fixture models a box with more than one tmux server, so the
+                           #: context it builds has to know how to reach the others — otherwise a case
+                           #: about following a record's address measures a context that cannot.
+                           layer_for=self.layer_for)
 
         return build
 
@@ -4068,36 +4098,56 @@ OTHER_SERVER = "someOtherTmuxServer"
 class TestAVerbThatActsOnASessionOnAnotherServer(CliCase):
     """`SI-59`. A record carries `tmux` — a session NAME — and a name is not an address.
 
-    Measured on the live box before this guard existed: `fleet close --id <live worker>` from a shell
+    Measured on the live box before any of this existed: `fleet close --id <live worker>` from a shell
     pointed at a different tmux server returned **rc=0**, printed `closed dt-<name>`, stamped `closed_at`
     and reported the monitor disarmed — while `tmux -L <other> ls` still listed the session. It did not
-    fail to find the pane; it reported success for a pane it never touched, and left a running worker
-    unmonitored and recorded as finished.
+    fail to find the pane. It reported success for a pane it never touched.
 
-    So the guard is fail-CLOSED and it is placed on the verbs that ACT. It has to work for records that
-    carry no socket at all, because the two records this was found on never will.
+    The rule that came out of it has two halves, and they are not the same half:
+
+    * the record NAMES a server — act **there**. That is doing what was asked. The first fix refused
+      instead, and refusing turned out to be its own trap: it forced a coordinator to keep an old socket
+      pinned in its runbook to stay able to close its own workers, and that pin then put the NEXT worker
+      on the wrong server. A guard that makes people write down a workaround has moved the defect.
+    * the record names NOTHING and the session turns up elsewhere — **refuse**. That is the pre-fix
+      record, where acting would mean guessing which of several servers is the right one.
     """
 
-    def elsewhere_worker(self, fleet, name="strandedWorker", **over):
-        #: No pool slot on purpose. A slot HOLDER already gets `SI-39`'s UNREACHABLE, so a case that
-        #: claimed one would pass without the guard under test ever running.
-        fleet.worker(name, server=OTHER_SERVER, **over)
-        return fleet.ids[name]
-
-    def test_close_refuses_and_names_both_servers(self):
+    def test_a_record_that_NAMES_a_server_is_acted_on_THERE(self):
         fleet = self.loaded()
-        todo = self.elsewhere_worker(fleet)
-        code, out, err = fleet.run(["close", "--id", todo])
-        self.assertNotEqual(code, EXIT_OK, f"close reported success for a pane on another server: {out}")
+        fleet.worker("addressedWorker", server=OTHER_SERVER, pane=IDLE_PANE)
+        code, out, err = fleet.run(["close", "--id", fleet.ids["addressedWorker"]])
+        self.assertEqual(code, EXIT_OK, f"close refused a record that says exactly where its pane is: "
+                                       f"{out}{err}")
+        self.assertIsNotNone(fleet.store.read(fleet.ids["addressedWorker"]).closed_at,
+                             "close reported success without stamping the record")
+        self.assertNotIn("dt-addressedWorker", fleet.killed,
+                         "the kill went to THIS server, which is the false-green this exists to stop")
+        self.assertIn((OTHER_SERVER, "dt-addressedWorker"), fleet.killed_elsewhere,
+                      "the kill never reached the server the record names, so nothing was closed")
+
+    def test_a_record_naming_NO_server_whose_session_is_elsewhere_is_refused(self):
+        """The pre-fix records — the two this defect was found on — carry no socket and never will. Here
+        the tool would have to GUESS which server is meant, and a guess that acts is the original bug."""
+        fleet = self.loaded()
+        fleet.worker("strandedWorker", server=OTHER_SERVER)
+        record = fleet.store.read(fleet.ids["strandedWorker"])
+        record.tmux_socket = ""                      # written before the field existed
+        fleet.store.write(record)
+        code, out, err = fleet.run(["close", "--id", fleet.ids["strandedWorker"]])
+        self.assertNotEqual(code, EXIT_OK, f"close acted on a session it could only have guessed at: {out}")
         self.assertIn(OTHER_SERVER, out + err, "the refusal does not name the server the session is on")
         self.assertIn("fixture-server", out + err, "the refusal does not name the server it looked on")
         self.assertEqual(fleet.killed, [], "close killed something while refusing")
-        self.assertIsNone(fleet.store.read(todo).closed_at,
+        self.assertIsNone(fleet.store.read(fleet.ids["strandedWorker"]).closed_at,
                           "close stamped closed_at for a pane it never touched")
 
-    def test_abort_refuses_and_leaves_the_folder_alone(self):
+    def test_abort_on_an_unaddressed_session_elsewhere_leaves_the_folder_alone(self):
         fleet = self.loaded()
-        todo = self.elsewhere_worker(fleet, name="strandedAbort")
+        fleet.worker("strandedAbort", server=OTHER_SERVER)
+        record = fleet.store.read(fleet.ids["strandedAbort"])
+        record.tmux_socket = ""
+        fleet.store.write(record)
         before = sorted(p.name for p in fleet.instants.iterdir())
         code, out, err = fleet.run(["abort", "--instant", str(fleet.paths["strandedAbort"]),
                                     "--reason", "assumed dead"])
@@ -4106,7 +4156,7 @@ class TestAVerbThatActsOnASessionOnAnotherServer(CliCase):
                          "abort renamed the instant folder of a worker that is still running")
 
     def test_a_session_that_is_on_NO_server_is_still_closable(self):
-        """The guard must not turn every genuinely finished worker into a refusal. Paired with the case
+        """The guard must not turn every genuinely finished worker into a refusal. Paired with the cases
         above so a rule that refused everything would fail here rather than look like a pass."""
         fleet = self.loaded()
         fleet.worker("finishedWorker", live=False)
@@ -4164,3 +4214,67 @@ class TestNotClaimingDEADAboutAnotherServer(CliCase):
         fleet.worker("otherServerNoted", server=OTHER_SERVER)
         code, out, err = fleet.run(["status", "--id", fleet.ids["otherServerNoted"]])
         self.assertIn(OTHER_SERVER, out + err, "the report does not name the server to look on")
+
+
+class TestFollowingARecordToItsOwnServer(CliCase):
+    """`SI-59`, second correction. Recording the server was not enough: the reader HAD the address and
+    still refused to use it.
+
+    Measured the morning after `0.5.3` deployed. A worker dispatched at 00:34 recorded
+    `tmux_socket: 'fleet'` — the field worked — and `fleet status` from a correctly configured shell still
+    answered:
+
+        state    UNREACHABLE
+        note     pid 2227342 is live and holds this record's slot, but no session answers for
+                 dt-x7stackfifthwaveprs … Usually the wrong tmux server: export FLEET_TMUX_SOCKET …
+        evidence.tmux_socket   fleet
+        evidence.asked_server  fleet-davis
+
+    The report printed the server it should have asked and the server it did ask, on adjacent lines, and
+    asked the wrong one anyway. Telling a reader to go and look is not the same as looking.
+
+    Reads follow the record; WRITES still do not. `close` and `abort` keep refusing across servers,
+    because acting on a server the caller never named is a different thing from answering about one.
+    """
+
+    def test_a_worker_on_the_server_its_record_names_is_reported_live(self):
+        fleet = self.loaded()
+        fleet.worker("followedWorker", server=OTHER_SERVER, pane=BUSY_PANE)
+        code, out, err = fleet.run(["status", "--id", fleet.ids["followedWorker"], "--porcelain"])
+        rows = dict(line.split("\t")[:2] for line in out.splitlines() if "\t" in line)
+        self.assertNotEqual(rows.get("state"), "UNREACHABLE",
+                            f"still unreachable with the address in hand: {out}")
+        self.assertEqual(rows.get("evidence.liveness"), "session",
+                         f"the reader did not follow the record to its own server: {out}")
+
+    def test_the_report_names_the_server_it_ACTUALLY_asked(self):
+        """`asked_server` is the honesty field. If the reader follows the record, it has to say so, or the
+        next person debugging this reads a true state beside a false claim about where it came from."""
+        fleet = self.loaded()
+        fleet.worker("askedWorker", server=OTHER_SERVER)
+        code, out, err = fleet.run(["status", "--id", fleet.ids["askedWorker"], "--porcelain"])
+        rows = dict(line.split("\t")[:2] for line in out.splitlines() if "\t" in line)
+        self.assertEqual(rows.get("evidence.asked_server"), OTHER_SERVER, out)
+
+    def test_a_record_naming_a_server_that_has_nothing_is_still_unreachable_and_says_which(self):
+        """The negative control. Following the address must not manufacture liveness when the address is
+        empty — and the note has to name the server that was asked, not the generic advice."""
+        fleet = self.loaded()
+        fleet.worker("goneWorker", live=False)
+        record = fleet.store.read(fleet.ids["goneWorker"])
+        record.tmux_socket = "aServerWithNothingOnIt"
+        fleet.store.write(record)
+        code, out, err = fleet.run(["status", "--id", fleet.ids["goneWorker"]])
+        self.assertIn("aServerWithNothingOnIt", out + err,
+                      f"the report does not name the server it asked: {out}{err}")
+
+    def test_a_record_with_NO_recorded_server_is_read_exactly_as_before(self):
+        """The pre-fix records — the ones that motivated all of this — carry no socket. Absence must not
+        send the reader hunting: it is not measured, and a search over every server for every record is
+        the cost `reconcile` refuses on a healthy board."""
+        fleet = self.loaded()
+        fleet.worker("plainWorker", pane=BUSY_PANE)
+        code, out, err = fleet.run(["status", "--id", fleet.ids["plainWorker"], "--porcelain"])
+        rows = dict(line.split("\t")[:2] for line in out.splitlines() if "\t" in line)
+        self.assertEqual(rows.get("evidence.asked_server"), "fixture-server", out)
+        self.assertEqual(rows.get("evidence.tmux_socket"), "", out)

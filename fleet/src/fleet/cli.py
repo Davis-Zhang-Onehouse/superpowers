@@ -459,6 +459,10 @@ class Ctx:
     #: because an alarm nobody can act on trains people to ignore it.
     live_work: object = None
     max_age_s: int = DEFAULT_MAX_AGE_S
+    #: `SI-59`. `socket -> SessionLayer`, so a record can be answered on the server it NAMES rather than
+    #: on whichever one this shell happens to point at. `None` keeps the single-server behaviour, which is
+    #: what a hand-built test context gets unless it says otherwise.
+    layer_for: object = None
 
     def live_work_now(self) -> bool:
         if self.live_work is not None:
@@ -468,7 +472,25 @@ class Ctx:
         return any(record.harvested_at is None for record in self.store.all())
 
     def subjects(self) -> list:
-        return reconcile(self.store, self.pool, self.sessions, self.instants_dir)
+        return reconcile(self.store, self.pool, self.sessions, self.instants_dir,
+                         layer_for=self.layer_for)
+
+    def sessions_for(self, record) -> object:
+        """The session layer for THIS record's own tmux server.
+
+        `SI-59`, second correction. Recording the server and then still acting on the ambient one is the
+        same defect the field was added to close, one layer along: a `close` that refuses because it is
+        pointed elsewhere is safer than one that false-greens, but it is still not doing what was asked
+        when the record says exactly where the pane is.
+
+        Falls back to the ambient layer for a record that names NO server. That is not measured, and this
+        is the one place a guess would be indistinguishable from an answer.
+        """
+        socket = getattr(record, "tmux_socket", "") or ""
+        here = getattr(self.sessions, "socket", "") or ""
+        if not socket or socket == here or self.layer_for is None:
+            return self.sessions
+        return self.layer_for(socket)
 
     def guard_ctx(self, parsed: Parsed, **over) -> guards.Context:
         return guards.Context(store=self.store, pool=self.pool, sessions=self.sessions,
@@ -708,6 +730,12 @@ def default_context(parsed: Parsed, out, err) -> Ctx:
 
     sessions = SessionLayer(default_probes(tmux_socket=resolve_socket(parsed, environ, cwd)))
 
+    #: `SI-59`. How a reader reaches ANOTHER tmux server — the one a record names. Built here beside the
+    #: probes it mirrors, so there is one place that knows how a `SessionLayer` is made. `reconcile` calls
+    #: it at most once per distinct foreign socket, and never for a record that names none.
+    def layer_for(socket):
+        return SessionLayer(default_probes(tmux_socket=socket or None))
+
     #: `G3` binds the pool to a root ONLY when this store IS that root's store. The same rule as the
     #: dispatch containment check, for the same reason and found by the same failure: a caller who named
     #: some other store (`--home /tmp/sandbox`, an IT section's `FLEET_HOME`, a skill's own suite) has
@@ -722,7 +750,8 @@ def default_context(parsed: Parsed, out, err) -> Ctx:
     pool = Pool(home, cwd_probe=_cwd_holders, alive=sessions.alive, fleet_root=owning_root)
     return Ctx(home=home, instants_dir=instants, store=Store(home), pool=pool, sessions=sessions,
                harvest=Harvest(home), out=out, err=err, dry_run=parsed.on("dry-run"),
-               porcelain=parsed.on("porcelain"), git=default_git(), runner=_default_runner())
+               porcelain=parsed.on("porcelain"), git=default_git(), runner=_default_runner(),
+               layer_for=layer_for)
 
 
 def _cwd_holders(path) -> list:
@@ -2368,10 +2397,16 @@ def _refuse_a_session_on_another_server(ctx: Ctx, record) -> None:
     would be unable to fire on the very records that motivated it (`FI-303`).
     """
     name = record.tmux
-    if not name or ctx.sessions.alive(name):
+    if not name:
         return
-    here = ctx.sessions.socket
-    found = ctx.sessions.servers_with(name)
+    #: The record's own server when it names one — acting there is doing what was asked, not guessing.
+    #: This refusal is for the records that name NOTHING: the pre-fix ones, where the session turns up on
+    #: some other server and nobody wrote down that it belongs there.
+    layer = ctx.sessions_for(record)
+    if layer.alive(name):
+        return
+    here = layer.socket
+    found = layer.servers_with(name)
     if not found:
         return
     others = [server for server in found if server != here]
@@ -2476,7 +2511,7 @@ def _do_abort(ctx: Ctx, parsed: Parsed) -> int:
     reason_path.parent.mkdir(parents=True, exist_ok=True)
     reason_path.write_text(json.dumps(body, indent=2, ensure_ascii=False))
     if record is not None and record.tmux:
-        ctx.sessions.kill(record.tmux)
+        ctx.sessions_for(record).kill(record.tmux)
     if record is not None and record.slot:
         ctx.pool.release(record.slot)
     child.rename(target)                       # THE state transition, and the last irreversible step
@@ -2525,16 +2560,19 @@ def _pane_refusal(ctx: Ctx, record: Record):
     six send paths, and a predicate restated per caller is how five of them keep the old behaviour.
     """
     tmux = record.tmux
-    if not tmux or not ctx.sessions.alive(tmux):
+    #: On the record's OWN server. A pane guard that read a different server than the kill will act on
+    #: would be asking one machine for permission to act on another.
+    layer = ctx.sessions_for(record)
+    if not tmux or not layer.alive(tmux):
         return None
-    text = ctx.sessions.pane(tmux)
-    if ctx.sessions.busy(text):
+    text = layer.pane(tmux)
+    if layer.busy(text):
         return (PANE_GUARD_CODES[PANE_MID_TURN],
                 f"{tmux} is still offering a way to interrupt, so it is mid-turn: closing it now ends a "
                 f"turn in progress and whatever that turn had not yet written down",
                 f"the turn finishes, or `fleet close --id {record.todo_id} {FORCE}` is said out loud",
                 record.base_instant or record.todo_id)
-    queued = ctx.sessions.unsubmitted(text)
+    queued = layer.unsubmitted(text)
     if queued is not None:
         return (PANE_GUARD_CODES[PANE_QUEUED_TEXT],
                 f"{tmux} holds unsubmitted text in its input box ({queued!r}): closing it discards a "
@@ -2581,7 +2619,7 @@ def _do_close(ctx: Ctx, parsed: Parsed) -> int:
                       clears_when=refusal[2], clears_who=refusal[3] or "the operator")
 
     if record.tmux:
-        ctx.sessions.kill(record.tmux)
+        ctx.sessions_for(record).kill(record.tmux)
     record.closed_at = ctx.now()
     ctx.store.write(record)
     _emit(ctx, "close", [
@@ -2682,7 +2720,7 @@ def _do_harvest(ctx: Ctx, parsed: Parsed) -> int:
             for proposal in roadmap.proposals():
                 applied.append(roadmap.apply(proposal).id)
             if record.tmux:
-                ctx.sessions.kill(record.tmux)
+                ctx.sessions_for(record).kill(record.tmux)
             # `SI-31`. STAMP BEFORE RELEASING. The order used to be release-then-stamp, and `J9` measured
             # what that costs: `SIGKILL` between the two left `slot_held: False` with `harvested_at: None` —
             # a FREE slot and a record that still reads in-flight. That state is both invisible and
