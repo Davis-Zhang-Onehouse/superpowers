@@ -885,6 +885,34 @@ record is still refused. Against `fleet/v0.5.3`, `S8` fails with
 `socket-recorded=1 followed=0(asked=itfleet-S) state=UNREACHABLE acted=0(rc=1)` — the x7 symptom — while
 `S9` passes, which is the half `0.5.3` got right.
 
+**Correction 2 — `pane-guard` was the verb left behind, and it is the one the gate is built on.** Found
+by checking `skills/reviving-dead-panes` against `0.5.4` rather than by a failure. `_pane_subject`
+resolved a record to a session NAME and `_do_pane_guard` then asked `ctx.sessions` — the ambient server.
+Measured, one record, one shell, two verbs:
+
+```
+status     --id …  ->  state RUNNING, asked_server 'pg-other', liveness session
+pane-guard --id …  ->  verdict unknown-pane
+                       "no live process and no session answer for 'dt-pgsubject'"
+```
+
+It fails CLOSED — `13` is not `0`, so an `FD-10` monitor will not send on it — so this was wrong rather
+than dangerous. But `pane-guard` IS that contract's gate, and `13`'s detail is the sentence `SI-54`
+already rewrote once for reading like a dead worker. `--id` now resolves through `Ctx.sessions_for`;
+`--pane` deliberately does not, because a bare session name carries no address and choosing a server for
+the caller is the guess the rest of `SI-59` refuses to make. `S10` asserts both halves and fails at
+`0.5.4` with `by-id-followed=0(verdict=unknown-pane rc=13)`.
+
+**What the check also turned up, outside the product.** `skills/reviving-dead-panes` was stale in five
+measurable places: `SOCKET=fleet` hardcoded (this root derives `fleet-davis`), the quoted `DEAD` sentence
+(the product now names the server), "take the session and slot from `fleet leases`" (`LEASE_COLUMNS` has
+no socket — only `status --porcelain` does), a launcher exporting `FLEET_HOME`, and a hand-built
+`capture-pane` target that `fleet_peek` already gets right. It also gained a trap that per-root isolation
+created: revive on the server the record NAMES, or every verb resolves through the record and cannot see
+the pane you just brought back. The mechanics it was making an operator retype — the socket, the slot, the
+config dir, the transcript list, the launcher — moved to `scripts/fleet-revive.sh`, which derives all of
+them from the record and never sends a key.
+
 **Still open, deliberately.** `bin/fleet-view` keeps its own socket search. It is a second implementation
 of the enumeration now in `session.default_probes`, and it should read the product's answer instead —
 but it is a view, it shells out to `fleet` rather than importing it, and collapsing the two is a change
