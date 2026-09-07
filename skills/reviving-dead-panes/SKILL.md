@@ -155,8 +155,12 @@ A pane target parses as `session:window.pane`, and `=name` alone is not a sessio
 it. An operator typing `capture-pane` by hand reaches for `=name`, gets *can't find pane*, and concludes
 the revival failed when it did not.
 
-**Use `fleet_peek "$SESSION"`** from `scripts/fleet-env.sh`, which already gets the target right — and
-which refuses when `FLEET_TMUX_SOCKET` is unset rather than falling back to a server you did not name.
+**Use `FLEET_TMUX_SOCKET="$SOCKET" fleet_peek "$SESSION"`** — the helper in `scripts/fleet-env.sh` gets
+the target right, but it reads the socket from the ENVIRONMENT, which is the shell's server and not
+necessarily the record's. Measured: a shell carrying `FLEET_TMUX_SOCKET=fleet-davis` ran `fleet_peek`
+against a worker whose record named another server and got *"error connecting to …/fleet-davis"*. Pass
+the record's socket in front of it, every time; a bare `fleet_peek` is right only when the two happen to
+agree, which is exactly the assumption this skill exists to break.
 
 ### 5. Revive on the server the RECORD names, or the board keeps looking at the old one
 

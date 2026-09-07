@@ -147,7 +147,10 @@ cmd_start() {
   tmux -L "$SOCKET" new-session -d -s "$SESSION" -c "$SLOT" "$launcher" \
     || die "tmux refused to start $SESSION on server $SOCKET"
   echo "started $SESSION on server $SOCKET"
-  echo "  read it with:   fleet_peek $SESSION        (or: tmux -L $SOCKET capture-pane -p -t '=$SESSION:')"
+  #: The socket goes IN FRONT of `fleet_peek`: the helper reads it from the environment, which is this
+  #: shell's server and not necessarily the record's. Printing the bare form taught the wrong habit.
+  echo "  read it with:   FLEET_TMUX_SOCKET=$SOCKET fleet_peek $SESSION"
+  echo "                  (or: tmux -L $SOCKET capture-pane -p -t '=$SESSION:')"
   echo "  check it with:  fleet pane-guard --id $1"
   echo "  DO NOT send a key until you have CAPTURED the pane and seen what is on it."
 }
