@@ -1,5 +1,14 @@
 # fleet — changelog
 
+## fleet/v0.5.5 — 2026-09-07T15:04:41Z
+Cut from 79e61e0 on `live` (upstream base snapshot/2026-08-17-221146). 1 commit(s) since fleet/v0.5.4.
+
+Every release ships the whole repository — all skills, `commands/`, `hooks/` and the plugin manifest, not only `fleet/`.
+Payload: fleet (3 files), skills (1 file), scripts (1 file), docs (1 file).
+Skills changed: reviving-dead-panes.
+
+- 79e61e0 pane-guard follows the record too; revive-dead-panes rebuilt on 0.5.x
+
 ## fleet/v0.5.4 — 2026-09-07T05:44:32Z
 Cut from c5c6ecf on `live` (upstream base snapshot/2026-08-17-221146). 1 commit(s) since fleet/v0.5.3.
 
