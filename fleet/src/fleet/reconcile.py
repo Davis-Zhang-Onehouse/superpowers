@@ -134,14 +134,38 @@ class Subject:
     note: str
 
 
-def reconcile(store, pool, sessions, instants_dir: Path, idle_after_s: int = 1800) -> list:
+def reconcile(store, pool, sessions, instants_dir: Path, idle_after_s: int = 1800,
+              layer_for=None) -> list:
     """Join every fact about the fleet into one subject list.
 
     Order is the join order: live processes first, then records nothing live matched, then leases no
     subject accounts for. Pure — it reads `store`, `pool`, `sessions` and the filesystem, and writes
     nothing to any of them.
+
+    `layer_for(socket) -> SessionLayer` lets a record be answered ON THE SERVER IT NAMES. `SI-59` shipped
+    the field and then read past it: a worker whose record said `tmux_socket: fleet` was reported
+    UNREACHABLE from a shell on `fleet-davis`, with the server it should have asked and the server it did
+    ask printed on adjacent lines. Telling a reader to go and look is not looking.
+
+    Optional, and `None` keeps the old single-server behaviour, because `reconcile` is called by tests and
+    by callers that legitimately have one server. Consulted ONLY for a record that names a server other
+    than the one in hand — never for a record with no socket, which is not measured and would turn every
+    healthy board into a search over every server on the box.
     """
     instants_dir = Path(instants_dir)
+    #: One layer per distinct foreign socket, built at most once. The cost of following an address is a
+    #: probe set per SERVER, not per record, and that is what makes this affordable on a board where a
+    #: whole wave was dispatched somewhere else.
+    layers = {}
+
+    def layer_of(socket):
+        here = getattr(sessions, "socket", "") or ""
+        if not socket or socket == here or layer_for is None:
+            return sessions
+        if socket not in layers:
+            layers[socket] = layer_for(socket)
+        return layers[socket]
+
     records = list(store.all())
     record_by_tmux = {}
     for rec in records:
@@ -174,8 +198,12 @@ def reconcile(store, pool, sessions, instants_dir: Path, idle_after_s: int = 180
         if rec.todo_id in seen_records:
             continue
         seen_records.add(rec.todo_id)
-        subject = _worker_subject(rec, pool, sessions, instants_dir, idle_after_s,
-                                  live=sessions.alive(rec.tmux), sess=None,
+        #: The record's OWN server, when it names one. Everything else about this subject stays as it
+        #: was: the slot holder is process evidence and deliberately not re-asked, since `/proc` does not
+        #: care which tmux server anybody is pointed at.
+        layer = layer_of(rec.tmux_socket)
+        subject = _worker_subject(rec, pool, layer, instants_dir, idle_after_s,
+                                  live=layer.alive(rec.tmux), sess=None,
                                   live_sessions=live_sessions)
         if subject.holds_slot:
             accounted_slots.add(rec.slot)
@@ -281,10 +309,16 @@ def _state_of(rec, folder_state, live, phase, parked, pane, sessions, instant, i
         if slot_holder is not None:
             # Alive by the probe that does not need tmux. Say what is missing rather than inventing a
             # death: the remedy is a server, not a recovery.
+            asked = getattr(sessions, "socket", "") or "the default server"
             return UNREACHABLE, (
                 f"pid {slot_holder} is live and holds this record's slot, but no session answers for "
-                f"{rec.tmux or 'it'} — the process is running and its SESSION is unreachable from here. "
-                f"Usually the wrong tmux server: export FLEET_TMUX_SOCKET to the one it was dispatched on.")
+                f"{rec.tmux or 'it'} on tmux server {asked!r} — the process is running and its SESSION is "
+                f"unreachable from there. "
+                + (f"The record names {rec.tmux_socket!r}, which was asked and did not have it: the "
+                   f"session may have been killed while the process lives on."
+                   if rec.tmux_socket else
+                   "This record predates the server field, so nothing says where to look: usually the "
+                   "wrong tmux server, and `export FLEET_TMUX_SOCKET` to the one it was dispatched on."))
         #: `SI-59`. The record NAMES a server, and it is not the one we looked on. `SI-39` gave this
         #: situation its own state because DEAD is an ACTIONABLE claim — the response is `reap` — and a
         #: wrong DEAD invites a human to free a slot out from under running work. That state needed a live
@@ -303,8 +337,11 @@ def _state_of(rec, folder_state, live, phase, parked, pane, sessions, instant, i
             # READ from an absent field, never stamped. Back-filling it here is exactly the defect that
             # made the predecessor's report a writer.
             return PENDING_LAUNCH, "dispatched, with no launch recorded and no live session"
-        return DEAD, (f"launched at {rec.launched_at} and no session is alive: the work stopped "
-                      "without renaming its folder")
+        #: Names the server, because that is what makes DEAD an honest claim rather than a local one. It
+        #: is reached only after the record's OWN server was asked, when it names one.
+        asked = getattr(sessions, "socket", "") or "the default server"
+        return DEAD, (f"launched at {rec.launched_at} and no session is alive on tmux server {asked!r}: "
+                      "the work stopped without renaming its folder")
     return _live_state(phase, parked, pane, sessions, instant, idle_after_s)
 
 
