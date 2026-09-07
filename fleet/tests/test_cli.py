@@ -4278,3 +4278,55 @@ class TestFollowingARecordToItsOwnServer(CliCase):
         rows = dict(line.split("\t")[:2] for line in out.splitlines() if "\t" in line)
         self.assertEqual(rows.get("evidence.asked_server"), "fixture-server", out)
         self.assertEqual(rows.get("evidence.tmux_socket"), "", out)
+
+
+class TestPaneGuardFollowsTheRecordToo(CliCase):
+    """`SI-59`, third instance. `pane-guard` was the one verb left asking the ambient server.
+
+    Measured on `0.5.4`, one record, one shell, two verbs:
+
+        status     --id …  ->  state RUNNING, asked_server 'pg-other', liveness session
+        pane-guard --id …  ->  verdict unknown-pane
+                               "no live process and no session answer for 'dt-pgsubject'"
+
+    It fails CLOSED — `13` is not `0`, so a monitor holding the `FD-10` contract will not send — so this
+    is wrong rather than dangerous. But it is the verb that gate is built on, and the one
+    `reviving-dead-panes` tells an operator to trust when checking whether a revived pane came back. A
+    guard that reports *this pane does not exist* about a pane the next verb along can see is the sentence
+    `SI-54` already rewrote once for reading like a dead worker.
+
+    `--pane` keeps asking the ambient server, and that asymmetry is the rule rather than an omission: a
+    bare session NAME carries no address, so there is nothing to follow.
+    """
+
+    def test_id_resolves_the_pane_on_the_server_the_record_names(self):
+        fleet = self.loaded()
+        fleet.worker("guardedElsewhere", server=OTHER_SERVER, pane=BUSY_PANE)
+        code, out, err = fleet.run(["pane-guard", "--id", fleet.ids["guardedElsewhere"], "--porcelain"])
+        rows = dict(line.split("\t")[:2] for line in out.splitlines() if "\t" in line)
+        self.assertNotEqual(rows.get("verdict"), "unknown-pane",
+                            f"pane-guard says the pane does not exist while status can see it: {out}")
+        self.assertEqual(code, cli.PANE_MID_TURN,
+                         f"the busy pane on the record's own server was not read: {out}{err}")
+
+    def test_a_bare_pane_NAME_still_asks_the_ambient_server(self):
+        """The asymmetry, asserted rather than assumed. `--pane` is for when you have only the session
+        name, and a name with no record behind it names no server either — following one would mean
+        picking a server for the caller."""
+        fleet = self.loaded()
+        fleet.worker("guardedNamed", server=OTHER_SERVER, pane=BUSY_PANE)
+        code, out, err = fleet.run(["pane-guard", "--pane", "dt-guardedNamed", "--porcelain"])
+        rows = dict(line.split("\t")[:2] for line in out.splitlines() if "\t" in line)
+        self.assertEqual(rows.get("verdict"), "unknown-pane",
+                         f"--pane followed an address a bare session name does not carry: {out}")
+
+    def test_a_record_whose_server_really_does_not_have_it_is_still_unknown(self):
+        """The negative control. Following the address must not manufacture a pane."""
+        fleet = self.loaded()
+        fleet.worker("guardedGone", live=False)
+        record = fleet.store.read(fleet.ids["guardedGone"])
+        record.tmux_socket = "aServerWithNothingOnIt"
+        fleet.store.write(record)
+        code, out, err = fleet.run(["pane-guard", "--id", fleet.ids["guardedGone"], "--porcelain"])
+        rows = dict(line.split("\t")[:2] for line in out.splitlines() if "\t" in line)
+        self.assertEqual(rows.get("verdict"), "unknown-pane", out)
