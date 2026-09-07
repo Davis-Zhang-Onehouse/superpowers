@@ -3611,8 +3611,18 @@ def _is_claude(sessions, text: str, name: str = "") -> bool:
     return sessions.busy(text) or sessions.unsubmitted(text) is not None
 
 
-def _pane_subject(ctx: Ctx, parsed: Parsed) -> str:
-    """WHICH pane `pane-guard` is being asked about — `SI-54`.
+def _pane_subject(ctx: Ctx, parsed: Parsed):
+    """WHICH pane `pane-guard` is being asked about, and on WHICH SERVER — `SI-54`, then `SI-59`.
+
+    Returns `(pane, layer)`. The server half is `SI-59`'s third instance: this verb was the last one still
+    asking whichever server the shell pointed at, and it answered `13` — *this pane does not exist* —
+    about panes `status` could see from the same shell. It fails closed, so a monitor holding `FD-10`
+    will not send on a `13`; but `13`'s detail is the sentence `SI-54` already rewrote once for reading
+    like a dead worker, and this is the verb `reviving-dead-panes` tells an operator to trust.
+
+    `--pane` keeps the ambient server. That is the rule, not an omission: a bare session NAME carries no
+    address, and choosing a server on the caller's behalf is the guess every other half of `SI-59`
+    refuses to make.
 
     This was the only verb on the surface keyed on `--pane <session>` while `close`, `harvest`, `status`
     and `seed-check` all take `--id <todo>`. The two identifiers differ by a timestamp suffix, so the
@@ -3636,7 +3646,7 @@ def _pane_subject(ctx: Ctx, parsed: Parsed) -> str:
             "pane-guard needs a subject: `--id <todo>` (the key every other verb takes) or "
             "`--pane <session>`.")
     if named_pane:
-        return named_pane
+        return named_pane, ctx.sessions
     record = _record(ctx, parsed)
     if not record.tmux:
         raise BadInput(
@@ -3644,7 +3654,7 @@ def _pane_subject(ctx: Ctx, parsed: Parsed) -> str:
             f"rather than answered `{PANE_UNKNOWN} {PANE_GUARD_CODES[PANE_UNKNOWN]}`: that code means "
             f"*this pane does not exist*, and a record that never had one is a different fact with a "
             f"different remedy — `fleet resume --instant <instant> --tmux <session>` attaches one.")
-    return record.tmux
+    return record.tmux, ctx.sessions_for(record)
 
 
 def _do_pane_guard(ctx: Ctx, parsed: Parsed) -> int:
@@ -3655,8 +3665,8 @@ def _do_pane_guard(ctx: Ctx, parsed: Parsed) -> int:
     `0` safe · `10` queued text · `11` mid-turn · `12` not-claude · `13` unknown pane — and a caller
     branches on the number, never on the sentence.
     """
-    pane = _pane_subject(ctx, parsed)
-    if not ctx.sessions.alive(pane):
+    pane, layer = _pane_subject(ctx, parsed)
+    if not layer.alive(pane):
         code, detail = PANE_UNKNOWN, (f"no live process and no session answer for {pane!r}; sending keys "
                                       "to a pane nobody can name is the send with no target")
     else:
@@ -3671,23 +3681,23 @@ def _do_pane_guard(ctx: Ctx, parsed: Parsed) -> int:
         #: real shell pane running `sleep 900` produces no output, is genuinely not claude, and was
         #: reported `14 indeterminate` — blocking a legitimate teardown forever. The probe now returns
         #: None on failure and `""` for an empty pane, so this asks the question that was always meant.
-        captured = ctx.sessions.capture(pane)
+        captured = layer.capture(pane)
         text = captured or ""
-        if captured is None and not ctx.sessions.is_claude_process(pane):
+        if captured is None and not layer.is_claude_process(pane):
             code, detail = PANE_INDETERMINATE, (
                 f"{pane} is alive but nothing about it could be read: no live claude process is "
                 f"attributed to it and the pane capture FAILED — tmux did not answer. That is a failed "
                 f"observation, not an observation of a non-claude pane; an empty pane that captured "
                 f"cleanly is reported {PANE_NOT_CLAUDE}, not this. WAIT and re-poll; do not send, and "
                 f"do not close")
-        elif not _is_claude(ctx.sessions, text, pane):
+        elif not _is_claude(layer, text, pane):
             code, detail = PANE_NOT_CLAUDE, (f"{pane} is alive and nothing in its tail is claude; a send "
                                              "here goes to somebody else's shell")
-        elif ctx.sessions.busy(text):
+        elif layer.busy(text):
             code, detail = PANE_MID_TURN, (f"{pane} is still offering a way to interrupt, so it is "
                                            "mid-turn; a send now is queued behind the current turn")
-        elif ctx.sessions.unsubmitted(text) is not None:
-            queued = ctx.sessions.unsubmitted(text)
+        elif layer.unsubmitted(text) is not None:
+            queued = layer.unsubmitted(text)
             code, detail = PANE_QUEUED_TEXT, (f"{pane} holds unsubmitted text in its input box "
                                               f"({queued!r}); a send would concatenate onto it")
         else:
@@ -3707,7 +3717,7 @@ def _do_pane_guard(ctx: Ctx, parsed: Parsed) -> int:
     #:
     #: Empty for every code but `10`, and that is not a hedge — no other code asserts anything about the
     #: box, and emitting a best guess there would invent a fact.
-    queued = ctx.sessions.unsubmitted(text) if code == PANE_QUEUED_TEXT else None
+    queued = layer.unsubmitted(text) if code == PANE_QUEUED_TEXT else None
     _emit(ctx, PANE_GUARD, [("code", str(code)), ("verdict", PANE_GUARD_CODES[code]),
                             ("pane", pane), ("queued_text", queued or ""), ("detail", detail)])
     return code

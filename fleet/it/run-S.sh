@@ -503,6 +503,51 @@ else
     "resume rc=$s9_resume_rc refused=$s9_refused(rc=$s9_close_rc) names-other=$s9_names names-this=$s9_here session-alive=$s9_alive unstamped=$s9_unstamped"
 fi
 
+# --- S10: `pane-guard` follows the record too, and `--pane` deliberately does not ------------------
+#
+#      `SI-59`'s third instance, measured at `0.5.4`: one record, one shell, two verbs disagreeing —
+#      `status --id` reported RUNNING on the record's server while `pane-guard --id` answered
+#      `unknown-pane`, whose detail reads *"no live process and no session answer"*. It fails CLOSED, so
+#      an `FD-10` monitor will not send on it; but it is the gate that contract is built on and the check
+#      `reviving-dead-panes` tells an operator to trust when a revived pane comes back.
+#
+#      Both halves are asserted here because the asymmetry IS the rule: `--id` has a record and therefore
+#      an address; `--pane` has a bare session name, which names no server, and following one would mean
+#      choosing a server on the caller's behalf.
+S10_SESS="${TMUX_PREFIX}-guarded"
+tmux -L "$S8_OTHER" new-session -d -s "$S10_SESS" 'sh -c "while :; do sleep 1; done"' 2>"$OUT/S10-tmux.err"
+S10_INST="$(s_init guardedSubject)"
+FLEET_TMUX_SOCKET="$S8_OTHER" fleet resume --instant "$S10_INST" --slot slot3 --tmux "$S10_SESS" --porcelain > "$OUT/S10-resume.out" 2>&1
+s10_resume_rc=$?
+S10_ID="$(awk -F'\t' '$1=="todo_id"{print $2}' "$OUT/S10-resume.out" | head -1)"
+
+#: From the section's OWN server, which is the wrong one for this record.
+fleet pane-guard --id "$S10_ID" --porcelain > "$OUT/S10-byid.tsv" 2>&1
+s10_id_rc=$?
+s10_id_verdict="$(awk -F'\t' '$1=="verdict"{print $2}' "$OUT/S10-byid.tsv")"
+fleet pane-guard --pane "$S10_SESS" --porcelain > "$OUT/S10-bypane.tsv" 2>&1
+s10_pane_rc=$?
+s10_pane_verdict="$(awk -F'\t' '$1=="verdict"{print $2}' "$OUT/S10-bypane.tsv")"
+{ echo "resume rc=$s10_resume_rc id=$S10_ID session=$S10_SESS on $S8_OTHER";
+  echo "--id   rc=$s10_id_rc verdict=$s10_id_verdict"; cat "$OUT/S10-byid.tsv";
+  echo "--pane rc=$s10_pane_rc verdict=$s10_pane_verdict"; cat "$OUT/S10-bypane.tsv"; } \
+  > "$OUT/S10.txt" 2>&1
+cat "$OUT/S10.txt"
+
+#: The pane runs `sh`, so the honest verdict from the record's server is `not-claude` (12) — an
+#: OBSERVATION of the pane. Asserted as "not unknown-pane" rather than as a specific code, because the
+#: defect is answering *this pane does not exist*, and pinning 12 would make this case fail the day the
+#: fixture's pane changes for an unrelated reason.
+s10_followed=0; [ "$s10_id_verdict" != "unknown-pane" ] && [ -n "$s10_id_verdict" ] && s10_followed=1
+s10_pane_local=0; [ "$s10_pane_verdict" = "unknown-pane" ] && s10_pane_local=1
+if [ "$s10_resume_rc" = 0 ] && [ "$s10_followed$s10_pane_local" = "11" ]; then
+  it_pass S10 "fleet/it/S/out/S10.txt" \
+    "\`pane-guard --id\` resolved the pane on the server the RECORD names and returned an observation of it (verdict=$s10_id_verdict, rc=$s10_id_rc) instead of \`unknown-pane\`, which is what it answered at 0.5.4 about a pane \`status\` could see from the same shell. \`--pane $S10_SESS\` from the same shell still answers unknown-pane, because a bare session name carries no address and picking a server for the caller is the guess every other half of SI-59 refuses"
+else
+  it_fail S10 "fleet/it/S/out/S10.txt" \
+    "resume rc=$s10_resume_rc by-id-followed=$s10_followed(verdict=$s10_id_verdict rc=$s10_id_rc) by-pane-stayed-local=$s10_pane_local(verdict=$s10_pane_verdict)"
+fi
+
 it_assert_isolation S-leave
 bash "$IT_ROOT/bin/source-pin.sh" after "$OUT" || { echo "CONTAMINATED — no verdict" >&2; exit 3; }
 sed -i "s|$INSTANT/||g" "$RESULTS"
