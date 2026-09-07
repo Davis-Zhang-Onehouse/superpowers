@@ -392,18 +392,25 @@ else
 fi
 
 # ==================================================================================================
-# S8 — `SI-59`. A verb that ACTS on a session must not act when that session answers on a DIFFERENT
-#      tmux server. Measured on the live box at `0.5.2`, against a running worker, from a shell pointed
-#      at another server: `fleet close` returned **rc=0**, printed `closed dt-<name>`, stamped
-#      `closed_at` and reported the monitor disarmed — while `tmux -L fleet ls` still listed the
-#      session. It did not fail to find the pane. It reported success for a pane it never touched.
+# S8/S9 — `SI-59`. A dt- session lives on the server it was created on, and a record has to say which.
 #
-#      Two servers are the whole fixture, and the second one is created here rather than borrowed: the
-#      defect needs a session that is reachable somewhere and not from where the command runs, which is
-#      a state no single-server section can produce.
+#      Measured at `0.5.2`, against a running worker, from a shell pointed at another server: `fleet
+#      close` returned rc=0, printed `closed dt-<name>`, stamped `closed_at` and reported the monitor
+#      disarmed — while `tmux -L fleet ls` still listed the session. It reported success for a pane it
+#      never touched.
 #
-#      Asserted NEGATIVELY, on the record and on the session: a refusal that still stamped the record,
-#      or still killed the pane, is the same defect wearing a non-zero exit code.
+#      `0.5.3` recorded the server and made the acting verbs REFUSE across servers. That was half right,
+#      and the other half was measured the next morning: a worker dispatched at 00:34 recorded its server
+#      correctly and `fleet status` still said UNREACHABLE, printing the server it should have asked and
+#      the server it did ask on adjacent lines. Worse, the refusal made a coordinator pin the old socket
+#      in its runbook so it could still close its own workers — and that pin put the NEXT worker on the
+#      wrong server. A guard people write a workaround around has moved the defect, not closed it.
+#
+#      So: a record that NAMES a server is read and acted on THERE (S8). A record that names nothing and
+#      whose session turns up elsewhere is REFUSED, because acting would mean guessing (S9).
+#
+#      Two servers are the fixture, and the second is created here rather than borrowed: the defect needs
+#      a session reachable somewhere and not from where the command runs.
 # ==================================================================================================
 S8_OTHER="${TMUX_PREFIX}-otherserver"
 S8_SESS="${TMUX_PREFIX}-strayed"
@@ -411,36 +418,89 @@ tmux -L "$S8_OTHER" new-session -d -s "$S8_SESS" 'sh -c "while :; do sleep 1; do
 S8_INST="$(s_init strayedSubject)"
 #: Recorded from a shell pointed at the OTHER server, which is how a real dispatch records one: the
 #: server it is talking to is the server it creates the session on.
-FLEET_TMUX_SOCKET="$S8_OTHER" fleet resume --instant "$S8_INST" --slot slot6 --tmux "$S8_SESS"       --porcelain > "$OUT/S8-resume.out" 2>&1
+FLEET_TMUX_SOCKET="$S8_OTHER" fleet resume --instant "$S8_INST" --slot slot6 --tmux "$S8_SESS" --porcelain > "$OUT/S8-resume.out" 2>&1
 s8_resume_rc=$?
 S8_ID="$(awk -F'\t' '$1=="todo_id"{print $2}' "$OUT/S8-resume.out" | head -1)"
-[ -n "$S8_ID" ] && s8_socket="$(fleet status --id "$S8_ID" --porcelain 2>/dev/null       | awk -F'\t' '$1=="evidence.tmux_socket"{print $2}')"
+s8_socket="$(fleet status --id "$S8_ID" --porcelain 2>/dev/null \
+      | awk -F'\t' '$1=="evidence.tmux_socket"{print $2}')"
 
-#: Now act on it from the section's OWN server — the wrong one for this record.
+#: READ from the section's OWN server — the wrong one for this record. The reader must follow the
+#: address rather than report the absence it sees locally. This is the x7 symptom, exactly.
+fleet status --id "$S8_ID" --porcelain > "$OUT/S8-status.tsv" 2>&1
+s8_state="$(awk -F'\t' '$1=="state"{print $2}' "$OUT/S8-status.tsv")"
+s8_asked="$(awk -F'\t' '$1=="evidence.asked_server"{print $2}' "$OUT/S8-status.tsv")"
+s8_liveness="$(awk -F'\t' '$1=="evidence.liveness"{print $2}' "$OUT/S8-status.tsv")"
+
+#: ACT from the section's own server. The record names the other one, so the kill belongs there.
 fleet close --id "$S8_ID" > "$OUT/S8-close.out" 2>&1
 s8_close_rc=$?
 s8_alive=0; tmux -L "$S8_OTHER" has-session -t "=$S8_SESS" 2>/dev/null && s8_alive=1
-#: Read from the RECORD, not from a report: the question is whether the refused close wrote anything, and
-#: asking a view about it would put the thing under test between the assertion and the fact.
 s8_closed_at="$(python3 -c "import json,sys
 try:
     print(json.load(open(sys.argv[1])).get('closed_at') or '')
 except Exception:
     print('UNREADABLE')" "$FLEET_HOME/records/$S8_ID.json" 2>/dev/null)"
 { echo "resume rc=$s8_resume_rc id=$S8_ID recorded_socket=${s8_socket:-<none>}";
-  echo "close rc=$s8_close_rc"; echo "--- close output ---"; cat "$OUT/S8-close.out";
-  echo "session still alive on $S8_OTHER: $s8_alive"; echo "closed_at: ${s8_closed_at:-<empty>}"; }   > "$OUT/S8.txt" 2>&1
+  echo "read from $IT_TMUX_SOCKET: state=$s8_state asked=$s8_asked liveness=$s8_liveness";
+  echo "close rc=$s8_close_rc"; cat "$OUT/S8-close.out";
+  echo "session alive on $S8_OTHER after close: $s8_alive"; echo "closed_at: ${s8_closed_at:-<empty>}"; } \
+  > "$OUT/S8.txt" 2>&1
 cat "$OUT/S8.txt"
 
-s8_refused=0; [ "$s8_close_rc" != 0 ] && s8_refused=1
-s8_names=0;   grep -qF "$S8_OTHER" "$OUT/S8-close.out" && s8_names=1
-s8_here=0;    grep -qF "$IT_TMUX_SOCKET" "$OUT/S8-close.out" && s8_here=1
-s8_unstamped=0; [ -z "$s8_closed_at" ] && s8_unstamped=1
 s8_recorded=0; [ "$s8_socket" = "$S8_OTHER" ] && s8_recorded=1
-if [ "$s8_resume_rc" = 0 ]    && [ "$s8_refused$s8_names$s8_here$s8_alive$s8_unstamped$s8_recorded" = "111111" ]; then
-  it_pass S8 "fleet/it/S/out/S8.txt"     "a record whose session lives on another tmux server is REFUSED by \`close\` (rc=$s8_close_rc) naming both the server it looked on and the one the session is on; the session is still alive there and the record carries no closed_at, so the refusal did not do half the job it refused. The record also carries the server it was dispatched on ($s8_socket), which is the fix underneath the guard: a session NAME is not an address, and every reader before this had to infer the server from whatever the shell exported"
+s8_followed=0; [ "$s8_asked" = "$S8_OTHER" ] && s8_followed=1
+s8_livestate=0; [ "$s8_liveness" = "session" ] && s8_livestate=1
+s8_notunreach=0; [ "$s8_state" != "UNREACHABLE" ] && [ "$s8_state" != "DEAD" ] && s8_notunreach=1
+s8_acted=0; [ "$s8_close_rc" = 0 ] && s8_acted=1
+s8_gone=0;  [ "$s8_alive" = 0 ] && s8_gone=1
+s8_stamped=0; [ -n "$s8_closed_at" ] && [ "$s8_closed_at" != "UNREADABLE" ] && s8_stamped=1
+if [ "$s8_resume_rc" = 0 ] \
+   && [ "$s8_recorded$s8_followed$s8_livestate$s8_notunreach$s8_acted$s8_gone$s8_stamped" = "1111111" ]; then
+  it_pass S8 "fleet/it/S/out/S8.txt" \
+    "a record dispatched on another tmux server records it ($s8_socket), and a reader on this section's own server FOLLOWS that address rather than reporting the absence it sees locally: state=$s8_state liveness=$s8_liveness asked_server=$s8_asked. \`close\` then acts THERE — rc=$s8_close_rc, the session is gone from $S8_OTHER and the record is stamped — which is doing what was asked instead of refusing and making somebody pin a socket in a runbook"
 else
-  it_fail S8 "fleet/it/S/out/S8.txt"     "resume rc=$s8_resume_rc refused=$s8_refused(rc=$s8_close_rc) names-other-server=$s8_names names-this-server=$s8_here session-still-alive=$s8_alive record-unstamped=$s8_unstamped socket-recorded=$s8_recorded(${s8_socket:-<none>})"
+  it_fail S8 "fleet/it/S/out/S8.txt" \
+    "resume rc=$s8_resume_rc socket-recorded=$s8_recorded(${s8_socket:-<none>}) followed=$s8_followed(asked=$s8_asked) live=$s8_livestate state=$s8_state not-unreachable=$s8_notunreach acted=$s8_acted(rc=$s8_close_rc) session-gone=$s8_gone stamped=$s8_stamped"
+fi
+
+# --- S9: the record that names NOTHING. Acting would mean guessing, so it refuses. -----------------
+S9_SESS="${TMUX_PREFIX}-unaddressed"
+tmux -L "$S8_OTHER" new-session -d -s "$S9_SESS" 'sh -c "while :; do sleep 1; done"' 2>"$OUT/S9-tmux.err"
+S9_INST="$(s_init unaddressedSubject)"
+FLEET_TMUX_SOCKET="$S8_OTHER" fleet resume --instant "$S9_INST" --slot slot4 --tmux "$S9_SESS" --porcelain > "$OUT/S9-resume.out" 2>&1
+s9_resume_rc=$?
+S9_ID="$(awk -F'\t' '$1=="todo_id"{print $2}' "$OUT/S9-resume.out" | head -1)"
+#: Blank the field, which is the state every record written before it existed is in — including the two
+#: this whole item was found on. A guard that only works for records carrying the new field cannot fire
+#: on the records that motivated it (`FI-303`).
+python3 -c "import json,sys
+p = sys.argv[1]
+d = json.load(open(p))
+d['tmux_socket'] = ''
+json.dump(d, open(p, 'w'), indent=2)" "$FLEET_HOME/records/$S9_ID.json"
+
+fleet close --id "$S9_ID" > "$OUT/S9-close.out" 2>&1
+s9_close_rc=$?
+s9_alive=0; tmux -L "$S8_OTHER" has-session -t "=$S9_SESS" 2>/dev/null && s9_alive=1
+s9_closed_at="$(python3 -c "import json,sys
+try:
+    print(json.load(open(sys.argv[1])).get('closed_at') or '')
+except Exception:
+    print('UNREADABLE')" "$FLEET_HOME/records/$S9_ID.json" 2>/dev/null)"
+{ echo "resume rc=$s9_resume_rc id=$S9_ID"; echo "close rc=$s9_close_rc"; cat "$OUT/S9-close.out";
+  echo "session alive on $S8_OTHER: $s9_alive"; echo "closed_at: ${s9_closed_at:-<empty>}"; } \
+  > "$OUT/S9.txt" 2>&1
+cat "$OUT/S9.txt"
+s9_refused=0; [ "$s9_close_rc" != 0 ] && s9_refused=1
+s9_names=0;   grep -qF "$S8_OTHER" "$OUT/S9-close.out" && s9_names=1
+s9_here=0;    grep -qF "$IT_TMUX_SOCKET" "$OUT/S9-close.out" && s9_here=1
+s9_unstamped=0; [ -z "$s9_closed_at" ] && s9_unstamped=1
+if [ "$s9_resume_rc" = 0 ] && [ "$s9_refused$s9_names$s9_here$s9_alive$s9_unstamped" = "11111" ]; then
+  it_pass S9 "fleet/it/S/out/S9.txt" \
+    "a record that names NO server, whose session turns up on another one, is REFUSED (rc=$s9_close_rc) naming both the server searched and the server it is on; the session is still alive there and the record carries no closed_at. This is the state every pre-0.5.3 record is in, and the one case where acting would be a guess"
+else
+  it_fail S9 "fleet/it/S/out/S9.txt" \
+    "resume rc=$s9_resume_rc refused=$s9_refused(rc=$s9_close_rc) names-other=$s9_names names-this=$s9_here session-alive=$s9_alive unstamped=$s9_unstamped"
 fi
 
 it_assert_isolation S-leave

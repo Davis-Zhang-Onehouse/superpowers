@@ -771,7 +771,9 @@ on this box actually have.
 
 ## SI-59 — a record names the tmux SESSION but not the SERVER, and `close` false-greens across servers
 
-**Status:** **FIXED in `0.5.3`**.
+**Status:** **FIXED in `0.5.4`**. `0.5.3` fixed half of it and shipped a second defect in the other
+half — see Correction 1 below, which was found the next morning by the same operator, on a worker
+dispatched three minutes after the two this entry was written about were harvested.
 **Field id:** reported from the product environment as a `fleet-view` display complaint —
 *"looks like a cosmetic issue"* — which it was not.
 
@@ -844,6 +846,44 @@ pid holding the slot to fire, and it protects the REPORT rather than the verbs t
 other, and asserts the refusal names both servers, the session is still alive, and the record carries no
 `closed_at`. Run against `fleet/v0.5.2` it fails with `refused=0(rc=0) session-still-alive=1
 record-unstamped=0 socket-recorded=0`, which is the defect itself.
+
+**Correction 1 — recording the address and then not using it.** `0.5.3` wrote the server down and made
+the acting verbs REFUSE across servers. Measured the next morning on `x7stackfifthwaveprs-09070034`,
+dispatched at 00:34 with `tmux_socket: 'fleet'` recorded correctly:
+
+```
+state                   UNREACHABLE
+note                    pid 2227342 is live and holds this record's slot, but no session
+                        answers for dt-x7stackfifthwaveprs … Usually the wrong tmux server:
+                        export FLEET_TMUX_SOCKET …
+evidence.tmux_socket    fleet
+evidence.asked_server   fleet-davis
+```
+
+The report printed the server it should have asked and the server it did ask on adjacent lines, and asked
+the wrong one anyway. **Telling a reader to go and look is not looking.** Two things were wrong:
+
+* the `SI-39` slot-holder branch fires first, so the branch added in `0.5.3` to name the recorded server
+  could not run for any worker holding its own slot — which is every real dispatch. A control that cannot
+  fire on the ordinary case is `FI-303` again, introduced by the fix for `FI-303`;
+* nothing consulted the recorded server at all.
+
+**And the refusal had a second-order cost that is the more interesting half.** Because `close` refused
+across servers, the coordinator had to keep `FLEET_TMUX_SOCKET=fleet` pinned in its runbook to stay able
+to close its own workers — and that pin is what put `x7` on `fleet` three minutes after the workers it
+existed to protect were harvested. *A guard people write a workaround around has moved the defect, not
+closed it.* The workaround was mine, written the previous evening, with a comment predicting exactly this.
+
+The fix: **reads and writes both follow the address the record carries.** `reconcile` takes a
+`layer_for(socket)` factory and answers a record on the server it names — at most one probe set per
+distinct foreign socket, and never for a record that names none. `close` and `abort` act on that server
+too. The cross-server REFUSAL survives for exactly one case: a record that names NO server whose session
+turns up elsewhere, which is every pre-`0.5.3` record and the one place acting would mean guessing.
+
+`S8` now asserts the read follows the address and the close acts there; `S9` asserts the un-addressed
+record is still refused. Against `fleet/v0.5.3`, `S8` fails with
+`socket-recorded=1 followed=0(asked=itfleet-S) state=UNREACHABLE acted=0(rc=1)` — the x7 symptom — while
+`S9` passes, which is the half `0.5.3` got right.
 
 **Still open, deliberately.** `bin/fleet-view` keeps its own socket search. It is a second implementation
 of the enumeration now in `session.default_probes`, and it should read the product's answer instead —
