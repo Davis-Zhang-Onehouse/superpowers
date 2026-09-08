@@ -24,6 +24,7 @@ Every control signal comes from structured state. The phase is read through `sto
 `HANDOFF.md` that *talks* about `Phase: AWAITING-CI` changes nothing (`RCF-9`, made unreachable rather
 than patched). No `.md` file is opened here at all.
 """
+import calendar
 import time
 from dataclasses import dataclass
 from pathlib import Path
@@ -114,6 +115,10 @@ TERMINAL_FOLDER_STATES = ("complete", "abort")
 
 #: The declared phase that means "not consuming attention, waiting on CI".
 PHASE_AWAITING_CI = "awaiting-ci"
+
+#: 4 h. The slowest required pair in the source effort is 3 h 20 m, so a shorter threshold would flag
+#: every healthy wait and a flag that fires on correct work gets ignored.
+STALE_WAIT_S = 4 * 60 * 60
 
 
 @dataclass(frozen=True)
@@ -353,7 +358,7 @@ def _live_state(phase, parked, pane, sessions, instant, idle_after_s):
         # queued while the agent is still working is not blocked — it is queued, and it will be sent.
         state, note = BLOCKED, f"the pane is waiting on a human: {waiting!r}"
     elif phase == PHASE_AWAITING_CI:
-        state, note = AWAITING_CI, "declared awaiting-ci; not consuming attention"
+        state, note = AWAITING_CI, _awaiting_note(pane, sessions, instant)
     elif busy:
         state, note = RUNNING, ""
     elif _idle_for(instant) > idle_after_s:
@@ -374,6 +379,39 @@ def _live_state(phase, parked, pane, sessions, instant, idle_after_s):
         else:
             state, note = PARKED, f"parked decision: {parked}"
     return state, note
+
+
+def _declared_age_s(instant, now):
+    """Seconds since the phase was declared, or `None` when the declaration predates the `at` field —
+    NOT MEASURED, so no staleness may be claimed from it."""
+    stamp = Declarations(instant).declared_at() if instant is not None else None
+    if not stamp:
+        return None
+    return now - calendar.timegm(time.strptime(stamp, "%Y-%m-%dT%H:%M:%SZ"))
+
+
+def _awaiting_note(pane, sessions, instant, stale_after_s=STALE_WAIT_S, now=None) -> str:
+    """What the board says about a worker that claims to be waiting on CI.
+
+    The declaration is a claim made at ONE moment; nothing re-reads it. A Monitor that emitted zero
+    events for 7.7 h and a self-matching wait shell that outlived its job both rendered here as a
+    healthy wait, and the cost was three operator `status?` pings in one session. This re-observes the
+    pane's own status line (`sessions.watchers`) rather than trusting the declaration alone, and — when a
+    live observation is not possible — falls back to what was ATTESTED at claim time, distinguishably
+    from what is actually OBSERVED now.
+    """
+    observed = sessions.watchers(pane)
+    attested = Declarations(instant).watchers() if instant is not None else None
+    if observed:
+        note = f"declared awaiting-ci; watcher observed ({observed})"
+    elif attested:
+        note = f"declared awaiting-ci; watcher ATTESTED, not observable: {attested}"
+    else:
+        note = "declared awaiting-ci; NO WATCHER OBSERVABLE on the pane"
+    age = _declared_age_s(instant, now if now is not None else time.time())
+    if age is not None and age > stale_after_s:
+        note += f"; STALE-WAIT (declared {int(age) // 3600}h{int(age) % 3600 // 60:02d}m ago)"
+    return note
 
 
 def _holds_slot(pool, rec) -> bool:
