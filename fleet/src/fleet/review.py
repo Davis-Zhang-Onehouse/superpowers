@@ -53,8 +53,12 @@ BLOCKING_SEVERITIES = ("Critical", "Important")
 
 #: A finding's disposition. `wont-fix` is a recorded decision and not a loophole, because `action` is
 #: required to be non-empty on every finding — declining a Critical therefore costs a written reason.
+#: `routed` is the same bargain for a finding this instant does not OWN: its `action` names who does.
+#: Without it, a finding against a coordinator-owned file could only sit `open`, and an `open` blocking
+#: finding refuses the gate — which once made a worker edit the coordinator's charter to clear its own
+#: gate. Only `open` blocks, so `routed` is non-blocking by construction.
 OPEN = "open"
-FINDING_STATUSES = (OPEN, "applied", "wont-fix")
+FINDING_STATUSES = (OPEN, "applied", "wont-fix", "routed")
 
 #: Guard ids. These are the machine-readable part of a verdict: a caller distinguishes "undecidable"
 #: from "decided no" by comparing these, never by grepping the sentence. `RCF-9` is what grepping the
