@@ -292,7 +292,10 @@ and fix-round diffs need it.
   not helpers, and never a reviewer. Review arrives from you, after the
   report. In real sessions, every reviewer a worker spawned duplicated
   the task review the controller dispatched anyway — a full extra
-  review seat per task.
+  review seat per task. The same template carries the no-Monitor rule:
+  an implementer runs long work in the foreground or hands the
+  controller a file to watch, never a wake-up the controller cannot
+  receive.
 - If an earlier task parked a finding in the area this task touches, carry
   a pointer to that ledger entry in the dispatch.
 - Record the implementer's agent identity from the dispatch result —
