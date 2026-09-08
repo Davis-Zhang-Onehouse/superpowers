@@ -181,6 +181,18 @@ class TestGateVerdicts(ReviewCase):
         self.assertTrue(rev.gate().allowed, rev.gate().reason)
         self.assertEqual([f.id for f in rev.open_blocking()], [])
 
+    def test_routed_records_an_owner_and_never_blocks(self):
+        """try-subtree recorded an Important finding against the coordinator-authored CHARTER.md — a file
+        a worker may never edit. With no `routed` status it sat `open`, the gate refused READY, and the
+        worker cleared it by editing the coordinator's charter. A missing enum value forced an ownership
+        violation."""
+        review = self.review()
+        review.add_round("all", "READY", [Finding("RV-8", "Important", "routed", "CHARTER.md",
+                                                  "the charter has no Updated|Status header",
+                                                  "coordinator fixes it at the template")])
+        self.assertEqual(review.open_blocking(), [])
+        self.assertTrue(review.gate(require_scope="all").allowed)
+
 
 # --- scope accumulation ----------------------------------------------------------------------------
 
