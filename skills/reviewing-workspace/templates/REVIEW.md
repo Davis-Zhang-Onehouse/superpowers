@@ -1,8 +1,10 @@
-# <Effort> — REVIEW   (append-only review ledger; never rewrite, supersede in place)
-Updated: <date> by session <uuid>  |  Status: LIVING register
+# <Effort> — REVIEW   (GENERATED VIEW of .fleet/review.json — regenerated in full on every render; hand edits are discarded)
+Updated: <date> by session <uuid>  |  Status: GENERATED VIEW
 
 Records every review round for this instant: findings, their status, and the action taken —
-the audit trail from "comment raised" to "comment addressed". Newest round on top.
+the audit trail from "comment raised" to "comment addressed". Newest round on top. Findings are recorded
+through `fleet review --finding`, which is what writes the ledger this view is rendered from; reasoning
+that must survive belongs in REVIEW-NARRATIVE.md, which nothing regenerates.
 
 ## Round R<n> — <date> · trigger: <on-demand | pre-complete> · scope: <all | format | alignment | code>
 Note: <why this round ran, from --note>
