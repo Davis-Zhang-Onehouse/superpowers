@@ -500,3 +500,23 @@ class TestAwaitingCiNote(unittest.TestCase):
         note = self.note(phase="awaiting-ci", pane="... 1 monitor ...", declared_at=None,
                          now="2026-09-07T21:00:00Z")
         self.assertNotIn("STALE-WAIT", note)
+
+    def test_a_float_now_does_not_crash_and_still_flags_stale(self):
+        """`_awaiting_note`'s real caller passes `time.time()` — a float. Every other test in this class
+        injects an integer `now` via `calendar.timegm`, which would NOT have caught the `:02d}` format
+        crash a float `age` produces. A later "simplification" that dropped the `int(age)` cast would
+        pass every one of those and still take `reconcile` down on the first real stale wait."""
+        self._write_declaration(attested=None, declared_at="2026-09-07T15:00:00Z")
+        declared_epoch = calendar.timegm(time.strptime("2026-09-07T15:00:00Z", "%Y-%m-%dT%H:%M:%SZ"))
+        now_float = declared_epoch + 5 * 3600 + 0.5
+        sessions = _FakeWatcherSessions({"... 1 monitor ...": "1 monitor"})
+        note = _awaiting_note("... 1 monitor ...", sessions, self.instant, now=now_float)
+        self.assertIn("STALE-WAIT (declared 5h00m ago)", note)
+
+    def test_a_malformed_stamp_is_not_measured_rather_than_raising(self):
+        """Controller ruling on the Minor from Task 9's review: a corrupted or hand-edited `at` is NOT
+        MEASURED, not a `ValueError` that takes the whole board down for one bad field."""
+        self._write_declaration(attested=None, declared_at="not-a-timestamp")
+        sessions = _FakeWatcherSessions({"... 1 monitor ...": "1 monitor"})
+        note = _awaiting_note("... 1 monitor ...", sessions, self.instant, now=time.time())
+        self.assertNotIn("STALE-WAIT", note)
