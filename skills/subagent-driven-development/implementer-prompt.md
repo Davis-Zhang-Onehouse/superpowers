@@ -59,6 +59,17 @@ Subagent (general-purpose):
     would strengthen my report" — that review is already scheduled.
     Report instead.
 
+    ## You Do Not End Your Turn on a Monitor
+
+    If a build or test run is long, run it in the foreground with a long
+    timeout, or write its result to a file the controller can watch. Never
+    arm a `Monitor` and end your turn waiting for it: the event goes to a
+    queue that does not wake the controller, and nothing wakes you. Measured
+    once at 268 minutes — a ten-minute build, then two idle sessions and an
+    operator saying "I saw u are idle". If you cannot finish without a
+    long wait, report DONE_WITH_CONCERNS naming the wait rather than
+    parking on it.
+
     ## Code Organization
 
     You reason best about code you can hold in context at once, and your edits are more
