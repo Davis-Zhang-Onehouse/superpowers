@@ -28,7 +28,7 @@ Three further properties are requirements rather than implementation details:
 """
 import json
 import time
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
 
 from fleet import EXIT_ATTENTION, EXIT_BAD_INPUT, EXIT_OK
@@ -112,13 +112,16 @@ class Finding:
 
 @dataclass(frozen=True)
 class Round:
-    """One review pass: what it looked at, what it concluded, what it saw."""
+    """One review pass: what it looked at, what it concluded, what it saw, and the code it saw it in."""
 
     number: int
     scope: str
     verdict: str
     findings: list
     at: str
+    #: repo -> sha at the moment the round was recorded. Empty means the slot could not be read, which
+    #: is NOT MEASURED and never a mismatch — every round written before this field carries it empty.
+    heads: dict = field(default_factory=dict)
 
     def thin(self) -> bool:
         """True when the round records a verdict with no visible basis.
@@ -129,13 +132,18 @@ class Round:
         return not self.findings
 
     def to_json(self) -> dict:
-        return {"number": self.number, "scope": self.scope, "verdict": self.verdict, "at": self.at,
-                "findings": [f.to_json() for f in self.findings]}
+        out = {"number": self.number, "scope": self.scope, "verdict": self.verdict, "at": self.at,
+               "findings": [f.to_json() for f in self.findings]}
+        #: Emitted only when populated, so every ledger written before this field renders byte-identically.
+        if self.heads:
+            out["heads"] = dict(sorted(self.heads.items()))
+        return out
 
     @classmethod
     def from_json(cls, d: dict) -> "Round":
         return cls(number=d["number"], scope=d["scope"], verdict=d["verdict"], at=d["at"],
-                   findings=[Finding.from_json(f) for f in d["findings"]])
+                   findings=[Finding.from_json(f) for f in d["findings"]],
+                   heads=dict(d.get("heads", {})))
 
 
 def _utc_now() -> str:
@@ -181,7 +189,7 @@ class Review:
             )
         return [Round.from_json(entry) for entry in data.get("rounds", [])]
 
-    def add_round(self, scope: str, verdict: str, findings: list) -> Round:
+    def add_round(self, scope: str, verdict: str, findings: list, heads=None) -> Round:
         if scope not in SCOPES:
             raise BadInput(f"scope={scope!r} is outside {SCOPES}; a scope nobody defined can neither "
                            "satisfy nor fail a gate, so it is refused rather than coerced.")
@@ -201,7 +209,7 @@ class Review:
         with held_for_update(self._ledger_path()):
             existing = self.rounds()
             made = Round(number=len(existing) + 1, scope=scope, verdict=verdict, findings=findings,
-                         at=self._now())
+                         at=self._now(), heads=dict(heads or {}))
             self._save(existing + [made])
         return made
 

@@ -405,6 +405,20 @@ class TestLedger(ReviewCase):
         self.assertFalse((self.instant / "REVIEW.md").exists(),
                          "recording a round is not rendering a view")
 
+    def test_heads_round_trip_and_absent_stays_absent(self):
+        """A round carries the code it reviewed. A ledger written before this field keeps validating,
+        and its rounds report {} — NOT MEASURED, which no gate may read as a mismatch."""
+        made = Round(number=1, scope="code", verdict="READY", findings=[], at=TICKS[0],
+                     heads={"gluten-internal": "a" * 40})
+        self.assertEqual(made.to_json()["heads"], {"gluten-internal": "a" * 40})
+        self.assertEqual(Round.from_json(made.to_json()).heads, {"gluten-internal": "a" * 40})
+
+    def test_a_round_with_no_heads_emits_no_key(self):
+        made = Round(number=1, scope="code", verdict="READY", findings=[], at=TICKS[0])
+        self.assertNotIn("heads", made.to_json())
+        self.assertEqual(Round.from_json({"number": 1, "scope": "code", "verdict": "READY",
+                                          "at": TICKS[0], "findings": []}).heads, {})
+
 
 if __name__ == "__main__":
     unittest.main()
