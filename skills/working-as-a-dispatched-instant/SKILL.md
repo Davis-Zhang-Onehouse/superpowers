@@ -146,6 +146,21 @@ which records no judgement at all.
 **If your attestation stops being true, say so.** It is a statement about the moment you made it; a cron or
 a peer's monitor can die afterwards, and nothing re-reads your claim to notice.
 
+**Two ways a watcher looks armed and is not.** Both were measured in one wave, and both cost hours.
+
+- **Never poll by process name.** `until ! pgrep -f "maven"` matches the waiting shell's OWN command
+  line, so it never exits. One such shell lived 7 h 55 m and poisoned every later `pgrep -f "[m]aven"`
+  wait in that slot; nine of those hit the 600 s timeout for jobs that had finished in 24 to 42 seconds.
+  Wait on a PID or on a sentinel line in the log, never on a pattern your own command line carries.
+- **Do not rely on word-splitting.** `for r in $RUNS` over a space-joined string iterates ONCE over the
+  whole string under the harness shell, so `gh api …/runs/<id> <id> <id>` failed silently on every poll.
+  Three monitors built that way emitted zero events in 7.7 hours while the board read them as healthy.
+
+**After you arm a watcher and declare the phase, end your turn.** The notification re-invokes you. A
+worker that sleep-polls instead is indistinguishable from a hung one — one ran 21 loops over 3 h 20 m,
+delayed its operator's message by 5.8 minutes, and was asked "status?" three times in a session where
+nothing was wrong.
+
 `--dry-run` answers the same question the real call does, so you can check before you commit to it. The
 refusal names what clears it and who clears it; a claim that skipped the gate says `ungated` and why, so it
 never looks like one that passed.
@@ -191,6 +206,26 @@ document you write can produce. Proposing first is not politeness either: `harve
 worker whose report never reached the coordinator.
 <!-- v2-cite: report-reaches-coordinator H10 -->
 
+### Finishing is five steps, and the last one is not the rename
+
+`fleet complete` renames the folder, and that rename is the state transition. It is not the end of your
+turn. Three workers in one wave ended there, and each needed an operator to come back and ask for the
+sweep:
+
+- **Every pointer you leave must survive the rename.** Cite paths RELATIVE to the instant. `complete`
+  refuses an absolute path naming your own folder, because it resolves at gate time and not one
+  millisecond later.
+- **Declare the phase you are actually in.** An instant that has completed is not `awaiting-ci`; a stale
+  claim outlives the watcher that justified it, and `complete` refuses while it stands.
+- **Kill the waiters you armed.** One worker left seven wait shells alive, one of which had been
+  self-matching for 7 h 55 m.
+- **Empty the slot of scratch** once its scripts are copied into `evidence/`. A private `.m2` is 22 GB,
+  and the next lessee inherits it.
+
+**Durable findings never live in scratch.** A review findings list under `/tmp` is gone when the session
+restarts, and one worker's round went into the ledger short for exactly that reason. Anything you would
+need after a restart lives under the instant.
+
 ## Positioning your workspace
 
 Your seed printed the exact commands under `=== POSITION YOUR WORKSPACE ===`, generated from the lineage base
@@ -222,6 +257,7 @@ coordinator to record `--lineage-mode analysis`.
 | Detect and prevent are different asks — if you forget the remedy, what happens? | a check you must remember to run fails the same way the thing it checks |
 | Verify inherited claims; do not adopt them | a "green" claim was false within the hour |
 | A refusal names what clears it and who clears it | otherwise it gets forced blindly |
+| End the turn when a watcher is armed | 21 sleep loops over 3 h 20 m; the operator asked "status?" three times in a session where nothing was wrong |
 
 ## Where your workspace contract comes from
 
