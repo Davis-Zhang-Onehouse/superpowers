@@ -19,7 +19,8 @@
 - **Refusals name what clears them and who clears them.** Every new refusal states what it observed, what it expected, and the exact command that clears it.
 - **Porcelain is tab-separated with no banner.** New rows go through `_emit`/`Row` like every other row; never `print`.
 - **Run bash scripts under `bash`, never `zsh`.** zsh does not word-split unquoted expansions — the defect this plan exists partly to fix.
-- **Test command:** `cd fleet && PYTHONPATH=src python3 -m unittest discover -s tests -q` (~45 s, 864 tests). Single module: `PYTHONPATH=src python3 -m unittest tests.test_review -v`.
+- **Test command:** `cd fleet && PYTHONPATH=src python3 -m unittest discover -s tests -q` (~90 s, 1706 tests at the start commit).
+- **Pre-flight corrections live in the SDD ledger** (`.superpowers/sdd/2026-09-08-dispatch-wave-efficiency/progress.md`, rulings R1–R8): `Refused` takes no `guard=`/`reason=`; record/slot/workspace come from `_record_for`/`_slot_of`/`Workspace(ctx.home, git=ctx.git)`; `Declarations` is in `store.py`; the IT section is `RH`/`run-reviewhead.sh`; tests use the existing `CliCase`/`Fleet` fixture. Each task brief carries the correction that binds it. Single module: `PYTHONPATH=src python3 -m unittest tests.test_review -v`.
 - **`fleet/it/RESULTS.tsv` is tracked and read by `skills/using-fleet/tools/lint-skill.py`.** Standalone IT runs must set `IT_RESULTS` to a scratch path or they clobber it. Note that script is `using-fleet`'s claim-citation checker, **not** a general `SKILL.md` linter — this repo has none, and `superpowers:writing-skills` governs skill edits instead.
 - **Skill-content changes need eval evidence per the repo `CLAUDE.md`, and `evals/` is not cloned in this checkout.** Task 12 resolves this before any Lane B task lands.
 
