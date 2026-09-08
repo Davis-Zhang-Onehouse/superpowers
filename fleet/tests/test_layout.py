@@ -55,13 +55,22 @@ class TestBootstrap(unittest.TestCase):
 
     def test_seeded_registers_satisfy_the_header_rule_they_are_reviewed_against(self):
         """13 of one instant's 27 workspace-review findings were this header. The template a worker is
-        given must pass the checklist that worker is held to (RCF-11)."""
+        given must pass the checklist that worker is held to (RCF-11). The enforced contract
+        (`reviewing-workspace/reviewers/format-reviewer.md:37`) is one line: `Updated: <date>  |  Status:
+        DURABLE|LIVE` — and `HANDOFF.md`/`RUNBOOK.md` are the two documents maintain-workspace itself
+        calls LIVE/LIVING (SKILL.md:85, :100), so seeding them `DURABLE` is a false assertion."""
         bootstrap(self.instant, name=self.name)
-        for register in ("DECISIONS.md", "ISSUES.md", "ASSUMPTIONS.md", "RUNBOOK.md"):
+        for register in ("DECISIONS.md", "ISSUES.md", "ASSUMPTIONS.md", "HANDOFF.md", "RUNBOOK.md"):
             text = (self.instant / register).read_text()
             self.assertRegex(text, r"Updated: \d{4}-\d{2}-\d{2}", register)
-            self.assertIn("Status: DURABLE", text, register)
             self.assertNotIn("seeded by fleet.layout", text, register)
+            header_line = next(line for line in text.splitlines() if line.startswith("Updated:"))
+            self.assertRegex(header_line, r"^Updated: \d{4}-\d{2}-\d{2}  \|  Status: (DURABLE|LIVE)$",
+                             f"{register}: one-line 'Updated: <date>  |  Status: DURABLE|LIVE' shape")
+        for register in ("DECISIONS.md", "ISSUES.md", "ASSUMPTIONS.md"):
+            self.assertIn("Status: DURABLE", (self.instant / register).read_text(), register)
+        for register in ("HANDOFF.md", "RUNBOOK.md"):
+            self.assertIn("Status: LIVE", (self.instant / register).read_text(), register)
 
 class TestValidate(unittest.TestCase):
     def setUp(self):

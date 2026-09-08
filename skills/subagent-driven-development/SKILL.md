@@ -237,7 +237,9 @@ none to buy when every task builds in the same leased workspace: a fresh impleme
 re-derive slot state each time for no overlap. Three workers in one wave reached that conclusion
 independently and the coordinator ratified it twice, once retroactively. Execute the steps inline and
 keep the review loop — the independent reviewer is what the method is actually for. Record the choice in
-`DECISIONS.md` so it reads as a decision and not a shortcut.
+`DECISIONS.md` so it reads as a decision and not a shortcut. This is not the "I'll fix it myself" rationalization
+below: the independent review round is unchanged and mandatory, and what inline execution drops is the
+implementer seat, never the reviewer's.
 
 **Waiting on dispatched subagents:** while you have local work — ledger updates, packaging the next
 review, reading reports — keep working; child results arrive on their own. When you are genuinely idle,

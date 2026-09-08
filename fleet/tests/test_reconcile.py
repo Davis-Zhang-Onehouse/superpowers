@@ -266,7 +266,12 @@ class TestReconcile(unittest.TestCase):
 
     def test_a_declared_awaiting_ci_worker_is_AWAITING_CI(self):
         self.assertEqual(Declarations(self.fleet.paths["ciWaiter-07300304"]).phase(), "awaiting-ci")
-        self.assertEqual(self.subject("ciWaiter-07300304").state, "AWAITING-CI")
+        s = self.subject("ciWaiter-07300304")
+        self.assertEqual(s.state, "AWAITING-CI")
+        #: `_awaiting_note` re-observes the pane's own status line rather than trusting the declaration
+        #: alone; asserting on `.state` only lets that branch be unwired and the suite stay green (I8).
+        self.assertIn("declared awaiting-ci", s.note)
+        self.assertIn("NO WATCHER OBSERVABLE", s.note)
 
     def test_prose_claiming_a_phase_does_not_change_the_state(self):
         # RCF-9 made unreachable: the prose is right there, and it is not a control signal.

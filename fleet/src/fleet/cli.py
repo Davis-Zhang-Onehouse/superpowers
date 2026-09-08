@@ -1832,7 +1832,7 @@ def _do_declare(ctx: Ctx, parsed: Parsed) -> int:
                                          "tracking; cannot determine whether this head was reviewed. "
                                          "Record a round at this head with fleet review --scope code so "
                                          "the next claim is measured")]
-            elif measured[-1].heads != current:
+            elif _head_disagreement(measured[-1].heads, current):
                 review_row = [("review", "no review round has seen this head; a finding now costs another "
                                          "full CI wave. Converge the review before the next push")]
     _emit(ctx, "declare", [("phase", value), ("asked", asked), ("consumer", str(consumer.path)),
@@ -1956,11 +1956,10 @@ def _checkout_instruction(lineage: dict, mode: str) -> str:
     if mode == "code":
         lines.append(
             "If you touch native code: the .so files in your slot were built from the GOLDEN commit, not "
-            "from your base, and whether THIS slot can rebuild them is something only your charter knows — "
-            "several slots cannot (I-52), and there the charter's slot note names a frozen pair to copy and "
-            "verify by md5 instead. Do what the charter's slot note says; do not rebuild because this seed "
-            "said so. `base-check` warns about stale native artifacts when it can tell, and after a copy "
-            "that warning is about mtime, not about your product pair.")
+            "from your base, and whether THIS slot can rebuild them is something only your charter knows. "
+            "Do what your charter says about rebuilding in this slot; do not rebuild because this seed said "
+            "so. `base-check` warns about stale native artifacts when it can tell, and after a copy that "
+            "warning is about mtime, not about your product pair.")
     return "\n".join(lines)
 
 
@@ -2045,10 +2044,20 @@ def _reviewed_heads(ctx: Ctx, child: Path) -> dict:
     if record is None or not record.lineage_base:
         return {}
     slot = _slot_of(ctx, record)
-    if slot is None:
+    if slot is None or not Path(slot).is_dir():
         return {}
     repos = _lineage_pairs(record.lineage_base, "--lineage-base")
     return Workspace(ctx.home, git=ctx.git).heads(slot, repos)
+
+
+def _head_disagreement(reviewed: dict, current: dict) -> list:
+    """Repos BOTH sides measured and disagree on.
+
+    A repo either side could not read is NOT MEASURED and never a mismatch: `Workspace.heads` omits an
+    unreadable repo on purpose, and unioning the key sets turns that deliberate absence back into a false
+    claim — a round that "reviewed (absent)", or commits that do not exist (`FI-417`).
+    """
+    return sorted(repo for repo in set(reviewed) & set(current) if reviewed[repo] != current[repo])
 
 
 GUARD_REVIEW_HEAD = "review-head"
@@ -2069,10 +2078,11 @@ def _review_head_gate(ctx: Ctx, child: Path) -> None:
         return
     newest = rounds[-1]
     current = _reviewed_heads(ctx, child)
-    if not current or current == newest.heads:
+    if not current:
         return
-    moved = sorted(repo for repo in set(newest.heads) | set(current)
-                   if newest.heads.get(repo) != current.get(repo))
+    moved = _head_disagreement(newest.heads, current)
+    if not moved:
+        return
     raise Refused(
         f"{GUARD_REVIEW_HEAD}: round {newest.number} reviewed "
         + ", ".join(f"{repo}={newest.heads.get(repo, '(absent)')}" for repo in moved)
@@ -2114,6 +2124,7 @@ def _lineage_gate(ctx: Ctx, child: Path, verb: str) -> None:
 
 
 GUARD_COMPLETE_POINTERS = "complete-pointers"
+GUARD_COMPLETE_PHASE = "complete-phase"
 
 #: The two documents a resuming reader and the coordinator actually navigate from. CHARTER.md and
 #: .fleet/seed.txt also carry the folder name and are deliberately NOT scanned: they are rendered by the
@@ -2139,7 +2150,7 @@ def _pointer_gate(ctx: Ctx, child: Path) -> None:
         if not path.is_file():
             continue
         for number, line in enumerate(path.read_text(encoding="utf-8").splitlines(), start=1):
-            if child.name in line:
+            if f"/{child.name}" in line or f"{child.name}/" in line:
                 offenders.append(f"{rel}:{number}")
     if not offenders:
         return
@@ -2470,7 +2481,7 @@ def _do_complete(ctx: Ctx, parsed: Parsed) -> int:
     _pointer_gate(ctx, child)
     if Declarations(child).phase() == PHASE_AWAITING_CI:
         raise Refused(
-            f"{GUARD_COMPLETE_POINTERS}: the declared phase is still awaiting-ci, and an instant that is "
+            f"{GUARD_COMPLETE_PHASE}: the declared phase is still awaiting-ci, and an instant that is "
             f"completing is not waiting on CI. A stale claim outlives the watcher that justified it.",
             clears_when=f"fleet declare --phase done --instant {child}",
             clears_who="this worker")
