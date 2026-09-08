@@ -1956,8 +1956,11 @@ def _checkout_instruction(lineage: dict, mode: str) -> str:
     if mode == "code":
         lines.append(
             "If you touch native code: the .so files in your slot were built from the GOLDEN commit, not "
-            "from your base. Rebuild them after repositioning, or a test run exercises new source against "
-            "old native code — `base-check` warns when it can tell.")
+            "from your base, and whether THIS slot can rebuild them is something only your charter knows — "
+            "several slots cannot (I-52), and there the charter's slot note names a frozen pair to copy and "
+            "verify by md5 instead. Do what the charter's slot note says; do not rebuild because this seed "
+            "said so. `base-check` warns about stale native artifacts when it can tell, and after a copy "
+            "that warning is about mtime, not about your product pair.")
     return "\n".join(lines)
 
 

@@ -3309,6 +3309,16 @@ class TestTheLineageGate(CliCase):
         self.assertIn("do NOT", analysis, "analysis mode must not tell the worker to check out")
         self.assertNotIn("checkout --detach", analysis)
 
+    def test_the_native_note_defers_to_the_charter_rather_than_ordering_a_rebuild(self):
+        """Every code-mode seed told the worker to rebuild native after repositioning; every charter in the
+        source effort said the opposite (I-52: copy the frozen pair, verify by md5). Two authorities the
+        worker reads first must not disagree, so the seed now points at the one that knows the slot."""
+        text = cli._checkout_instruction({"alpha": "a" * 40}, "code")
+        self.assertIn("charter", text.lower())
+        self.assertIn("slot note", text)
+        self.assertNotIn("Rebuild them after repositioning", text)
+        self.assertIn("base-check", text)   # the warning is still named; it is the ORDER that is gone
+
 
 class TestCompleteRefusesBrokenPointers(CliCase):
     """`complete` IS the rename: at gate time every `-inflight-` path still resolves, so checking "does
