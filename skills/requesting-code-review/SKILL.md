@@ -45,6 +45,10 @@ Dispatch a `general-purpose` subagent, filling the template at [code-reviewer.md
 - Note Minor issues for later
 - Push back if reviewer is wrong (with reasoning)
 
+### Comment-only findings ride
+
+**A comment-only finding does not earn a new CI wave.** When the branch already has a labeled run in flight, applying a docstring or comment fix means a new head, which cancels that run and starts the clock again. Measured: one worker paid 24 CI-minutes for three comment nits, and another shipped two comment-only commits into a live wave. Route them as riders for the next restack, and say so in the review record. Findings that change behaviour are a different question and are worth the wave.
+
 ## Example
 
 ```
