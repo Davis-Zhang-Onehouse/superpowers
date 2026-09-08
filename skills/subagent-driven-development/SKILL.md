@@ -232,16 +232,34 @@ Everything you paste into a dispatch prompt — and everything a subagent
 prints back — stays resident in your context for the rest of the session
 and is re-read on every later turn. Hand artifacts over as files.
 
-**Waiting on dispatched subagents:** never poll a wait interface with
-short timeouts, and never sit in one silent, open-ended wait either.
-While you have local work — ledger updates, packaging the next review,
-reading reports — keep working; child results arrive on their own.
-When you are genuinely idle, wait in bounded stretches (five to ten
-minutes, where your platform allows), and between stretches post one
-line of status and reconcile your live children: list them, and chase
-any that finished without reporting. A bounded stretch keeps nearly
-all of a long wait's efficiency while guaranteeing a stuck or lost
-child is noticed within minutes, not at the end of the session.
+**Inline execution is first-class on a single sequential slot.** Fan-out buys parallelism, and there is
+none to buy when every task builds in the same leased workspace: a fresh implementer per task would
+re-derive slot state each time for no overlap. Three workers in one wave reached that conclusion
+independently and the coordinator ratified it twice, once retroactively. Execute the steps inline and
+keep the review loop — the independent reviewer is what the method is actually for. Record the choice in
+`DECISIONS.md` so it reads as a decision and not a shortcut.
+
+**Waiting on dispatched subagents:** while you have local work — ledger updates, packaging the next
+review, reading reports — keep working; child results arrive on their own. When you are genuinely idle,
+**end the turn.** The completion notification re-invokes you, and a turn that has ended is one an
+operator can interrupt.
+
+Do not sleep-poll. Measured: a controller that followed a "wait in bounded stretches" rule literally ran
+37 sleep loops totalling 286 minutes, of which 29 minutes were pure added latency on the critical path —
+each child's completion notification sat in the queue until the current loop returned. The same session
+was told verbatim by its harness "keep working, do not poll or sleep" and polled anyway for 3 h 20 m,
+during which it was indistinguishable from a hung session and delayed its operator's message by
+5.8 minutes.
+
+If a loop is genuinely unavoidable, give it an **exit condition** — a report file, an agent state — never
+a fixed `seq`. A loop that cannot end early is a timer, not a wait.
+
+**An implementer never ends its turn on a `Monitor`.** This is the single most expensive defect measured
+in the source wave: an implementer started a build, was blocked from `sleep`, armed a `Monitor` instead,
+and ended its turn waiting for it. The build finished in 10 minutes; the event reached the parent's queue
+and was never delivered; the parent wrote "waiting on Task 4" twice and stopped. **268 minutes**, ended
+by an operator saying "I saw u are idle". Run the build in the foreground with a long timeout, or have
+the parent watch the artefact — never hand a child a wake-up the parent cannot receive.
 
 ### 1. Dispatch the implementer
 
