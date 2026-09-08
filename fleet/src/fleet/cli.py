@@ -2021,6 +2021,40 @@ def _reviewed_heads(ctx: Ctx, child: Path) -> dict:
     return Workspace(ctx.home, git=ctx.git).heads(slot, repos)
 
 
+GUARD_REVIEW_HEAD = "review-head"
+
+
+def _review_head_gate(ctx: Ctx, child: Path) -> None:
+    """Refuse to claim done on a head no review round has seen.
+
+    Measured across five instants: reviewing AFTER the push cost a second heavy CI wave four times, at
+    3.3 h a wave, and once the late review found a real defect (six suite pins that would have reddened
+    the ANSI dim) — so the review was already worth running first. This gate fires at the moment the
+    tool can see it: the claim of done.
+
+    A round with no recorded heads is NOT MEASURED and never a mismatch.
+    """
+    rounds = [r for r in Review(child, now=ctx.now).rounds() if r.heads]
+    if not rounds:
+        return
+    newest = rounds[-1]
+    current = _reviewed_heads(ctx, child)
+    if not current or current == newest.heads:
+        return
+    moved = sorted(repo for repo in set(newest.heads) | set(current)
+                   if newest.heads.get(repo) != current.get(repo))
+    raise Refused(
+        f"{GUARD_REVIEW_HEAD}: round {newest.number} reviewed "
+        + ", ".join(f"{repo}={newest.heads.get(repo, '(absent)')}" for repo in moved)
+        + " and the slot is now at "
+        + ", ".join(f"{repo}={current.get(repo, '(absent)')}" for repo in moved)
+        + ". The head being graded carries commits no review round has seen, so a finding in them "
+          "costs another full CI wave to fix.",
+        clears_when=(f"review the current head — `fleet review --instant {child} --scope code "
+                     f"--verdict <v> --finding ...` — then propose again"),
+        clears_who="this worker")
+
+
 def _lineage_gate(ctx: Ctx, child: Path, verb: str) -> None:
     """Refuse a claim of DONE made from the wrong base.  `SI-32`, and this is mechanism B.
 
@@ -2242,6 +2276,7 @@ def _do_propose(ctx: Ctx, parsed: Parsed) -> int:
     #: worker legitimately reports `running` from wherever it happens to be while it works.
     if status == "done":
         _lineage_gate(ctx, proposer, "propose --status done")
+        _review_head_gate(ctx, proposer)
     #: A worker proposing about a milestone it was not dispatched for is REPORTED, not refused. It could be
     #: wrong and it could be legitimate, and nothing here can tell which — refusing on a guess is `SI-25`
     #: again, a check that accuses before it can attribute. The coordinator sees this at `apply`.
