@@ -9,13 +9,17 @@ everybody read**.
 The whole fleet is built through the injected probes (`Probes`, `cwd_probe`, `alive`): `NFR2-3` exists so
 a suite can describe a fleet without owning one. Nothing here starts a process, a tmux or a repository.
 """
+import calendar
+import json
 import pathlib
 import tempfile
+import time
 import unittest
 from dataclasses import fields as dataclass_fields
 
 from fleet.pool import Pool
-from fleet.reconcile import COMPLETE, DEAD, KINDS, STATES, UNREACHABLE, Subject, reconcile
+from fleet.reconcile import (COMPLETE, DEAD, KINDS, STALE_WAIT_S, STATES, UNREACHABLE, Subject,
+                             _awaiting_note, reconcile)
 from fleet.session import LiveSession, Probes, SessionLayer
 from fleet.store import Declarations, Record, Store
 
@@ -426,3 +430,73 @@ class TestATerminatedRecordDoesNotInheritTheLiveHolder(unittest.TestCase):
                          "that pid is fed to the watchdog's exclude list")
         self.assertEqual(subs["coord-334"].state, COMPLETE,
                          "the aborted folder still decides its state; only the pid was wrong")
+
+
+class _FakeWatcherSessions:
+    """A minimal `sessions` stand-in for `_awaiting_note`. `watchers(pane_text)` returns whatever the
+    test says is armed, keyed on the literal pane text handed in — the actual status-line parsing is
+    `session.Sessions.watchers`'s job and is exercised in `test_session.py`, not here."""
+
+    def __init__(self, by_pane: dict):
+        self._by_pane = by_pane
+
+    def watchers(self, pane_text: str) -> str:
+        return self._by_pane.get(pane_text, "")
+
+
+class TestAwaitingCiNote(unittest.TestCase):
+    """`_awaiting_note` directly. `working-as-a-dispatched-instant` names this gap as owned by `i45`:
+    `reconcile` rendered every `awaiting-ci` row as the SAME constant note regardless of whether anything
+    was actually observed on the pane. Measured: a Monitor that emitted zero events for 7.7h and a
+    self-matching wait shell that outlived its job both rendered as a healthy wait, and the cost was
+    three operator `status?` pings in one session.
+
+    Exercised directly rather than through the whole `reconcile` join — `_awaiting_note` is where the
+    four renderings and the staleness math live, and driving the full pipeline for these cases would
+    test the join, not the note.
+    """
+
+    def setUp(self):
+        self.tmp = pathlib.Path(tempfile.mkdtemp())
+        self.instant = self.tmp / "instant"
+        self.instant.mkdir()
+
+    def _write_declaration(self, attested, declared_at):
+        fleet_dir = self.instant / ".fleet"
+        fleet_dir.mkdir(exist_ok=True)
+        data = {"phase": "awaiting-ci"}
+        if attested is not None:
+            data["watchers"] = attested
+        if declared_at is not None:
+            data["at"] = declared_at
+        (fleet_dir / "declare.json").write_text(json.dumps(data))
+
+    def note(self, *, phase="awaiting-ci", pane="", attested=None, declared_at=None, now=None,
+             stale_after_s=STALE_WAIT_S) -> str:
+        self._write_declaration(attested, declared_at)
+        observed = "1 monitor" if "monitor" in pane else ""
+        sessions = _FakeWatcherSessions({pane: observed})
+        now_epoch = (calendar.timegm(time.strptime(now, "%Y-%m-%dT%H:%M:%SZ"))
+                    if now is not None else None)
+        return _awaiting_note(pane, sessions, self.instant, stale_after_s=stale_after_s, now=now_epoch)
+
+    def test_awaiting_ci_distinguishes_observed_attested_and_absent_watchers(self):
+        """`working-as-a-dispatched-instant` already warns that `fleet board` renders an attested claim
+        identically to an observed one, and names i45 as the owner. This is i45."""
+        self.assertIn("watcher observed",
+                      self.note(phase="awaiting-ci", pane="... 1 monitor ... esc to interrupt"))
+        self.assertIn("ATTESTED, not observable",
+                      self.note(phase="awaiting-ci", pane="no status line", attested="cron every 10m"))
+        self.assertIn("NO WATCHER OBSERVABLE",
+                      self.note(phase="awaiting-ci", pane="no status line"))
+
+    def test_a_wait_older_than_the_threshold_is_flagged_stale(self):
+        note = self.note(phase="awaiting-ci", pane="... 1 monitor ...",
+                         declared_at="2026-09-07T15:00:00Z", now="2026-09-07T21:00:00Z")
+        self.assertIn("STALE-WAIT", note)
+
+    def test_a_declaration_with_no_timestamp_is_never_stale(self):
+        """Every declaration written before this change. Absence is NOT MEASURED."""
+        note = self.note(phase="awaiting-ci", pane="... 1 monitor ...", declared_at=None,
+                         now="2026-09-07T21:00:00Z")
+        self.assertNotIn("STALE-WAIT", note)

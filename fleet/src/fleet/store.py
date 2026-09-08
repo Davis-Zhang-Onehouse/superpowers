@@ -15,6 +15,7 @@ brief worded it, a leading `## ` defeated the consumer's regex, the declaration 
 at a WIP cap of 1 that holds the whole effort's only dev slot for the length of a CI queue.
 """
 import json
+import time
 from dataclasses import asdict, dataclass, fields
 from pathlib import Path
 
@@ -183,14 +184,26 @@ class Declarations:
     def phase(self) -> str | None:
         return self._load().get("phase")
 
-    def set_phase(self, phase: str | None) -> str | None:
+    def set_phase(self, phase: str | None, now=None) -> str | None:
         data = self._load()
         if phase is None:
             data.pop("phase", None)
+            data.pop("at", None)
         else:
             data["phase"] = phase
+            #: `i45`. The MOMENT of the claim, so a consumer can compute how long it has stood — a
+            #: declaration is a claim made at ONE instant, and without a stamp nothing can ever say a
+            #: wait has gone stale. `now` is injectable because `Declarations` has no clock of its own.
+            data["at"] = now if now is not None else time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
         self._save(data)
         return Declarations(self.dir.parent).phase()      # re-read THROUGH the consumer
+
+    def declared_at(self) -> str | None:
+        """When the phase was declared, or `None` for a declaration written before this field existed.
+
+        `None` is NOT MEASURED: no age can be computed from it, so no staleness may ever be claimed.
+        """
+        return self._load().get("at")
 
     def watchers(self) -> str | None:
         """What was armed to wake this instant when it last declared a gated phase, or `None`.
