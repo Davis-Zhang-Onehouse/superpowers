@@ -1815,11 +1815,26 @@ def _do_declare(ctx: Ctx, parsed: Parsed) -> int:
     #: worker converges its review BEFORE the next push rather than finding out at the next `propose`).
     review_row = []
     if phase == PHASE_AWAITING_CI:
-        rounds = [r for r in Review(child, now=ctx.now).rounds() if r.heads]
+        all_rounds = Review(child, now=ctx.now).rounds()
+        measured = [r for r in all_rounds if r.heads]
         current = _reviewed_heads(ctx, child)
-        if current and (not rounds or rounds[-1].heads != current):
-            review_row = [("review", "no review round has seen this head; a finding now costs another "
-                                     "full CI wave. Converge the review before the next push")]
+        #: Three distinguishable states, not two. `not measured` used to stand in for BOTH "zero rounds
+        #: ever recorded" and "rounds exist but all predate head tracking" (a legacy ledger, `heads == {}`)
+        #: — collapsing them made a legacy round read as "no round has seen this head", a claim the tool
+        #: cannot back (a legacy round may well have reviewed this exact head). NOT MEASURED is never read
+        #: as an answer, so that case gets its own row rather than borrowing the unreviewed one's wording.
+        if current:
+            if not all_rounds:
+                review_row = [("review", "no review round has seen this head; a finding now costs another "
+                                         "full CI wave. Converge the review before the next push")]
+            elif not measured:
+                review_row = [("review", f"{len(all_rounds)} review round(s) recorded before head "
+                                         "tracking; cannot determine whether this head was reviewed. "
+                                         "Record a round at this head with fleet review --scope code so "
+                                         "the next claim is measured")]
+            elif measured[-1].heads != current:
+                review_row = [("review", "no review round has seen this head; a finding now costs another "
+                                         "full CI wave. Converge the review before the next push")]
     _emit(ctx, "declare", [("phase", value), ("asked", asked), ("consumer", str(consumer.path)),
                            ("instant", str(child))]
                           + ([("watchers", watchers)] if watchers else [])
