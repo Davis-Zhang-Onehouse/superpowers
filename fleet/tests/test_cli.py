@@ -3437,6 +3437,45 @@ class TestProposeDoneRefusesAnUnreviewedHead(CliCase):
         self.assertEqual(EXIT_OK, code, err)
 
 
+class TestDeclareAwaitingCiReportsAnUnreviewedHead(CliCase):
+    """`declare --phase awaiting-ci` is ADVISORY, never a `Refused` — by declare time the push has already
+    happened, and refusing would strand the worker with a running wave it may not abandon. The row exists
+    so the worker converges its review BEFORE the next push, not so it is blocked from declaring."""
+
+    def _dispatched(self, fleet, lineage_base, milestone="m1", title="claimant"):
+        """Copies `TestProposeDoneRefusesAnUnreviewedHead._dispatched`'s argv: a real dispatch, so the
+        record carries a real `--lineage-base` for `_reviewed_heads` to read back."""
+        coordinator = fleet.paths["readyWorker"]
+        Roadmap(coordinator).add(Milestone(id=milestone, title="carried work", status="blocked",
+                                           deps=[], evidence=[]))
+        argv = ["dispatch", "--porcelain", "--profile", str(fleet.profile("worker")),
+                "--title", title, "--base", "00000000", "--optype", "append",
+                "--from", str(coordinator), "--milestone", milestone]
+        if lineage_base:
+            argv += ["--lineage-base", lineage_base]
+        code, out, err = fleet.run(argv)
+        self.assertEqual(0, code, err)
+        child = [line.split("\t")[1] for line in out.splitlines() if line.startswith("instant\t")][0]
+        return pathlib.Path(child)
+
+    def test_declare_awaiting_ci_reports_an_unreviewed_head(self):
+        fleet = self.loaded()
+        fleet.git = HeadsFakeGit({"alpha": "b" * 40})
+        child = self._dispatched(fleet, "alpha=" + "a" * 40)
+        #: The declare gate for `awaiting-ci` needs a watched, LIVE pane, or it refuses before reaching the
+        #: advisory this test is about. A real `dispatch` records the session name but does not itself
+        #: register it as live (`Fleet.worker()`'s fixture path does that; the CLI's own `dispatch` verb
+        #: does not start a real session here) — so both `tmux_live` and `panes` need arming by hand.
+        fleet.tmux_live.add("dt-claimant")
+        fleet.panes["dt-claimant"] = WATCHED_PANE
+
+        code, out, err = fleet.run(["declare", "--porcelain", "--instant", str(child),
+                                    "--phase", "awaiting-ci"])
+
+        self.assertEqual(EXIT_OK, code, err)
+        self.assertIn("no review round has seen this head", out)
+
+
 class TestBrief(CliCase):
     """`fleet brief` is the dispatched instant's first command.
 
