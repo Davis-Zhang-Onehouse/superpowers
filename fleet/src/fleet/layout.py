@@ -23,6 +23,7 @@ change.
 This module is one of the two presence-only exemptions to "no module reads a `.md` file" (AC-2): it asks
 whether a file exists and never what it says. Nothing here opens a markdown file for a control signal.
 """
+import time
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -166,12 +167,19 @@ def seed_headings(entry: str, name: InstantName) -> tuple:
     return (f"{title} — {name.name}",)
 
 
-def _seed(entry: str, name: InstantName) -> str:
-    """A minimal document carrying the two header fields every consumer of these files reads."""
+def _seed(entry: str, name: InstantName, today: str = "") -> str:
+    """A minimal document carrying the two header fields every consumer of these files reads.
+
+    The header must satisfy the maintain-workspace rule the workspace reviewer enforces, because the
+    template a worker is handed is the template that worker is graded on: seeding `Status: seeded by
+    fleet.layout` made every instant fail its own first review on a line no worker wrote (`RCF-11`).
+    Recognition is on the heading TEXT alone (`seed_headings`), so the header body is free to change.
+    """
+    stamp = today or time.strftime("%Y-%m-%d", time.gmtime())
     return (
         "".join(f"# {heading}\n" for heading in seed_headings(entry, name))
-        + f"\nUpdated: {name.curr}\n"
-        f"Status: seeded by fleet.layout (spec-version {SPEC_VERSION})\n\n"
+        + f"\nUpdated: {stamp}\n"
+        "Status: DURABLE\n\n"
         f"{_TEMPLATES.get(entry, '')}"
     )
 
