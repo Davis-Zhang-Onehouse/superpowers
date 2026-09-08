@@ -238,6 +238,21 @@ class Workspace:
                 out.append(repo)
         return out
 
+    def heads(self, slot_path: Path, repos) -> dict:
+        """Each repo's current HEAD, for binding a review round to the code it reviewed.
+
+        A repo that cannot answer is OMITTED rather than recorded as empty: an empty sha would compare
+        unequal to every real sha and turn a slot this tool could not read into a false mismatch. Absence
+        is read downstream as NOT MEASURED (`FI-417`).
+        """
+        slot = Path(slot_path)
+        out = {}
+        for repo in sorted(repos):
+            rc, stdout = self.git(["rev-parse", "HEAD"], slot / repo)
+            if rc == 0 and stdout.strip():
+                out[repo] = stdout.strip()
+        return out
+
     def stale_native(self, slot_path: Path, golden_base: dict, current: dict) -> list:
         """-> [(repo, artifact_name)] whose prebuilt native artifacts predate the last checkout.  `SI-32`.
 
