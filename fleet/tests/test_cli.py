@@ -3475,6 +3475,29 @@ class TestDeclareAwaitingCiReportsAnUnreviewedHead(CliCase):
         self.assertEqual(EXIT_OK, code, err)
         self.assertIn("no review round has seen this head", out)
 
+    def test_declare_awaiting_ci_reports_a_legacy_round_as_undetermined_not_unreviewed(self):
+        """Fix round 1: a round exists but predates head tracking (`heads` absent, not `{}` differing from
+        current). That is NOT MEASURED, and NOT MEASURED must never be read as an answer — a legacy round
+        may well have reviewed this exact head, so the row says 'cannot determine', never 'no round has
+        seen this head'."""
+        fleet = self.loaded()
+        fleet.git = HeadsFakeGit({"alpha": "b" * 40})
+        child = self._dispatched(fleet, "alpha=" + "a" * 40)
+        (child / ".fleet" / "review.json").write_text(json.dumps({
+            "schema_version": 1,
+            "rounds": [{"number": 1, "scope": "all", "verdict": "READY",
+                        "at": "2026-07-30T01:00:00Z", "findings": []}],
+        }))
+        fleet.tmux_live.add("dt-claimant")
+        fleet.panes["dt-claimant"] = WATCHED_PANE
+
+        code, out, err = fleet.run(["declare", "--porcelain", "--instant", str(child),
+                                    "--phase", "awaiting-ci"])
+
+        self.assertEqual(EXIT_OK, code, err)
+        self.assertIn("cannot determine whether this head was reviewed", out)
+        self.assertNotIn("no review round has seen this head", out)
+
 
 class TestBrief(CliCase):
     """`fleet brief` is the dispatched instant's first command.
