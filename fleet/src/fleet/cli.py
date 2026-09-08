@@ -2110,6 +2110,45 @@ def _lineage_gate(ctx: Ctx, child: Path, verb: str) -> None:
         clears_who="the dispatched instant")
 
 
+GUARD_COMPLETE_POINTERS = "complete-pointers"
+
+#: The two documents a resuming reader and the coordinator actually navigate from. CHARTER.md and
+#: .fleet/seed.txt also carry the folder name and are deliberately NOT scanned: they are rendered by the
+#: dispatcher, so a refusal on them would land on somebody who cannot fix it.
+_POINTER_DOCS = ("HANDOFF.md", "evidence/INDEX.md")
+
+
+def _pointer_gate(ctx: Ctx, child: Path) -> None:
+    """Refuse to rename out from under this instant's own pointers.
+
+    `complete` IS the rename, so at gate time every `-inflight-` path still resolves — checking "does this
+    path exist" passes and then breaks one millisecond later. The question this asks instead is whether the
+    pointer SURVIVES the rename, which it answers by refusing any line in the two worker-owned navigation
+    documents that names this instant's OWN current folder.
+
+    Measured in three audited instants: `complete` succeeded while `HANDOFF.md` still named the absolute
+    `-inflight-` path and `evidence/INDEX.md` still had `*pending*` rows, and each cost an operator round
+    trip to discover.
+    """
+    offenders = []
+    for rel in _POINTER_DOCS:
+        path = child / rel
+        if not path.is_file():
+            continue
+        for number, line in enumerate(path.read_text(encoding="utf-8").splitlines(), start=1):
+            if child.name in line:
+                offenders.append(f"{rel}:{number}")
+    if not offenders:
+        return
+    raise Refused(
+        f"{GUARD_COMPLETE_POINTERS}: {len(offenders)} pointer(s) name this instant's own folder, which "
+        f"`complete` is about to rename: {', '.join(offenders)}. They resolve now and will not resolve in "
+        f"one millisecond.",
+        clears_when=("cite paths RELATIVE to the instant (`evidence/INDEX.md`, not the absolute path) — "
+                     "the maintain-workspace rule — then complete again"),
+        clears_who="this worker")
+
+
 # --- propose / apply ------------------------------------------------------------------------------
 
 
@@ -2425,6 +2464,13 @@ def _do_complete(ctx: Ctx, parsed: Parsed) -> int:
     #: `SI-32`. Before the review gate, because the rename is the state transition and a completed instant on
     #: the wrong base is the artefact everything downstream trusts.
     _lineage_gate(ctx, child, "complete")
+    _pointer_gate(ctx, child)
+    if Declarations(child).phase() == PHASE_AWAITING_CI:
+        raise Refused(
+            f"{GUARD_COMPLETE_POINTERS}: the declared phase is still awaiting-ci, and an instant that is "
+            f"completing is not waiting on CI. A stale claim outlives the watcher that justified it.",
+            clears_when=f"fleet declare --phase done --instant {child}",
+            clears_who="this worker")
     review = Review(child, now=ctx.now)
     gate = review.gate(require_scope="all")
     name = InstantName.parse(child.name)
