@@ -2005,6 +2005,22 @@ def _lineage_rows(ctx: Ctx, record: Record) -> tuple:
     return rows, fatal
 
 
+def _reviewed_heads(ctx: Ctx, child: Path) -> dict:
+    """The slot's HEADs for the repos this instant's lineage names, or `{}` when they cannot be read.
+
+    Empty is the honest answer for an analysis instant, a released slot, or a record this tool cannot
+    find — and empty is read downstream as NOT MEASURED, never as a mismatch (`FI-417`).
+    """
+    record = _record_for(ctx, child)
+    if record is None or not record.lineage_base:
+        return {}
+    slot = _slot_of(ctx, record)
+    if slot is None:
+        return {}
+    repos = _lineage_pairs(record.lineage_base, "--lineage-base")
+    return Workspace(ctx.home, git=ctx.git).heads(slot, repos)
+
+
 def _lineage_gate(ctx: Ctx, child: Path, verb: str) -> None:
     """Refuse a claim of DONE made from the wrong base.  `SI-32`, and this is mechanism B.
 
@@ -2297,7 +2313,8 @@ def _do_review(ctx: Ctx, parsed: Parsed) -> int:
     findings = [_finding_of(text) for text in parsed.all("finding")]
     rows = []
     if verdict_asked and not ctx.dry_run:
-        made = review.add_round(parsed.get("scope", "all"), verdict_asked, findings)
+        made = review.add_round(parsed.get("scope", "all"), verdict_asked, findings,
+                                heads=_reviewed_heads(ctx, child))
         review.render()
         rows.append(Row(kind="round", subject=str(made.number), severity=INFO,
                         detail=f"scope {made.scope}, verdict {made.verdict}, "
