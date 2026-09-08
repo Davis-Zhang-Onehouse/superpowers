@@ -354,8 +354,8 @@ class Review:
                 reason=(f"round {newest.number} (scope {newest.scope}) recorded {newest.verdict}, but "
                         f"{len(blocking)} open blocking finding(s) remain of severity "
                         f"{'/'.join(BLOCKING_SEVERITIES)}: {named}. {population}{advisory}"),
-                clears_when="each finding is recorded applied or wont-fix (with its reason) in a later "
-                            "round",
+                clears_when="each finding is recorded applied, wont-fix (with its reason), or routed "
+                            "(with the owner in its action) in a later round",
                 clears_who=REVIEWER,
                 blocker=named,
             )

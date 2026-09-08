@@ -167,6 +167,12 @@ def seed_headings(entry: str, name: InstantName) -> tuple:
     return (f"{title} — {name.name}",)
 
 
+#: The documents maintain-workspace calls LIVE/LIVING; everything else a worker keeps is DURABLE.
+#: `HANDOFF.md` is LIVE (SKILL.md:85), `RUNBOOK.md` is LIVING (SKILL.md:100), and `evidence/INDEX.md` is
+#: seeded through this same function and is likewise a working document, not a durable one.
+_SEED_STATUS = {"HANDOFF.md": "LIVE", "RUNBOOK.md": "LIVE", _INDEX: "LIVE"}
+
+
 def _seed(entry: str, name: InstantName, today: str = "") -> str:
     """A minimal document carrying the two header fields every consumer of these files reads.
 
@@ -174,12 +180,17 @@ def _seed(entry: str, name: InstantName, today: str = "") -> str:
     template a worker is handed is the template that worker is graded on: seeding `Status: seeded by
     fleet.layout` made every instant fail its own first review on a line no worker wrote (`RCF-11`).
     Recognition is on the heading TEXT alone (`seed_headings`), so the header body is free to change.
+
+    The enforced contract (`reviewing-workspace/reviewers/format-reviewer.md:37`) is one line:
+    `Updated: <date>  |  Status: DURABLE|LIVE`. Stamping every canonical file `DURABLE` was false for the
+    two documents maintain-workspace itself calls LIVE/LIVING — `_SEED_STATUS` is the one place that
+    distinction is made.
     """
     stamp = today or time.strftime("%Y-%m-%d", time.gmtime())
+    status = _SEED_STATUS.get(entry, "DURABLE")
     return (
         "".join(f"# {heading}\n" for heading in seed_headings(entry, name))
-        + f"\nUpdated: {stamp}\n"
-        "Status: DURABLE\n\n"
+        + f"\nUpdated: {stamp}  |  Status: {status}\n\n"
         f"{_TEMPLATES.get(entry, '')}"
     )
 

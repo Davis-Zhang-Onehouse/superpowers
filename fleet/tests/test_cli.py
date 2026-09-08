@@ -3315,7 +3315,7 @@ class TestTheLineageGate(CliCase):
         worker reads first must not disagree, so the seed now points at the one that knows the slot."""
         text = cli._checkout_instruction({"alpha": "a" * 40}, "code")
         self.assertIn("charter", text.lower())
-        self.assertIn("slot note", text)
+        self.assertIn("your charter says", text)
         self.assertNotIn("Rebuild them after repositioning", text)
         self.assertIn("base-check", text)   # the warning is still named; it is the ORDER that is gone
 
@@ -3365,6 +3365,23 @@ class TestCompleteRefusesBrokenPointers(CliCase):
         self.assertIn("HANDOFF.md:3", err)
         self.assertTrue(env.instant.exists(), "refused, so the folder was NOT renamed")
 
+    def test_complete_refuses_a_broken_pointer_in_evidence_index(self):
+        """`_pointer_gate` scans BOTH `_POINTER_DOCS` — `HANDOFF.md` and `evidence/INDEX.md` — but every
+        other case here only ever writes to `HANDOFF.md`, so dropping `evidence/INDEX.md` from
+        `_POINTER_DOCS` would pass the whole class (I8)."""
+        env = self.ready_to_complete()
+        (env.instant / "evidence" / "INDEX.md").write_text(
+            "| criterion | artifact | source | regenerate |\n"
+            "|---|---|---|---|\n"
+            f"| AC1 | {env.instant}/evidence/proof.log | ci | rerun |\n")
+
+        code, out, err = env.fleet.run(["complete", "--instant", str(env.instant)])
+
+        self.assertEqual(EXIT_REFUSED, code, f"complete accepted a broken pointer in INDEX.md: {out}")
+        self.assertIn("complete-pointers", err)
+        self.assertIn("evidence/INDEX.md:3", err)
+        self.assertTrue(env.instant.exists(), "refused, so the folder was NOT renamed")
+
     def test_complete_allows_an_instant_relative_pointer(self):
         env = self.ready_to_complete()
         (env.instant / "HANDOFF.md").write_text("## Resume\n\nRead `evidence/INDEX.md` first.\n")
@@ -3372,6 +3389,24 @@ class TestCompleteRefusesBrokenPointers(CliCase):
         code, out, err = env.fleet.run(["complete", "--instant", str(env.instant)])
 
         self.assertEqual(EXIT_OK, code, err)
+
+    def test_complete_allows_the_mandated_session_log_row_with_a_bare_folder_name(self):
+        """`maintain-workspace` SKILL.md:131 mandates a session-log row — `date | workspace | resume cmd |
+        did what` — and the `workspace` cell is the bare folder name, not a path. Matching that bare name
+        ANYWHERE on a line (rather than as a path fragment) refused this exact mandated row with a remedy
+        that cannot clear it, since there is no path to make relative."""
+        env = self.ready_to_complete()
+        (env.instant / "HANDOFF.md").write_text(
+            "## Resume\n\nRead `evidence/INDEX.md` first.\n\n"
+            "## Session log\n\n"
+            "| date | workspace | resume cmd | did what |\n"
+            "|---|---|---|---|\n"
+            f"| 2026-09-08 | {env.instant.name} | positioned the slot and pushed |\n")
+
+        code, out, err = env.fleet.run(["complete", "--instant", str(env.instant)])
+
+        self.assertEqual(EXIT_OK, code, f"the mandated session-log row must not refuse: {err}")
+        self.assertFalse(env.instant.exists(), "complete must have renamed the folder")
 
     def test_complete_refuses_while_the_phase_is_still_awaiting_ci(self):
         env = self.ready_to_complete()
@@ -3381,6 +3416,7 @@ class TestCompleteRefusesBrokenPointers(CliCase):
 
         self.assertEqual(EXIT_REFUSED, code)
         self.assertIn("fleet declare --phase done", err)
+        self.assertIn("complete-phase", err)
 
 
 class TestReviewRecordsTheHeadsItReviewed(CliCase):
@@ -3494,6 +3530,30 @@ class TestProposeDoneRefusesAnUnreviewedHead(CliCase):
 
         self.assertEqual(EXIT_OK, code, err)
 
+    def test_propose_done_admits_a_repo_the_review_round_could_not_read(self):
+        """`FI-417`. `beta` was unreadable at review time, so the round's `heads` carries only `alpha` —
+        that absence is NOT MEASURED, never a mismatch, even once `beta` starts answering and the two
+        sides' key sets differ. Reproduced by the reviewer on a real two-repo slot: `propose --status done`
+        refused with 'reviewed beta=(absent)', asserting a round that never touched beta at all."""
+        fleet = self.loaded()
+        fleet.git = HeadsFakeGit({"gluten-internal": "b" * 40})  # velox-internal not yet readable
+        child = self._dispatched(fleet, "gluten-internal=" + "a" * 40 + ",velox-internal=" + "a" * 40)
+
+        rc, out, err = fleet.run(["review", "--instant", str(child), "--scope", "all",
+                                  "--verdict", "READY",
+                                  "--finding", "RV-1:Minor:applied:SPEC.md:reviewed at b:none"])
+        self.assertEqual(EXIT_OK, rc, err)
+        ledger = json.loads((child / ".fleet" / "review.json").read_text())
+        self.assertEqual({"gluten-internal": "b" * 40}, ledger["rounds"][0]["heads"],
+                         "the round must not have recorded a repo it could not read")
+
+        fleet.git.heads["velox-internal"] = "c" * 40  # now readable, unrelated to the round
+        code, out, err = fleet.run(["propose", "--instant", str(child), "--milestone", "m1",
+                                    "--status", "done", "--evidence", "evidence/INDEX.md"])
+
+        self.assertEqual(EXIT_OK, code,
+                         f"a repo the round never measured must not be read as a moved head: {err}")
+
     def test_propose_done_is_not_gated_when_no_round_carries_heads(self):
         """Every ledger written before this field carries no `heads` key at all. Absence is NOT
         MEASURED, never a mismatch."""
@@ -3571,6 +3631,48 @@ class TestDeclareAwaitingCiReportsAnUnreviewedHead(CliCase):
         self.assertEqual(EXIT_OK, code, err)
         self.assertIn("cannot determine whether this head was reviewed", out)
         self.assertNotIn("no review round has seen this head", out)
+
+    def test_declare_awaiting_ci_is_silent_when_the_head_was_reviewed(self):
+        """The false-positive direction, which is what makes an advisory ignored: nothing previously
+        pinned silence when the newest round's `heads` actually MATCHES the slot's current heads (I8)."""
+        fleet = self.loaded()
+        fleet.git = HeadsFakeGit({"alpha": "b" * 40})
+        child = self._dispatched(fleet, "alpha=" + "a" * 40)
+        rc, out, err = fleet.run(["review", "--instant", str(child), "--scope", "all",
+                                  "--verdict", "READY",
+                                  "--finding", "RV-1:Minor:applied:SPEC.md:reviewed at b:none"])
+        self.assertEqual(EXIT_OK, rc, err)
+        fleet.tmux_live.add("dt-claimant")
+        fleet.panes["dt-claimant"] = WATCHED_PANE
+
+        code, out, err = fleet.run(["declare", "--porcelain", "--instant", str(child),
+                                    "--phase", "awaiting-ci"])
+
+        self.assertEqual(EXIT_OK, code, err)
+        self.assertNotIn("review\t", out,
+                         f"the head was reviewed, so no review advisory row should be emitted: {out}")
+
+    def test_declare_awaiting_ci_emits_no_review_row_for_a_repo_the_round_could_not_read(self):
+        """Same shape as `TestProposeDoneRefusesAnUnreviewedHead`'s FI-417 case, on the advisory path: a
+        round that measured only `alpha` and a slot that now also answers for `beta` must not be reported
+        as an unreviewed head — `beta` was simply NOT MEASURED at review time."""
+        fleet = self.loaded()
+        fleet.git = HeadsFakeGit({"alpha": "b" * 40})  # beta not yet readable
+        child = self._dispatched(fleet, "alpha=" + "a" * 40 + ",beta=" + "a" * 40)
+        rc, out, err = fleet.run(["review", "--instant", str(child), "--scope", "all",
+                                  "--verdict", "READY",
+                                  "--finding", "RV-1:Minor:applied:SPEC.md:reviewed at b:none"])
+        self.assertEqual(EXIT_OK, rc, err)
+        fleet.git.heads["beta"] = "c" * 40  # now readable, unrelated to the round
+        fleet.tmux_live.add("dt-claimant")
+        fleet.panes["dt-claimant"] = WATCHED_PANE
+
+        code, out, err = fleet.run(["declare", "--porcelain", "--instant", str(child),
+                                    "--phase", "awaiting-ci"])
+
+        self.assertEqual(EXIT_OK, code, err)
+        self.assertNotIn("review\t", out,
+                         f"beta was never measured, so no review advisory row should be emitted: {out}")
 
 
 class TestBrief(CliCase):
