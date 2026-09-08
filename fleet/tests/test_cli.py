@@ -3359,6 +3359,84 @@ class TestReviewRecordsTheHeadsItReviewed(CliCase):
         self.assertNotIn("heads", ledger["rounds"][0])
 
 
+class TestProposeDoneRefusesAnUnreviewedHead(CliCase):
+    """`propose --status done` refuses when the newest round carrying `heads` disagrees with the slot's
+    current HEADs. Measured across five audited workers: four pushed, reviewed, then pushed the fixes —
+    a second 3.3h CI wave each time. This gate fires at the earliest moment the tool can see it: the
+    claim of done."""
+
+    def _dispatched(self, fleet, lineage_base, milestone="m1", title="claimant"):
+        """Dispatch a real worker, optionally with a lineage base, and hand back its instant path.
+
+        Copies `TestReviewRecordsTheHeadsItReviewed._dispatched`'s argv rather than `_dispatched_onto`,
+        which never passes `--lineage-base`.
+        """
+        coordinator = fleet.paths["readyWorker"]
+        Roadmap(coordinator).add(Milestone(id=milestone, title="carried work", status="blocked",
+                                           deps=[], evidence=[]))
+        argv = ["dispatch", "--porcelain", "--profile", str(fleet.profile("worker")),
+                "--title", title, "--base", "00000000", "--optype", "append",
+                "--from", str(coordinator), "--milestone", milestone]
+        if lineage_base:
+            argv += ["--lineage-base", lineage_base]
+        code, out, err = fleet.run(argv)
+        self.assertEqual(0, code, err)
+        child = [line.split("\t")[1] for line in out.splitlines() if line.startswith("instant\t")][0]
+        return pathlib.Path(child)
+
+    def test_propose_done_refuses_a_head_the_newest_round_never_reviewed(self):
+        """trypmod, unaryminus and try-subtree each pushed, then reviewed, then pushed the fixes — a
+        second 3.3 h CI wave each time. Grading a head no round has seen is the moment that is visible
+        to this tool."""
+        fleet = self.loaded()
+        fleet.git = HeadsFakeGit({"gluten-internal": "b" * 40})
+        child = self._dispatched(fleet, "gluten-internal=" + "a" * 40)
+
+        rc, out, err = fleet.run(["review", "--instant", str(child), "--scope", "all",
+                                  "--verdict", "READY",
+                                  "--finding", "RV-1:Minor:applied:SPEC.md:reviewed at b:none"])
+        self.assertEqual(EXIT_OK, rc, err)
+
+        fleet.git.heads["gluten-internal"] = "c" * 40
+        code, out, err = fleet.run(["propose", "--instant", str(child), "--milestone", "m1",
+                                    "--status", "done", "--evidence", "evidence/INDEX.md"])
+
+        self.assertEqual(EXIT_REFUSED, code, f"a head no round reviewed was accepted: {out}")
+        self.assertIn("review-head", err)
+        self.assertIn("c" * 40, err)
+
+    def test_propose_done_allows_a_head_the_newest_round_reviewed(self):
+        fleet = self.loaded()
+        fleet.git = HeadsFakeGit({"gluten-internal": "b" * 40})
+        child = self._dispatched(fleet, "gluten-internal=" + "a" * 40)
+
+        rc, out, err = fleet.run(["review", "--instant", str(child), "--scope", "all",
+                                  "--verdict", "READY",
+                                  "--finding", "RV-1:Minor:applied:SPEC.md:reviewed at b:none"])
+        self.assertEqual(EXIT_OK, rc, err)
+
+        code, out, err = fleet.run(["propose", "--instant", str(child), "--milestone", "m1",
+                                    "--status", "done", "--evidence", "evidence/INDEX.md"])
+
+        self.assertEqual(EXIT_OK, code, err)
+
+    def test_propose_done_is_not_gated_when_no_round_carries_heads(self):
+        """Every ledger written before this field carries no `heads` key at all. Absence is NOT
+        MEASURED, never a mismatch."""
+        fleet = self.loaded()
+        child = self._dispatched(fleet, "gluten-internal=" + "a" * 40)
+        (child / ".fleet" / "review.json").write_text(json.dumps({
+            "schema_version": 1,
+            "rounds": [{"number": 1, "scope": "all", "verdict": "READY",
+                        "at": "2026-07-30T01:00:00Z", "findings": []}],
+        }))
+
+        code, out, err = fleet.run(["propose", "--instant", str(child), "--milestone", "m1",
+                                    "--status", "done", "--evidence", "evidence/INDEX.md"])
+
+        self.assertEqual(EXIT_OK, code, err)
+
+
 class TestBrief(CliCase):
     """`fleet brief` is the dispatched instant's first command.
 
