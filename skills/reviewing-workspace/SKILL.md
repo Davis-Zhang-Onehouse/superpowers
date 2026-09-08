@@ -9,15 +9,16 @@ description: Use when an effort-workspace instant (superpowers:maintain-workspac
 
 A fresh-eyes reviewer for a `superpowers:maintain-workspace` **instant** — the workspace analogue of `superpowers:requesting-code-review`. A resuming session asks "where do I continue?"; a reviewer asks **"is this workspace well-formed, does its evidence actually prove the charter, and is the delivered code sound?"**
 
-**Core principle:** review three lenses **cheapest-and-most-foundational first**, gated in sequence — you cannot trust a content review of a malformed workspace, and code-reviewing PRs is premature before you know what the charter required. Each stage dispatches a **read-only** reviewer subagent (fresh context — no session history, the whole point of review). The orchestrator (you) is the only writer, and every finding lands in an append-only `REVIEW.md` ledger.
+**Core principle:** review three lenses **cheapest-and-most-foundational first**, gated in sequence — you cannot trust a content review of a malformed workspace, and code-reviewing PRs is premature before you know what the charter required. Each stage dispatches a **read-only** reviewer subagent (fresh context — no session history, the whole point of review). The orchestrator (you) is the only writer; every finding is recorded through `fleet review --finding`, and `REVIEW.md` is the generated view of that ledger.
 
 **Advisory, always.** This skill recommends; the operator decides. It never blocks a completion and never renames an instant.
 
 ## When to Use
 
-- You're about to `mv …-inflight-… …-complete-…` and want the instant checked first (the advisory pre-complete gate).
+- You're about to `mv …-inflight-… …-complete-…` and want the instant checked first.
 - **Mid-effort**, to catch deviation from the charter early — before more work compounds on a wrong approach.
 - Your partner asks "is this workspace ready?", "did we actually prove the goal?", "audit this instant".
+- Run the round **before** `fleet complete`, not after. The skill's own gate is pre-complete, and in the source wave no worker ran it unprompted: two were told to by an operator, and one ran it 7 minutes after completing, which is 7 minutes in which the answer could not change anything.
 
 **Not for:** a single-session task with no maintain-workspace instant (there's nothing to review). Review one instant per run.
 
@@ -57,7 +58,11 @@ digraph review {
 
 ## REVIEW.md Discipline
 
-`REVIEW.md` is a new canonical maintain-workspace file — an **append-only** register, same discipline as DECISIONS/ISSUES. Bootstrap it from `templates/REVIEW.md`.
+The ledger is `.fleet/review.json`, written only by `fleet review --finding`; `REVIEW.md` is the view `fleet review` regenerates from it in full, and `REVIEW-NARRATIVE.md` is where your reasoning lives.
+
+**`REVIEW.md` is a generated view, and `fleet review` rewrites it in full.** Findings go into the ledger through `fleet review --finding`; reasoning goes into `REVIEW-NARRATIVE.md`, which nothing regenerates. Two workers in one wave wrote their round narrative into `REVIEW.md`, lost it to the next render — about 15 findings in one case, 119 lines in the other — and both then invented `REVIEW-NARRATIVE.md` independently. The file's own banner warns about this, and it only exists after the first render, so it cannot warn the person who needs it.
+
+A finding against a file this instant does not own — a coordinator-authored `CHARTER.md`, a sibling's suite — is recorded `routed` with an owner in its `action`, never `open`. An `open` blocking finding refuses this worker's gate, and one worker cleared such a gate by editing the coordinator's charter.
 
 - Findings get stable IDs `RV-1, RV-2, …`. Never rewrite a finding — **supersede in place**: update its `Status` with a dated note.
 - A finding re-observed in a later round **references its prior `RV-id`**, so the ledger shows the whole arc from raised → addressed. This is the audit trail.
@@ -84,7 +89,7 @@ digraph review {
 | Auto-fixing a judgment call (e.g. inventing missing evidence) | Only `mechanical` findings are auto-fixed; judgment findings are flagged `OPEN` for the operator. |
 | Blocking completion until findings are resolved | Advisory only — recommend a verdict, record it, never block or rename the instant. |
 | Code-reviewing the full PR stack every round | Delta only — review PRs authored on this instant, diffed from the prev-reviewed head SHA. Skip inherited base PRs. |
-| Findings left in the session transcript | Every finding + status + action-taken lives in `REVIEW.md` (append-only) so the audit trail survives the session. |
+| Findings left in the session transcript | Every finding + status + action-taken goes through `fleet review --finding` (the ledger survives the session); reasoning goes to `REVIEW-NARRATIVE.md`. |
 | Marking an AC VERIFIED on a prose assertion | Acceptance needs a proof the code executes (green test / grep beacon log / CI run); assertion-only → `INSUFFICIENT`. |
 | Marking an AC VERIFIED on a green-but-STALE runtime proof | A test/CI proof whose provenance is behind the review tip (after code changed) proves an old version → `INSUFFICIENT`. Apply the Stage-2 fresh-evidence gate: regenerate at the tip, then verify from the fresh result. |
 
