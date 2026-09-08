@@ -1,5 +1,37 @@
 # fleet — changelog
 
+## fleet/v0.5.6 — 2026-09-08T22:13:47Z
+Cut from 5dae469 on `live` (upstream base snapshot/2026-08-17-221146). 24 commit(s) since fleet/v0.5.5.
+
+Every release ships the whole repository — all skills, `commands/`, `hooks/` and the plugin manifest, not only `fleet/`.
+Payload: fleet (13 files), skills (7 files), scripts (1 file), docs (2 files).
+Skills changed: requesting-code-review, reviewing-workspace, reviving-dead-panes, subagent-driven-development, working-as-a-dispatched-instant.
+
+- 48cf965 reviving-dead-panes: fix the fleet_peek advice testing proved wrong
+- 129cdf1 Design: dispatch wave efficiency, from the five-instant friction audit
+- 10d4ff8 Plan: dispatch wave efficiency, 16 tasks across three lanes
+- 7941f81 plan: point at the pre-flight corrections; baseline is 1706 tests
+- e1e98f5 workspace: heads() snapshots each repo's HEAD, omitting what it cannot read
+- 7cc47f3 review: a round records the repo HEADs it reviewed; absent stays NOT MEASURED
+- 6cde101 review: bind each recorded round to the slot HEADs it reviewed
+- 4a4a127 propose: refuse --status done on a head no review round has seen
+- 6886a8f declare: awaiting-ci reports whether a review round has seen this head
+- 5b8ffab declare: a legacy ledger reads as could-not-determine, never as unreviewed
+- ad0704c review: a routed finding names its owner and does not block this worker's gate
+- 475b2ae complete: refuse to rename out from under this instant's own pointers
+- 4b684c7 layout: seed the register header the workspace reviewer enforces
+- 105f741 reconcile: re-observe the watcher and flag a stale awaiting-ci (i45)
+- 33a1cb6 reconcile: the float clock and a malformed stamp are both covered
+- 1998fcb it: §RH proves the round-to-head binding across a real commit
+- 1ca46b1 dispatched-instant: close-out contract, scratch rule, and two measured watcher traps
+- b3fb438 sdd: end the turn instead of polling; an implementer never waits on a Monitor
+- 6d2dcca sdd: the no-Monitor rule rides in the implementer template, where it can be read
+- 8170c74 review skills: narrative has a durable home; comment-only findings ride, never re-push
+- 07e1e19 reviewing-workspace: every finding path now goes through the ledger, not the view
+- 155c79b reviewing-workspace: the REVIEW.md template stops calling itself an append-only ledger
+- bc99aeb dispatch: the seed's native-rebuild note defers to the charter's slot note
+- 5dae469 Fix wave: unmeasured repo read as moved head, complete refuses a mandated HANDOFF row
+
 ## fleet/v0.5.5 — 2026-09-07T15:04:41Z
 Cut from 79e61e0 on `live` (upstream base snapshot/2026-08-17-221146). 1 commit(s) since fleet/v0.5.4.
 
