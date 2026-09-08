@@ -36,6 +36,7 @@ import shutil
 import subprocess
 import sys
 import tempfile
+import types
 import unittest
 from unittest import mock
 
@@ -3307,6 +3308,69 @@ class TestTheLineageGate(CliCase):
         analysis = cli._checkout_instruction({"alpha": self.BASE}, "analysis")
         self.assertIn("do NOT", analysis, "analysis mode must not tell the worker to check out")
         self.assertNotIn("checkout --detach", analysis)
+
+
+class TestCompleteRefusesBrokenPointers(CliCase):
+    """`complete` IS the rename: at gate time every `-inflight-` path still resolves, so checking "does
+    this path exist" passes and then breaks one millisecond later. The question the gate must ask is
+    whether a pointer SURVIVES the rename, which it answers by refusing any citation of the instant's own
+    (about-to-be-renamed) folder name in the two worker-owned navigation documents.
+
+    Measured in three audited instants: `complete` succeeded while `HANDOFF.md` still named the absolute
+    `-inflight-` path and `evidence/INDEX.md` still had `*pending*` rows, and each cost an operator round
+    trip to discover.
+    """
+
+    def ready_to_complete(self, milestone="M9", title="claimant"):
+        """Dispatch a real worker onto a real milestone and record a READY review round over it, so the
+        pre-existing review gate admits `complete` and the only thing left to trip is the one under test."""
+        fleet = self.loaded()
+        coordinator = fleet.paths["readyWorker"]
+        Roadmap(coordinator).add(Milestone(id=milestone, title="carried work", status="blocked",
+                                           deps=[], evidence=[]))
+        code, out, err = fleet.run(["dispatch", "--porcelain", "--profile", str(fleet.profile("worker")),
+                                    "--title", title, "--base", "00000000", "--optype", "append",
+                                    "--from", str(coordinator), "--milestone", milestone])
+        self.assertEqual(0, code, err)
+        child = pathlib.Path(
+            [line.split("\t")[1] for line in out.splitlines() if line.startswith("instant\t")][0])
+        code, out, err = fleet.run(["review", "--instant", str(child), "--scope", "all",
+                                    "--verdict", "READY",
+                                    "--finding", "RV-1:Minor:applied:evidence/INDEX.md:baseline:none"])
+        self.assertEqual(EXIT_OK, code, err)
+        return types.SimpleNamespace(fleet=fleet, instant=child)
+
+    def test_complete_refuses_a_pointer_the_rename_will_break(self):
+        """complete IS the rename, so at gate time every -inflight- path still resolves. Checking 'does
+        this path exist' passes and then breaks one millisecond later. The question is whether the
+        pointer SURVIVES the rename."""
+        env = self.ready_to_complete()
+        (env.instant / "HANDOFF.md").write_text(
+            "## Resume\n\nRead " + str(env.instant) + "/evidence/INDEX.md first.\n")
+
+        code, out, err = env.fleet.run(["complete", "--instant", str(env.instant)])
+
+        self.assertEqual(EXIT_REFUSED, code, f"complete accepted a pointer naming its own folder: {out}")
+        self.assertIn("complete-pointers", err)
+        self.assertIn("HANDOFF.md:3", err)
+        self.assertTrue(env.instant.exists(), "refused, so the folder was NOT renamed")
+
+    def test_complete_allows_an_instant_relative_pointer(self):
+        env = self.ready_to_complete()
+        (env.instant / "HANDOFF.md").write_text("## Resume\n\nRead `evidence/INDEX.md` first.\n")
+
+        code, out, err = env.fleet.run(["complete", "--instant", str(env.instant)])
+
+        self.assertEqual(EXIT_OK, code, err)
+
+    def test_complete_refuses_while_the_phase_is_still_awaiting_ci(self):
+        env = self.ready_to_complete()
+        Declarations(env.instant).set_phase("awaiting-ci")
+
+        code, out, err = env.fleet.run(["complete", "--instant", str(env.instant)])
+
+        self.assertEqual(EXIT_REFUSED, code)
+        self.assertIn("fleet declare --phase done", err)
 
 
 class TestReviewRecordsTheHeadsItReviewed(CliCase):
