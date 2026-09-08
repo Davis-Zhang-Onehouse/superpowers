@@ -96,6 +96,7 @@ FULL_EXTRA=(
   "J:bash $IT_ROOT/run-J.sh"
   "O:bash $IT_ROOT/run-O.sh"
   "LB:bash $IT_ROOT/run-lineage.sh"
+  "RH:bash $IT_ROOT/run-reviewhead.sh"
 )
 
 IT_FULL=no
