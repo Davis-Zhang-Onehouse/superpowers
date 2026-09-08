@@ -237,8 +237,13 @@ checkout. The implementation plan treats that as a prerequisite decision rather 
   binding across a push, the `complete` refusal on a stale pointer, and the reconcile re-observation with
   a pane that has gone away. `SCHEMA_VERSION` stays 1; a fixture of existing `review.json` files must keep
   validating with `heads` absent.
-- **Lane B:** pressure-test each changed skill against the transcript situation that motivated it. Gated
-  on the eval-harness decision above.
+- **Lane B:** pressure-test each changed skill against the transcript situation that motivated it. The
+  decision was to ship Lane B against the five audited session transcripts, with each commit naming the
+  measured failure it answers. The reasons: `evals/` is not cloned in this checkout, a Drill run across
+  harnesses is outside this plan's scope, and each skill commit is independently revertable. **No eval was
+  run**, so a skill-text regression would be found by the next dispatched wave rather than by the harness —
+  a decision that overrode `CLAUDE.md`'s eval requirement, recorded here so it is legible to the next
+  reader of this spec.
 - **Lane C:** no automated test. Verified by the next dispatched wave.
 
 ## Success criteria

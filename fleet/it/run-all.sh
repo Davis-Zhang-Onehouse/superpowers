@@ -84,6 +84,11 @@ RUNNERS=(
   #: every `awaiting-ci` worker's CI waiter has. A control that only runs under `--full` is a control that
   #: is mostly not running.
   "S:bash $IT_ROOT/run-S.sh"
+  #: Default roster, for the reason `i7`, `R` and `S` are: it is one `git init` and three CLI calls, so
+  #: `--full` is not a meaningfully cheaper place to leave it. §RH is the only end-to-end proof that a
+  #: round bound to the heads it reviewed actually gates `propose --status done` against a real repo — a
+  #: control that only runs under `--full` is a control that is mostly not running.
+  "RH:bash $IT_ROOT/run-reviewhead.sh"
 )
 
 # The sections added after this orchestrator was written. No prerequisites — checked per runner: each
@@ -96,7 +101,6 @@ FULL_EXTRA=(
   "J:bash $IT_ROOT/run-J.sh"
   "O:bash $IT_ROOT/run-O.sh"
   "LB:bash $IT_ROOT/run-lineage.sh"
-  "RH:bash $IT_ROOT/run-reviewhead.sh"
 )
 
 IT_FULL=no
