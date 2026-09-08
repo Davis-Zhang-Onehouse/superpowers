@@ -1809,10 +1809,22 @@ def _do_declare(ctx: Ctx, parsed: Parsed) -> int:
             f"the declaration did not land: {consumer.path} reports no phase after writing {phase!r}. "
             "The acknowledgement is the re-read, so a declaration that cannot be read back is a failure "
             "and not a success with a caveat.")
+    #: Advisory, never a `Refused` — by declare time the push has already happened, and refusing would
+    #: strand the worker with a running wave it may not abandon (Task 4's `_review_head_gate` is the
+    #: refusal half, at `propose --status done`; this is the same comparison as a nudge instead, so the
+    #: worker converges its review BEFORE the next push rather than finding out at the next `propose`).
+    review_row = []
+    if phase == PHASE_AWAITING_CI:
+        rounds = [r for r in Review(child, now=ctx.now).rounds() if r.heads]
+        current = _reviewed_heads(ctx, child)
+        if current and (not rounds or rounds[-1].heads != current):
+            review_row = [("review", "no review round has seen this head; a finding now costs another "
+                                     "full CI wave. Converge the review before the next push")]
     _emit(ctx, "declare", [("phase", value), ("asked", asked), ("consumer", str(consumer.path)),
                            ("instant", str(child))]
                           + ([("watchers", watchers)] if watchers else [])
-                          + ([("ungated", ungated_because)] if ungated_because else []))
+                          + ([("ungated", ungated_because)] if ungated_because else [])
+                          + review_row)
     return EXIT_OK
 
 
