@@ -382,12 +382,15 @@ def _live_state(phase, parked, pane, sessions, instant, idle_after_s):
 
 
 def _declared_age_s(instant, now):
-    """Seconds since the phase was declared, or `None` when the declaration predates the `at` field —
-    NOT MEASURED, so no staleness may be claimed from it."""
+    """Seconds since the phase was declared, or None when the declaration predates the `at` field or the
+    stamp cannot be parsed — NOT MEASURED, so no staleness may be claimed from it."""
     stamp = Declarations(instant).declared_at() if instant is not None else None
     if not stamp:
         return None
-    return now - calendar.timegm(time.strptime(stamp, "%Y-%m-%dT%H:%M:%SZ"))
+    try:
+        return now - calendar.timegm(time.strptime(stamp, "%Y-%m-%dT%H:%M:%SZ"))
+    except ValueError:
+        return None
 
 
 def _awaiting_note(pane, sessions, instant, stale_after_s=STALE_WAIT_S, now=None) -> str:
