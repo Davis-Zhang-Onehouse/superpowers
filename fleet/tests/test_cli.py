@@ -240,6 +240,24 @@ class FakeGit:
         return 0, ""
 
 
+class HeadsFakeGit(FakeGit):
+    """`FakeGit` whose `rev-parse HEAD` answer is keyed by the repo directory's basename and may be changed
+    mid-test, so a review round and a later "commit" can be told apart."""
+
+    def __init__(self, heads=None, **kw):
+        super().__init__(**kw)
+        self.heads = dict(heads or {})
+
+    def __call__(self, args, cwd=None):
+        args = list(args)
+        if args[:2] == ["rev-parse", "HEAD"] and cwd is not None:
+            sha = self.heads.get(pathlib.Path(cwd).name)
+            if sha is None:
+                return 128, ""
+            return 0, sha + "\n"
+        return super().__call__(args, cwd)
+
+
 class Fleet:
     """A synthetic fleet, built entirely through injected probes, that `cli` can be pointed at."""
 
@@ -3289,6 +3307,56 @@ class TestTheLineageGate(CliCase):
         analysis = cli._checkout_instruction({"alpha": self.BASE}, "analysis")
         self.assertIn("do NOT", analysis, "analysis mode must not tell the worker to check out")
         self.assertNotIn("checkout --detach", analysis)
+
+
+class TestReviewRecordsTheHeadsItReviewed(CliCase):
+    """`_reviewed_heads`: a recorded round is bound to the slot HEADs for the repos the record's
+    `--lineage-base` names. Without the binding, "a review happened" and "the graded code was reviewed"
+    are different facts nothing connects."""
+
+    def _dispatched(self, fleet, lineage_base, milestone="M9", title="claimant"):
+        """Dispatch a real worker, optionally with a lineage base, and hand back its instant path.
+
+        Copies `_dispatched_onto`'s argv rather than reusing it, because that helper never passes
+        `--lineage-base` and these tests are exactly about the case where it is (and is not) given.
+        """
+        coordinator = fleet.paths["readyWorker"]
+        Roadmap(coordinator).add(Milestone(id=milestone, title="carried work", status="blocked",
+                                           deps=[], evidence=[]))
+        argv = ["dispatch", "--porcelain", "--profile", str(fleet.profile("worker")),
+                "--title", title, "--base", "00000000", "--optype", "append",
+                "--from", str(coordinator), "--milestone", milestone]
+        if lineage_base:
+            argv += ["--lineage-base", lineage_base]
+        code, out, err = fleet.run(argv)
+        self.assertEqual(0, code, err)
+        child = [line.split("\t")[1] for line in out.splitlines() if line.startswith("instant\t")][0]
+        return pathlib.Path(child)
+
+    def test_review_records_the_slot_heads_for_the_lineage_repos(self):
+        fleet = self.loaded()
+        fleet.git = HeadsFakeGit({"alpha": "b" * 40})
+        child = self._dispatched(fleet, "alpha=" + "a" * 40)
+
+        rc, out, err = fleet.run(["review", "--instant", str(child), "--scope", "code",
+                                  "--verdict", "READY",
+                                  "--finding", "RV-1:Minor:applied:SPEC.md:the arm table is complete:none"])
+
+        self.assertEqual(EXIT_OK, rc, err)
+        ledger = json.loads((child / ".fleet" / "review.json").read_text())
+        self.assertEqual({"alpha": "b" * 40}, ledger["rounds"][0]["heads"])
+
+    def test_review_without_a_readable_slot_records_no_heads(self):
+        fleet = self.loaded()
+        child = self._dispatched(fleet, "")
+
+        rc, out, err = fleet.run(["review", "--instant", str(child), "--scope", "code",
+                                  "--verdict", "READY",
+                                  "--finding", "RV-1:Minor:applied:SPEC.md:nothing to bind:none"])
+
+        self.assertEqual(EXIT_OK, rc, err)
+        ledger = json.loads((child / ".fleet" / "review.json").read_text())
+        self.assertNotIn("heads", ledger["rounds"][0])
 
 
 class TestBrief(CliCase):
