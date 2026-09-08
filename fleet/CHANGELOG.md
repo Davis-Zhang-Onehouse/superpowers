@@ -1,5 +1,13 @@
 # fleet — changelog
 
+## fleet/v0.5.7 — 2026-09-08T23:22:29Z
+Cut from eddd027 on `live` (upstream base snapshot/2026-08-17-221146). 1 commit(s) since fleet/v0.5.6.
+
+Every release ships the whole repository — all skills, `commands/`, `hooks/` and the plugin manifest, not only `fleet/`.
+Payload: fleet (2 files).
+
+- eddd027 it: fix 0.5.6 gate RED — K7 stale awaiting-ci, M9 mut3/mut4 injector crash
+
 ## fleet/v0.5.6 — 2026-09-08T22:13:47Z
 Cut from 5dae469 on `live` (upstream base snapshot/2026-08-17-221146). 24 commit(s) since fleet/v0.5.5.
 
