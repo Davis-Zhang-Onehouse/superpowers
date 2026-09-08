@@ -979,6 +979,14 @@ k_main_narrative() {            # K1 K2 K3 K4 K5 K7 — one compaction, in its r
   fi
 
   # --- K7: rename to -complete-compact- WITHOUT COMPACTED.md => violation; write it => clean, freeze lifts ---
+  #: K5 declared awaiting-ci on this same instant to probe the wip-cap/compaction-exclusive interaction, and
+  #: that claim outlives K5 on purpose (K5 never clears it) so it is genuinely stale by the time this section
+  #: tries to complete. `complete` refuses a completing instant whose phase is still awaiting-ci
+  #: (complete-phase, added alongside complete-pointers): "an instant that is completing is not waiting on
+  #: CI. A stale claim outlives the watcher that justified it." Clearing it is the exact remedy the refusal
+  #: names (`fleet declare --phase done`), and is what a real operator does once CI resolves — the step this
+  #: narrative was missing between the awaiting-ci probe and the real completion it models.
+  fleet declare --instant "$child" --phase done > "$out/k7-declare-done.out" 2>&1
   fleet review --instant "$child" --scope all --verdict READY > "$out/k7-review.out" 2>&1
   fleet complete --instant "$child" > "$out/k7-complete.out" 2>&1; rc=$?
   local done_path
