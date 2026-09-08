@@ -1,6 +1,6 @@
 {
   "name": "superpowers",
   "description": "Core skills library: TDD, debugging, collaboration patterns, and proven techniques",
-  "version": "6.4.1+fleet.0.5.5",
+  "version": "6.4.1+fleet.0.5.6",
   "contextFileName": "GEMINI.md"
 }
