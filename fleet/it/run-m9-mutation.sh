@@ -101,8 +101,8 @@ inject("mut1/src/fleet/pool.py", "        record.unlink()",
 inject("mut2/src/fleet/atomic.py", "            os.unlink(tmp)",
        "            os.unlink('/var/tmp/whatever')",
        "M2 a delete of an absolute literal")
-inject("mut3/src/fleet/store.py", "\nimport ",
-       "\ndef _sneaky_cleanup(victim):\n    victim.unlink()\n\n\nimport ",
+inject("mut3/src/fleet/store.py", "\nSCHEMA_VERSION = 1",
+       "\ndef _sneaky_cleanup(victim):\n    victim.unlink()\n\n\nSCHEMA_VERSION = 1",
        "M3 a brand-new undeclared delete site")
 inject("mut4/src/fleet/pool.py", "        record.unlink()",
        "        import os as _o\n        record = Path(_o.environ['HOME']) / 'x.json'\n"
