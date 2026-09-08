@@ -148,3 +148,28 @@ class TestBaseCheck(unittest.TestCase):
         w = self.ws({"alpha": "aaa", "beta": "zzz"},
                     ancestors={"alpha": ("aaa",), "beta": ()}, objects={"alpha": ("aaa",), "beta": ()})
         self.assertEqual(w.verdict(w.base_check(self.slot, {"alpha": "aaa", "beta": "aaa"})), "failed")
+
+class FakeGitHeads:
+    """Injected git for heads() tests. Returns (rc, stdout) based on repo name."""
+    def __init__(self, answers):
+        self.answers = answers
+
+    def __call__(self, args, cwd):
+        return self.answers.get(pathlib.Path(cwd).name, (1, ""))
+
+class TestHeads(unittest.TestCase):
+    """Repo HEAD snapshots. A repo that cannot answer is omitted, never recorded as empty:
+    an empty string would read as a measured answer downstream (FI-417)."""
+    def setUp(self):
+        self.tmp = pathlib.Path(tempfile.mkdtemp())
+
+    def test_heads_maps_each_repo_to_its_sha(self):
+        ws = Workspace(self.tmp, git=FakeGitHeads({"gluten-internal": (0, "a" * 40 + "\n"),
+                                                    "velox-internal": (0, "b" * 40 + "\n")}))
+        self.assertEqual(ws.heads(self.tmp, ["velox-internal", "gluten-internal"]),
+                         {"gluten-internal": "a" * 40, "velox-internal": "b" * 40})
+
+    def test_a_repo_that_cannot_answer_is_omitted_not_empty(self):
+        ws = Workspace(self.tmp, git=FakeGitHeads({"gluten-internal": (0, "a" * 40 + "\n"), "velox-internal": (128, "")}))
+        self.assertEqual(ws.heads(self.tmp, ["gluten-internal", "velox-internal"]),
+                         {"gluten-internal": "a" * 40})
