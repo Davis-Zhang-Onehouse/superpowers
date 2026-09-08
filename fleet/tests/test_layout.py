@@ -53,6 +53,16 @@ class TestBootstrap(unittest.TestCase):
         bootstrap(self.instant, self.name)
         self.assertEqual((self.instant / "CHARTER.md").read_text(), "MINE\n")
 
+    def test_seeded_registers_satisfy_the_header_rule_they_are_reviewed_against(self):
+        """13 of one instant's 27 workspace-review findings were this header. The template a worker is
+        given must pass the checklist that worker is held to (RCF-11)."""
+        bootstrap(self.instant, name=self.name)
+        for register in ("DECISIONS.md", "ISSUES.md", "ASSUMPTIONS.md", "RUNBOOK.md"):
+            text = (self.instant / register).read_text()
+            self.assertRegex(text, r"Updated: \d{4}-\d{2}-\d{2}", register)
+            self.assertIn("Status: DURABLE", text, register)
+            self.assertNotIn("seeded by fleet.layout", text, register)
+
 class TestValidate(unittest.TestCase):
     def setUp(self):
         self.tmp = pathlib.Path(tempfile.mkdtemp())
