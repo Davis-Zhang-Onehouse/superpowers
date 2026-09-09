@@ -78,7 +78,7 @@ A finding against a file this instant does not own — a coordinator-authored `C
 |-------|------|----------|---------|---------------------|
 | 1 | Format & hygiene | `reviewers/format-reviewer.md` | findings `mechanical\|judgment` | auto-fix mechanical → ADDRESSED; flag judgment → OPEN |
 | 2 | Goal alignment / evidence chain | `reviewers/alignment-reviewer.md` | per-AC `VERIFIED\|INSUFFICIENT\|MISALIGNED` | record verdicts; gaps → RV findings |
-| 3 | PR code review (delta) | `requesting-code-review/code-reviewer.md` | Strengths / Issues / Assessment | record findings through `fleet review --finding`; update last-reviewed SHA |
+| 3 | PR code review (delta) | `requesting-code-review/code-reviewer.md` | Strengths / Issues / Assessment | record findings through `fleet review --finding` |
 | 4 | Close | — | — | round summary + overall verdict; HANDOFF session-log row |
 
 ## Common Mistakes
@@ -88,7 +88,7 @@ A finding against a file this instant does not own — a coordinator-authored `C
 | Restating the maintain-workspace invariants in the format checklist | Paste the authoritative invariant text into the reviewer's `[MAINTAIN_WORKSPACE_INVARIANTS]` placeholder — one source of truth, no drift. |
 | Auto-fixing a judgment call (e.g. inventing missing evidence) | Only `mechanical` findings are auto-fixed; judgment findings are flagged `OPEN` for the operator. |
 | Blocking completion until findings are resolved | Advisory only — recommend a verdict, record it, never block or rename the instant. |
-| Code-reviewing the full PR stack every round | Delta only — review PRs authored on this instant, diffed from the prev-reviewed head SHA. Skip inherited base PRs. |
+| Code-reviewing the full PR stack every round | Delta only — review PRs authored on this instant, diffed from the previous round's `heads` in `.fleet/review.json`. Skip inherited base PRs. |
 | Findings left in the session transcript | Every finding + status + action-taken goes through `fleet review --finding` (the ledger survives the session); reasoning goes to `REVIEW-NARRATIVE.md`. |
 | Marking an AC VERIFIED on a prose assertion | Acceptance needs a proof the code executes (green test / grep beacon log / CI run); assertion-only → `INSUFFICIENT`. |
 | Marking an AC VERIFIED on a green-but-STALE runtime proof | A test/CI proof whose provenance is behind the review tip (after code changed) proves an old version → `INSUFFICIENT`. Apply the Stage-2 fresh-evidence gate: regenerate at the tip, then verify from the fresh result. |
