@@ -53,4 +53,4 @@ RULES:
 - Be exhaustive but do not invent problems: report ONLY actual violations you found in the files. If a check passes, say nothing about it.
 ```
 
-The orchestrator auto-applies every `mechanical` finding's FIX and records it in REVIEW.md as ADDRESSED (auto-fix); `judgment` findings are recorded OPEN.
+The orchestrator auto-applies every `mechanical` finding's FIX and records it through `fleet review --finding` with status `applied` (noting the auto-fix in its action); `judgment` findings are recorded `open`.

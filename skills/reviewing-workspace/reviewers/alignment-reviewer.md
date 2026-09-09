@@ -1,6 +1,6 @@
 # Alignment Reviewer (Stage 2)
 
-Purpose: Stage-2 **read-only** goal-alignment & evidence-chain verification of a maintain-workspace effort instant. This reviewer is **analytic-primary** — it reads the charter and the evidence and reasons about whether the chain holds; it does **not** run heavy builds or long test suites. Its output is **advisory**: the orchestrator turns the reported gaps into REVIEW.md findings.
+Purpose: Stage-2 **read-only** goal-alignment & evidence-chain verification of a maintain-workspace effort instant. This reviewer is **analytic-primary** — it reads the charter and the evidence and reasons about whether the chain holds; it does **not** run heavy builds or long test suites. Its output is **advisory**: the orchestrator records the reported gaps as findings through `fleet review --finding`.
 
 ## Placeholders
 
@@ -120,8 +120,8 @@ evidence -> Goal, ending with whether the Goal is achieved or which link breaks>
 Overall: <ALIGNED | GAPS>
 
 Gaps:
-- <each gap phrased so the orchestrator can turn it into a REVIEW.md finding:
-  a title, a severity, and what to do to close it>
+- <each gap phrased so the orchestrator can record it as a finding through
+  `fleet review --finding`: a title, a severity, and what to do to close it>
 
 Register deviations (from step 5 — write "none" per line if clean):
 - DECISIONS: <an ACTIVE decision inconsistent with the charter, work that deviated
