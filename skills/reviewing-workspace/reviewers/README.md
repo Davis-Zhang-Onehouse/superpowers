@@ -22,9 +22,10 @@ placeholders and dispatch it — nothing else changes.
    Cross-check the table's **Branch** and **Contents** columns against this
    instant's own work and its session log.
 3. **Skip** inherited base-instant PRs — branches carried forward from the
-   fork parent that were already reviewed upstream. List these in
-   `REVIEW.md`'s Stage 3 section under **"Skipped (inherited …)"** so it is
-   explicit they were considered and deliberately excluded.
+   fork parent that were already reviewed upstream. Record each as a finding
+   through `fleet review --finding` with status `wont-fix` and an action
+   naming why it was excluded — considered and deliberately declined, so it
+   survives the render.
 
 ## Incremental / delta review
 
