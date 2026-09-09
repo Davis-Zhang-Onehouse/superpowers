@@ -33,14 +33,13 @@ only the commits added since the previous round.
 
 For each in-scope PR:
 
-- Read the prior round's **"Head sha (this round)"** from the Stage-3
-  "Reviewed" table in `REVIEW.md` — this is the **prev-reviewed head**.
-- **`[BASE_SHA]`** = the prev-reviewed head (so only new commits are reviewed).
+- The prev-reviewed head for a repo is that repo's entry in the **previous
+  round's `heads`** in `.fleet/review.json`, which `fleet review` recorded
+  when that round was written.
+- **`[BASE_SHA]`** = that prev-reviewed head, so only new commits are reviewed.
   - **First-ever review** of a PR: use the PR's **merge-base with its target
     branch** as `[BASE_SHA]`.
 - **`[HEAD_SHA]`** = the PR's current tip (the table's **Tip githash**).
-- After the review returns, the orchestrator records the new tip as
-  **"Head sha (this round)"** in `REVIEW.md`, so the next round diffs from here.
 
 ## Placeholder mapping into `code-reviewer.md`
 
@@ -48,7 +47,7 @@ For each in-scope PR:
 |---|---|
 | `[DESCRIPTION]` | HANDOFF **"Where we are"** one-paragraph + the PR's **Contents** cell. |
 | `[PLAN_OR_REQUIREMENTS]` | The **CHARTER** acceptance criteria (what the work must satisfy). |
-| `[BASE_SHA]` | Per the delta rule above (prev-reviewed head, or merge-base on first review). |
+| `[BASE_SHA]` | Per the delta rule above (the previous round's `heads` entry for that repo, or the PR's merge-base on first review). |
 | `[HEAD_SHA]` | The PR's current tip. |
 
 ## Read-only

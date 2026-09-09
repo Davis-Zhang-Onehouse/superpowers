@@ -8,10 +8,7 @@ that must survive belongs in REVIEW-NARRATIVE.md, which nothing regenerates.
 
 ## Round R<n> — <date> · trigger: <on-demand | pre-complete> · scope: <all | format | alignment | code>
 Note: <why this round ran, from --note>
-Git snapshot (from HANDOFF PR-stack table):
-| Repo | Branch | Tip sha at review |
-|------|--------|-------------------|
-| <repo> | <branch> | <sha> |
+Heads reviewed: recorded automatically as the round's `heads` (repo → sha) in `.fleet/review.json` — never hand-copied here.
 
 ### Stage 1 — Format & hygiene   (verdict: PASS | FIXED | ISSUES)
 
@@ -35,10 +32,10 @@ Chain: setup-to-begin → deliverables → evidence → acceptance → goal. Per
 
 ### Stage 3 — Code review   (verdict: CLEAN | ISSUES | N/A)
 
-Reviewed (delta since last round):
-| PR | Base sha | Head sha (this round) | Prev-reviewed head | Verdict |
-|----|----------|-----------------------|--------------------|---------|
-| <#N link> | <sha> | <sha> | <sha or "first review"> | Yes/No/With-fixes |
+Reviewed (delta since last round — the base and head shas come from the round's `heads` in `.fleet/review.json`):
+| PR | Verdict |
+|----|---------|
+| <#N link> | Yes/No/With-fixes |
 
 Skipped (inherited from base instant, reviewed upstream): <PR list or "none">
 
