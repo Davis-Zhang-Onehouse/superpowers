@@ -1,5 +1,15 @@
 # fleet — changelog
 
+## fleet/v0.5.8 — 2026-09-09T01:35:04Z
+Cut from df52db1 on `live` (upstream base snapshot/2026-08-17-221146). 2 commit(s) since fleet/v0.5.7.
+
+Every release ships the whole repository — all skills, `commands/`, `hooks/` and the plugin manifest, not only `fleet/`.
+Payload: skills (5 files).
+Skills changed: reviewing-workspace.
+
+- 8030f59 reviewing-workspace: stop routing hand-written SHAs into REVIEW.md
+- df52db1 reviewing-workspace: the reviewers record findings through the ledger too
+
 ## fleet/v0.5.7 — 2026-09-08T23:22:29Z
 Cut from eddd027 on `live` (upstream base snapshot/2026-08-17-221146). 1 commit(s) since fleet/v0.5.6.
 
