@@ -1,0 +1,74 @@
+[
+  {
+    "runtime": "codex",
+    "cli_version": "0.154.0",
+    "state": "idle",
+    "frame": "codex-idle.frame",
+    "columns": 100,
+    "rows": 35,
+    "evidence": "Captured from private test session: codex-driver-startup.frame"
+  },
+  {
+    "runtime": "codex",
+    "cli_version": "0.154.0",
+    "state": "queued",
+    "frame": "codex-queued.frame",
+    "columns": 100,
+    "rows": 35,
+    "evidence": "Captured from private test session: codex-queued-native.frame"
+  },
+  {
+    "runtime": "codex",
+    "cli_version": "0.154.0",
+    "state": "busy",
+    "frame": "codex-busy.frame",
+    "columns": 100,
+    "rows": 35,
+    "evidence": "Captured from private test session: codex-busy-native.frame"
+  },
+  {
+    "runtime": "codex",
+    "cli_version": "0.154.0",
+    "state": "dialog",
+    "frame": "codex-dialog.frame",
+    "columns": 100,
+    "rows": 35,
+    "evidence": "Captured from private test session: codex-latest.frame"
+  },
+  {
+    "runtime": "claude",
+    "cli_version": "2.1.268",
+    "state": "idle",
+    "frame": "claude-idle.frame",
+    "columns": 100,
+    "rows": 35,
+    "evidence": "Captured from private test session: claude-idle-native.frame"
+  },
+  {
+    "runtime": "claude",
+    "cli_version": "2.1.268",
+    "state": "queued",
+    "frame": "claude-queued.frame",
+    "columns": 100,
+    "rows": 35,
+    "evidence": "Captured from private test session: claude-queued-native.frame"
+  },
+  {
+    "runtime": "claude",
+    "cli_version": "2.1.268",
+    "state": "dialog",
+    "frame": "claude-dialog.frame",
+    "columns": 100,
+    "rows": 35,
+    "evidence": "Captured from private test session: claude-driver-startup.frame"
+  },
+  {
+    "runtime": "claude",
+    "cli_version": "2.1.268",
+    "state": "busy",
+    "frame": "claude-busy.frame",
+    "columns": 100,
+    "rows": 35,
+    "evidence": "Captured while running sleep 8: claude-busy-usable.frame"
+  }
+]
