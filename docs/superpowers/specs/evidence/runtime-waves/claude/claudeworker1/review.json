@@ -1,0 +1,21 @@
+{
+  "schema_version": 1,
+  "rounds": [
+    {
+      "number": 1,
+      "scope": "all",
+      "verdict": "READY",
+      "at": "2026-09-11T19:43:47Z",
+      "findings": [
+        {
+          "id": "RV-1",
+          "severity": "Minor",
+          "status": "applied",
+          "location": "evidence/INDEX.md",
+          "finding": "add(a,b) returned a-b instead of a+b causing test_add to fail",
+          "action": "changed calc.py to return a+b, verified via before/after unittest logs"
+        }
+      ]
+    }
+  ]
+}

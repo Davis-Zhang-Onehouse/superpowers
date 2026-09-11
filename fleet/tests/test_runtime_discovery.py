@@ -41,3 +41,20 @@ class DiscoveryTests(unittest.TestCase):
         with patch('subprocess.run', return_value=subprocess.CompletedProcess([], 2, '', 'denied')):
             with self.assertRaises(FleetError):
                 default_probes(both_runtimes=True).list_processes()
+
+    def test_exited_workers_are_omitted_but_unreadable_live_workers_refuse(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            proc = root / '101'
+            proc.mkdir()
+            (proc / 'comm').write_text('codex')
+            def run(argv, **kw):
+                return subprocess.CompletedProcess(argv, 0, '101\n' if argv[0] == 'pgrep' else '', '')
+            with patch('subprocess.run', run):
+                probes = default_probes(process_name='codex', proc_root=root)
+                for state in ('Z', 'X'):
+                    (proc / 'stat').write_text(f'101 (codex) {state} 1 0')
+                    self.assertEqual(probes.list_processes(), [])
+                (proc / 'stat').write_text('101 (codex) S 1 0')
+                with self.assertRaises(FleetError):
+                    probes.list_processes()

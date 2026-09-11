@@ -1,0 +1,21 @@
+{
+  "schema_version": 1,
+  "rounds": [
+    {
+      "number": 1,
+      "scope": "all",
+      "verdict": "READY",
+      "at": "2026-09-11T19:43:37Z",
+      "findings": [
+        {
+          "id": "RV-1",
+          "severity": "Minor",
+          "status": "applied",
+          "location": "evidence/INDEX.md",
+          "finding": "add() subtracted instead of added, causing test_add to fail",
+          "action": "fixed return a - b to return a + b, captured before/after evidence"
+        }
+      ]
+    }
+  ]
+}

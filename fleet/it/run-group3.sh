@@ -1114,6 +1114,9 @@ k8_abort_lifts_the_freeze() {
 k9_wrong_kind_refused_before_any_side_effect() {
   g3_home "kC" 2
   local out="$CD" before after
+  # Admission uses a persistent lock inode. Include it in the baseline so
+  # refusal must preserve its contents/mtime as well as all fleet state.
+  : > "$FLEET_HOME/.runtime-admission.lock"
   before="$(g3_manifest)"
   fleet dispatch --optype compact --profile "$P_WORKER" --title "k9 wrong kind" --base 00000000 \
     > "$out/dispatch.out" 2>&1

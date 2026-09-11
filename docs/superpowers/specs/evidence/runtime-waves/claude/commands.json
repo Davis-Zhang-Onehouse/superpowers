@@ -1,0 +1,522 @@
+[
+  {
+    "argv": [
+      "/home/ubuntu/davis_root/superpowers/.worktrees/fleet-runtime/bin/fleet",
+      "runtime",
+      "--set",
+      "claude",
+      "--porcelain"
+    ],
+    "code": 0,
+    "out": "runtime\tclaude\nsource\tlegacy-default\nhome\t/home/ubuntu/davis_root/superpowers/.worktrees/fleet-runtime/fleet/it/RTL-claude-152591/attempt-uPS13n/store\n",
+    "err": ""
+  },
+  {
+    "argv": [
+      "/home/ubuntu/davis_root/superpowers/.worktrees/fleet-runtime/bin/fleet",
+      "init",
+      "--name",
+      "claudeCoord",
+      "--porcelain"
+    ],
+    "code": 0,
+    "out": "instant\t00000000-09111941-inflight-append-claudecoord\npath\t/home/ubuntu/davis_root/superpowers/.worktrees/fleet-runtime/fleet/it/RTL-claude-152591/attempt-uPS13n/instants/00000000-09111941-inflight-append-claudecoord\ncreated\t10\nwatched_source\t/home/ubuntu/davis_root/superpowers/.worktrees/fleet-runtime/fleet/it/RTL-claude-152591/attempt-uPS13n/instants/00000000-09111941-inflight-append-claudecoord\nregister\t/home/ubuntu/davis_root/superpowers/.worktrees/fleet-runtime/fleet/it/RTL-claude-152591/attempt-uPS13n/instants/00000000-09111941-inflight-append-claudecoord/ISSUES.md\nfile\t/home/ubuntu/davis_root/superpowers/.worktrees/fleet-runtime/fleet/it/RTL-claude-152591/attempt-uPS13n/instants/00000000-09111941-inflight-append-claudecoord/evidence\nfile\t/home/ubuntu/davis_root/superpowers/.worktrees/fleet-runtime/fleet/it/RTL-claude-152591/attempt-uPS13n/instants/00000000-09111941-inflight-append-claudecoord/investigations\nfile\t/home/ubuntu/davis_root/superpowers/.worktrees/fleet-runtime/fleet/it/RTL-claude-152591/attempt-uPS13n/instants/00000000-09111941-inflight-append-claudecoord/plans\nfile\t/home/ubuntu/davis_root/superpowers/.worktrees/fleet-runtime/fleet/it/RTL-claude-152591/attempt-uPS13n/instants/00000000-09111941-inflight-append-claudecoord/ASSUMPTIONS.md\nfile\t/home/ubuntu/davis_root/superpowers/.worktrees/fleet-runtime/fleet/it/RTL-claude-152591/attempt-uPS13n/instants/00000000-09111941-inflight-append-claudecoord/CHARTER.md\nfile\t/home/ubuntu/davis_root/superpowers/.worktrees/fleet-runtime/fleet/it/RTL-claude-152591/attempt-uPS13n/instants/00000000-09111941-inflight-append-claudecoord/DECISIONS.md\nfile\t/home/ubuntu/davis_root/superpowers/.worktrees/fleet-runtime/fleet/it/RTL-claude-152591/attempt-uPS13n/instants/00000000-09111941-inflight-append-claudecoord/HANDOFF.md\nfile\t/home/ubuntu/davis_root/superpowers/.worktrees/fleet-runtime/fleet/it/RTL-claude-152591/attempt-uPS13n/instants/00000000-09111941-inflight-append-claudecoord/ISSUES.md\nfile\t/home/ubuntu/davis_root/superpowers/.worktrees/fleet-runtime/fleet/it/RTL-claude-152591/attempt-uPS13n/instants/00000000-09111941-inflight-append-claudecoord/RUNBOOK.md\nfile\t/home/ubuntu/davis_root/superpowers/.worktrees/fleet-runtime/fleet/it/RTL-claude-152591/attempt-uPS13n/instants/00000000-09111941-inflight-append-claudecoord/evidence/INDEX.md\n",
+    "err": ""
+  },
+  {
+    "argv": [
+      "/home/ubuntu/davis_root/superpowers/.worktrees/fleet-runtime/bin/fleet",
+      "milestone",
+      "--instant",
+      "/home/ubuntu/davis_root/superpowers/.worktrees/fleet-runtime/fleet/it/RTL-claude-152591/attempt-uPS13n/instants/00000000-09111941-inflight-append-claudecoord",
+      "--id",
+      "m1",
+      "--title",
+      "addition 1",
+      "--porcelain"
+    ],
+    "code": 0,
+    "out": "added\tm1\ntitle\taddition 1\nstatus\tblocked\ndeps\t(none)\nevidence\t(none yet)\nroadmap\t/home/ubuntu/davis_root/superpowers/.worktrees/fleet-runtime/fleet/it/RTL-claude-152591/attempt-uPS13n/instants/00000000-09111941-inflight-append-claudecoord/.fleet/roadmap.json\nready-now\tyes\n",
+    "err": ""
+  },
+  {
+    "argv": [
+      "/home/ubuntu/davis_root/superpowers/.worktrees/fleet-runtime/bin/fleet",
+      "enroll",
+      "--slot",
+      "/home/ubuntu/davis_root/superpowers/.worktrees/fleet-runtime/fleet/it/RTL-claude-152591/attempt-uPS13n/slot1",
+      "--porcelain"
+    ],
+    "code": 0,
+    "out": "slot\tslot1\npath\t/home/ubuntu/davis_root/superpowers/.worktrees/fleet-runtime/fleet/it/RTL-claude-152591/attempt-uPS13n/slot1\nenrolled\t1\nslots\tslot1\n",
+    "err": ""
+  },
+  {
+    "argv": [
+      "/home/ubuntu/davis_root/superpowers/.worktrees/fleet-runtime/bin/fleet",
+      "milestone",
+      "--instant",
+      "/home/ubuntu/davis_root/superpowers/.worktrees/fleet-runtime/fleet/it/RTL-claude-152591/attempt-uPS13n/instants/00000000-09111941-inflight-append-claudecoord",
+      "--id",
+      "m2",
+      "--title",
+      "addition 2",
+      "--porcelain"
+    ],
+    "code": 0,
+    "out": "added\tm2\ntitle\taddition 2\nstatus\tblocked\ndeps\t(none)\nevidence\t(none yet)\nroadmap\t/home/ubuntu/davis_root/superpowers/.worktrees/fleet-runtime/fleet/it/RTL-claude-152591/attempt-uPS13n/instants/00000000-09111941-inflight-append-claudecoord/.fleet/roadmap.json\nready-now\tyes\n",
+    "err": ""
+  },
+  {
+    "argv": [
+      "/home/ubuntu/davis_root/superpowers/.worktrees/fleet-runtime/bin/fleet",
+      "enroll",
+      "--slot",
+      "/home/ubuntu/davis_root/superpowers/.worktrees/fleet-runtime/fleet/it/RTL-claude-152591/attempt-uPS13n/slot2",
+      "--porcelain"
+    ],
+    "code": 0,
+    "out": "slot\tslot2\npath\t/home/ubuntu/davis_root/superpowers/.worktrees/fleet-runtime/fleet/it/RTL-claude-152591/attempt-uPS13n/slot2\nenrolled\t2\nslots\tslot1, slot2\n",
+    "err": ""
+  },
+  {
+    "argv": [
+      "/home/ubuntu/davis_root/superpowers/.worktrees/fleet-runtime/bin/fleet",
+      "pane-guard",
+      "--pane",
+      "itfleet-claude-coordinator",
+      "--porcelain"
+    ],
+    "code": 0,
+    "out": "code\t0\nverdict\tsafe\npane\titfleet-claude-coordinator\nqueued_text\t\ndetail\titfleet-claude-coordinator is a quiet claude pane with an empty input box\n",
+    "err": ""
+  },
+  {
+    "argv": [
+      "/home/ubuntu/davis_root/superpowers/.worktrees/fleet-runtime/bin/fleet",
+      "dispatch",
+      "--profile",
+      "/home/ubuntu/davis_root/superpowers/.worktrees/fleet-runtime/fleet/it/RTL-claude-152591/attempt-uPS13n/profile1",
+      "--title",
+      "claudeWorker1",
+      "--from",
+      "/home/ubuntu/davis_root/superpowers/.worktrees/fleet-runtime/fleet/it/RTL-claude-152591/attempt-uPS13n/instants/00000000-09111941-inflight-append-claudecoord",
+      "--milestone",
+      "m1",
+      "--cap",
+      "2",
+      "--porcelain"
+    ],
+    "code": 0,
+    "out": "todo_id\tclaudeworker1-09111942\ninstant\t/home/ubuntu/davis_root/superpowers/.worktrees/fleet-runtime/fleet/it/RTL-claude-152591/attempt-uPS13n/instants/00000000-09111942-inflight-append-claudeworker1\nslot\tslot1\ntmux\tdt-claudeworker1\nwatched_source\t00000000\nmilestone\tm1\noverride_reason\t(none \u2014 no rule was overridden)\nlineage_base\t(none)\nlineage_mode\t(none)\ngolden_base\t(none recorded)\ncoordinator\t/home/ubuntu/davis_root/superpowers/.worktrees/fleet-runtime/fleet/it/RTL-claude-152591/attempt-uPS13n/instants/00000000-09111941-inflight-append-claudecoord\nlaunched_at\t2026-09-11T19:42:12Z\n",
+    "err": ""
+  },
+  {
+    "argv": [
+      "/home/ubuntu/davis_root/superpowers/.worktrees/fleet-runtime/bin/fleet",
+      "pane-guard",
+      "--pane",
+      "dt-claudeworker1",
+      "--porcelain"
+    ],
+    "code": 11,
+    "out": "code\t11\nverdict\tmid-turn\npane\tdt-claudeworker1\nqueued_text\t\ndetail\tdt-claudeworker1 is still offering a way to interrupt, so it is mid-turn; a send now is queued behind the current turn\n",
+    "err": ""
+  },
+  {
+    "argv": [
+      "/home/ubuntu/davis_root/superpowers/.worktrees/fleet-runtime/bin/fleet",
+      "pane-guard",
+      "--pane",
+      "dt-claudeworker1",
+      "--porcelain"
+    ],
+    "code": 11,
+    "out": "code\t11\nverdict\tmid-turn\npane\tdt-claudeworker1\nqueued_text\t\ndetail\tdt-claudeworker1 is still offering a way to interrupt, so it is mid-turn; a send now is queued behind the current turn\n",
+    "err": ""
+  },
+  {
+    "argv": [
+      "/home/ubuntu/davis_root/superpowers/.worktrees/fleet-runtime/bin/fleet",
+      "pane-guard",
+      "--pane",
+      "dt-claudeworker1",
+      "--porcelain"
+    ],
+    "code": 0,
+    "out": "code\t0\nverdict\tsafe\npane\tdt-claudeworker1\nqueued_text\t\ndetail\tdt-claudeworker1 is a quiet claude pane with an empty input box\n",
+    "err": ""
+  },
+  {
+    "argv": [
+      "/home/ubuntu/davis_root/superpowers/.worktrees/fleet-runtime/bin/fleet",
+      "seed-check",
+      "--id",
+      "claudeworker1-09111942",
+      "--porcelain"
+    ],
+    "code": 0,
+    "out": "verified\tdt-claudeworker1\tinfo\tpid=154692 todo=claudeworker1-09111942 rendered_md5=132c206263f2876742038ef7bab2df50 delivered_md5=132c206263f2876742038ef7bab2df50 :: the delivered argv carries this instant's rendered seed\t\t\npopulation\tclaudeworker1-09111942\tinfo\t1 live session(s) examined: 1 verified ['dt-claudeworker1']; 0 attested []; 0 FOREIGN []; 0 unverifiable []; 0 unreadable []. 'verified' means the briefing was seen in the worker's own argv; 'attested' means the actor that delivered it RECORDED what it sent and that text carries the rendered seed (`SI-55`) \u2014 a positive answer through a weaker channel, which is why it is counted separately\t\t\n",
+    "err": ""
+  },
+  {
+    "argv": [
+      "/home/ubuntu/davis_root/superpowers/.worktrees/fleet-runtime/bin/fleet",
+      "dispatch",
+      "--profile",
+      "/home/ubuntu/davis_root/superpowers/.worktrees/fleet-runtime/fleet/it/RTL-claude-152591/attempt-uPS13n/profile2",
+      "--title",
+      "claudeWorker2",
+      "--from",
+      "/home/ubuntu/davis_root/superpowers/.worktrees/fleet-runtime/fleet/it/RTL-claude-152591/attempt-uPS13n/instants/00000000-09111941-inflight-append-claudecoord",
+      "--milestone",
+      "m2",
+      "--cap",
+      "2",
+      "--porcelain"
+    ],
+    "code": 0,
+    "out": "todo_id\tclaudeworker2-09111942\ninstant\t/home/ubuntu/davis_root/superpowers/.worktrees/fleet-runtime/fleet/it/RTL-claude-152591/attempt-uPS13n/instants/00000000-09111942-inflight-append-claudeworker2\nslot\tslot2\ntmux\tdt-claudeworker2\nwatched_source\t00000000\nmilestone\tm2\noverride_reason\t(none \u2014 no rule was overridden)\nlineage_base\t(none)\nlineage_mode\t(none)\ngolden_base\t(none recorded)\ncoordinator\t/home/ubuntu/davis_root/superpowers/.worktrees/fleet-runtime/fleet/it/RTL-claude-152591/attempt-uPS13n/instants/00000000-09111941-inflight-append-claudecoord\nlaunched_at\t2026-09-11T19:42:39Z\n",
+    "err": ""
+  },
+  {
+    "argv": [
+      "/home/ubuntu/davis_root/superpowers/.worktrees/fleet-runtime/bin/fleet",
+      "pane-guard",
+      "--pane",
+      "dt-claudeworker2",
+      "--porcelain"
+    ],
+    "code": 11,
+    "out": "code\t11\nverdict\tmid-turn\npane\tdt-claudeworker2\nqueued_text\t\ndetail\tdt-claudeworker2 is still offering a way to interrupt, so it is mid-turn; a send now is queued behind the current turn\n",
+    "err": ""
+  },
+  {
+    "argv": [
+      "/home/ubuntu/davis_root/superpowers/.worktrees/fleet-runtime/bin/fleet",
+      "pane-guard",
+      "--pane",
+      "dt-claudeworker2",
+      "--porcelain"
+    ],
+    "code": 0,
+    "out": "code\t0\nverdict\tsafe\npane\tdt-claudeworker2\nqueued_text\t\ndetail\tdt-claudeworker2 is a quiet claude pane with an empty input box\n",
+    "err": ""
+  },
+  {
+    "argv": [
+      "/home/ubuntu/davis_root/superpowers/.worktrees/fleet-runtime/bin/fleet",
+      "seed-check",
+      "--id",
+      "claudeworker2-09111942",
+      "--porcelain"
+    ],
+    "code": 0,
+    "out": "verified\tdt-claudeworker2\tinfo\tpid=159187 todo=claudeworker2-09111942 rendered_md5=9048b012b4d08b0a0c87cb1215e3d7a2 delivered_md5=9048b012b4d08b0a0c87cb1215e3d7a2 :: the delivered argv carries this instant's rendered seed\t\t\npopulation\tclaudeworker2-09111942\tinfo\t1 live session(s) examined: 1 verified ['dt-claudeworker2']; 0 attested []; 0 FOREIGN []; 0 unverifiable []; 0 unreadable []. 'verified' means the briefing was seen in the worker's own argv; 'attested' means the actor that delivered it RECORDED what it sent and that text carries the rendered seed (`SI-55`) \u2014 a positive answer through a weaker channel, which is why it is counted separately\t\t\n",
+    "err": ""
+  },
+  {
+    "argv": [
+      "/home/ubuntu/davis_root/superpowers/.worktrees/fleet-runtime/bin/fleet",
+      "dispatch",
+      "--profile",
+      "/home/ubuntu/davis_root/superpowers/.worktrees/fleet-runtime/fleet/it/RTL-claude-152591/attempt-uPS13n/profile2",
+      "--title",
+      "overCap",
+      "--cap",
+      "2",
+      "--porcelain"
+    ],
+    "code": 4,
+    "out": "",
+    "err": "Refused: the WIP cap is 2 and 2 active-dev subject(s) hold it: 00000000-09111942-inflight-append-claudeworker1, 00000000-09111942-inflight-append-claudeworker2. examined 2 subject(s) of 00000000; 2 counted, 0 excluded\n  blocker: 00000000-09111942-inflight-append-claudeworker1, 00000000-09111942-inflight-append-claudeworker2\n  clears when: one of those subjects completes, or declares `fleet declare --instant <instant> --phase awaiting-ci` \u2014 the declaration is the only channel; prose and a quiet pane are not\n  clears who: 00000000-09111942-inflight-append-claudeworker1, 00000000-09111942-inflight-append-claudeworker2\n"
+  },
+  {
+    "argv": [
+      "/home/ubuntu/davis_root/superpowers/.worktrees/fleet-runtime/bin/fleet",
+      "runtime",
+      "--set",
+      "codex",
+      "--porcelain"
+    ],
+    "code": 4,
+    "out": "",
+    "err": "Refused: Runtime switch requires a completed fleet: unharvested record claudeworker1-09111942; unharvested record claudeworker2-09111942; held lease slot1; held lease slot2; live claude process 152987 at /home/ubuntu/davis_root/superpowers/.worktrees/fleet-runtime/fleet/it/RTL-claude-152591/attempt-uPS13n/instants/00000000-09111941-inflight-append-claudecoord; live claude process 154692 at /home/ubuntu/davis_root/superpowers/.worktrees/fleet-runtime/fleet/it/RTL-claude-152591/attempt-uPS13n/slot1; live claude process 159187 at /home/ubuntu/davis_root/superpowers/.worktrees/fleet-runtime/fleet/it/RTL-claude-152591/attempt-uPS13n/slot2\n"
+  },
+  {
+    "argv": [
+      "/home/ubuntu/davis_root/superpowers/.worktrees/fleet-runtime/bin/fleet",
+      "complete",
+      "--instant",
+      "/home/ubuntu/davis_root/superpowers/.worktrees/fleet-runtime/fleet/it/RTL-claude-152591/attempt-uPS13n/instants/00000000-09111942-inflight-append-claudeworker1",
+      "--porcelain"
+    ],
+    "code": 2,
+    "out": "gate\treview-undecidable\nallowed\tfalse\nreason\tUNDECIDABLE: no review round has been recorded, so this gate cannot decide. That is not the same as deciding against it \u2014 nothing has been judged. Failing closed. population: 0 round(s) [none]; scopes covered: none; 0 finding(s), 0 open blocking; ledger /home/ubuntu/davis_root/superpowers/.worktrees/fleet-runtime/fleet/it/RTL-claude-152591/attempt-uPS13n/instants/00000000-09111942-inflight-append-claudeworker1/.fleet/review.json\nclears_when\ta review round is recorded in the ledger (`fleet review --instant <path> --scope <scope> --verdict <verdict> --finding <id:severity:status:location:finding:action>`)\nclears_who\tthe reviewing instant\n",
+    "err": ""
+  },
+  {
+    "argv": [
+      "/home/ubuntu/davis_root/superpowers/.worktrees/fleet-runtime/bin/fleet",
+      "harvest",
+      "--id",
+      "claudeworker1-09111942",
+      "--porcelain"
+    ],
+    "code": 1,
+    "out": "harvest-refused\tclaudeworker1-09111942\tviolation\tUNDECIDABLE: no review round has been recorded, so this gate cannot decide. That is not the same as deciding against it \u2014 nothing has been judged. Failing closed. population: 0 round(s) [none]; scopes covered: none; 0 finding(s), 0 open blocking; ledger /home/ubuntu/davis_root/superpowers/.worktrees/fleet-runtime/fleet/it/RTL-claude-152591/attempt-uPS13n/instants/00000000-09111942-inflight-append-claudeworker1/.fleet/review.json\ta review round is recorded in the ledger (`fleet review --instant <path> --scope <scope> --verdict <verdict> --finding <id:severity:status:location:finding:action>`)\tthe reviewing instant\nsource\t/home/ubuntu/davis_root/superpowers/.worktrees/fleet-runtime/fleet/it/RTL-claude-152591/attempt-uPS13n/instants/00000000-09111941-inflight-append-claudecoord\tinfo\t0 id(s) in /home/ubuntu/davis_root/superpowers/.worktrees/fleet-runtime/fleet/it/RTL-claude-152591/attempt-uPS13n/instants/00000000-09111941-inflight-append-claudecoord/ISSUES.md, 0 new \u2014 this source produced nothing, which is the observation and not an omission\t\t\nno-issues-filed\t/home/ubuntu/davis_root/superpowers/.worktrees/fleet-runtime/fleet/it/RTL-claude-152591/attempt-uPS13n/instants/00000000-09111941-inflight-append-claudecoord\tinfo\t/home/ubuntu/davis_root/superpowers/.worktrees/fleet-runtime/fleet/it/RTL-claude-152591/attempt-uPS13n/instants/00000000-09111941-inflight-append-claudecoord/ISSUES.md holds nothing but the header fleet.layout seeded, so there are no issues filed yet. Reported as info, not failed: an empty-of-issues register is not a broken extractor, and a brand-new effort that is RED on every tick until somebody files its first issue is the always-red alarm OBS-21 avoided (FI-18).\t\t\nno-prior-state\t/home/ubuntu/davis_root/superpowers/.worktrees/fleet-runtime/fleet/it/RTL-claude-152591/attempt-uPS13n/instants/00000000-09111941-inflight-append-claudecoord\tviolation\tthis tick had NO state file for /home/ubuntu/davis_root/superpowers/.worktrees/fleet-runtime/fleet/it/RTL-claude-152591/attempt-uPS13n/instants/00000000-09111941-inflight-append-claudecoord, so its diff had no memory and 0 of 0 id(s) read as new. RI-28..31 were harvested exactly this way, on the first tick of the loop that wrote the lesson. The memory has now been written, so the NEXT tick is trustworthy \u2014 this one is not.\tthe next tick runs against the state file this one wrote\tthis loop, on its next tick\nsource\t00000000\tinfo\tnothing to harvest: the root base '00000000' is synthetic and has no register of its own; 00000000/ISSUES.md is a path no rename can make exist. Recorded so the source is not silently absent from the tick, and INFO rather than a violation because no action could clear it. `stale()` consults the same judgement (FI-5), so this source also raises no cadence alarm \u2014 one answer, not two.\t\t\npopulation\t/home/ubuntu/davis_root/superpowers/.worktrees/fleet-runtime/fleet/it/RTL-claude-152591/attempt-uPS13n/store/harvest/sources.json\tinfo\texamined 2 watched source(s) at 2026-09-11T19:42:58Z, 0 of them past a 1800s cadence window (live_work=True), from /home/ubuntu/davis_root/superpowers/.worktrees/fleet-runtime/fleet/it/RTL-claude-152591/attempt-uPS13n/store/harvest/sources.json\t\t\n",
+    "err": ""
+  },
+  {
+    "argv": [
+      "/home/ubuntu/davis_root/superpowers/.worktrees/fleet-runtime/bin/fleet",
+      "send",
+      "--id",
+      "claudeworker1-09111942",
+      "--message-file",
+      "/home/ubuntu/davis_root/superpowers/.worktrees/fleet-runtime/fleet/it/RTL-claude-152591/attempt-uPS13n/message.txt",
+      "--porcelain"
+    ],
+    "code": 0,
+    "out": "todo_id\tclaudeworker1-09111942\ndelivery\tsubmitted\n",
+    "err": ""
+  },
+  {
+    "argv": [
+      "/home/ubuntu/davis_root/superpowers/.worktrees/fleet-runtime/bin/fleet",
+      "complete",
+      "--instant",
+      "/home/ubuntu/davis_root/superpowers/.worktrees/fleet-runtime/fleet/it/RTL-claude-152591/attempt-uPS13n/instants/00000000-09111942-inflight-append-claudeworker2",
+      "--porcelain"
+    ],
+    "code": 2,
+    "out": "gate\treview-undecidable\nallowed\tfalse\nreason\tUNDECIDABLE: no review round has been recorded, so this gate cannot decide. That is not the same as deciding against it \u2014 nothing has been judged. Failing closed. population: 0 round(s) [none]; scopes covered: none; 0 finding(s), 0 open blocking; ledger /home/ubuntu/davis_root/superpowers/.worktrees/fleet-runtime/fleet/it/RTL-claude-152591/attempt-uPS13n/instants/00000000-09111942-inflight-append-claudeworker2/.fleet/review.json\nclears_when\ta review round is recorded in the ledger (`fleet review --instant <path> --scope <scope> --verdict <verdict> --finding <id:severity:status:location:finding:action>`)\nclears_who\tthe reviewing instant\n",
+    "err": ""
+  },
+  {
+    "argv": [
+      "/home/ubuntu/davis_root/superpowers/.worktrees/fleet-runtime/bin/fleet",
+      "harvest",
+      "--id",
+      "claudeworker2-09111942",
+      "--porcelain"
+    ],
+    "code": 1,
+    "out": "harvest-refused\tclaudeworker2-09111942\tviolation\tUNDECIDABLE: no review round has been recorded, so this gate cannot decide. That is not the same as deciding against it \u2014 nothing has been judged. Failing closed. population: 0 round(s) [none]; scopes covered: none; 0 finding(s), 0 open blocking; ledger /home/ubuntu/davis_root/superpowers/.worktrees/fleet-runtime/fleet/it/RTL-claude-152591/attempt-uPS13n/instants/00000000-09111942-inflight-append-claudeworker2/.fleet/review.json\ta review round is recorded in the ledger (`fleet review --instant <path> --scope <scope> --verdict <verdict> --finding <id:severity:status:location:finding:action>`)\tthe reviewing instant\nsource\t/home/ubuntu/davis_root/superpowers/.worktrees/fleet-runtime/fleet/it/RTL-claude-152591/attempt-uPS13n/instants/00000000-09111941-inflight-append-claudecoord\tinfo\t0 id(s) in /home/ubuntu/davis_root/superpowers/.worktrees/fleet-runtime/fleet/it/RTL-claude-152591/attempt-uPS13n/instants/00000000-09111941-inflight-append-claudecoord/ISSUES.md, 0 new \u2014 this source produced nothing, which is the observation and not an omission\t\t\nno-issues-filed\t/home/ubuntu/davis_root/superpowers/.worktrees/fleet-runtime/fleet/it/RTL-claude-152591/attempt-uPS13n/instants/00000000-09111941-inflight-append-claudecoord\tinfo\t/home/ubuntu/davis_root/superpowers/.worktrees/fleet-runtime/fleet/it/RTL-claude-152591/attempt-uPS13n/instants/00000000-09111941-inflight-append-claudecoord/ISSUES.md holds nothing but the header fleet.layout seeded, so there are no issues filed yet. Reported as info, not failed: an empty-of-issues register is not a broken extractor, and a brand-new effort that is RED on every tick until somebody files its first issue is the always-red alarm OBS-21 avoided (FI-18).\t\t\nsource\t00000000\tinfo\tnothing to harvest: the root base '00000000' is synthetic and has no register of its own; 00000000/ISSUES.md is a path no rename can make exist. Recorded so the source is not silently absent from the tick, and INFO rather than a violation because no action could clear it. `stale()` consults the same judgement (FI-5), so this source also raises no cadence alarm \u2014 one answer, not two.\t\t\npopulation\t/home/ubuntu/davis_root/superpowers/.worktrees/fleet-runtime/fleet/it/RTL-claude-152591/attempt-uPS13n/store/harvest/sources.json\tinfo\texamined 2 watched source(s) at 2026-09-11T19:42:59Z, 0 of them past a 1800s cadence window (live_work=True), from /home/ubuntu/davis_root/superpowers/.worktrees/fleet-runtime/fleet/it/RTL-claude-152591/attempt-uPS13n/store/harvest/sources.json\t\t\n",
+    "err": ""
+  },
+  {
+    "argv": [
+      "/home/ubuntu/davis_root/superpowers/.worktrees/fleet-runtime/bin/fleet",
+      "send",
+      "--id",
+      "claudeworker2-09111942",
+      "--message-file",
+      "/home/ubuntu/davis_root/superpowers/.worktrees/fleet-runtime/fleet/it/RTL-claude-152591/attempt-uPS13n/message.txt",
+      "--porcelain"
+    ],
+    "code": 0,
+    "out": "todo_id\tclaudeworker2-09111942\ndelivery\tsubmitted\n",
+    "err": ""
+  },
+  {
+    "argv": [
+      "/home/ubuntu/davis_root/superpowers/.worktrees/fleet-runtime/bin/fleet",
+      "pane-guard",
+      "--pane",
+      "dt-claudeworker1",
+      "--porcelain"
+    ],
+    "code": 11,
+    "out": "code\t11\nverdict\tmid-turn\npane\tdt-claudeworker1\nqueued_text\t\ndetail\tdt-claudeworker1 is still offering a way to interrupt, so it is mid-turn; a send now is queued behind the current turn\n",
+    "err": ""
+  },
+  {
+    "argv": [
+      "/home/ubuntu/davis_root/superpowers/.worktrees/fleet-runtime/bin/fleet",
+      "pane-guard",
+      "--pane",
+      "dt-claudeworker1",
+      "--porcelain"
+    ],
+    "code": 11,
+    "out": "code\t11\nverdict\tmid-turn\npane\tdt-claudeworker1\nqueued_text\t\ndetail\tdt-claudeworker1 is still offering a way to interrupt, so it is mid-turn; a send now is queued behind the current turn\n",
+    "err": ""
+  },
+  {
+    "argv": [
+      "/home/ubuntu/davis_root/superpowers/.worktrees/fleet-runtime/bin/fleet",
+      "pane-guard",
+      "--pane",
+      "dt-claudeworker1",
+      "--porcelain"
+    ],
+    "code": 0,
+    "out": "code\t0\nverdict\tsafe\npane\tdt-claudeworker1\nqueued_text\t\ndetail\tdt-claudeworker1 is a quiet claude pane with an empty input box\n",
+    "err": ""
+  },
+  {
+    "argv": [
+      "/home/ubuntu/davis_root/superpowers/.worktrees/fleet-runtime/bin/fleet",
+      "apply",
+      "--instant",
+      "/home/ubuntu/davis_root/superpowers/.worktrees/fleet-runtime/fleet/it/RTL-claude-152591/attempt-uPS13n/instants/00000000-09111941-inflight-append-claudecoord",
+      "--milestone",
+      "m1",
+      "--porcelain"
+    ],
+    "code": 0,
+    "out": "applied\tm1 -> done\nevidence\tevidence/INDEX.md\n",
+    "err": ""
+  },
+  {
+    "argv": [
+      "/home/ubuntu/davis_root/superpowers/.worktrees/fleet-runtime/bin/fleet",
+      "close",
+      "--id",
+      "claudeworker1-09111942",
+      "--porcelain"
+    ],
+    "code": 0,
+    "out": "record\tclaudeworker1-09111942\nclosed\tdt-claudeworker1\nclosed_at\t2026-09-11T19:44:00Z\nforced\tfalse\nslot_still_held\tslot1 \u2014 released by `fleet harvest --id claudeworker1-09111942` when the delta lands, or by `fleet reap --base 00000000` once nothing is sitting in it\ndisarmed\tthe monitor's arm set is recomputed from the join; this pane is no longer in it\n",
+    "err": ""
+  },
+  {
+    "argv": [
+      "/home/ubuntu/davis_root/superpowers/.worktrees/fleet-runtime/bin/fleet",
+      "harvest",
+      "--id",
+      "claudeworker1-09111942",
+      "--porcelain"
+    ],
+    "code": 0,
+    "out": "harvested\tclaudeworker1-09111942\tinfo\tdelta applied (none pending), session dt-claudeworker1 closed, slot slot1 released, record stamped at 2026-09-11T19:44:02Z; the row has left the board (FD-5)\t\t\nsource\t/home/ubuntu/davis_root/superpowers/.worktrees/fleet-runtime/fleet/it/RTL-claude-152591/attempt-uPS13n/instants/00000000-09111941-inflight-append-claudecoord\tinfo\t0 id(s) in /home/ubuntu/davis_root/superpowers/.worktrees/fleet-runtime/fleet/it/RTL-claude-152591/attempt-uPS13n/instants/00000000-09111941-inflight-append-claudecoord/ISSUES.md, 0 new \u2014 this source produced nothing, which is the observation and not an omission\t\t\nno-issues-filed\t/home/ubuntu/davis_root/superpowers/.worktrees/fleet-runtime/fleet/it/RTL-claude-152591/attempt-uPS13n/instants/00000000-09111941-inflight-append-claudecoord\tinfo\t/home/ubuntu/davis_root/superpowers/.worktrees/fleet-runtime/fleet/it/RTL-claude-152591/attempt-uPS13n/instants/00000000-09111941-inflight-append-claudecoord/ISSUES.md holds nothing but the header fleet.layout seeded, so there are no issues filed yet. Reported as info, not failed: an empty-of-issues register is not a broken extractor, and a brand-new effort that is RED on every tick until somebody files its first issue is the always-red alarm OBS-21 avoided (FI-18).\t\t\nsource\t00000000\tinfo\tnothing to harvest: the root base '00000000' is synthetic and has no register of its own; 00000000/ISSUES.md is a path no rename can make exist. Recorded so the source is not silently absent from the tick, and INFO rather than a violation because no action could clear it. `stale()` consults the same judgement (FI-5), so this source also raises no cadence alarm \u2014 one answer, not two.\t\t\npopulation\t/home/ubuntu/davis_root/superpowers/.worktrees/fleet-runtime/fleet/it/RTL-claude-152591/attempt-uPS13n/store/harvest/sources.json\tinfo\texamined 2 watched source(s) at 2026-09-11T19:44:02Z, 0 of them past a 1800s cadence window (live_work=True), from /home/ubuntu/davis_root/superpowers/.worktrees/fleet-runtime/fleet/it/RTL-claude-152591/attempt-uPS13n/store/harvest/sources.json\t\t\n",
+    "err": ""
+  },
+  {
+    "argv": [
+      "/home/ubuntu/davis_root/superpowers/.worktrees/fleet-runtime/bin/fleet",
+      "send",
+      "--id",
+      "claudeworker1-09111942",
+      "--message-file",
+      "/home/ubuntu/davis_root/superpowers/.worktrees/fleet-runtime/fleet/it/RTL-claude-152591/attempt-uPS13n/message.txt",
+      "--porcelain"
+    ],
+    "code": 4,
+    "out": "",
+    "err": "Refused: Cannot message a closed or harvested worker\n"
+  },
+  {
+    "argv": [
+      "/home/ubuntu/davis_root/superpowers/.worktrees/fleet-runtime/bin/fleet",
+      "pane-guard",
+      "--pane",
+      "dt-claudeworker2",
+      "--porcelain"
+    ],
+    "code": 0,
+    "out": "code\t0\nverdict\tsafe\npane\tdt-claudeworker2\nqueued_text\t\ndetail\tdt-claudeworker2 is a quiet claude pane with an empty input box\n",
+    "err": ""
+  },
+  {
+    "argv": [
+      "/home/ubuntu/davis_root/superpowers/.worktrees/fleet-runtime/bin/fleet",
+      "apply",
+      "--instant",
+      "/home/ubuntu/davis_root/superpowers/.worktrees/fleet-runtime/fleet/it/RTL-claude-152591/attempt-uPS13n/instants/00000000-09111941-inflight-append-claudecoord",
+      "--milestone",
+      "m2",
+      "--porcelain"
+    ],
+    "code": 0,
+    "out": "applied\tm2 -> done\nevidence\tevidence/INDEX.md\n",
+    "err": ""
+  },
+  {
+    "argv": [
+      "/home/ubuntu/davis_root/superpowers/.worktrees/fleet-runtime/bin/fleet",
+      "close",
+      "--id",
+      "claudeworker2-09111942",
+      "--porcelain"
+    ],
+    "code": 0,
+    "out": "record\tclaudeworker2-09111942\nclosed\tdt-claudeworker2\nclosed_at\t2026-09-11T19:44:03Z\nforced\tfalse\nslot_still_held\tslot2 \u2014 released by `fleet harvest --id claudeworker2-09111942` when the delta lands, or by `fleet reap --base 00000000` once nothing is sitting in it\ndisarmed\tthe monitor's arm set is recomputed from the join; this pane is no longer in it\n",
+    "err": ""
+  },
+  {
+    "argv": [
+      "/home/ubuntu/davis_root/superpowers/.worktrees/fleet-runtime/bin/fleet",
+      "harvest",
+      "--id",
+      "claudeworker2-09111942",
+      "--porcelain"
+    ],
+    "code": 0,
+    "out": "harvested\tclaudeworker2-09111942\tinfo\tdelta applied (none pending), session dt-claudeworker2 closed, slot slot2 released, record stamped at 2026-09-11T19:44:05Z; the row has left the board (FD-5)\t\t\nsource\t/home/ubuntu/davis_root/superpowers/.worktrees/fleet-runtime/fleet/it/RTL-claude-152591/attempt-uPS13n/instants/00000000-09111941-inflight-append-claudecoord\tinfo\t0 id(s) in /home/ubuntu/davis_root/superpowers/.worktrees/fleet-runtime/fleet/it/RTL-claude-152591/attempt-uPS13n/instants/00000000-09111941-inflight-append-claudecoord/ISSUES.md, 0 new \u2014 this source produced nothing, which is the observation and not an omission\t\t\nno-issues-filed\t/home/ubuntu/davis_root/superpowers/.worktrees/fleet-runtime/fleet/it/RTL-claude-152591/attempt-uPS13n/instants/00000000-09111941-inflight-append-claudecoord\tinfo\t/home/ubuntu/davis_root/superpowers/.worktrees/fleet-runtime/fleet/it/RTL-claude-152591/attempt-uPS13n/instants/00000000-09111941-inflight-append-claudecoord/ISSUES.md holds nothing but the header fleet.layout seeded, so there are no issues filed yet. Reported as info, not failed: an empty-of-issues register is not a broken extractor, and a brand-new effort that is RED on every tick until somebody files its first issue is the always-red alarm OBS-21 avoided (FI-18).\t\t\nsource\t00000000\tinfo\tnothing to harvest: the root base '00000000' is synthetic and has no register of its own; 00000000/ISSUES.md is a path no rename can make exist. Recorded so the source is not silently absent from the tick, and INFO rather than a violation because no action could clear it. `stale()` consults the same judgement (FI-5), so this source also raises no cadence alarm \u2014 one answer, not two.\t\t\npopulation\t/home/ubuntu/davis_root/superpowers/.worktrees/fleet-runtime/fleet/it/RTL-claude-152591/attempt-uPS13n/store/harvest/sources.json\tinfo\texamined 2 watched source(s) at 2026-09-11T19:44:05Z, 0 of them past a 1800s cadence window (live_work=True), from /home/ubuntu/davis_root/superpowers/.worktrees/fleet-runtime/fleet/it/RTL-claude-152591/attempt-uPS13n/store/harvest/sources.json\t\t\n",
+    "err": ""
+  },
+  {
+    "argv": [
+      "/home/ubuntu/davis_root/superpowers/.worktrees/fleet-runtime/bin/fleet",
+      "send",
+      "--id",
+      "claudeworker2-09111942",
+      "--message-file",
+      "/home/ubuntu/davis_root/superpowers/.worktrees/fleet-runtime/fleet/it/RTL-claude-152591/attempt-uPS13n/message.txt",
+      "--porcelain"
+    ],
+    "code": 4,
+    "out": "",
+    "err": "Refused: Cannot message a closed or harvested worker\n"
+  },
+  {
+    "argv": [
+      "/home/ubuntu/davis_root/superpowers/.worktrees/fleet-runtime/bin/fleet",
+      "roadmap",
+      "--instant",
+      "/home/ubuntu/davis_root/superpowers/.worktrees/fleet-runtime/fleet/it/RTL-claude-152591/attempt-uPS13n/instants/00000000-09111941-inflight-append-claudecoord",
+      "--porcelain"
+    ],
+    "code": 0,
+    "out": "not-ready\tm1\tinfo\tstatus=done: it is finished, so it is not pending work\t\t\nnot-ready\tm2\tinfo\tstatus=done: it is finished, so it is not pending work\t\t\npopulation\t/home/ubuntu/davis_root/superpowers/.worktrees/fleet-runtime/fleet/it/RTL-claude-152591/attempt-uPS13n/instants/00000000-09111941-inflight-append-claudecoord\tinfo\texamined 2 milestone(s) of which 0 ready, 0 pending proposal(s), from /home/ubuntu/davis_root/superpowers/.worktrees/fleet-runtime/fleet/it/RTL-claude-152591/attempt-uPS13n/instants/00000000-09111941-inflight-append-claudecoord/.fleet/roadmap.json\t\t\n",
+    "err": ""
+  },
+  {
+    "argv": [
+      "/home/ubuntu/davis_root/superpowers/.worktrees/fleet-runtime/bin/fleet",
+      "pane-guard",
+      "--pane",
+      "itfleet-claude-coordinator",
+      "--porcelain"
+    ],
+    "code": 0,
+    "out": "code\t0\nverdict\tsafe\npane\titfleet-claude-coordinator\nqueued_text\t\ndetail\titfleet-claude-coordinator is a quiet claude pane with an empty input box\n",
+    "err": ""
+  },
+  {
+    "argv": [
+      "/home/ubuntu/davis_root/superpowers/.worktrees/fleet-runtime/bin/fleet",
+      "runtime",
+      "--set",
+      "codex",
+      "--porcelain"
+    ],
+    "code": 0,
+    "out": "runtime\tcodex\nsource\tsaved\nhome\t/home/ubuntu/davis_root/superpowers/.worktrees/fleet-runtime/fleet/it/RTL-claude-152591/attempt-uPS13n/store\n",
+    "err": ""
+  },
+  {
+    "argv": [
+      "/home/ubuntu/davis_root/superpowers/.worktrees/fleet-runtime/bin/fleet",
+      "runtime",
+      "--set",
+      "claude",
+      "--porcelain"
+    ],
+    "code": 0,
+    "out": "runtime\tclaude\nsource\tsaved\nhome\t/home/ubuntu/davis_root/superpowers/.worktrees/fleet-runtime/fleet/it/RTL-claude-152591/attempt-uPS13n/store\n",
+    "err": ""
+  }
+]

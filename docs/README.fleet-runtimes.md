@@ -74,3 +74,23 @@ Use the updated fleet CLI for all operations on records containing runtime metad
 cannot safely operate on the extended records. This implementation is under validation; unit and stub
 results alone do not establish a complete live lifecycle. See the runtime evidence reports before
 promoting or deploying it.
+
+## Repeating validation
+
+`bash fleet/it/run-runtime.sh --stubs` tests dispatch and switch-back using attributed stand-ins.
+For real model coverage, point `RT_LIVE_CONFIG` at a private, authenticated configuration where the
+native plugin is installed, then explicitly select the runtime:
+
+```bash
+RT_LIVE_CONFIG=/absolute/private/config bash fleet/it/run-runtime.sh --live --runtime codex
+```
+
+The live runner starts a coordinator and two workers on a private `itfleet-RTL-` tmux server.
+It prints the attachment command for inspecting ordinary trust and permission dialogs; it does not
+accept those dialogs automatically. It waits up to 900 seconds per stage (`RT_LIVE_TIMEOUT` overrides).
+Command results, terminal frames and worker artifacts remain in the printed attempt directory.
+On failure, the server stops and unfinished leases remain for inspection. The real-session recovery
+checks and before/after skill evaluations are recorded separately in the validation report.
+
+Worker launchers preserve terminal color attributes even when the calling shell sets `NO_COLOR`;
+the guards need those attributes to distinguish suggested prompts from actual drafts.

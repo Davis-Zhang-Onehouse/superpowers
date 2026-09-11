@@ -1,0 +1,27 @@
+PASS ISOLATION-RTL-claude-152591-enter live-INSTANTS baseline ESTABLISHED on this call (1 folder(s) across 1 live tree(s)), so the instants half is vacuous here and binds from the next call on. live stores byte-identical; live instants trees unchanged in 1 live tree(s); live tmux session set byte-identical (0 sessions, incl. 0 dt-); section work is on socket itfleet-RTL-claude-152591
+pinned 67 files
+Native claude test: /home/ubuntu/davis_root/superpowers/.worktrees/fleet-runtime/fleet/it/RTL-claude-152591/attempt-uPS13n
+Trust/permission dialogs require inspection: tmux -L itfleet-RTL-claude-152591 attach
+Waiting: native coordinator ready. Inspect trust/permission dialogs with tmux -L itfleet-RTL-claude-152591 attach
+PASS native coordinator ready
+Waiting: worker 1 ready. Inspect trust/permission dialogs with tmux -L itfleet-RTL-claude-152591 attach
+PASS worker 1 ready
+Waiting: worker 2 ready. Inspect trust/permission dialogs with tmux -L itfleet-RTL-claude-152591 attach
+PASS worker 2 ready
+Waiting: worker completed claudeworker1-09111942. Inspect trust/permission dialogs with tmux -L itfleet-RTL-claude-152591 attach
+Waiting: worker completed claudeworker1-09111942. Inspect trust/permission dialogs with tmux -L itfleet-RTL-claude-152591 attach
+PASS worker completed claudeworker1-09111942
+PASS worker exited claudeworker1-09111942
+Waiting: workspace process exited claudeworker1-09111942. Inspect trust/permission dialogs with tmux -L itfleet-RTL-claude-152591 attach
+PASS workspace process exited claudeworker1-09111942
+PASS worker completed claudeworker2-09111942
+PASS worker exited claudeworker2-09111942
+Waiting: workspace process exited claudeworker2-09111942. Inspect trust/permission dialogs with tmux -L itfleet-RTL-claude-152591 attach
+PASS workspace process exited claudeworker2-09111942
+PASS coordinator exited
+Waiting: coordinator process exited. Inspect trust/permission dialogs with tmux -L itfleet-RTL-claude-152591 attach
+PASS coordinator process exited
+PASS native coordinator, two workers, proposals, review, close, harvest, switch-back
+PASS RTL1 native coordinator and two workers completed proposal/review/harvest and switch-back
+PASS ISOLATION-RTL-claude-leave live stores byte-identical; live instants trees unchanged in 1 live tree(s); live tmux session set byte-identical (0 sessions, incl. 0 dt-); section work is on socket itfleet-RTL-claude-152591
+STABLE — every verdict in this run is attributable to one tree state

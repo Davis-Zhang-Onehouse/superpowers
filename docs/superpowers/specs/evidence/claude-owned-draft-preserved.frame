@@ -1,0 +1,21 @@
+     [37m…[39m [37m+18[39m [37mlines[39m [37m(ctrl+o[39m [37mto[39m [37mexpand)[39m
+
+[97m●[39m Root cause: [97mcalc.py:2[39m had [97madd[39m implemented as [97ma[39m [97m-[39m [97mb[39m instead of [97ma[39m [97m+[39m [97mb[39m. Fixed the
+  operator, tests now pass (1 passed). Evidence (before/after test logs, buggy
+  source, RCA) saved under the instant's [97mevidence/[39m and
+  [97minvestigations/test_calc_add_failure/[39m.
+
+  DEBUGGING DONE
+
+[37m✻[39m [37mChurned[39m [37mfor[39m [37m34s[39m [37m·[39m [37mdone[39m [37m7:28[39m [37mPM[39m
+
+[30m[40m❯ [97mReply exactly COLOR READY. Do not edit files.[39m
+
+[97m[49m●[39m COLOR READY
+
+[37m✻[39m [37mBaked for 1s · done 7:33 PM[39m
+
+[37m────────────────────────────────────────────────────────────────────────────────
+[39m❯ OWNED TEST DRAFT
+[37m────────────────────────────────────────────────────────────────────────────────
+[39m  [93m⏵⏵ auto mode on[37m (shift+tab to cycle)[39m                                     [32m/rc[39m

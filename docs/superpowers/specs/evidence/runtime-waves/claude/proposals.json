@@ -1,0 +1,26 @@
+{
+  "schema_version": 1,
+  "pending": [],
+  "applied": [
+    {
+      "instant": "/home/ubuntu/davis_root/superpowers/.worktrees/fleet-runtime/fleet/it/RTL-claude-152591/attempt-uPS13n/instants/00000000-09111942-inflight-append-claudeworker1",
+      "milestone": "m1",
+      "status": "done",
+      "evidence": [
+        "evidence/INDEX.md"
+      ],
+      "at": "2026-09-11T19:43:51Z",
+      "note": ""
+    },
+    {
+      "instant": "/home/ubuntu/davis_root/superpowers/.worktrees/fleet-runtime/fleet/it/RTL-claude-152591/attempt-uPS13n/instants/00000000-09111942-inflight-append-claudeworker2",
+      "milestone": "m2",
+      "status": "done",
+      "evidence": [
+        "evidence/INDEX.md"
+      ],
+      "at": "2026-09-11T19:43:40Z",
+      "note": ""
+    }
+  ]
+}

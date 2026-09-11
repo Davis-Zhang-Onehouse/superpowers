@@ -1,0 +1,22 @@
+
+  [1mDiagnosis:[0m[39m[49m [97mcalc.py[39m's [97madd(a, b)[39m returned [97ma - b[39m instead of [97ma + b[39m, causing
+  [97mtest_add[39m ([97massertEqual(add(2, 3), 5)[39m) to fail with [97m-1 != 5[39m.
+
+  [1mFix:[0m[39m[49m one-line change to [97ma + b[39m; re-ran the test and it now passes.
+
+  [1mEvidence[0m[39m[49m (in the instant's [97mevidence/[39m folder, now renamed
+  [97m00000000-09111942-complete-append-claudeworker2[39m):
+  - [97m01-diagnose/calc.py.orig[39m + [97mfailing-output.txt[39m — pre-fix state
+  - [97m01-diagnose/calc.py.fixed[39m + [97mpassing-output.txt[39m — post-fix state
+  - [97mINDEX.md[39m — summary linking criteria to artifacts
+
+  Review round recorded READY (RV-1, applied), proposal [97mm2 done[39m sent to the
+  coordinator's inbox (not yet applied — that's the coordinator's call), and the
+  instant renamed to [97m-complete-[39m, completing the state transition.
+
+[37m✻[39m [37mChurned for 47s · done 7:43 PM[39m
+
+[37m────────────────────────────────────────────────────────────────────────────────
+[39m❯ [2mcheck fleet brief for outstanding status[0m[39m[49m
+[37m────────────────────────────────────────────────────────────────────────────────
+[39m  [93m⏵⏵ auto mode on[37m (shift+tab to cycle) · ← for agents[39m                      [32m/rc[39m

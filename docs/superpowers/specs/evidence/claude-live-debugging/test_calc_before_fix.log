@@ -1,0 +1,21 @@
+============================= test session starts ==============================
+platform linux -- Python 3.10.9, pytest-9.1.1, pluggy-1.6.0 -- /home/ubuntu/miniconda3/bin/python3
+cachedir: .pytest_cache
+rootdir: /tmp/fleet-runtime-probe-8x14rwii/live/slot
+collecting ... collected 1 item
+
+test_calc.py::Addition::test_add FAILED                                  [100%]
+
+=================================== FAILURES ===================================
+______________________________ Addition.test_add _______________________________
+
+self = <test_calc.Addition testMethod=test_add>
+
+    def test_add(self):
+>       self.assertEqual(add(2, 3), 5)
+E       AssertionError: -1 != 5
+
+test_calc.py:6: AssertionError
+=========================== short test summary info ============================
+FAILED test_calc.py::Addition::test_add - AssertionError: -1 != 5
+============================== 1 failed in 0.01s ===============================
