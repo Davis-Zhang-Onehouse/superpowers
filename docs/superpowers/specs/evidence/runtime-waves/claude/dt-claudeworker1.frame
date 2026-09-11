@@ -1,0 +1,21 @@
+     [97mtest_calc.py::Addition::test_add[39m failed ([97madd(2, 3)[39m → [97m-1[39m, expected [97m5[39m).
+  2. [1mEvidence captured before editing[0m[39m[49m: [97mready.txt[39m, [97mcalc.py.orig[39m,
+     [97mbefore-failing.log[39m (failing run).
+  3. [1mFixed[0m[39m[49m: changed [97mcalc.py[39m to [97mreturn a + b[39m.
+  4. [1mEvidence after fixing[0m[39m[49m: [97mcalc.py.fixed[39m, [97mafter-passing.log[39m ([97mtest_add ... ok[39m),
+     all indexed in [97mevidence/INDEX.md[39m.
+  5. [1mReview[0m[39m[49m: recorded round 1, scope [97mall[39m, verdict [97mREADY[39m, 0 open blocking
+     findings.
+  6. [1mProposal[0m[39m[49m: [97mfleet propose --milestone m1 --status done[39m delivered to the
+     coordinator's inbox (not yet applied — that's the coordinator's call).
+  7. [1mCompleted[0m[39m[49m: instant renamed [97m00000000-09111942-inflight-append-claudeworker1[39m
+     → [97m00000000-09111942-complete-append-claudeworker1[39m.
+
+  No commits, pushes, or actions outside my leased slot/instant were taken.
+
+[37m✻[39m [37mBaked for 1m 1s · done 7:43 PM[39m
+
+[37m────────────────────────────────────────────────────────────────────────────────
+[39m❯ 
+[37m────────────────────────────────────────────────────────────────────────────────
+[39m  [93m⏵⏵ auto mode on[37m (shift+tab to cycle) · ← for agents[39m                      [32m/rc[39m

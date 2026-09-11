@@ -1,0 +1,1 @@
+{"fixture": "sleep copied as codex, not a model", "state": "Z", "exe": "FileNotFoundError", "cwd": "FileNotFoundError", "verdict": "FleetError: Cannot inspect live codex process 5"}

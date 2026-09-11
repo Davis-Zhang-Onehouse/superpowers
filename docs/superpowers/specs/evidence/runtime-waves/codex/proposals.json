@@ -1,0 +1,28 @@
+{
+  "schema_version": 1,
+  "pending": [],
+  "applied": [
+    {
+      "instant": "/home/ubuntu/davis_root/superpowers/.worktrees/fleet-runtime/fleet/it/RTL-codex-152592/attempt-FgiWuK/instants/00000000-09111942-inflight-append-codexworker1",
+      "milestone": "m1",
+      "status": "done",
+      "evidence": [
+        "evidence/INDEX.md"
+      ],
+      "at": "2026-09-11T19:44:03Z",
+      "note": ""
+    },
+    {
+      "instant": "/home/ubuntu/davis_root/superpowers/.worktrees/fleet-runtime/fleet/it/RTL-codex-152592/attempt-FgiWuK/instants/00000000-09111942-inflight-append-codexworker2",
+      "milestone": "m2",
+      "status": "done",
+      "evidence": [
+        "evidence/INDEX.md",
+        "evidence/failing-test.txt",
+        "evidence/passing-test.txt"
+      ],
+      "at": "2026-09-11T19:43:59Z",
+      "note": "Changed add from subtraction to addition; original files and failing output saved before edit; python3 -m unittest -v passes one test; READY review recorded."
+    }
+  ]
+}
