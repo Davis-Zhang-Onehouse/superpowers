@@ -436,7 +436,13 @@ def default_probes(process_name: str = "claude", tmux_socket=_FROM_ENV, *,
                     argv = (proc / "cmdline").read_text().rstrip("\0").split("\0")
                     cwd = os.readlink(proc / "cwd")
                 except FileNotFoundError:
-                    if not proc.exists():
+                    # Zombies remain in pgrep and /proc until their parent reaps
+                    # them, but have no executable or cwd and hold no workspace.
+                    try:
+                        state = (proc / "stat").read_text().rsplit(")", 1)[1].split()[0]
+                    except (OSError, UnicodeError, IndexError):
+                        state = None
+                    if state in ("Z", "X") or not proc.exists():
                         continue  # Exited while inventory was sampled.
                     raise FleetError(f"Cannot inspect live {runtime} process {pid}")
                 except (OSError, UnicodeError) as exc:

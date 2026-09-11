@@ -1,0 +1,29 @@
+{
+  "schema_version": 1,
+  "rounds": [
+    {
+      "number": 1,
+      "scope": "all",
+      "verdict": "READY",
+      "at": "2026-09-11T19:43:54Z",
+      "findings": [
+        {
+          "id": "RV-1",
+          "severity": "Minor",
+          "status": "applied",
+          "location": "evidence/INDEX.md",
+          "finding": "Original source and red-green test evidence satisfy charter",
+          "action": "none"
+        },
+        {
+          "id": "RV-2",
+          "severity": "Minor",
+          "status": "applied",
+          "location": "evidence/change.diff",
+          "finding": "Reviewed single operator fix and unchanged test locally per no-subagents instruction",
+          "action": "none"
+        }
+      ]
+    }
+  ]
+}
