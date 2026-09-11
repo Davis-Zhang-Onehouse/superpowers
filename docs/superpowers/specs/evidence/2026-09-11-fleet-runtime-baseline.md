@@ -45,3 +45,13 @@ approved persistent private test driver outside that outer sandbox. Both CLIs
 retained their own normal permission policies. Captures and transcripts remain
 in the private evidence directory; credentials and full configuration files are
 excluded from tracked evidence.
+
+## Follow-up: executable alias identity
+
+The real dispatch probe found a distinction the original interactive probe did not exercise. On Claude
+Code 2.1.268, launching `/home/ubuntu/.local/bin/claude` yields `/proc/PID/comm = claude`, while launching
+its resolved target `/home/ubuntu/.local/share/claude/versions/2.1.268` yields `comm = 2.1.268`.
+`/proc/PID/exe` names the same versioned executable in both cases; both `-p` probe invocations exited zero.
+Resolving away the executable symlink therefore breaks the `pgrep -x claude` census and seed verification.
+Launch configuration must retain the caller's absolute executable alias. This was measured with isolated
+configuration and a finite `Reply exactly OK` prompt, not inferred from the filename alone.

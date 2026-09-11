@@ -60,7 +60,7 @@ verb refuses: `$FLEET_HOME/instants` used to be a default and it planted a dispa
 effort tree at rc=0 with every guard green, invisible until an endgame compaction could not find it.
 
 `FLEET_TMUX_SOCKET` selects the tmux **server**. Set it before anything that could start a session:
-`fleet dispatch` launches a real `claude` in a session named `dt-<name>`, and on the default server that is
+`fleet dispatch` launches the selected Claude or Codex CLI in a session named `dt-<name>`, and on the default server that is
 the one act you must never perform against somebody else's coordinator. Unset, commands see the real live
 sessions — which is correct in production, because guarding a live pane is what several verbs are for.
 
@@ -73,7 +73,7 @@ Read-only. Safe to run at any time; they change nothing.
 | `fleet board` | every subject HOLDING A SLOT, and nothing else |
 | `fleet status` | one subject in full, with the evidence behind its state |
 | `fleet leases` | every enrolled slot and who holds it |
-| `fleet peers` | which live Claude sessions this fleet may address, and which are FOREIGN |
+| `fleet peers` | which live agent sessions this fleet may address, and which are FOREIGN |
 | `fleet roadmap` | milestones, readiness, blockers and pending proposals |
 | `fleet brief` | what a dispatched instant needs to know about itself |
 | `fleet base-check` | is this workspace positioned on the base its milestone builds on? |
@@ -92,6 +92,9 @@ Mutating. Each has `--dry-run`.
 
 | Verb | What it does |
 |---|---|
+| `fleet runtime` | read the saved runtime; `--set claude` or `--set codex` changes it between completed runs |
+| `fleet send` | deliver a message file to an owned worker after observing an empty idle input |
+| `fleet revive` | resume an explicit session UUID using the record’s runtime, workspace and configuration |
 | `fleet init` | bootstrap a new instant from the layout matrix |
 | `fleet dispatch` | evaluate every gate, then dispatch one worker |
 | `fleet resume` | adopt an existing conforming instant; evaluates NO admission rule |
@@ -151,34 +154,44 @@ not, so a coordinator that sees `15` should stop polling and go answer the pane,
 this code existed a dialog fell through to `0 safe`, the same answer an idle worker gets — a scheduled
 poll saw a healthy quiet pane while the worker was blocked waiting on an operator.
 
-### Delivering text to a pane: type, WAIT, then Enter
+### Selecting the runtime
 
-`tmux send-keys <text>` immediately followed by `send-keys Enter` **loses the Enter**. The TUI has not
-processed the text yet, so the keystroke reaches a widget that is not ready for it and is discarded. The
-text then sits in the box unsubmitted and the worker looks like it simply stopped — which is exactly how
-it looks to an operator, and why this went undiagnosed for days (`FI-15`).
-
-Measured on a real pane, one session, varying only the gap:
-
-| gap between text and Enter | result |
-|---|---|
-| none | **Enter dropped** — `pane-guard` still `10`, text queued, nothing submitted |
-| 50ms and above | submitted |
-
-The rule is therefore a **condition, not a delay**:
+`fleet runtime` reports the saved choice; an older store without a setting defaults to Claude.
+From a normal shell, after harvesting every worker and stopping the coordinator:
 
 ```bash
-tmux -L "$SOCKET" send-keys -t "=$SESSION:" -l "$TEXT"
-until fleet pane-guard --pane "$SESSION"; [ $? = 10 ]; do sleep 0.2; done   # the box HAS the text
-tmux -L "$SOCKET" send-keys -t "=$SESSION:" Enter
+fleet runtime --set codex
 ```
 
-`pane-guard`'s `10` means precisely *"there is text in the box"*, so it is the gate. No `sleep` constant
-is right on a box under load. Reference implementation: `fleet/it/bin/live-pane.sh submit`.
+Start the matching coordinator CLI manually. Dispatches use this choice; model settings stay with that
+CLI. Changing back uses `fleet runtime --set claude`. Open records, held leases and live in-scope
+agents block a change, including a crashed worker with an unfinished record. Resolve that work first;
+never delete a lease or edit `runtime.json` to bypass the refusal. The operator setup is in
+`docs/README.fleet-runtimes.md`.
 
-You will see the advice *"send a space before Enter"*. It works, and it works for the wrong reason — the
-extra round-trip buys the milliseconds. Treating that as the mechanism leaves the channel one scheduling
-hiccup from dropping instructions again, with a space keystroke as the charm that was meant to prevent it.
+### Delivering text to a worker
+
+Write the complete message to a file, then use the recorded worker ID:
+
+```bash
+fleet send --id "$ID" --message-file "$MESSAGE_FILE" --dry-run
+fleet send --id "$ID" --message-file "$MESSAGE_FILE"
+```
+
+The command locks that pane, checks its ownership and empty idle input, pastes once, observes the exact
+draft, sends Enter once, and observes consumption. Busy, queued, modal and unfamiliar panes refuse.
+If delivery becomes uncertain, inspect the pane; do not retry automatically, clear a human's draft,
+or send an extra Enter. Immediate text-plus-Enter can lose the Enter on a real TUI (`FI-15`).
+
+`fleet peers` reports runtime and address transport in human output. Use `fleet send` for owned tmux
+workers. A native messaging API is usable only when the current harness exposes it and peer discovery
+supplies its address; a tmux session name is not a native agent ID. FOREIGN or unaddressable peers are
+not message targets.
+
+A known agent with a modal or unfamiliar input returns `14 indeterminate`; `12 not-claude` retains its
+legacy label and means a positively identified non-agent pane. Treat every nonzero guard code as wait
+before sending. Codex has no verified CI wake mechanism here: `awaiting-ci` is refused, even with a
+watcher attestation, and the worker continues to count against capacity.
 
 ## Releasing fleet
 

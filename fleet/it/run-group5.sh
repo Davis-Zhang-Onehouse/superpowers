@@ -382,6 +382,9 @@ PY
     case "$1" in
       init)      echo "--name l7v --dry-run" ;;
       dispatch)  echo "--profile $EV/profile --title l7t --dry-run" ;;
+      runtime)   echo "--set claude --dry-run" ;;
+      send)      echo "--id $TODO --message-file $INSTP/.fleet/seed.txt --dry-run" ;;
+      revive)    echo "--id $TODO --session-id 12345678-1234-1234-1234-123456789abc --dry-run" ;;
       resume)    echo "--instant $INSTP --dry-run" ;;
       declare)   echo "--instant $INSTP --phase awaiting-ci --dry-run" ;;
       park)      echo "--instant $INSTP --question l7question --dry-run" ;;
@@ -448,7 +451,7 @@ PY
     fi
     l7_verbs=$((l7_verbs+1))
     # shellcheck disable=SC2086
-    timeout 120 python3 -m fleet.cli "$v" $args --home "$L7H" --porcelain \
+    timeout 600 python3 -m fleet.cli "$v" $args --home "$L7H" --porcelain \
         > "$EV/L7-$v.stdout" 2> "$EV/L7-$v.stderr"; rc=$?
     cad=$(grep -c '^cadence:' "$EV/L7-$v.stderr")
     named=$(grep -c 'l7stale' "$EV/L7-$v.stderr")
@@ -622,6 +625,9 @@ PY
     case "$1" in
       init)      echo "--name mv1 --dry-run" ;;
       dispatch)  echo "--profile $EV/profile --title mt --dry-run" ;;
+      runtime)   echo "--set claude --dry-run" ;;
+      send)      echo "--id $TODO --message-file $INSTP/.fleet/seed.txt --dry-run" ;;
+      revive)    echo "--id $TODO --session-id 12345678-1234-1234-1234-123456789abc --dry-run" ;;
       resume)    echo "--instant $INSTP --dry-run" ;;
       declare)   echo "--instant $INSTP --phase awaiting-ci --dry-run" ;;
       park)      echo "--instant $INSTP --question mq --dry-run" ;;
@@ -678,7 +684,7 @@ PY
   # actual job — catching a genuine hang fast — so only `selftest` gets the wider wall; the guard
   # against unbounded recursion is `FLEET_SELFTEST` (SELFTEST_GUARD, cli.py), not the size of this
   # timeout, and stays effective at any ceiling.
-  m_timeout() { [ "$1" = selftest ] && echo 300 || echo 120; }
+  m_timeout() { [ "$1" = selftest ] && echo 600 || echo 120; }
 
   # ---- M1 ---------------------------------------------------------------------------------------
   M1LOG="$EV/M1-per-verb.txt"; : > "$M1LOG"
@@ -801,7 +807,7 @@ PY
       timeout 5 python3 -m fleet.cli "$v" $args "$f" > /dev/null 2>&1; rcs=$?
       extra=""
       if [ "$rcs" = 124 ]; then
-        # not a hang until it fails to terminate with a generous wall too — `m_timeout` above (300s
+        # not a hang until it fails to terminate with a generous wall too — `m_timeout` above (600s — the suite is 1,849 tests and took 180 s under concurrent load
         # for `selftest`, unchanged 120s otherwise) so the real hermetic-suite run this verb performs
         # is not mistaken for a hang at the 120s wall every other verb is held to.
         # shellcheck disable=SC2086

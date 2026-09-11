@@ -42,6 +42,7 @@ from unittest import mock
 
 from fleet import (EXIT_ATTENTION, EXIT_BAD_INPUT, EXIT_CODES, EXIT_NO_CAPACITY, EXIT_OK,
                    EXIT_REFUSED)
+from fleet.runtime import LaunchSettings
 from fleet import cli
 from tests import hermetic_environment
 from fleet import seedcheck
@@ -312,6 +313,8 @@ class Fleet:
             has_session=lambda name: name in self.tmux_live,
             start_session=lambda name, cwd, cmd: self.started.append((name, str(cwd), cmd)),
             kill_session=self._kill,
+            send_literal=lambda name, text: self.panes.update({name: '❯ ' + text.strip() + '\n? for shortcuts'}),
+            submit=lambda name: self.panes.update({name: BUSY_PANE}),
             #: `SI-59`. The fixture IS a server, and it has a name — `elsewhere` is the fixture's model of
             #: another one. A session on this server answers with this socket; a session the fixture has
             #: put `elsewhere` answers with that socket and with nothing on this one, which is exactly the
@@ -372,6 +375,20 @@ class Fleet:
         path = self.slots_dir / name
         path.mkdir(exist_ok=True)
         return path
+
+    def revival_fixture(self):
+        session_id = '12345678-1234-1234-1234-123456789abc'
+        if 'recoverable' not in self.ids:
+            self.worker('recoverable', slot='ws7', live=False)
+            record = self.store.read(self.ids['recoverable'])
+            record.runtime_executable = '/bin/true'
+            record.runtime_config_dir = str(self.tmp / 'resume-config')
+            self.store.write(record)
+            project = pathlib.Path(record.runtime_config_dir) / 'projects' / 'slot'
+            project.mkdir(parents=True)
+            (project / (session_id + '.jsonl')).write_text(json.dumps({
+                'sessionId': session_id, 'cwd': str(self.pool.slot_path('ws7'))}) + '\n')
+        return ['--id', self.ids['recoverable'], '--session-id', session_id]
 
     def profile(self, kind: str = "worker") -> pathlib.Path:
         path = self.profiles_dir / kind
@@ -522,7 +539,10 @@ class Fleet:
         """The `context` hook `main` accepts, wired to this fixture's fakes and its frozen clock."""
 
         def build(parsed, out, err):
-            return cli.Ctx(home=self.home, instants_dir=self.instants, store=self.store,
+            return cli.Ctx(launch_settings=lambda runtime, slot: LaunchSettings(runtime, '/test/bin/' + runtime, '/test/config'),
+                           seed_delivery=lambda name, text: seedcheck.Verdict(seedcheck.ATTESTED, detail='hermetic fixture delivery'),
+                           resume_verified=lambda record, session_id: True,
+                           home=self.home, instants_dir=self.instants, store=self.store,
                            pool=self.pool, sessions=self.sessions, harvest=self.harvest,
                            out=out, err=err, dry_run=parsed.on("dry-run"),
                            porcelain=parsed.on("porcelain"), now=lambda: NOW,
@@ -647,6 +667,9 @@ class CliCase(unittest.TestCase):
             #: Read-only and argument-free. It shells out to `claude agents --json`; where that binary
             #: is absent the verb REFUSES (`PeersUnavailable` -> `EXIT_ATTENTION`) rather than
             #: reporting an empty peer set, which is the fail-closed behaviour it exists to provide.
+            "revive": fleet.revival_fixture(),
+            "send": ["--id", fleet.ids["closable"], "--message-file", str(was_sent)],
+            "runtime": ["--set", "claude"],
             "peers": [],
             #: `SI-32`. A subject with no recorded lineage base — the verb must answer "nothing to check"
             #: rather than fail, because that is the state of most dispatches.
@@ -1431,51 +1454,26 @@ class TestOutwardState(CliCase):
                          f"session.kill() is called from {sorted(killers)}, which is not exactly the "
                          "three lifecycle transactions plus dispatch's own rollback")
 
-    def test_dispatch_kills_only_on_a_foreign_seed_and_never_on_an_unverifiable_one(self):
-        """The narrowness of the admission above, asserted rather than promised.
+    def test_dispatch_rollback_only_kills_its_started_session(self):
+        """Direct launch now owns delivery; any failed launch must retain ownership until exit."""
+        fleet = Fleet()
+        self.addCleanup(shutil.rmtree, fleet.tmp)
+        original_context = fleet.context
+        def context():
+            build = original_context()
+            def candidate(parsed, out, err):
+                ctx = build(parsed, out, err)
+                ctx.seed_delivery = lambda name, text: seedcheck.Verdict(seedcheck.NOT_DELIVERED)
+                return ctx
+            return candidate
+        fleet.context = context
+        code, out, err = fleet.run(['dispatch', '--profile', str(fleet.profile()),
+                                    '--title', 'seed failure'])
+        self.assertEqual(code, EXIT_ATTENTION, err)
+        self.assertEqual(len(fleet.started), 1)
+        self.assertEqual(fleet.killed, [fleet.started[0][0]])
+        self.assertIsNone(fleet.store.all()[0].launched_at)
 
-        `NOT-DELIVERED` is what a correct send-keys delivery looks like from inside `dispatch`, because
-        `fleet` renders the seed and does not deliver it. If that verdict could kill, every dispatch on the
-        box would be torn down to fix one — the shape where a safety check becomes the outage.
-        """
-        import inspect, textwrap
-        source = textwrap.dedent(inspect.getsource(cli._do_dispatch))
-        tree = ast.parse(source)
-
-        # STRUCTURAL, over EVERY kill in the function — not a prefix of its source text.
-        #
-        # The first version of this case did `source.split("ctx.sessions.kill(")[0]` and asserted over the
-        # text BEFORE THE FIRST kill. A reviewer found the hole: a SECOND `ctx.sessions.kill(...)` added
-        # anywhere later in `_do_dispatch` is invisible to that check, and the package-wide AST test above
-        # records only WHICH functions call kill, never how many times. So the admission would have been
-        # narrow by convention rather than by construction — exactly the next-editor move this milestone
-        # exists to anticipate.
-        kills = [node for node in ast.walk(tree)
-                 if isinstance(node, ast.Call) and isinstance(node.func, ast.Attribute)
-                 and node.func.attr == "kill"]
-        self.assertEqual(len(kills), 1,
-                         f"_do_dispatch may end exactly ONE session — its own, on a FOREIGN seed — and "
-                         f"{len(kills)} kill call(s) were found. A second one is a new outward action "
-                         f"hiding inside an admission granted for one.")
-
-        # ...and that one kill must sit inside a branch testing FOREIGN, never NOT_DELIVERED.
-        def guarded(node) -> bool:
-            for branch in ast.walk(tree):
-                if not isinstance(branch, ast.If):
-                    continue
-                if any(k is node for k in ast.walk(branch)) and not any(
-                        k is node for k in ast.walk(ast.Module(body=[branch.test], type_ignores=[]))):
-                    names = {n.attr for n in ast.walk(branch.test) if isinstance(n, ast.Attribute)}
-                    if "FOREIGN" in names:
-                        return True
-            return False
-
-        self.assertTrue(guarded(kills[0]),
-                        "the kill must sit inside a branch whose test references seedcheck.FOREIGN")
-        killing_branch = source.split("ctx.sessions.kill(")[0]
-        self.assertNotIn("seedcheck.NOT_DELIVERED", killing_branch,
-                         "NOT-DELIVERED must not be able to reach the kill: it is the ordinary state of a "
-                         "send-keys delivery, not a misdelivery")
 
 
 class TestCadence(CliCase):
@@ -3210,7 +3208,7 @@ class TestRecordingASendKeysDelivery(CliCase):
         fake = seedcheck.Probes(read_cmdline=lambda pid: b"claude\0--permission-mode\0auto",
                                 comm_of=lambda pid: "claude", children_of=lambda pid: [])
 
-        with mock.patch.object(cli.seedcheck, "default_probes", lambda: fake):
+        with mock.patch.object(cli.seedcheck, "default_probes", lambda runtime="claude": fake):
             code, out, err = fleet.run(["seed-check", "--porcelain"])
 
         self.assertIn(code, EXIT_CODES, err)
@@ -3351,7 +3349,7 @@ class TestSeedExtra(CliCase):
         seen = []
 
         with mock.patch.object(cli, "_verify_seed_delivery",
-                               side_effect=lambda ctx, tmux, seed, **kw: seen.append(seed)):
+                               side_effect=lambda ctx, tmux, seed, **kw: (seen.append(seed), seedcheck.Verdict(seedcheck.ATTESTED))[1]):
             code, out, err = self._dispatch(fleet, "--seed-extra", str(extra))
 
         self.assertEqual(EXIT_OK, code, err)

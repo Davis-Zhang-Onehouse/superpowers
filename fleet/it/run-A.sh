@@ -204,6 +204,9 @@ a1_args() {               # every required flag supplied; no value contains a sp
     #: (cli._do_dispatch) and the isolation contract forbids creating one. --dry-run still resolves the
     #: store and evaluates every gate against it, which is exactly the fallback question A1 asks.
     dispatch)   echo "--profile $A_PROFILE --title a1probe --base 00000000 --dry-run" ;;
+    runtime)    echo "--set codex" ;;
+    send)       echo "--id a1probe-00000000 --message-file $A_PROFILE/seed.txt --dry-run" ;;
+    revive)     echo "--id a1probe-00000000 --session-id 12345678-1234-1234-1234-123456789abc --dry-run" ;;
     resume)     echo "--instant $A1_INST --tmux itfleet-A-a1resume" ;;
     declare)    echo "--instant $A1_INST --phase awaiting-ci" ;;
     park)       echo "--instant $A1_INST --question a1park" ;;

@@ -303,6 +303,7 @@ class Probes:
     #: forgets. Neither is a decision a default may make on a caller's behalf, so every seam answers it.
     comm_of: Callable[[int], Optional[str]] = None
     children_of: Callable[[int], list] = field(default=lambda pid: [])
+    worker_identity: Callable[[int], bool] | None = None
 
     def __post_init__(self):
         if self.comm_of is None:
@@ -319,10 +320,14 @@ def is_worker(pid: int, probes: Probes) -> bool:
     session inside `dispatch`, so a probe that could not read a process must degrade to "not delivered"
     (unverifiable) rather than to the verdict that authorises destroying it.
     """
+    if probes.worker_identity is not None:
+        return probes.worker_identity(pid)
     return (probes.comm_of(pid) or "").strip() == WORKER_COMM
 
 
 def default_probes(process_name: str = WORKER_COMM) -> Probes:
+    from fleet.runtime import recognizes_process
+    import os
     def read_cmdline(pid: int):
         try:
             return Path(f"/proc/{pid}/cmdline").read_bytes()
@@ -347,7 +352,16 @@ def default_probes(process_name: str = WORKER_COMM) -> Probes:
             return []
         return out
 
-    return Probes(read_cmdline=read_cmdline, comm_of=comm_of, children_of=children_of)
+    def worker_identity(pid):
+        try:
+            executable = os.readlink(f'/proc/{pid}/exe')
+            argv = (read_cmdline(pid) or b'').decode().rstrip('\0').split('\0')
+            return recognizes_process(process_name, comm_of(pid) or '', executable, argv)
+        except (OSError, UnicodeError):
+            return False
+
+    return Probes(read_cmdline=read_cmdline, comm_of=comm_of, children_of=children_of,
+                  worker_identity=worker_identity)
 
 
 def delivered_argv(pid: int, probes: Probes, depth: int = 2) -> tuple:

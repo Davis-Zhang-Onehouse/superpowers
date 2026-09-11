@@ -41,179 +41,13 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Callable, Optional
 
-from fleet.errors import BadInput
+from fleet.errors import BadInput, FleetError
 
-#: How much of the pane is "now", counted UP FROM THE LAST NON-BLANK ROW. A caret above this window is
-#: scrollback, not a queued message. Counted from the last non-blank row rather than from the last raw
-#: capture line because tmux pads a capture to the pane height (`_rendered`, `FI-24`).
-PROMPT_TAIL_LINES = 8
-#: Busy indicators sit a little further up than the input box (spinner line, token counter, hints).
-BUSY_TAIL_LINES = 15
-
-#: The characters a pane may render an input caret with.
-_CARET = ("❯", ">")
-#: Box-drawing gutter around the input box, stripped before the caret is looked for.
-_GUTTER = "│┃|"
-
-#: SGR — the "select graphic rendition" escape, the ONLY thing `capture-pane -e` adds to a capture. It is
-#: also the whole of `FI-208`: an empty Claude Code box is not blank, it is drawn holding a model-generated
-#: ghost SUGGESTION in **SGR 2 (DIM/faint)**, and a capture taken WITHOUT `-e` throws that attribute away
-#: one layer below every consumer. `pane-guard` then reported `10 queued-text` for a box nobody had typed
-#: into, `close` refused naming a clearing condition of *"the text is submitted or cleared"* — a remedy
-#: that cannot be performed, because there is no text — and the question "who typed that?" (`FI-43`) was
-#: chased for days over a string that had no author.
-_SGR = re.compile(r"\x1b\[([0-9;]*)m")
-#: Any OTHER escape `-e` or a TUI may emit. Stripped, never interpreted — this module reasons about
-#: VISIBLE characters plus one attribute, and a sequence it does not understand must not become text.
-_ESC_OTHER = re.compile(r"\x1b\][^\x07\x1b]*(?:\x07|\x1b\\)|\x1b\[[0-9;:?]*[ -/]*[@-~]|\x1b[@-Z\\-_]")
-
-#: The SGR parameters that turn DIM on and off, compared AFTER leading zeros are stripped — so `0` and a
-#: bare `\x1b[m` both arrive here as `""`. `2` is faint; `0`/`""` reset everything; `22` is the targeted
-#: "normal intensity" that ends bold AND faint. Nothing else touches it.
-_SGR_DIM_ON = "2"
-_SGR_DIM_OFF = ("", "22")
-
-#: SGR parameters that SWALLOW the parameters after them: `38` (foreground), `48` (background) and `58`
-#: (underline colour) introduce an extended colour, and the value that follows selects its form —
-#: `5;<n>` is a 256-colour index (one more parameter), `2;<r>;<g>;<b>` is truecolor (three more).
-#:
-#: This is not pedantry about a spec. **`\x1b[38;2;136;192;208m` contains a `2`**, and read parameter-by
-#: -parameter that `2` is SGR 2 = DIM. My first version of `_cells` did exactly that, and the consequence
-#: was measured: `_caret_content` returned `''` for `❯ ` + truecolor + `REAL-TYPED-TEXT-GAMMA`, so a
-#: truecolor-styled input box makes REAL TYPED TEXT VANISH — `unsubmitted` None, `pane-guard 0 safe`, and
-#: a `send-keys` concatenates onto somebody's live draft. That is the exact false-safe `AC-5` forbids and
-#: `FI-169` exists to prevent, reintroduced by the fix for `FI-208`. `38;5;2` (256-colour index 2) failed
-#: the same way; `38;5;99` did not, which is what a partial fix looks like from the outside.
-_SGR_EXTENDED_COLOUR = ("38", "48", "58")
-#: How many parameters each extended-colour FORM consumes after its selector.
-_SGR_COLOUR_FORM = {"5": 1, "2": 3}
-
-
-def plain(text: str) -> str:
-    """`text` with every escape removed — the VISIBLE characters, and nothing else.
-
-    Public because `capture()` now returns what tmux drew *including* attributes, and a caller matching
-    UI chrome (`cli.CLAUDE_MARKERS`) must match on what a human would read. Matching a marker against raw
-    capture output works right up until tmux happens to split the phrase across a colour change, and then
-    it fails silently in the direction that reports a live claude pane as `12 not-claude`.
-    """
-    return _ESC_OTHER.sub("", _SGR.sub("", text))
-
-
-def _cells(line: str) -> list:
-    """`line` as `[(visible character, is it DIM), …]`.
-
-    The pair is the point. Every predicate below wants the characters; exactly one of them —
-    `_caret_content` — also wants the attribute, and it is the one bit that separates *a human typed
-    this* from *the TUI is suggesting this*. Carrying them together means no layer can drop the second
-    while keeping the first, which is precisely how `FI-208` happened.
-    """
-    out, dim, i = [], False, 0
-    while i < len(line):
-        match = _SGR.match(line, i)
-        if match:
-            params = match.group(1).split(";")
-            index = 0
-            while index < len(params):
-                param = params[index].lstrip("0")          # `2`, `02` and `002` are all SGR 2
-                index += 1
-                if param in _SGR_EXTENDED_COLOUR:
-                    #: Skip the selector AND its arguments, so the `2` inside `38;2;R;G;B` is a colour
-                    #: component and never SGR 2. An unknown selector consumes only itself, which stops a
-                    #: malformed sequence eating the rest of the line.
-                    selector = params[index].lstrip("0") if index < len(params) else ""
-                    index += 1 + _SGR_COLOUR_FORM.get(selector or "0", 0)
-                elif param == _SGR_DIM_ON:
-                    dim = True
-                elif param in _SGR_DIM_OFF:
-                    dim = False
-            i = match.end()
-            continue
-        match = _ESC_OTHER.match(line, i)
-        if match:
-            i = match.end()
-            continue
-        out.append((line[i], dim))
-        i += 1
-    return out
-
-
-def _undim(cells: list) -> str:
-    """The characters a human actually typed: the cells left once the DIM ones are dropped.
-
-    **Not** "empty if any cell is dim". A box can hold typed text AND a dim completion hint at once, and
-    calling that whole body a placeholder would blind the guard to real queued text — the `FI-180` shape,
-    where a fix stops a failure being visible instead of fixing it. Dropping only the dim cells answers
-    both directions from one rule: an all-dim body collapses to `''` (an empty box), and a body with any
-    non-dim character keeps exactly that character as the queued text.
-    """
-    return "".join(char for char, dim in cells if not dim).strip()
-
-
-#: Shapes an EMPTY input box renders. None of these is a swallowed submit, and alarming on them is a
-#: false positive on every idle session in the fleet at once.
-#:
-#: These are the FALLBACK, not the primary signal (`FI-208`). They are five fixed legacy strings and the
-#: thing they need to catch today is *model-generated prose* — a denylist of suggestion texts can never be
-#: completed, so the attribute decides first and these only answer for a terminal that stripped it.
-_PLACEHOLDERS = (
-    re.compile(r'^try\s+["“]', re.I),
-    re.compile(r"^ask\b", re.I),
-    re.compile(r"^/\s*for\s+commands\b", re.I),
-    re.compile(r"^#\s*for\s+memory\b", re.I),
-    re.compile(r"^new\s+task\?", re.I),
+from fleet.runtime import (
+    PROMPT_TAIL_LINES, BUSY_TAIL_LINES, plain, _cells, _undim, _caret_content,
+    _rendered, _tail, _trim, _is_placeholder, claude_unsubmitted, claude_busy,
+    claude_watchers, observe, validate_runtime, PaneObservation, recognizes_process,
 )
-
-#: A pane is busy when it is still offering a way to interrupt the work.
-#: What a pane shows while it is WORKING. `SI-37`: "esc to cancel" was here and is not that — it is what a
-#: MODAL offers while it waits for a human to choose. The two read alike and mean opposite things: one says
-#: "a turn is in flight, your send will queue behind it", the other says "nothing will happen until somebody
-#: answers me".
-#:
-#: The cost was measured on the first production dispatch. A fresh claude in an untrusted directory shows
-#: "Is this a project you created or one you trust?" with "Enter to confirm · Esc to cancel". `busy` matched,
-#: so `pane-guard` said `11 mid-turn` and `reconcile` said RUNNING — for a session that had not started and
-#: never would. A coordinator following the documented loop waits forever on a pane needing one keystroke.
-#:
-#: Removing it costs nothing, because `unsubmitted` ALREADY detects the modal's selected line as text in the
-#: input position. With `busy` no longer firing, the guard reaches its queued-text branch and `_live_state`
-#: reaches BLOCKED — "the pane is waiting on a human", which is exactly what a trust modal is. It stays in
-#: `CLAUDE_MARKERS`: a modal is still a claude pane, it is just not a busy one.
-#:
-#: **Amendment, `I-16`: that claim is measured FALSE for the `AskUserQuestion` selection dialog.** It is
-#: true only for a modal whose selected row renders one of `_CARET`'s characters — the trust modal's
-#: `> 1. Yes, I trust this folder` does. `AskUserQuestion` draws its options as plain numbered rows with no
-#: caret glyph at all (see `DIALOG_PANE` / `test_pane_guard_does_not_call_a_blocked_question_dialog_safe`,
-#: `tests/test_cli.py`), so `unsubmitted` finds no caret, returns `None`, and the pane falls through both
-#: `busy` and `unsubmitted` to `0 safe` — the same code an idle worker gets, for a worker blocked on an
-#: unanswered question. "Detects the modal's selected line" was never a property of every modal; it was a
-#: property of every modal measured *so far*, and this is the modal that was not. `pane-guard`'s `15`
-#: (`cli.PANE_AWAITING_OPERATOR`) exists to answer for the shape this paragraph could not.
-_BUSY_MARKERS = (
-    "esc to interrupt",
-    "ctrl+c to stop",
-)
-
-#: `FI-255`/`i39`. What the harness draws when something is armed that will RE-INVOKE this session with no
-#: human in the loop: a `Monitor` renders `1 monitor`, a background shell renders `1 shell`, and both
-#: together render `1 shell, 1 monitor`. Measured on a live pane, both arms, in `i39`'s evidence.
-#:
-#: A COUNTED NOUN, not a bare word, and matched on the STATUS LINE alone rather than the busy window. Both
-#: halves of that are load-bearing and both were measured, not reasoned:
-#:
-#:  - the bare word fails because `BUSY_TAIL_LINES` is 15 rows and an agent's own prose lives in them. The
-#:    capture taken while authoring this change has "monitors" inside that window purely because the agent
-#:    was WRITING ABOUT monitors. `"monitor" in window` therefore reports a watcher for a session that
-#:    merely discussed one — a guard that admits everything, which is indistinguishable from a guard that
-#:    works and is the exact failure `i39`'s charter names.
-#:  - the status line is where the harness draws this indicator, and `_rendered` already discards tmux's
-#:    bottom padding, so its last row IS that line.
-_WATCHER_MARKER = re.compile(r"\b\d+\s+(?:monitor|shell)s?\b")
-
-#: What identifies the row as the harness's STATUS LINE rather than any other row on screen. The watcher
-#: indicator shares this row, so requiring both on one line is what separates "the harness is telling me a
-#: watcher is armed" from "the agent typed the word monitor".
-_STATUS_LINE_MARKERS = _BUSY_MARKERS + ("auto mode on", "? for shortcuts", "for agents")
 
 #: `I-16`. The `AskUserQuestion` selection dialog's own hint line, quoted VERBATIM from the register:
 #: "Enter to select · Tab/Arrow keys to navigate · Esc to cancel". Neither `_BUSY_MARKERS` nor `_CARET`
@@ -249,6 +83,7 @@ class LiveSession:
     pid: int
     cwd: Path
     name: Optional[str]
+    runtime: str = "claude"
 
 
 @dataclass
@@ -282,6 +117,8 @@ class Probes:
     #: probe means UNOBSERVED, and reporting "found nowhere" for it would be `FI-417` — the same shape as
     #: the DEAD this field exists to stop being claimed.
     session_servers: Optional[Callable[[str], list]] = None
+    send_literal: Optional[Callable[[str, str], None]] = None
+    submit: Optional[Callable[[str], None]] = None
 
 
 #: tmux's exact-match marker. A BARE target is resolved by PREFIX: with only `itfleet-N-pre-ab` alive,
@@ -328,82 +165,12 @@ def exact_pane_target(name: str) -> str:
     return f"{_EXACT}{name}:"
 
 
-def _rendered(text: str) -> list:
-    """The rows the pane is actually SHOWING, with tmux's bottom padding removed.
-
-    `capture-pane` pads its output to the PANE HEIGHT. `M11b` measured an input box holding
-    `draft message` at capture line 2 with 31 blank rows beneath it, so every window counted in raw
-    lines put the box outside itself and the predicate answered *safe* with text in the box — a
-    false-safe, the dangerous direction. The last non-blank row is the bottom of the content; the
-    window is anchored there.
-
-    Blankness is judged on the VISIBLE characters (`plain`), which is not cosmetic now that the capture
-    carries attributes: a padding row that tmux emits as `\\x1b[39m\\x1b[49m` is blank to a reader and
-    NON-blank to `str.strip`, so trimming on the raw row stops at the padding and re-opens `FI-24` with
-    the window anchored below the content. Measured before the fix: a two-row frame with two styled-blank
-    padding rows kept **4** rows where the plain equivalent keeps 2.
-    """
-    rows = text.splitlines()
-    while rows and not plain(rows[-1]).strip():
-        rows.pop()
-    return rows
-
-
-def _tail(text: str, count: int) -> list:
-    return _rendered(text)[-count:]
-
-
-def _trim(cells: list) -> list:
-    """`cells` with leading and trailing whitespace dropped, attributes kept alongside."""
-    start, end = 0, len(cells)
-    while start < end and cells[start][0].isspace():
-        start += 1
-    while end > start and cells[end - 1][0].isspace():
-        end -= 1
-    return cells[start:end]
-
-
-def _caret_content(line: str) -> Optional[str]:
-    """The text a caret line carries **that a human typed**, or None when the line has no caret.
-
-    Tolerates the box-drawing gutter a real pane draws around its input box, and — since `FI-208` — the
-    SGR attributes the capture now carries.
-
-    Both halves of the attribute handling are load-bearing and they fail in OPPOSITE directions:
-
-    * **Finding the caret at all.** The live `w22` box row is `\\x1b[39m❯\\xa0`: the caret is preceded by a
-      colour escape. Under the old text-only rule `line.strip()[0]` is `ESC`, so the caret is not found,
-      `unsubmitted` reports None, and `pane-guard` answers `0 safe` **for a box holding real typed text**.
-      Adding `-e` to the capture *without* this is therefore not a fix — it is a false-safe, and a worse
-      defect than the one it was meant to close. Measured before the change: `_caret_content` returned
-      `None` for that exact live row.
-    * **Deciding what the body IS.** `_undim` drops the DIM cells, so a body drawn entirely in SGR 2 —
-      Claude Code's ghost suggestion in an EMPTY box — collapses to `''` and a body with any normal-
-      intensity character keeps it. Attribute first, `_PLACEHOLDERS` only as the fallback for a terminal
-      that stripped attributes (`AC-6`): the suggestion is model-generated prose, so no list of texts
-      could ever have matched it.
-    """
-    cells = _trim(_cells(line))
-    while cells and cells[0][0] in _GUTTER:
-        cells = _trim(cells[1:])
-    for caret in _CARET:
-        if "".join(char for char, _ in cells[:len(caret)]) == caret:
-            body = _trim(cells[len(caret):])
-            while body and body[-1][0] in _GUTTER:
-                body = _trim(body[:-1])
-            return _undim(body)
-    return None
-
-
-def _is_placeholder(content: str) -> bool:
-    return any(pattern.search(content) for pattern in _PLACEHOLDERS)
-
-
 class SessionLayer:
     """Liveness, pane state and session control — the whole outside world in one object."""
 
-    def __init__(self, probes: Probes):
+    def __init__(self, probes: Probes, runtime="claude"):
         self.probes = probes
+        self.runtime = validate_runtime(runtime)
 
     @property
     def socket(self) -> str:
@@ -470,39 +237,28 @@ class SessionLayer:
         """
         return self.capture(name) or ""
 
-    def unsubmitted(self, pane_text: str) -> Optional[str]:
-        """Text sitting in the input box that was never submitted, or None.
+    def observe(self, name: str) -> PaneObservation:
+        frame = self.capture(name)
+        return PaneObservation("unknown") if frame is None else observe(self.runtime, frame)
 
-        The input box is identified STRUCTURALLY: it is the **last** caret among the rendered rows,
-        within `PROMPT_TAIL_LINES` of the last non-blank one. Both halves are corrections of measured
-        false answers (`FI-24`), and they fail in opposite directions:
+    def is_agent_process(self, name: str) -> bool:
+        return bool(name) and any(item.name == name and item.runtime == self.runtime
+                                  for item in self.live())
 
-        * **The last caret, not the first.** A real shell — and Claude's own transcript — leaves the
-          *submitted* prompt on screen and draws the new empty box BELOW it. `N4` submitted its
-          message and the predicate still reported `draft message`, read off the echo above the new
-          box, so `pane-guard` stayed at 10 and `status` at BLOCKED: an alarm that cannot be cleared
-          by doing the thing it asks for, for the sixth time in this build. The first caret in a
-          window is not the box; it is the most recent thing the box FINISHED with.
-        * **Anchored to the last non-blank row, not to a raw line index.** See `_rendered` — `M11b`'s
-          box sat 31 blank padding rows above the bottom of the capture and read as safe.
+    def send_literal(self, name: str, text: str):
+        if self.probes.send_literal is None:
+            raise BadInput('Literal delivery probe is unavailable')
+        self.probes.send_literal(name, text)
 
-        `N8` — a stale caret with output below it and an empty box at the bottom — is safe under this
-        rule because the empty box is the LAST caret, which is why it holds at 13 rows up and at 3.
-        Under the previous rule it held only because 13 > 8: an eight-line accident, not a property,
-        and the 3-row fixture is the one that says so.
+    def submit(self, name: str):
+        if self.probes.submit is None:
+            raise BadInput('Submission probe is unavailable')
+        self.probes.submit(name)
 
-        An empty box is not a swallowed submit: an empty caret answers None outright rather than
-        falling back to an earlier caret (falling back IS the `N4` defect), and the placeholder shapes
-        a pane renders when the box is empty are filtered out rather than reported.
-        """
-        box = None
-        for line in _tail(pane_text, PROMPT_TAIL_LINES):
-            content = _caret_content(line)
-            if content is not None:
-                box = content              # keep going: the LAST caret in the window is the box
-        if not box or _is_placeholder(box):
-            return None
-        return box
+    def unsubmitted(self, pane_text: str):
+        if self.runtime == "claude":
+            return claude_unsubmitted(pane_text)
+        return observe(self.runtime, pane_text).draft
 
     def is_claude_process(self, name: str) -> bool:
         """Whether a live CLAUDE PROCESS is attributed to this session.
@@ -520,21 +276,12 @@ class SessionLayer:
         """
         if not name:
             return False
-        return any(session.name == name for session in self.live())
+        return any(session.name == name and session.runtime == "claude" for session in self.live())
 
-    def busy(self, pane_text: str) -> bool:
-        """Whether the pane is still working. Anchored to the tail for the same reason as above — an
-        interrupt hint from an hour ago is not evidence of current work — and to the tail of the
-        RENDERED rows for the same reason as `unsubmitted`: padding that pushed an input box out of its
-        window pushes an interrupt hint out of this one too, and a mid-turn pane reading idle is the
-        direction that lands a send in the middle of a turn.
-
-        Matched on the VISIBLE characters (`plain`). The capture carries attributes now, and a marker is a
-        PHRASE: the moment tmux emits a colour change inside `esc to interrupt` — which it does whenever
-        the TUI styles part of a hint — a raw substring match stops finding it and a mid-turn pane reads
-        idle. Stripping first makes the match test what a human would read."""
-        window = plain("\n".join(_tail(pane_text, BUSY_TAIL_LINES))).lower()
-        return any(marker in window for marker in _BUSY_MARKERS)
+    def busy(self, pane_text: str):
+        if self.runtime == "claude":
+            return claude_busy(pane_text)
+        return observe(self.runtime, pane_text).state == "busy"
 
     def asking(self, pane_text: str) -> bool:
         """Whether the pane is blocked at an `AskUserQuestion` selection dialog, waiting on an operator's
@@ -581,31 +328,10 @@ class SessionLayer:
         """
         return bool(self.watchers(pane_text))
 
-    def watchers(self, pane_text: str) -> str:
-        """What the status line says is armed — `"1 shell, 1 monitor"` — or `""` when nothing is.
-
-        The TEXT and not just the boolean, because the claim RECORDS what it observed. `FI-255`'s harm was
-        that nothing distinguishable was written down at claim time: two opposite states produced one
-        byte-identical row, so the record could not answer the question afterwards. A stored `true` would
-        repeat that mistake one field along.
-        """
-        for row in reversed(_tail(pane_text, BUSY_TAIL_LINES)):
-            #: The status line is found by its SIGNATURE, not by its position, and both halves of that
-            #: matter. Position alone (`rows[-1]`) was the first implementation and it has a measured false
-            #: positive: anything drawn BELOW the status line — a tool-approval prompt, a notification —
-            #: displaces it, and a genuinely watched session is then refused. That direction is safe but it
-            #: lands on somebody who did nothing wrong.
-            #:
-            #: The marker and the signature must appear on the SAME row, which is what keeps this immune to
-            #: the contamination a bare window scan suffers: an agent writing *about* monitors puts the
-            #: word in the window, but not onto a row that is also drawing the interrupt hint.
-            plain_row = plain(row).lower()
-            if not any(marker in plain_row for marker in _STATUS_LINE_MARKERS):
-                continue
-            return ", ".join(match.group(0) for match in _WATCHER_MARKER.finditer(plain_row))
-        return ""
-
-    # --- control -----------------------------------------------------------------------------
+    def watchers(self, pane_text: str):
+        if self.runtime == "claude":
+            return claude_watchers(pane_text)
+        return observe(self.runtime, pane_text).watcher
 
     def start(self, name: str, cwd: Path, command: str) -> None:
         if not name:
@@ -630,7 +356,8 @@ class SessionLayer:
         return self.probes.pane_pid(name)
 
 
-def default_probes(process_name: str = "claude", tmux_socket=_FROM_ENV) -> Probes:
+def default_probes(process_name: str = "claude", tmux_socket=_FROM_ENV, *,
+                   both_runtimes=False, proc_root=Path("/proc")) -> Probes:
     """The real probes: `pgrep -x <process_name>`, `/proc/<pid>/{cwd,cmdline}` and `tmux`.
 
     One of the package's THREE subprocess seams — the others are `cli._default_runner` and
@@ -653,12 +380,12 @@ def default_probes(process_name: str = "claude", tmux_socket=_FROM_ENV) -> Probe
     #: a SERVER option: tmux requires it before the subcommand, not after.
     tmux = ["tmux"] + (["-L", tmux_socket] if tmux_socket else [])
 
-    def run(argv: list) -> "subprocess.CompletedProcess":
-        return subprocess.run(argv, capture_output=True, text=True)
+    def run(argv: list, **kwargs) -> "subprocess.CompletedProcess":
+        return subprocess.run(argv, capture_output=True, text=True, **kwargs)
 
     def proc_field(pid: int, field: str) -> str:
         try:
-            path = Path("/proc") / str(pid) / field
+            path = Path(proc_root) / str(pid) / field
             if field == "cwd":
                 return str(path.resolve())
             return path.read_text()
@@ -667,7 +394,7 @@ def default_probes(process_name: str = "claude", tmux_socket=_FROM_ENV) -> Probe
 
     def parent_of(pid: int) -> int:
         try:
-            stat = (Path("/proc") / str(pid) / "stat").read_text()
+            stat = (Path(proc_root) / str(pid) / "stat").read_text()
         except OSError:
             return 0
         # comm may contain spaces and parentheses; ppid is the field after the closing paren + state.
@@ -690,27 +417,40 @@ def default_probes(process_name: str = "claude", tmux_socket=_FROM_ENV) -> Probe
         return owners
 
     def list_processes() -> list:
-        done = run(["pgrep", "-x", process_name])
-        if done.returncode != 0:
-            return []
         owners = pane_owners()
         out = []
-        for token in done.stdout.split():
-            if not token.isdigit():
+        for runtime in (("claude", "codex") if both_runtimes else (process_name,)):
+            done = run(["pgrep", "-x", runtime])
+            if done.returncode == 1:
                 continue
-            pid = int(token)
-            cmdline = proc_field(pid, "cmdline")
-            if cmdline and process_name not in cmdline.replace("\0", " "):
-                continue
-            cwd = proc_field(pid, "cwd")
-            name, walker, hops = None, pid, 0
-            while walker > 1 and hops < 32:
-                if walker in owners:
-                    name = owners[walker]
-                    break
-                walker = parent_of(walker)
-                hops += 1
-            out.append(LiveSession(pid=pid, cwd=Path(cwd or "/"), name=name))
+            if done.returncode != 0:
+                raise FleetError(f"Cannot enumerate {runtime} processes: {done.stderr.strip()}")
+            for token in done.stdout.split():
+                if not token.isdigit():
+                    raise FleetError(f"Invalid process inventory for {runtime}")
+                pid = int(token)
+                proc = Path(proc_root) / str(pid)
+                try:
+                    comm = (proc / "comm").read_text().strip()
+                    executable = os.readlink(proc / "exe")
+                    argv = (proc / "cmdline").read_text().rstrip("\0").split("\0")
+                    cwd = os.readlink(proc / "cwd")
+                except FileNotFoundError:
+                    if not proc.exists():
+                        continue  # Exited while inventory was sampled.
+                    raise FleetError(f"Cannot inspect live {runtime} process {pid}")
+                except (OSError, UnicodeError) as exc:
+                    raise FleetError(f"Cannot inspect {runtime} process {pid}: {exc}") from exc
+                if not recognizes_process(runtime, comm, executable, argv):
+                    continue
+                name, walker, hops = None, pid, 0
+                while walker > 1 and hops < 32:
+                    if walker in owners:
+                        name = owners[walker]
+                        break
+                    walker = parent_of(walker)
+                    hops += 1
+                out.append(LiveSession(pid=pid, cwd=Path(cwd), name=name, runtime=runtime))
         return out
 
     # Every `-t` below is EXACT (`FI-23`). `new-session -s` is not a target and needs no marker: it
@@ -795,7 +535,25 @@ def default_probes(process_name: str = "claude", tmux_socket=_FROM_ENV) -> Probe
                 found.append(candidate)
         return found
 
+    def send_literal(name, text):
+        import uuid
+        buffer_name = 'fleet-' + uuid.uuid4().hex
+        loaded = run(tmux + ['load-buffer', '-b', buffer_name, '-'], input=text)
+        if loaded.returncode:
+            raise FleetError(f'Cannot load tmux message: {loaded.stderr.strip()}')
+        pasted = run(tmux + ['paste-buffer', '-p', '-d', '-b', buffer_name,
+                             '-t', exact_pane_target(name)])
+        if pasted.returncode:
+            run(tmux + ['delete-buffer', '-b', buffer_name])
+            raise FleetError(f'Cannot paste tmux message: {pasted.stderr.strip()}')
+
+    def submit(name):
+        done = run(tmux + ['send-keys', '-t', exact_pane_target(name), 'Enter'])
+        if done.returncode:
+            raise FleetError(f'Cannot submit tmux message: {done.stderr.strip()}')
+
     return Probes(list_processes=list_processes, socket=tmux_socket or "",
+                  send_literal=send_literal, submit=submit,
                   session_servers=session_servers,
                   capture_pane=capture_pane,
                   has_session=has_session,

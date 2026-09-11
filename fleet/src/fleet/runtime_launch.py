@@ -1,0 +1,127 @@
+"""Direct launch and exact-session recovery, with explicit non-secret settings."""
+import os
+import json
+from pathlib import Path
+import shlex
+import uuid
+
+from fleet.atomic import atomic_write
+from fleet.errors import BadInput, Refused
+from fleet.runtime import LaunchSettings, validate_runtime
+
+
+def launch_argv(settings: LaunchSettings, prompt: str, writable_dirs=()) -> list[str]:
+    validate_runtime(settings.runtime)
+    args = [settings.executable]
+    if settings.runtime == 'claude':
+        args += ['--permission-mode', 'auto']
+    else:
+        for directory in writable_dirs:
+            args += ['--add-dir', str(directory)]
+    return args + ['--', prompt]
+
+
+def resume_argv(settings: LaunchSettings, session_id: str, writable_dirs=()) -> list[str]:
+    validate_runtime(settings.runtime)
+    try:
+        if str(uuid.UUID(session_id)) != session_id.lower():
+            raise ValueError('not a canonical UUID')
+    except (ValueError, AttributeError, TypeError) as exc:
+        raise BadInput('Resume requires an explicit session UUID') from exc
+    if settings.runtime == 'claude':
+        return [settings.executable, '--permission-mode', 'auto', '--resume', session_id]
+    args = [settings.executable, 'resume']
+    for directory in writable_dirs:
+        args += ['--add-dir', str(directory)]
+    return args + ['--', session_id]
+
+
+def resolve_settings(runtime, slot, environ, which, runner) -> LaunchSettings:
+    validate_runtime(runtime)
+    override = environ.get('FLEET_' + runtime.upper() + '_BIN')
+    if runtime == 'claude':
+        override = override or environ.get('REAL_CLAUDE')
+    executable = which(override or runtime)
+    if not executable or not os.access(executable, os.X_OK):
+        raise BadInput(f'No executable for fleet runtime {runtime}')
+    # Claude adopts argv[0]'s basename as comm. Resolving its executable symlink
+    # changes comm to a version number and removes it from the process census.
+    executable = str(Path(executable).absolute())
+    # An old fleet PATH shim may recursively launch seeded workers. Reject its
+    # recognizable contract; never modify the server PATH to make dispatch work.
+    with open(executable, 'rb') as handle:
+        prefix = handle.read(16384)
+    if b'FLEET_SEED_DELIVERED' in prefix or b'seed-to-send.txt' in prefix:
+        raise BadInput(f'{executable} is an old fleet shim; select the real {runtime} executable')
+    if runtime == 'codex':
+        config = environ.get('CODEX_HOME') or str(Path(environ.get('HOME', str(Path.home()))) / '.codex')
+    else:
+        resolver = Path(__file__).resolve().parents[3] / 'scripts/claude-config-dir.sh'
+        code, output, error = runner(shlex.join([str(resolver), str(slot)]))
+        if code:
+            raise BadInput(f'Cannot resolve Claude owner for {slot}: {error.strip()}')
+        config = output.strip()
+    if not config or not Path(config).is_absolute() or not Path(config).is_dir():
+        raise BadInput(f'Required {runtime} configuration directory is unavailable: {config!r}')
+    return LaunchSettings(runtime, executable, str(Path(config).resolve()))
+
+
+def prepare(settings, record, seed_path, environ, *, session_id=None) -> Path:
+    child = Path(record.child_instant)
+    writable = tuple(str(Path(environ[key]).resolve()) for key in ('FLEET_HOME', 'FLEET_INSTANTS')
+                     if environ.get(key))
+    env = {key: environ[key] for key in ('FLEET_HOME', 'FLEET_INSTANTS', 'PATH') if environ.get(key)}
+    env.update(FLEET_ROOT=record.root, FLEET_TMUX_SOCKET=record.tmux_socket,
+               INSTANT=str(child), FLEET_INSTANT=str(child))
+    env['CODEX_HOME' if settings.runtime == 'codex' else 'CLAUDE_CONFIG_DIR'] = settings.config_dir
+    lines = ['#!/usr/bin/env bash', 'set -euo pipefail']
+    lines += ['export ' + key + '=' + shlex.quote(str(value)) for key, value in env.items()]
+    if settings.runtime == 'claude':
+        slug = Path(settings.config_dir).parent.name.removesuffix('_root')
+        token_file = Path(environ.get('HOME', str(Path.home()))) / ('.gh-token-' + slug)
+        lines += ['token_file=' + shlex.quote(str(token_file)),
+                  'if [ -r "$token_file" ]; then GH_TOKEN="$(cat -- "$token_file")"; export GH_TOKEN; fi']
+    if session_id is not None:
+        command = shlex.join(resume_argv(settings, session_id, writable))
+    else:
+        lines += ['seed_file=' + shlex.quote(str(seed_path)),
+                  '[ -s "$seed_file" ] || { echo "Missing or empty fleet seed" >&2; exit 2; }']
+        args = launch_argv(settings, '', writable)[:-1]
+        if settings.runtime == 'claude':
+            args[-1:-1] = ['--remote-control', record.tmux]
+        command = shlex.join(args) + ' "$(cat -- "$seed_file")"'
+    lines.append('exec ' + command)
+    path = child / '.fleet' / ('resume-worker.sh' if session_id else 'launch-worker.sh')
+    atomic_write(path, '\n'.join(lines) + '\n')
+    return path
+
+
+def session_transcript(settings, session_id, slot) -> Path:
+    resume_argv(settings, session_id)  # Validate before constructing a glob.
+    config = Path(settings.config_dir)
+    if settings.runtime == 'codex':
+        candidates = list((config / 'sessions').rglob('*-' + session_id + '.jsonl'))
+    else:
+        candidates = list((config / 'projects').rglob(session_id + '.jsonl'))
+    if len(candidates) != 1:
+        raise Refused(f'Expected one transcript for {session_id} under the recorded configuration; found {len(candidates)}')
+    path = candidates[0]
+    try:
+        with path.open() as handle:
+            for line in handle:
+                row = json.loads(line)
+                if settings.runtime == 'codex':
+                    if row.get('type') != 'session_meta':
+                        continue
+                    data = row.get('payload', {})
+                    identity = data.get('id')
+                else:
+                    data = row
+                    identity = row.get('sessionId')
+                if identity == session_id and data.get('cwd'):
+                    if Path(data['cwd']).resolve() != Path(slot).resolve():
+                        raise Refused('The requested transcript belongs to a different workspace')
+                    return path
+    except (OSError, ValueError, TypeError) as exc:
+        raise Refused(f'Cannot verify transcript {path}: {exc}') from exc
+    raise Refused(f'Transcript {path} has no matching session/workspace metadata')

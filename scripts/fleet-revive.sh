@@ -66,18 +66,16 @@ derive() {                # derive <todo-id> -> sets SESSION SOCKET INSTANT SLOT
   [ -n "$SLOT" ] || die "no lease in this store is held by $id, so its slot is unknown. \`fleet leases\` shows what is held; a released lease means the work is not revivable in place."
   [ -d "$SLOT" ] || die "slot $SLOT is not a directory"
 
-  #: The ROOT, by the same walk `fleet` and `fleet-env.sh` do — up from the slot to a `.fleet-root`
-  #: marker, stopping BELOW $HOME. The config directory is a property of the root, and getting it wrong
-  #: is the trap that makes `--resume` find nothing.
-  ROOT=""
-  local d="$SLOT"
-  while [ -n "$d" ] && [ "$d" != "/" ] && [ "$d" != "$HOME" ]; do
-    [ -f "$d/.fleet-root" ] && { ROOT="$d"; break; }
-    d="$(dirname "$d")"
-  done
-  [ -n "$ROOT" ] || die "no .fleet-root at or above $SLOT (searched up to \$HOME); this slot is not inside a fleet root"
-  CONFIG_DIR="${CLAUDE_CONFIG_DIR:-$ROOT/.claude}"
-  [ -d "$CONFIG_DIR" ] || die "$CONFIG_DIR is not a directory; \`--resume\` would read a config directory that does not exist"
+  RUNTIME="$(field "$status" evidence.runtime)"
+  RUNTIME="${RUNTIME:-claude}"
+  ROOT="${FLEET_ROOT:-}"
+  CONFIG_DIR="$(field "$status" evidence.runtime_config_dir)"
+  if [ -z "$CONFIG_DIR" ]; then
+    [ "$RUNTIME" = claude ] || die "record has no Codex configuration; use fleet revive for explicit resolution"
+    CONFIG_DIR="$("$HERE/claude-config-dir.sh" "$SLOT")" || die "cannot resolve legacy Claude configuration"
+  fi
+  [ -d "$CONFIG_DIR" ] || die "recorded configuration directory is unavailable: $CONFIG_DIR"
+
 }
 
 # --- subcommands --------------------------------------------------------------------------------------
@@ -91,6 +89,7 @@ cmd_plan() {
   note "instant"    "$INSTANT"
   note "root"       "$ROOT"
   note "config dir" "$CONFIG_DIR"
+  note "runtime"    "$RUNTIME"
   local alive="no"
   tmux -L "$SOCKET" has-session -t "=$SESSION" 2>/dev/null && alive="YES — nothing to revive"
   note "alive now"  "$alive"
@@ -98,61 +97,63 @@ cmd_plan() {
 
 cmd_transcripts() {
   derive "$1"
-  #: The slug claude uses for a project directory. Listed NEWEST FIRST but never chosen: a slot is
-  #: re-leased across efforts, so the newest transcript in it can belong to a previous occupant. Pick the
-  #: one whose mtime matches the death — that judgement is the operator's and the skill says why.
-  local slug; slug="$(printf '%s' "$SLOT" | tr '/_' '--')"
-  local dir="$CONFIG_DIR/projects/$slug"
-  [ -d "$dir" ] || die "no transcript directory at $dir — nothing was ever recorded for this slot under this config directory"
-  echo "transcripts for $SLOT"
-  echo "  (newest first; pick the one whose time matches the death, NOT simply the first)"
-  ls -lat --time-style=+'%Y-%m-%d %H:%M' "$dir"/*.jsonl 2>/dev/null \
-    | awk '{printf "  %-6s %s %s  %s\n", $5, $6, $7, $NF}' \
-    || die "no *.jsonl in $dir"
+  python3 - "$RUNTIME" "$CONFIG_DIR" "$SLOT" <<'PY_LIST'
+import json
+from pathlib import Path
+import sys
+runtime, config, slot = sys.argv[1:]
+base = Path(config) / ('sessions' if runtime == 'codex' else 'projects')
+for path in sorted(base.rglob('*.jsonl')):
+    try:
+        with path.open() as stream:
+            for line in stream:
+                row = json.loads(line)
+                if runtime == 'codex':
+                    if row.get('type') != 'session_meta':
+                        continue
+                    data = row.get('payload', {})
+                    identity = data.get('id')
+                else:
+                    data, identity = row, row.get('sessionId')
+                if identity and data.get('cwd'):
+                    if Path(data['cwd']).resolve() == Path(slot).resolve():
+                        print(identity, path, sep='\t')
+                    break
+    except (OSError, ValueError) as exc:
+        print(f'Cannot inspect {path}: {exc}', file=sys.stderr)
+        sys.exit(1)
+PY_LIST
+
 }
 
 cmd_launcher() {
   derive "$1"
-  local transcript="${2:-}"
-  [ -n "$transcript" ] || die "usage: launcher <todo-id> <transcript-id>   (\`transcripts\` lists them)"
-  local out="$INSTANT/.fleet/revive-launcher.sh"
-  mkdir -p "$INSTANT/.fleet"
-  #: NOT named `claude`, and not on any PATH. A shim called `claude` on the tmux server's PATH is the
-  #: stale-shim shape `dispatch`'s seed-integrity check exists to catch — one such shim once handed a
-  #: worker another instant's briefing byte for byte.
-  cat > "$out" <<LAUNCHER
-#!/usr/bin/env bash
-# Written by scripts/fleet-revive.sh for $1. Started by tmux through \`sh -c\`, which sees no shell
-# functions and inherits the SERVER's environment — so every value below is stated rather than assumed.
-export CLAUDE_CONFIG_DIR="$CONFIG_DIR"
-export FLEET_ROOT="$ROOT"
-export FLEET_INSTANTS="$(dirname "$INSTANT")"
-export FLEET_TMUX_SOCKET="$SOCKET"
-export INSTANT="$INSTANT"
-export PATH="$ROOT/fleet-releases/current/bin:\$PATH"
-cd "$SLOT" || exit 1
-exec claude --resume "$transcript"
-LAUNCHER
-  chmod +x "$out"
-  echo "$out"
+  local transcript="${2:-}" out="$INSTANT/.fleet/revive-launcher.sh" store
+  [ -n "$transcript" ] || die "usage: launcher <todo-id> <session-uuid>"
+  "$FLEET" revive --id "$1" --session-id "$transcript" --dry-run || return $?
+  store="$("$FLEET" runtime --porcelain | awk -F'\t' '$1=="home"{print $2}')"
+  [ -n "$store" ] || die "could not resolve fleet store"
+  python3 - "$out" "$(command -v "$FLEET")" "$1" "$transcript" "$store" "$(dirname "$INSTANT")" <<'PY_LAUNCH'
+from pathlib import Path
+import shlex
+import sys
+out, binary, record, session, store, instants = sys.argv[1:]
+path = Path(out)
+path.parent.mkdir(parents=True, exist_ok=True)
+argv = [binary, 'revive', '--id', record, '--session-id', session,
+        '--home', store, '--instants-dir', instants]
+path.write_text('#!/usr/bin/env bash\nset -euo pipefail\nexec ' + shlex.join(argv) + '\n')
+path.chmod(0o700)
+print(path)
+PY_LAUNCH
 }
 
 cmd_start() {
   derive "$1"
   local launcher="$INSTANT/.fleet/revive-launcher.sh"
-  [ -x "$launcher" ] || die "no launcher at $launcher — run \`launcher $1 <transcript-id>\` first"
-  if tmux -L "$SOCKET" has-session -t "=$SESSION" 2>/dev/null; then
-    die "$SESSION already exists on server $SOCKET; there is nothing to revive"
-  fi
-  tmux -L "$SOCKET" new-session -d -s "$SESSION" -c "$SLOT" "$launcher" \
-    || die "tmux refused to start $SESSION on server $SOCKET"
-  echo "started $SESSION on server $SOCKET"
-  #: The socket goes IN FRONT of `fleet_peek`: the helper reads it from the environment, which is this
-  #: shell's server and not necessarily the record's. Printing the bare form taught the wrong habit.
-  echo "  read it with:   FLEET_TMUX_SOCKET=$SOCKET fleet_peek $SESSION"
-  echo "                  (or: tmux -L $SOCKET capture-pane -p -t '=$SESSION:')"
-  echo "  check it with:  fleet pane-guard --id $1"
-  echo "  DO NOT send a key until you have CAPTURED the pane and seen what is on it."
+  [ -x "$launcher" ] || die "run launcher $1 <session-uuid> first"
+  # fleet acquires the admission and pane locks at actual start.
+  bash "$launcher"
 }
 
 case "${1:-}" in

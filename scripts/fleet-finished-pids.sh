@@ -76,7 +76,8 @@ for subject in $finished; do
   # needs no exclusion, because there is nothing left to arm.
   "$FLEET" status --id "$subject" --porcelain 2>/dev/null \
     | awk -F'\t' '$1=="kind"          { kind = $2 }
+                  $1=="evidence.runtime" { runtime = $2 }
                   $1=="evidence.pid" && $2 ~ /^[0-9]+$/ { pid = $2 }
-                  END { if (kind == "worker" && pid != "") print pid }'
+                  END { if (kind == "worker" && (runtime == "" || runtime == "claude") && pid != "") print pid }'
 done | sort -un
 exit 0

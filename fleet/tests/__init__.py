@@ -15,7 +15,9 @@ from unittest import mock
 #: Every variable `cli` reads. Cleared as a SET rather than one at a time: the failure this file exists
 #: to stop was one unlisted variable reaching a test, and a hand-maintained partial list is that failure
 #: waiting to happen again.
-FLEET_ENV = ("FLEET_HOME", "FLEET_INSTANTS", "FLEET_RELEASES", "FLEET_TMUX_SOCKET", "FLEET_ROOT")
+FLEET_ENV = ("FLEET_HOME", "FLEET_INSTANTS", "FLEET_RELEASES", "FLEET_TMUX_SOCKET", "FLEET_ROOT",
+             "FLEET_CODEX_BIN", "FLEET_CLAUDE_BIN", "CODEX_HOME", "CLAUDE_CONFIG_DIR",
+             "REAL_CLAUDE", "CLAUDE_OWNERS_MAP", "FLEET_SEED_CHECK_SECONDS")
 
 
 @contextlib.contextmanager

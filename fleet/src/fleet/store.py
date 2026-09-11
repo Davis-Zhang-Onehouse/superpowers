@@ -80,6 +80,9 @@ class Record:
     #: is NOT MEASURED — never "the default server" — because reading absence as an answer is `FI-417`,
     #: and the two records this was found on are exactly the ones that carry no value.
     tmux_socket: str = ""
+    runtime: str = "claude"
+    runtime_executable: str = ""
+    runtime_config_dir: str = ""
     launched_at: str | None = None
     gate_verdict: str | None = None
     harvested_at: str | None = None
@@ -91,6 +94,11 @@ class Record:
 
     @classmethod
     def from_json(cls, d: dict) -> "Record":
+        if not isinstance(d.get('runtime', 'claude'), str) or d.get('runtime', 'claude') not in ('claude', 'codex'):
+            raise BadInput(f"record {d.get('todo_id')!r} has unsupported runtime")
+        for key in ('runtime_executable', 'runtime_config_dir'):
+            if not isinstance(d.get(key, ''), str):
+                raise BadInput(f"record {d.get('todo_id')!r} has invalid {key}")
         version = d.get("schema_version")
         if version != SCHEMA_VERSION:
             raise BadInput(
