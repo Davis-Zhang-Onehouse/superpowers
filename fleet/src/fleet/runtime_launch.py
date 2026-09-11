@@ -74,7 +74,9 @@ def prepare(settings, record, seed_path, environ, *, session_id=None) -> Path:
     env.update(FLEET_ROOT=record.root, FLEET_TMUX_SOCKET=record.tmux_socket,
                INSTANT=str(child), FLEET_INSTANT=str(child))
     env['CODEX_HOME' if settings.runtime == 'codex' else 'CLAUDE_CONFIG_DIR'] = settings.config_dir
-    lines = ['#!/usr/bin/env bash', 'set -euo pipefail']
+    # Shell tools may set NO_COLOR for their own output. Native TUIs need SGR
+    # attributes so pane guards can distinguish suggested text from real drafts.
+    lines = ['#!/usr/bin/env bash', 'set -euo pipefail', 'unset NO_COLOR']
     lines += ['export ' + key + '=' + shlex.quote(str(value)) for key, value in env.items()]
     if settings.runtime == 'claude':
         slug = Path(settings.config_dir).parent.name.removesuffix('_root')
