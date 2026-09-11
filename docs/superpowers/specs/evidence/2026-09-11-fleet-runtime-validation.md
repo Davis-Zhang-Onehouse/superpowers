@@ -1,22 +1,23 @@
-# Runtime validation — work in progress
+# Runtime validation — results
 
-The implementation is in `feat/fleet-runtime-selection`, with runtime implementation `f2e6b32` and terminal-attribute fix `59531ec`.
-This report distinguishes infrastructure checks from actual model behavior. Validation is ongoing;
-the feature has not been promoted or deployed.
+The implementation is in `feat/fleet-runtime-selection`; its latest source revision is `b3516c7`.
+This report distinguishes infrastructure checks from actual model behavior and attributes earlier
+native runs to their measured source. The default integration batch and targeted E1 retest are complete.
+The feature has not been promoted or deployed; the remaining validation limits are stated below.
 
 ## Completed checks
 
-- Full fleet unit suite: 1,845 tests passed in 115.377 seconds, including the terminal-attribute and exited-process regressions.
+- Full fleet unit suite: 1,849 tests passed in 113.539 seconds, including denied-tmux preflight, executable pinning, terminal redraw, terminal-attribute and exited-process regressions.
 - New multiprocessing cases: dispatch versus switch, two senders versus close, lock release after
   process death, and independent roots/panes passed.
 - `run-runtime.sh --stubs`: Claude → Codex → Claude in one store, seed-byte attestation, early-switch
   refusal, WIP-cap refusal, Codex watcher refusal, review/abort/harvest and released leases passed.
   The stand-in is a real tmux process but is explicitly not a model.
-- Existing integration sections A and S passed their runnable checks, with their recorded isolation
-  skips. L/M/N was stopped before completion: the source was uncommitted, which violates M13's stated
-  precondition, and two nested self-tests exceeded the old 120-second timeout. The full unit suite
-  separately passed in 180.531 seconds during concurrent checks. The timeout now allows 600 seconds;
-  the assertions remain unchanged. This interrupted run is not a green integration result.
+- The default 17-runner batch completed with 250 passes, ten skips and one outdated E1 timeout
+  expectation. The corrected E1 passed its targeted twenty-iteration retest; the original batch exit 1
+  remains recorded. See [the batch and retest evidence](final-gate/INDEX.md).
+  Nested self-test timeouts were raised from 120 to 600 seconds after the full suite took 180.531
+  seconds under concurrent load; assertions remain unchanged. Earlier interrupted runs are not passes.
 - Hook JSON tests, Codex native-hook tests, marketplace/package tests, systematic-debugging's polluter
   test, fleet-view, fleet-env root derivation, and the Claude watchdog PID exclusion test passed.
 - The exact-session helper test passed with paths containing spaces. Its generated launcher delegates
@@ -100,7 +101,8 @@ Earlier test-runner attempts failed because its custom store was mistaken for a 
 it expected the wrong review/harvest exit codes, and it tried reading root-owned process cwd links.
 Those were corrected in the runner. One earlier Codex input observation was indeterminate and stopped
 without pressing Enter. Explicit-session recovery and a later fresh two-worker run both succeeded;
-the original transient frame was not retained, so its cause is not asserted here.
+the frame from that particular attempt was not retained, so its cause is not asserted here. A later
+occurrence was captured and addressed as described below.
 
 Codex's login shell selected the older main-checkout fleet binary on PATH. The workers identified the
 record-schema error and used the candidate checkout's absolute binary. Install/select the same updated
@@ -115,9 +117,53 @@ unreadable live processes. This refinement changes exit handling, not the comple
 The full integration attempt at `59531ec` passed runtime, W1, mutation/leak controls, A/B/C/D/Q/I7/RMW,
 then failed K9 because the manifest counted creation of the persistent admission-lock inode as leaked
 state. K9 now includes that inode in its baseline and still compares all contents/mtimes. The repeated
-K section passed. The full run is being repeated on the subsequent committed revision.
+K section passed. The final default batch completed against `b3516c7`; its sole E1 expectation mismatch was corrected
+and passed a targeted retest, as recorded below. Earlier interrupted attempts are not counted as passes.
 
 The evidence-path lint fails on historical/generated IT result tables that contain absolute paths;
 this is not a passing control. The older tracked RESULTS.tsv already contains such references.
 Quorum remains unavailable. Claude's existing external watcher-positive behavior was not re-evaluated;
 Codex's unsupported-watcher refusal and retained capacity were tested explicitly.
+
+## Executable pin and final live follow-up
+
+The standard §P Claude test passed but its worker report exposed the old-CLI PATH problem as a real
+first-command failure. Dispatch now exports `FLEET_BIN` for the matching CLI and includes it in every
+seed before delivery. The repeated P test confirmed the initial commands worked directly; its own
+missing `--instant` proposal example was also corrected. A final P run passed all four lifecycle checks
+and isolation, and directly exercised the wrong-lineage refusal before repositioning.
+
+A captured Codex draft showed exact input after an earlier indeterminate observation. Messaging now
+waits through temporary redraws within its existing deadline, still requiring the matching draft before
+Enter and performing no repeated insertion/submission. A fresh Codex two-worker lifecycle passed.
+All 67 source/test files in both final native measurements match `8f3e892`.
+
+See [the before/after reports and source verification](cli-path-pin/INDEX.md).
+
+## Model-issued coordinator dispatch
+
+A real Codex coordinator exposed a sandbox-denial leak: the first dispatch created a pending record,
+so its normally approved retry refused at capacity. Commit `b3516c7` fails inaccessible tmux discovery
+before records or leases are written. The repeated model-issued dispatch succeeded after one normal
+approval, with no pending peer before approval; the native peer replied and both sessions were
+subsequently aborted and harvested as test cleanup. See [the before/after transcripts](coordinator-dispatch/INDEX.md).
+
+## Final default integration result
+
+The complete 17-runner batch reported 250 PASS / 1 FAIL / 10 SKIP, exit 1, with all 67 source/test
+files unchanged and matching `b3516c7`. Its only failure was E1: all twenty ten-dispatch races created
+three workers on distinct leases, but the old assertion rejected the documented bounded admission-lock
+refusal returned to waiting callers. The revised test permits only that specifically named refusal,
+then requires an explicit retry to return no-capacity without changing records, leases or instants.
+The targeted E1 rerun passed all twenty iterations and its five isolation checks, exit 0. Product source
+and unit tests did not change. The full batch was not rerun after this test-only correction; its original
+nonzero result remains visible rather than being labeled green.
+
+The batch also ran the complete 1,849-test suite repeatedly, including clean/dirty source checks and
+with/without the self-test guard. The final clean variants passed in 115.701 and 115.474 seconds.
+The exported `b3516c7` unit check passed all 1,849 tests in 120.973 seconds.
+
+See [the full batch, targeted retest, source pins and lint result](final-gate/INDEX.md). The separate
+evidence-path lint remains nonpassing on 7 historical/generated result tables, including five
+pre-existing absolute-path rows in the tracked result table. No production state was changed by the
+isolated tests. Quorum and the external Claude watcher-positive check remain the limits described above.

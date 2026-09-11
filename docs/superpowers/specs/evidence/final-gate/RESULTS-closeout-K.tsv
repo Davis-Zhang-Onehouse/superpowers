@@ -1,0 +1,17 @@
+case	verdict	evidence	note
+ISOLATION-K-enter	PASS		live-INSTANTS baseline ESTABLISHED on this call (1 folder(s) across 1 live tree(s)), so the instants half is vacuous here and binds from the next call on. live stores byte-identical; live instants trees unchanged in 1 live tree(s); live tmux session set byte-identical (0 sessions, incl. 0 dt-); section work is on socket itfleet-K
+K1	PASS	it/K/out/kA/k1-dispatch.out	born 00000000-09112041-inflight-compact-foldTheStack
+K2	PASS	it/K/out/kA/k2-lint.out	COMPACTED.md reported 'info', exit 0, 0 violations
+K3a	PASS	it/K/out/kA/k3-dispatch.out	dispatch exit 4 naming 00000000-09112041-inflight-compact-foldTheStack
+K3b	PASS	it/K/out/kA/k3-resume.out	resume exit 0 under the freeze (FD-9: refusing a resume is its own outage)
+K4	PASS	it/K/out/kA/k4.out	names 00000000-09112041-inflight-compact-foldTheStack, exit 1, zero delta over store+pool+slots+instants (content+mtime)
+K5	PASS	it/K/out/kA/k5-dryrun.out	declared awaiting-ci: wip-cap says ROOM (allow: 0 of 1 active-dev slot(s) in use. examined 1 subject(s) of 00000000; 0 counted, 1 excluded (00000000-09112041-inflight-compact-foldTheStack (AWAITING-CI))), compaction-exclusive still REFUSES, real dispatch exit 4
+K7	PASS	it/K/out/kA/k7-lint-after.out	-complete-compact- without COMPACTED.md: 1 violation(s), exit 1; after writing it: clean exit 0; the freeze LIFTED (dispatch exit 0)
+K6	SKIP	it/K/out/K6-why-not-runnable.txt	no verb produces COMPACTED.md and no rule checks its CONTENT (layout.validate is presence-only), so no assertion here can fail if the four-part contract is violated
+K8	PASS	it/K/out/kB/lint.out	-abort-compact-: lint clean with NO COMPACTED.md row at all (optional, not even info); freeze lifted (dispatch exit 0). direct abort with the pane still live: exit 0
+K9	PASS	it/K/out/kC/dispatch.out	exit 4 naming the profile, BEFORE any side effect: 0 leases, 0 records, 0 instants, zero delta (content+mtime)
+K10	PASS	it/K/out/K10-per-iteration.tsv	n=20 x 2 concurrent compaction dispatches: exactly one compaction existed every time, the second refused by the first
+ISOLATION-K-live-tmux	PASS	it/K/out/live-tmux-after.txt	live tmux session set byte-identical
+ISOLATION-K-private-leak	PASS	/home/ubuntu/davis_root/superpowers/.worktrees/fleet-runtime/fleet/it/K/out/private-tmux-sessions.txt	none of the 23 session(s) this section created on socket itfleet-K appears on the default server (dt-* dispatch sessions: no name-shape rule can catch these, only the exact names)
+ISOLATION-K-claude-count	PASS		no claude was launched by this section (5 live before, 5 after) (A6)
+ISOLATION-K-leave	PASS		live stores byte-identical; live instants trees unchanged in 1 live tree(s); live tmux session set byte-identical (0 sessions, incl. 0 dt-); section work is on socket itfleet-K

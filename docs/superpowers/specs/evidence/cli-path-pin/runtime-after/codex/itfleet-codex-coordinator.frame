@@ -1,0 +1,35 @@
+[1m[38;5;2m•[0m[39m[49m [1mRan[0m[39m[49m [38;2;137;180;250mcat[38;2;205;214;244m /tmp/fleet-runtime-probe-8x14rwii/codex/config/plugins/cache/superpowers-dev/[39m
+[2m  │ [0m[38;2;205;214;244m[49msuperpowers/6.3.0+fleet.0.5.8/skills/using-superpowers/SKILL.md /tmp/[39m
+[2m  │ [0m[38;2;205;214;244m[49mfleet-runtime-probe-8x14rwii/codex/config/plugins/cache/superpowers-dev/[39m
+[2m  │ … +5 lines[0m[39m[49m
+[2m  └ ---[0m[39m[49m
+    [2mname: using-superpowers[0m[39m[49m
+[2m    … +646 lines (ctrl + t to view transcript)[0m[39m[49m
+    [2m- `superpowers:working-as-a-dispatched-instant` — you ARE a dispatched worker.[0m[39m[49m
+    [2m- `superpowers:dispatching-subagents` — parallel work inside ONE session; not instants.[0m[39m[49m
+
+[2m────────────────────────────────────────────────────────────────────────────────────────────────────
+
+• [0m[39m[49mUsing superpowers:coordinating-instants and superpowers:using-fleet to read the roadmap.
+
+[2m•[0m[39m[49m [1mExplored[0m[39m[49m
+[2m  └ [0m[38;5;6m[49mRead[39m SKILL.md (superpowers:coordinating-instants skill)
+
+[1m[38;5;2m•[0m[39m[49m [1mRan[0m[39m[49m [38;2;137;180;250mfleet[38;2;205;214;244m roadmap[38;2;147;153;178m --[38;2;235;160;172minstant[38;2;205;214;244m /home/ubuntu/davis_root/superpowers/.worktrees/fleet-runtime/fleet/it/
+[2m[39m  │ [0m[38;2;205;214;244m[49mRTL-codex-238803/attempt-QjBI71/instants/00000000-09112000-inflight-append-codexcoord[39m
+[2m  └ root /home/ubuntu/davis_root/superpowers/.worktrees/fleet-runtime/fleet/it/RTL-codex-238803/[0m[39m[49m
+    [2mattempt-QjBI71/store ($FLEET_HOME)[0m[39m[49m
+[2m    … +4 lines (ctrl + t to view transcript)[0m[39m[49m
+    [2msuperpowers/.worktrees/fleet-runtime/fleet/it/RTL-codex-238803/attempt-QjBI71/[0m[39m[49m
+    [2minstants/00000000-09112000-inflight-append-codexcoord/.fleet/roadmap.json  -  -[0m[39m[49m
+
+[2m────────────────────────────────────────────────────────────────────────────────────────────────────
+
+• [0m[39m[49mCOORDINATOR READY
+
+[2m────────────────────────────────────────────────────────────────────────────────────────────────────
+[0m[39m[49m
+
+[1m›[0m[39m[49m [2mAsk Codex to do anything[0m[39m[49m
+
+  [38;2;246;226;183mgpt-6-astra default fast[2m[39m · [0m[38;2;171;223;167m[49m~/davis_root/superpowers/.worktrees/fleet-runtime/fleet/it/RTL-codex-2…

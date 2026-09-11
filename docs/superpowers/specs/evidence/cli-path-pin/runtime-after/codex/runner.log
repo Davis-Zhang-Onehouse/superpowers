@@ -1,0 +1,27 @@
+PASS ISOLATION-RTL-codex-238803-enter live-INSTANTS baseline ESTABLISHED on this call (1 folder(s) across 1 live tree(s)), so the instants half is vacuous here and binds from the next call on. live stores byte-identical; live instants trees unchanged in 1 live tree(s); live tmux session set byte-identical (0 sessions, incl. 0 dt-); section work is on socket itfleet-RTL-codex-238803
+pinned 67 files
+Native codex test: /home/ubuntu/davis_root/superpowers/.worktrees/fleet-runtime/fleet/it/RTL-codex-238803/attempt-QjBI71
+Trust/permission dialogs require inspection: tmux -L itfleet-RTL-codex-238803 attach
+Waiting: native coordinator ready. Inspect trust/permission dialogs with tmux -L itfleet-RTL-codex-238803 attach
+PASS native coordinator ready
+Waiting: worker 1 ready. Inspect trust/permission dialogs with tmux -L itfleet-RTL-codex-238803 attach
+PASS worker 1 ready
+Waiting: worker 2 ready. Inspect trust/permission dialogs with tmux -L itfleet-RTL-codex-238803 attach
+PASS worker 2 ready
+Waiting: worker completed codexworker1-09112000. Inspect trust/permission dialogs with tmux -L itfleet-RTL-codex-238803 attach
+Waiting: worker completed codexworker1-09112000. Inspect trust/permission dialogs with tmux -L itfleet-RTL-codex-238803 attach
+PASS worker completed codexworker1-09112000
+PASS worker exited codexworker1-09112000
+Waiting: workspace process exited codexworker1-09112000. Inspect trust/permission dialogs with tmux -L itfleet-RTL-codex-238803 attach
+PASS workspace process exited codexworker1-09112000
+PASS worker completed codexworker2-09112001
+PASS worker exited codexworker2-09112001
+Waiting: workspace process exited codexworker2-09112001. Inspect trust/permission dialogs with tmux -L itfleet-RTL-codex-238803 attach
+PASS workspace process exited codexworker2-09112001
+PASS coordinator exited
+Waiting: coordinator process exited. Inspect trust/permission dialogs with tmux -L itfleet-RTL-codex-238803 attach
+PASS coordinator process exited
+PASS native coordinator, two workers, proposals, review, close, harvest, switch-back
+PASS RTL1 native coordinator and two workers completed proposal/review/harvest and switch-back
+PASS ISOLATION-RTL-codex-leave live stores byte-identical; live instants trees unchanged in 1 live tree(s); live tmux session set byte-identical (0 sessions, incl. 0 dt-); section work is on socket itfleet-RTL-codex-238803
+STABLE — every verdict in this run is attributable to one tree state

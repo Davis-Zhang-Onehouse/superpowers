@@ -39,9 +39,9 @@ Options:
   --keep-stage             Print and keep the temporary staging directory.
   -h, --help               Show this help.
 
-The archive is rootless: .codex-plugin/, assets/, skills/, README.md, LICENSE,
-and CODE_OF_CONDUCT.md sit at the archive root. Source-only repo files, hooks, tests,
-docs, and other harness manifests are intentionally not shipped.
+The archive is rootless: .codex-plugin/, assets/, skills/, hooks/, README.md, LICENSE,
+and CODE_OF_CONDUCT.md sit at the archive root. Only the Codex bootstrap hooks are
+shipped; source-only repo files, tests, docs, and other harness manifests are excluded.
 EOF
 }
 

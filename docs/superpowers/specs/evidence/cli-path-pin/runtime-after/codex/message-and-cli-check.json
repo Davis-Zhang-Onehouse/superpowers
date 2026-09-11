@@ -1,0 +1,14 @@
+[
+  {
+    "session": "01a0920f-4a1b-75c3-b8fd-1c90e0a1b86a",
+    "slot": "slot2",
+    "go_messages": 1,
+    "calls_naming_pinned_cli": 5
+  },
+  {
+    "session": "01a0920e-ffd0-73b1-b96b-7e87c979df66",
+    "slot": "slot1",
+    "go_messages": 1,
+    "calls_naming_pinned_cli": 6
+  }
+]
