@@ -64,6 +64,9 @@ class RuntimeCliTests(unittest.TestCase):
         record = self.f.store.all()[0]
         self.assertEqual(record.runtime, 'codex')
         self.assertEqual(record.runtime_executable, '/test/bin/codex')
+        seed = (Path(record.child_instant) / '.fleet/seed.txt').read_text()
+        self.assertIn('"$FLEET_BIN"', seed)
+        self.assertIn(str(Path(__file__).resolve().parents[2] / 'bin/fleet'), seed)
         launcher = Path(record.child_instant) / '.fleet/launch-worker.sh'
         self.assertIn(str(launcher), self.f.started[0][2])
         self.assertIn('/test/bin/codex', launcher.read_text())

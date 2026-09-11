@@ -3389,15 +3389,17 @@ class TestSeedExtra(CliCase):
         self.assertEqual(EXIT_BAD_INPUT, code, f"an empty seed addition was accepted: {out}")
         self.assertNotIn("is not a flag", err, f"vacuous: --seed-extra is undeclared: {err!r}")
 
-    def test_without_the_flag_the_seed_is_byte_for_byte_what_it_was(self):
+    def test_without_the_flag_profile_seed_is_unchanged_after_cli_header(self):
         fleet = self.loaded()
 
         code, out, err = self._dispatch(fleet)
 
         self.assertEqual(EXIT_OK, code, err)
         seed = self._seed_of(out).read_text()
-        self.assertEqual((fleet.profile("worker") / "seed.txt").read_text(), seed,
-                         "dispatch without --seed-extra no longer renders what it rendered before")
+        header, body = seed.split("\n\n", 1)
+        self.assertIn('"$FLEET_BIN"', header)
+        self.assertEqual((fleet.profile("worker") / "seed.txt").read_text(), body,
+                         "dispatch without --seed-extra changed the profile's seed body")
 
     def test_dry_run_reports_the_addition_and_writes_nothing(self):
         fleet = self.loaded()

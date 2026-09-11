@@ -32,6 +32,17 @@ class MessagingTests(unittest.TestCase):
                     send(Path(directory),layer,SimpleNamespace(tmux='worker'),'hello')
                 self.assertEqual(events,[])
 
+    def test_transient_redraw_is_observed_without_reinserting_or_resubmitting(self):
+        with tempfile.TemporaryDirectory() as directory:
+            layer, events = self.fixture([
+                PaneObservation('idle'), PaneObservation('unknown'),
+                PaneObservation('queued', 'hello'), PaneObservation('unknown'),
+                PaneObservation('busy')])
+            result = send(Path(directory), layer, SimpleNamespace(tmux='worker'), 'hello',
+                          sleep=lambda _: None)
+            self.assertEqual(result, 'submitted')
+            self.assertEqual(events, [('literal', 'hello'), ('submit', None)])
+
     def test_competing_draft_and_failed_capture_never_retry(self):
         for after in (PaneObservation('queued','someone else'),PaneObservation('unknown')):
             with tempfile.TemporaryDirectory() as directory:

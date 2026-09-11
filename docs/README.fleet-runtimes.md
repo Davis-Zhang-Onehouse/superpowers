@@ -12,7 +12,8 @@ fleet dispatch --profile "$PREPARED_PROFILE" --title "$TITLE" --seed-extra "$TAS
 ```
 
 Prepare the complete charter in the profile and any additional instructions in the task brief before
-dispatch. Dispatch renders and delivers the seed itself. Remove the old fleet `claude` PATH shim:
+dispatch. Dispatch renders and delivers the seed itself. It exports `FLEET_BIN` for the matching fleet CLI;
+the seed tells workers to use `"$FLEET_BIN"` so login-shell PATH changes cannot select an older binary. Remove the old fleet `claude` PATH shim:
 `scripts/fleet-dispatch-launcher.sh` now reports that dispatch owns this operation.
 
 When the run is finished, complete and harvest every worker, stop the coordinator, and switch from a
@@ -57,7 +58,8 @@ fleet revive --id "$ID" --session-id "$SESSION_UUID"
 ```
 
 `send` checks the record, lease, runtime and pane, observes an empty idle input, pastes once, waits for
-the matching draft, presses Enter once, and observes consumption. A refusal types nothing; an uncertain
+the matching draft, presses Enter once, and observes consumption. Temporary redraws are observed within
+the existing deadline; they never cause another insertion or submission. A refusal types nothing; an uncertain
 delivery requires inspection before retrying. It never clears another person's draft. Multiline input
 is supported for the captured layouts; large or unfamiliar editor layouts can be refused.
 

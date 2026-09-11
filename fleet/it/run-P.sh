@@ -14,12 +14,10 @@
 #     parameter precisely so this is possible, and running it on the default server would put the operator's
 #     coordinator at risk for no gain in coverage.
 #
-#  2. A wrapper named `claude` on PATH that execs the real binary with the seed as its initial prompt.
-#     `fleet dispatch` runs `sessions.start(tmux, lease.path, "claude")` — cwd and nothing else. NOTHING in
-#     `fleet` delivers the seed to the worker: `dispatch` writes `.fleet/seed.txt` into the INSTANT and starts
-#     the process in the SLOT. Seed delivery is the caller's job (which is what `pane-guard` exists to gate),
-#     and this section does it through argv rather than send-keys so the measurement does not depend on
-#     keystroke timing. `pane-guard` is asserted separately, against the live pane.
+#  2. Fleet dispatch owns seed delivery: it execs the real CLI with the complete rendered seed as one
+#     argument. This section selects the real Claude executable explicitly and supplies task scope
+#     before dispatch. No PATH shim or post-dispatch keystroke timing is involved; pane-guard is
+#     measured separately against the live worker.
 #
 # Run: bash fleet/it/run-P.sh          Budget: one real claude, one task, polled to completion.
 IT_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -97,7 +95,7 @@ instructions themselves — including anything that was wrong, missing, or that 
      fleet review --instant "$INSTANT" --scope all --verdict READY \
        --finding "P-1:Minor:applied:evidence/P-worker-report.md:the report is written:none"
 6. Report done, citing your report as evidence:
-     fleet propose --milestone p1 --status done --evidence evidence/P-worker-report.md
+     fleet propose --instant "$INSTANT" --milestone p1 --status done --evidence evidence/P-worker-report.md
 7. Rename yourself complete:  fleet complete --instant "$INSTANT"
 8. Then STOP. Do not harvest yourself, do not touch any other instant, do not commit or push anything, and
    do not leave this slot or your instant folder.

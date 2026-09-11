@@ -66,7 +66,8 @@ class LaunchTests(unittest.TestCase):
             seed = root / '.fleet/seed.txt'
             seed.parent.mkdir()
             seed.write_text('task')
-            inherited = dict(os.environ, NO_COLOR='1', TERM='screen', FLEET_TEST_SENTINEL='kept')
+            inherited = dict(os.environ, NO_COLOR='1', TERM='screen', FLEET_TEST_SENTINEL='kept',
+                             FLEET_BIN='/obsolete/fleet')
             for runtime in ('claude', 'codex'):
                 for session_id in (None, '12345678-1234-1234-1234-123456789abc'):
                     with self.subTest(runtime=runtime, session_id=session_id):
@@ -79,6 +80,8 @@ class LaunchTests(unittest.TestCase):
                         self.assertFalse('NO_COLOR' in environment)
                         self.assertEqual(environment['TERM'], 'screen')
                         self.assertEqual(environment['FLEET_TEST_SENTINEL'], 'kept')
+                        self.assertEqual(environment['FLEET_BIN'],
+                                         str(Path(__file__).resolve().parents[2] / 'bin/fleet'))
 
     def test_claude_launch_preserves_executable_alias_for_process_identity(self):
         with tempfile.TemporaryDirectory() as directory:

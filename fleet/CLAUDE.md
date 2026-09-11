@@ -107,6 +107,11 @@ It also reads the worker's own written report at
 worker to be blunt about what was wrong, missing or unfollowable, and that prose is the actual deliverable —
 the four PASS rows only say the mechanism held.
 
+**Runtime selection and seed delivery:** `fleet runtime --set claude|codex` selects the CLI between
+runs. Dispatch starts it in the leased slot with the complete rendered seed as one argument. It verifies
+delivery before recording launch readiness; no separate PATH shim is needed. See
+[the runtime guide](../docs/README.fleet-runtimes.md) for setup and exact-session recovery.
+
 ## Working with a fleet from a shell
 
 ```bash
@@ -153,7 +158,7 @@ without colour.
 
 ## Hard rules
 
-**Never start a `dt-` session on the default tmux server.** `fleet dispatch` launches a real `claude` in a
+**Never start a `dt-` session on the default tmux server.** `fleet dispatch` launches the selected native CLI in a
 session named `dt-<name>`, and a live coordinator may be attached to one. Export `FLEET_TMUX_SOCKET` first.
 Every runner does this through `it_section`; a bare shell does not.
 
@@ -302,9 +307,6 @@ and did not buy: it fixed WHICH sessions get armed, not what a monitor does once
 
 ## Known gaps
 
-- **Nothing delivers the seed to a worker.** `dispatch` writes `.fleet/seed.txt` into the *instant* and starts
-  the process in the *slot*, with no prompt. Delivery is the caller's job, gated by `pane-guard`. §P's launcher
-  does it; production has no verb for it.
 - **A dispatched worker's cwd is its leased slot, not its instant folder.** The seeds export `$INSTANT` for
   this reason. `--instant .` is wrong for a worker.
 - **The coordinator can type a wrong lineage SHA.** Nothing checks it is the *right* base for a milestone, only

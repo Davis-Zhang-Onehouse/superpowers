@@ -10,6 +10,17 @@ from fleet.errors import BadInput, Refused
 from fleet.runtime import LaunchSettings, validate_runtime
 
 
+def fleet_executable() -> str:
+    return str(Path(__file__).resolve().parents[3] / 'bin/fleet')
+
+
+def seed_cli_header() -> str:
+    return (f'Fleet CLI for this dispatch: {fleet_executable()}\n'
+            'The launcher exports this path as FLEET_BIN. For every fleet command in the task,\n'
+            'charter, or skills, invoke "$FLEET_BIN" instead of the bare fleet command.\n'
+            'Login shells may put an older fleet installation first on PATH.\n\n')
+
+
 def launch_argv(settings: LaunchSettings, prompt: str, writable_dirs=()) -> list[str]:
     validate_runtime(settings.runtime)
     args = [settings.executable]
@@ -72,7 +83,7 @@ def prepare(settings, record, seed_path, environ, *, session_id=None) -> Path:
                      if environ.get(key))
     env = {key: environ[key] for key in ('FLEET_HOME', 'FLEET_INSTANTS', 'PATH') if environ.get(key)}
     env.update(FLEET_ROOT=record.root, FLEET_TMUX_SOCKET=record.tmux_socket,
-               INSTANT=str(child), FLEET_INSTANT=str(child))
+               INSTANT=str(child), FLEET_INSTANT=str(child), FLEET_BIN=fleet_executable())
     env['CODEX_HOME' if settings.runtime == 'codex' else 'CLAUDE_CONFIG_DIR'] = settings.config_dir
     # Shell tools may set NO_COLOR for their own output. Native TUIs need SGR
     # attributes so pane guards can distinguish suggested text from real drafts.
