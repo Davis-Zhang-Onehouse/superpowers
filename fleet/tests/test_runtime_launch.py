@@ -57,6 +57,29 @@ class LaunchTests(unittest.TestCase):
         with self.assertRaises(BadInput):
             resolve_settings('codex',Path('/slot'),{},lambda x:None,lambda *a:None)
 
+    def test_launch_and_resume_preserve_terminal_attributes_for_guards(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            binary = root / 'agent'
+            binary.write_text('#!/usr/bin/env python3\nimport json,os\nprint(json.dumps(dict(os.environ)))\n')
+            binary.chmod(0o700)
+            seed = root / '.fleet/seed.txt'
+            seed.parent.mkdir()
+            seed.write_text('task')
+            inherited = dict(os.environ, NO_COLOR='1', TERM='screen', FLEET_TEST_SENTINEL='kept')
+            for runtime in ('claude', 'codex'):
+                for session_id in (None, '12345678-1234-1234-1234-123456789abc'):
+                    with self.subTest(runtime=runtime, session_id=session_id):
+                        record = rec(child_instant=str(root), runtime=runtime)
+                        settings = LaunchSettings(runtime, str(binary), str(root))
+                        launcher = prepare(settings, record, seed, inherited, session_id=session_id)
+                        done = subprocess.run(['bash', str(launcher)], env=inherited,
+                                              capture_output=True, text=True, check=True)
+                        environment = json.loads(done.stdout)
+                        self.assertFalse('NO_COLOR' in environment)
+                        self.assertEqual(environment['TERM'], 'screen')
+                        self.assertEqual(environment['FLEET_TEST_SENTINEL'], 'kept')
+
     def test_claude_launch_preserves_executable_alias_for_process_identity(self):
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)

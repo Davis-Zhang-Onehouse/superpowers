@@ -192,12 +192,13 @@ fi
 #        Both branches are driven with a real process each, named `claude` so `pgrep -x claude` matches it
 #        exactly as it would a dispatched worker: one started INSIDE the instant (what a section's dispatch
 #        produces, since a worker starts in the slot it leased) and one started OUTSIDE (what the operator's
-#        own session looks like). No real `claude` is launched — a copy of the stub carries the name.
+#        own session looks like). No real `claude` is launched — a copy of sleep carries the name.
+#        This tests cwd attribution independently of the dispatch seed-delivery stand-in.
 W9="$OUT/w1-9"; mkdir -p "$W9/inside"
-cp "$IT_ROOT/bin/claude" "$W9/claude"
-( cd "$W9/inside" && exec "$W9/claude" sleep-forever ) >/dev/null 2>&1 &
+cp "$(command -v sleep)" "$W9/claude"
+( cd "$W9/inside" && exec "$W9/claude" 100000 ) >/dev/null 2>&1 &
 inside_pid=$!
-( cd /tmp && exec "$W9/claude" sleep-forever ) >/dev/null 2>&1 &
+( cd /tmp && exec "$W9/claude" 100000 ) >/dev/null 2>&1 &
 outside_pid=$!
 sleep 0.5
 w9_ok=1
