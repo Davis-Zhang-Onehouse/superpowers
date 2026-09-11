@@ -52,24 +52,16 @@ if not plugin_manifest.exists():
 manifest = json.loads(plugin_manifest.read_text(encoding="utf-8"))
 assert_equal(manifest.get("name"), plugin.get("name"), "plugin manifest name")
 
-# Codex auto-discovers a plugin's hooks/hooks.json whenever the Codex manifest
-# has no `hooks` field: load_plugin_hooks falls back to a hardcoded
-# DEFAULT_HOOKS_CONFIG_FILE = "hooks/hooks.json" and registers it. That file is
-# the Claude Code SessionStart hook, it is tracked in this repo, and this
-# marketplace installs the whole repo root (source url "./"), so on Codex the
-# fallback re-registers the SessionStart hook and its install-time trust prompt.
-# Declaring an empty inline hooks object ({}) parses as an empty inline hook set
-# and suppresses the auto-discovery. An absent field, an empty array ([]), and
-# an empty inline list all collapse back to the fallback, so the value must be
-# exactly an empty object.
+# An explicit Codex hook avoids discovering the separate Claude hook and loads
+# the bootstrap through Codex's native lifecycle contract.
 hooks_config = repo_root / "hooks" / "hooks.json"
 if not hooks_config.exists():
     raise AssertionError("hooks/hooks.json must exist (Claude Code SessionStart hook)")
 
 assert_equal(
     manifest.get("hooks"),
-    {},
-    "Codex manifest must declare empty hooks {} to suppress hooks/hooks.json auto-discovery",
+    "./hooks/hooks-codex.json",
+    "Codex manifest selects its native bootstrap configuration",
 )
 
 print("Codex marketplace manifest looks good")

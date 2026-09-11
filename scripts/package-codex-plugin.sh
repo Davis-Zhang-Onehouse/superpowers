@@ -238,6 +238,8 @@ git -C "$REPO_ROOT" -c tar.umask=0022 archive --format=tar "$REF" -- \
   LICENSE \
   README.md \
   assets \
+  hooks/hooks-codex.json \
+  hooks/session-start-codex \
   skills \
   | tar -xpf - -C "$STAGE"
 

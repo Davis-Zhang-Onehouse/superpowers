@@ -1,0 +1,24 @@
+#!/usr/bin/env bash
+# Codex lifecycle bootstrap. Resolve from the installed script, never the project cwd.
+set -euo pipefail
+plugin_root="$(cd -P -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd)"
+exec python3 - "$plugin_root" <<'PY'
+import json
+from pathlib import Path
+import sys
+
+root = Path(sys.argv[1])
+try:
+    bootstrap = (root / "skills/using-superpowers/SKILL.md").read_text()
+except OSError as exc:
+    print(f"Superpowers bootstrap could not be loaded: {exc}", file=sys.stderr)
+    raise SystemExit(1)
+intro = (
+    "You have Superpowers. In Codex, load a named skill by reading its SKILL.md "
+    "with the available file tools. Follow the Codex platform reference and "
+    "your actual tool inventory.\n\n"
+)
+print(json.dumps({"hookSpecificOutput": {
+    "hookEventName": "SessionStart", "additionalContext": intro + bootstrap
+}}))
+PY
