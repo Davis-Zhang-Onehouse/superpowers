@@ -27,7 +27,10 @@ def send(home, sessions, record, text, *, timeout_s=10.0, clock=time.monotonic,
                 observation = sessions.observe(record.tmux)
                 if observation.state == 'queued' and observation.draft == text.strip():
                     break
-                if observation.state not in ('idle', 'queued') or clock() >= deadline:
+                # A TUI redraw can temporarily omit its prompt/footer. Observe
+                # through the existing deadline; never insert again or submit
+                # until the exact draft is visible.
+                if observation.state not in ('idle', 'queued', 'unknown') or clock() >= deadline:
                     raise FleetError('Delivery uncertain after insertion; inspect the draft before retrying')
                 sleep(0.02)
             sessions.submit(record.tmux)
@@ -36,7 +39,7 @@ def send(home, sessions, record, text, *, timeout_s=10.0, clock=time.monotonic,
                 observation = sessions.observe(record.tmux)
                 if observation.state in ('busy', 'idle') and not observation.draft:
                     return 'submitted'
-                if observation.state in ('unknown', 'dialog') or clock() >= deadline:
+                if observation.state == 'dialog' or clock() >= deadline:
                     raise FleetError('Delivery uncertain after Enter; inspect the worker before retrying')
                 sleep(0.02)
         except FleetError:
