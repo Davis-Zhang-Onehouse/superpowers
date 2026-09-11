@@ -32,6 +32,8 @@ import tempfile
 import unittest
 
 from fleet import EXIT_CODES
+from fleet.runtime import LaunchSettings
+from fleet import seedcheck
 from fleet import cli
 from tests import hermetic_environment
 from fleet.guards import Context, evaluate_all, guards_for
@@ -112,7 +114,9 @@ class Fleet:
                         capture_pane=lambda name: self.panes.get(name, ""),
                         has_session=lambda name: name in self.tmux_live,
                         start_session=lambda n, c, m: self.started.append(n),
-                        kill_session=lambda n: self.killed.append(n))
+                        kill_session=lambda n: self.killed.append(n),
+                        send_literal=lambda n,t: self.panes.update({n:'❯ ' + t.strip() + '\n? for shortcuts'}),
+                        submit=lambda n: self.panes.update({n:BUSY_PANE}))
         self.sessions = SessionLayer(probes)
         self.store = Store(self.home)
         self.pool = Pool(self.home, cwd_probe=lambda p: [], alive=self.sessions.alive)
@@ -125,6 +129,20 @@ class Fleet:
             self.pool.enroll(self.slots_dir / slot)
         self._n = 0
         self.paths, self.ids = {}, {}
+
+    def revival_fixture(self):
+        session_id = '12345678-1234-1234-1234-123456789abc'
+        if 'recoverable' not in self.ids:
+            self.worker('recoverable', slot='ws7', live=False)
+            record = self.store.read(self.ids['recoverable'])
+            record.runtime_executable = '/bin/true'
+            record.runtime_config_dir = str(self.tmp / 'resume-config')
+            self.store.write(record)
+            project = pathlib.Path(record.runtime_config_dir) / 'projects' / 'slot'
+            project.mkdir(parents=True)
+            (project / (session_id + '.jsonl')).write_text(json.dumps({
+                'sessionId': session_id, 'cwd': str(self.pool.slot_path('ws7'))}) + '\n')
+        return ['--id', self.ids['recoverable'], '--session-id', session_id]
 
     def profile(self, kind="worker") -> pathlib.Path:
         path = self.profiles_dir / kind
@@ -193,7 +211,10 @@ class Fleet:
 
     def context(self):
         def build(parsed, out, err):
-            return cli.Ctx(home=self.home, instants_dir=self.instants, store=self.store,
+            return cli.Ctx(launch_settings=lambda runtime, slot: LaunchSettings(runtime, '/test/bin/' + runtime, '/test/config'),
+                           seed_delivery=lambda name, text: seedcheck.Verdict(seedcheck.ATTESTED),
+                           resume_verified=lambda record, session_id: True,
+                           home=self.home, instants_dir=self.instants, store=self.store,
                            pool=self.pool, sessions=self.sessions, harvest=self.harvest,
                            out=out, err=err, dry_run=parsed.on("dry-run"),
                            porcelain=parsed.on("porcelain"), now=lambda: NOW,
@@ -344,6 +365,9 @@ class Loaded(unittest.TestCase):
             #: Read-only and argument-free. It shells out to `claude agents --json`; where that binary
             #: is absent the verb REFUSES (`PeersUnavailable` -> `EXIT_ATTENTION`) rather than
             #: reporting an empty peer set, which is the fail-closed behaviour it exists to provide.
+            "revive": fleet.revival_fixture(),
+            "send": ["--id", fleet.ids["closable"], "--message-file", str(was_sent)],
+            "runtime": ["--set", "claude"],
             "peers": [],
             "abort": ["--instant", str(fleet.paths["doomed"]),
                       "--reason", "the baseline moved under it"],

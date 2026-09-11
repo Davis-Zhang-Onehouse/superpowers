@@ -22,15 +22,15 @@ pane is out of reach, so there is nothing to revive. Revive `DEAD`. For `UNREACH
 the note; `fleet` follows the record on its own, and the remaining reason to care is that raw `tmux -L`
 commands do not.
 
-**No verb revives one.** `fleet resume` adopts an existing *record* and starts nothing. `fleet dispatch`
-is the only verb that starts a session, and it would mint a new instant, claim a fresh lease and
-re-render the seed — that is a replacement, not a resume, and it discards everything the worker learned.
-So revival is done by hand. This skill is the hand procedure and the four traps in it.
+Use `fleet revive --id <todo-id> --session-id <uuid>`. It retains the instant and lease, verifies the
+exact transcript's workspace, and starts the recorded runtime with its recorded configuration.
+`fleet resume` only adopts an existing instant; `fleet dispatch` creates a new one. Neither substitutes
+for revival. A failed resume retains the lease and never silently starts a fresh session.
 
 **Announce at start:** "I'm using the reviving-dead-panes skill to bring the worker's session back."
 
 **REQUIRED BACKGROUND:** superpowers:using-fleet owns the verb surface, the `pane-guard` contract and the
-send-keys rule this skill builds on.
+guarded messaging rule this skill builds on.
 
 ## Decide first: revive, or abandon?
 
@@ -59,60 +59,23 @@ read this section to know what it is doing and why each value is where it is:
 
 ```bash
 bash scripts/fleet-revive.sh plan        <todo-id>   # every derived value, before anything is created
-bash scripts/fleet-revive.sh transcripts <todo-id>   # candidates, newest first — see trap 2
+bash scripts/fleet-revive.sh transcripts <todo-id>   # verified workspace candidates — see trap 2
 bash scripts/fleet-revive.sh launcher    <todo-id> <transcript-id>
 bash scripts/fleet-revive.sh start       <todo-id>
 ```
 
-By hand, it is this — and **every value is read, never typed**:
+The direct form is:
 
 ```bash
-ID=<todo-id>                                          # from `fleet board`
-eval "$(fleet status --id "$ID" --porcelain | awk -F'\t' '
-  $1=="evidence.tmux"        {print "SESSION=" $2}
-  $1=="evidence.tmux_socket" {print "SOCKET="  $2}')"
-SLOT=$(fleet leases --porcelain | awk -F'\t' -v i="$ID" '$3==i{print $7}')
-tmux -L "$SOCKET" new-session -d -s "$SESSION" -c "$SLOT" /abs/path/to/launch.sh
+fleet revive --id "$ID" --session-id "$SESSION_ID" --dry-run
+fleet revive --id "$ID" --session-id "$SESSION_ID"
 ```
 
-**The socket comes from the record, and there is no default.** Every root has its own tmux server
-(`fleet-<name>`), so a hardcoded `fleet` is now wrong everywhere it is not a coincidence. `fleet leases`
-carries `slot, lease, todo_id, owner, tmux, claimed_at, path` — the session name and the slot, but **not
-the server**; only `fleet status --porcelain` has `evidence.tmux_socket`.
-
-An EMPTY `evidence.tmux_socket` means the record predates the field. That is *not measured*, not "the
-default server": find the session before you revive it, with
-`for s in $(ls /tmp/tmux-$(id -u)/); do tmux -L "$s" has-session -t "=$SESSION" 2>/dev/null && echo "$s"; done`.
-
-### 1. `new-session` runs the command through `/bin/sh -c`, so a `claude` shell FUNCTION is not there
-
-Where `claude` is a shell function that selects `CLAUDE_CONFIG_DIR` per user before exec'ing the real
-binary — the usual arrangement on a shared box — `sh -c` sees only the binary on `PATH`, with
-`CLAUDE_CONFIG_DIR` **unset**. The revived worker then reads a different config directory and
-`--resume <id>` finds nothing — while the transcript it should have read sits untouched in the
-directory it never opened.
-
-Put the exports in a launcher script and give `new-session` that script's absolute path:
-
-```bash
-#!/bin/bash
-export CLAUDE_CONFIG_DIR=/home/<user>_root/.claude   # the trap: sh -c will not derive this
-export FLEET_ROOT=/home/<user>_root                  # the marker supplies store, releases and server
-export FLEET_INSTANTS=/abs/path/to/the/effort/instants
-export FLEET_TMUX_SOCKET="$SOCKET"                   # the one the RECORD named, not a literal
-export INSTANT=/abs/path/to/the/instant
-export PATH="$FLEET_ROOT/fleet-releases/current/bin:$PATH"   # the server's PATH is not your PATH
-cd "$SLOT"
-exec claude --resume <transcript-id>
-```
-
-**`FLEET_ROOT`, not `FLEET_HOME`.** Naming the root lets its `.fleet-root` marker supply the store, the
-release area and the server, so one line moves if the root does. A literal `FLEET_HOME=$HOME/.fleet` is
-the pre-isolation path: it reaches another root's store, or a store that no longer exists.
-
-**Do not name that script `claude` and do not put it on the tmux server's PATH.** That is precisely the
-stale-shim shape `dispatch`'s seed-integrity check exists to catch — one such shim once handed a worker
-another instant's briefing byte for byte.
+The runtime must match the fleet selection. The original lease must still be held, and both the pane
+and workspace must be unoccupied. The launcher exports the record's socket, instant, store and resolved
+configuration explicitly. Legacy records without executable/configuration metadata use the workspace
+owner resolver and say so visibly. A failed configuration or transcript check does not guess a fallback.
+The helper's generated launcher calls `fleet revive` at actual start, so the same locks and checks apply.
 
 ### 2. Revive by transcript id, not `--continue`
 
@@ -120,10 +83,10 @@ A slot is re-leased across efforts, so the newest transcript in the slot's proje
 reliably the worker you are reviving. One slot here held three, from three occupants weeks apart.
 
 ```bash
-bash scripts/fleet-revive.sh transcripts <todo-id>    # slug, directory and ordering, derived
+bash scripts/fleet-revive.sh transcripts <todo-id>    # runtime and workspace candidates, derived
 ```
 
-Pick the id whose mtime matches the death, and pass it to `--resume` explicitly. The script lists and
+Inspect the candidate transcript and choose the UUID belonging to this worker; mtime alone is not identity. Pass it to `--session-id` explicitly. The script lists and
 refuses to choose, because that judgement is the only part of this step that is not mechanical.
 
 ### 3. A resumed session opens a MENU, and `pane-guard` reads that menu as unsubmitted text
@@ -136,9 +99,8 @@ showing that menu.
 `10` there does **not** mean a human left something in the box. Two consequences:
 
 - **Read the pane before you believe the code.** `10` is not evidence of a boot that finished.
-- **The `until … [ $? = 10 ]` submit gate from superpowers:using-fleet falls straight through here.** It
-  is designed to wait for text to land in a box; on a booting pane it passes immediately and the `Enter`
-  it releases lands on the menu, silently choosing whatever option was highlighted.
+- **Do not submit a menu as if it were a message draft.** `fleet send` requires an observed idle
+  input before insertion and the exact message afterward. Inspect and resolve a real resume menu first.
 
 ### 4. `capture-pane -t "=$SESSION"` fails on a session that EXISTS
 
@@ -151,7 +113,7 @@ A pane target parses as `session:window.pane`, and `=name` alone is not a sessio
 | `=dt-x2ansilinearstack` | rc 1 — **can't find pane** |
 | `=dt-x2ansilinearstack:` | rc 0 |
 
-`session.exact_pane_target` appends the colon for exactly this reason and the send-keys recipe inherits
+`session.exact_pane_target` appends the colon for exactly this reason and guarded messaging inherits
 it. An operator typing `capture-pane` by hand reaches for `=name`, gets *can't find pane*, and concludes
 the revival failed when it did not.
 
@@ -169,19 +131,8 @@ A record carries `tmux_socket`, and every verb resolves the session through it �
 healthy it is. This is the one trap that did not exist before per-root isolation, and it is created by the
 thing that fixed the others.
 
-Two ways out, and they are not equivalent:
-
-```bash
-# Preferred: revive where the record says.
-tmux -L "$SOCKET" new-session …          # $SOCKET from evidence.tmux_socket
-
-# Or move the record to where you revived it — `resume` rewrites the server from the shell it runs in.
-FLEET_TMUX_SOCKET=<new-server> fleet resume --instant "$INSTANT" --tmux "$SESSION"
-```
-
-Prefer the first. The second is correct but it edits the record, and a record that has been re-pointed no
-longer agrees with the launcher, the coordinator's runbook or anything else that wrote the old server
-down.
+`fleet revive` uses the recorded server automatically. Do not manually start a second pane on another
+server or re-point the record to hide a failed revival. Inspect `fleet status --id "$ID" --porcelain`.
 
 ## Never send a navigation key on spec
 
@@ -214,7 +165,7 @@ correct. Check the board first.
 
 | Mistake | Reality |
 |---|---|
-| `fleet resume` to bring a pane back | It adopts a record and starts no process. The pane is yours to start. |
+| `fleet resume` to bring a pane back | It adopts a record and starts no process. Use `fleet revive` to start the recorded session. |
 | `fleet dispatch` to "re-run" the worker | Mints a NEW instant and lease; abandons the transcript. That is replacement. |
 | Reading `DEAD` as "the work failed" | It means no session is alive. The folder, `.fleet/` and transcript are intact. |
 | Bare `claude` in `new-session` | `sh -c` misses the shell function, so `CLAUDE_CONFIG_DIR` is wrong and `--resume` finds nothing. |
@@ -236,6 +187,6 @@ correct. Check the board first.
 
 ## Related skills
 
-- superpowers:using-fleet — the verb surface, `pane-guard` codes, and the send-keys contract.
+- superpowers:using-fleet — the verb surface, `pane-guard` codes, and the guarded messaging contract.
 - superpowers:coordinating-instants — you are the coordinator deciding revive-vs-abort.
 - superpowers:working-as-a-dispatched-instant — you ARE the worker that just came back.

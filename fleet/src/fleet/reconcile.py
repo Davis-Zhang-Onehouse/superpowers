@@ -31,6 +31,7 @@ from pathlib import Path
 
 from fleet.identity import InstantName, resolve
 from fleet.store import Declarations
+from fleet.session import SessionLayer
 
 # --- the state vocabulary. This tuple is the whole domain; a value outside it is a bug. -----------
 PENDING_LAUNCH = "PENDING-LAUNCH"
@@ -174,7 +175,7 @@ def reconcile(store, pool, sessions, instants_dir: Path, idle_after_s: int = 180
     records = list(store.all())
     record_by_tmux = {}
     for rec in records:
-        if rec.tmux:
+        if rec.tmux and (not rec.tmux_socket or rec.tmux_socket == sessions.socket):
             record_by_tmux.setdefault(rec.tmux, rec)
 
     live_sessions = list(sessions.live())
@@ -229,6 +230,8 @@ def reconcile(store, pool, sessions, instants_dir: Path, idle_after_s: int = 180
 
 def _worker_subject(rec, pool, sessions, instants_dir: Path, idle_after_s: int, live: bool, sess,
                     live_sessions=()):
+    if sessions.runtime != rec.runtime:
+        sessions = SessionLayer(sessions.probes, rec.runtime)
     instant = _instant_on_disk(rec, instants_dir)
     folder_state = _folder_state(instant)
     declared = Declarations(instant) if instant is not None else None
@@ -249,8 +252,13 @@ def _worker_subject(rec, pool, sessions, instants_dir: Path, idle_after_s: int, 
     holder = _slot_holder_pid(rec, pool, live_sessions) if holds else None
     state, note = _state_of(rec, folder_state, live, phase, parked, pane, sessions,
                             instant, idle_after_s, holder)
+    if sess is not None and sess.runtime != rec.runtime:
+        state, note = BLOCKED, f'live runtime {sess.runtime} differs from record runtime {rec.runtime}'
     evidence = {
         "record": rec.todo_id,
+        "runtime": rec.runtime,
+        "runtime_executable": rec.runtime_executable,
+        "runtime_config_dir": rec.runtime_config_dir,
         "base": rec.base_instant,
         "instant": str(instant) if instant is not None else f"{rec.child_instant} (missing)",
         "folder_state": folder_state or "missing",
@@ -310,6 +318,8 @@ def _state_of(rec, folder_state, live, phase, parked, pane, sessions, instant, i
         # what "a renamed instant is followed" means. `abort` is terminal too: W2-21's fix reached
         # inflight and complete and never abort, and abort is legal.
         return COMPLETE, f"the instant folder is `-{folder_state}-`; the work is over"
+    if live and rec.runtime == 'codex' and sessions.observe(rec.tmux).state in ('unknown', 'dialog'):
+        return BLOCKED, 'Codex input is modal or unrecognized; inspect before acting'
     if not live:
         if slot_holder is not None:
             # Alive by the probe that does not need tmux. Say what is missing rather than inventing a
@@ -357,6 +367,8 @@ def _live_state(phase, parked, pane, sessions, instant, idle_after_s):
         # A pane holding text nobody submitted needs a keystroke: a modal, or a swallowed submit. Text
         # queued while the agent is still working is not blocked — it is queued, and it will be sent.
         state, note = BLOCKED, f"the pane is waiting on a human: {waiting!r}"
+    elif phase == PHASE_AWAITING_CI and sessions.runtime == 'codex':
+        state, note = BLOCKED, 'Codex has no verified CI wake mechanism; this worker still consumes capacity'
     elif phase == PHASE_AWAITING_CI:
         state, note = AWAITING_CI, _awaiting_note(pane, sessions, instant)
     elif busy:
@@ -443,6 +455,7 @@ def _unknown_subject(sess, slot: str):
     evidence = {
         "pid": str(sess.pid),
         "cwd": str(sess.cwd),
+        "runtime": sess.runtime,
         "session": sess.name or "",
         "record": "none",
         "slot": slot or "",

@@ -107,34 +107,11 @@ TASK
 
 # ---- the launcher: the real binary, the seed as its prompt ------------------------------------------
 mkdir -p "$OUT/bin"
-cat > "$OUT/bin/claude" <<WRAP
-#!/usr/bin/env bash
-# The REAL claude, launched with this instant's seed as its initial prompt. \`fleet dispatch\` passes cwd and
-# nothing else, so without this the worker starts with no instruction at all.
-#
-# It WAITS for the seed file, and that is not defensive padding — it is a real ordering problem. \`dispatch\`
-# renders the seed INTO the instant and starts this session as part of the same call, so the caller cannot
-# write the file until dispatch has returned, by which time this wrapper has already exec'd. The first run of
-# §P lost exactly that race: claude came up with an EMPTY prompt and sat idle at it until the poll gave up.
-for _ in \$(seq 1 120); do
-  [ -s "$OUT/seed-to-send.txt" ] && break
-  sleep 1
-done
-if [ ! -s "$OUT/seed-to-send.txt" ]; then
-  echo "no seed arrived within 120s — refusing to start with an empty prompt" >&2
-  exec sleep 300
+# Dispatch owns the complete seed and launches the real CLI directly.
+export FLEET_CLAUDE_BIN="$REAL_CLAUDE"
+if [ -n "${P_CLAUDE_OWNERS_MAP:-}" ]; then
+  export CLAUDE_OWNERS_MAP="$P_CLAUDE_OWNERS_MAP"
 fi
-exec "$REAL_CLAUDE" --permission-mode auto "\$(cat "$OUT/seed-to-send.txt")"
-WRAP
-chmod +x "$OUT/bin/claude"
-PATH="$OUT/bin:$PATH"; export PATH
-
-# ---- dispatch, for real ----------------------------------------------------------------------------
-# The seed is rendered by `dispatch` INTO the instant, so it cannot be read before the dispatch exists — and
-# the session starts inside that same call. The wrapper therefore WAITS for this file rather than assuming it
-# is already there (see the wrapper above; the first run of §P lost that race and the worker sat at an empty
-# prompt). Truncated here so a stale seed from a previous run cannot be picked up.
-: > "$OUT/seed-to-send.txt"
 fleet dispatch --profile "$PROFILE" --title "pRealWorker" --base 00000000 --optype append \
       --from "$COORD" --milestone p1 --lineage-base "alpha=$L" --lineage-mode code \
       --porcelain > "$OUT/P-dispatch.out" 2>&1
@@ -150,9 +127,6 @@ if [ "$P_RC" != 0 ] || [ -z "$W" ] || [ ! -d "$W" ]; then
   echo "§P done: IT_FAILED=1"; exit 1
 fi
 
-# The seed the worker must actually receive: what dispatch rendered, plus the instant path it needs.
-{ printf 'Your instant folder is %s and your leased slot is %s (your cwd).\n\n' "$W" "$SLOT"
-  cat "$W/.fleet/seed.txt"; } > "$OUT/seed-to-send.txt"
 mkdir -p "$W/evidence"
 
 # ---- P1: the pane is live and running the real claude ----------------------------------------------

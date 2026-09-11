@@ -60,6 +60,7 @@ import shlex
 import sys
 import tempfile
 from dataclasses import dataclass, field
+from contextlib import nullcontext
 from pathlib import Path
 from typing import Callable
 
@@ -91,6 +92,9 @@ from fleet.session import (TMUX_SOCKET_ENV, SessionLayer, default_probes,
                            plain as pane_plain)
 from fleet.store import Declarations, Record, Store
 from fleet.workspace import GOLDEN_FILE, Workspace, default_git
+from fleet.runtime import validate_runtime, observe
+from fleet.runtime_config import admission_lock, pane_lock, read_runtime, write_runtime
+from fleet import runtime_launch, messaging
 
 # --- the flag spec ---------------------------------------------------------------------------------
 
@@ -491,6 +495,10 @@ class Ctx:
     #: one; a test injects a fake so the wait costs no wall-clock time (FD-6: every outside-world edge
     #: arrives injected, and a sleep is as much an edge as a process or a tmux pane).
     sleep: Callable = None
+    launch_settings: object = None
+    launch_environment: object = None
+    seed_delivery: object = None
+    resume_verified: object = None
 
     def live_work_now(self) -> bool:
         if self.live_work is not None:
@@ -516,9 +524,9 @@ class Ctx:
         """
         socket = getattr(record, "tmux_socket", "") or ""
         here = getattr(self.sessions, "socket", "") or ""
-        if not socket or socket == here or self.layer_for is None:
-            return self.sessions
-        return self.layer_for(socket)
+        layer = (self.sessions if not socket or socket == here or self.layer_for is None
+                 else self.layer_for(socket))
+        return layer if layer.runtime == record.runtime else SessionLayer(layer.probes, record.runtime)
 
     def guard_ctx(self, parsed: Parsed, **over) -> guards.Context:
         return guards.Context(store=self.store, pool=self.pool, sessions=self.sessions,
@@ -756,13 +764,15 @@ def default_context(parsed: Parsed, out, err) -> Ctx:
         shown = home.parent if home.name == ".fleet" else home
         print(f"root {shown} ({home_source})", file=err)
 
-    sessions = SessionLayer(default_probes(tmux_socket=resolve_socket(parsed, environ, cwd)))
+    runtime, _ = read_runtime(home)
+    sessions = SessionLayer(default_probes(tmux_socket=resolve_socket(parsed, environ, cwd),
+                                          both_runtimes=True), runtime)
 
     #: `SI-59`. How a reader reaches ANOTHER tmux server — the one a record names. Built here beside the
     #: probes it mirrors, so there is one place that knows how a `SessionLayer` is made. `reconcile` calls
     #: it at most once per distinct foreign socket, and never for a record that names none.
     def layer_for(socket):
-        return SessionLayer(default_probes(tmux_socket=socket or None))
+        return SessionLayer(default_probes(tmux_socket=socket or None, both_runtimes=True), runtime)
 
     #: `G3` binds the pool to a root ONLY when this store IS that root's store. The same rule as the
     #: dispatch containment check, for the same reason and found by the same failure: a caller who named
@@ -776,10 +786,15 @@ def default_context(parsed: Parsed, out, err) -> Ctx:
     owning_root = (resolved_root.path if resolved_root is not None
                    and Path(home).resolve() == resolved_root.store.resolve() else None)
     pool = Pool(home, cwd_probe=_cwd_holders, alive=sessions.alive, fleet_root=owning_root)
+    import shutil
+    command_runner = _default_runner()
+    def resolve_launch(runtime, slot):
+        return runtime_launch.resolve_settings(runtime, slot, environ, shutil.which, command_runner)
+
     return Ctx(home=home, instants_dir=instants, store=Store(home), pool=pool, sessions=sessions,
                harvest=Harvest(home), out=out, err=err, dry_run=parsed.on("dry-run"),
                porcelain=parsed.on("porcelain"), git=default_git(), runner=_default_runner(),
-               layer_for=layer_for)
+               layer_for=layer_for, launch_settings=resolve_launch, launch_environment=environ)
 
 
 def _cwd_holders(path) -> list:
@@ -1077,14 +1092,20 @@ def _verify_seed_delivery(ctx: Ctx, tmux: str, rendered_seed: str, probes=None, 
     """
     import time
 
+    if ctx.seed_delivery is not None:
+        return ctx.seed_delivery(tmux, rendered_seed)
     pid = ctx.sessions.pane_pid(tmux)
     if not pid:
         return None
-    probes = probes or seedcheck.default_probes()
+    probes = probes or seedcheck.default_probes(ctx.sessions.runtime)
     sleep = sleep or time.sleep
     deadline = _seed_check_window()
     waited, step = 0.0, 0.25
-    verdict = seedcheck.check_session(tmux, pid, rendered_seed, probes)
+    record = next((record for record in ctx.store.all() if record.tmux == tmux and not record.harvested_at), None)
+    def check():
+        delivery = seedcheck.read_delivery(Path(record.child_instant)) if record else None
+        return seedcheck.check_session(tmux, pid, rendered_seed, probes, delivery=delivery)
+    verdict = check()
     #: Poll only while the answer is "nothing delivered yet". A launcher that execs takes a moment, and a
     #: check that read once would report NOT-DELIVERED for a delivery that was milliseconds away —
     #: reporting the dangerous case as the benign one. VERIFIED and FOREIGN are final the instant they are
@@ -1092,7 +1113,7 @@ def _verify_seed_delivery(ctx: Ctx, tmux: str, rendered_seed: str, probes=None, 
     while verdict.state == seedcheck.NOT_DELIVERED and waited < deadline:
         sleep(step)
         waited += step
-        verdict = seedcheck.check_session(tmux, pid, rendered_seed, probes)
+        verdict = check()
     return verdict
 
 
@@ -1190,14 +1211,15 @@ def _do_seed_check(ctx: Ctx, parsed: Parsed) -> int:
         if wanted and wanted not in record.todo_id:
             continue
         session = record.tmux
-        if not ctx.sessions.alive(session):
+        layer = ctx.sessions_for(record)
+        if not layer.alive(session):
             continue
-        seed_file = Path(record.child_instant) / ".fleet" / "seed.txt"
+        seed_file = _child_of(ctx, record) / ".fleet" / "seed.txt"
         if not seed_file.is_file():
             unreadable.append((session, f"no rendered seed at {seed_file} to compare against. This is NOT "
                                         f"a pass — it is a check that could not run"))
             continue
-        pid = ctx.sessions.pane_pid(session)
+        pid = layer.pane_pid(session)
         if not pid:
             unreadable.append((session, "the pane pid could not be read, so nothing about this session's "
                                         "delivery was observed. This is NOT a pass"))
@@ -1213,7 +1235,7 @@ def _do_seed_check(ctx: Ctx, parsed: Parsed) -> int:
                                         f"{_one_line(exc)}"))
             continue
         verdict = seedcheck.check_session(session, pid, seed_file.read_text(),
-                                          seedcheck.default_probes(), delivery=delivery)
+                                          seedcheck.default_probes(record.runtime), delivery=delivery)
         verdicts.append(verdict)
         #: Only FOREIGN is a VIOLATION. NOT-DELIVERED is reported at INFO because `fleet` renders the seed
         #: and does not deliver it, so it is the ordinary appearance of a send-keys delivery — but its
@@ -1295,6 +1317,149 @@ def _read_seed_extra(path) -> str:
             f"--seed-extra {path!r} is empty (or only whitespace). Passing the flag says an addition was "
             f"meant; appending nothing would leave the dispatch reading as though it carried one.")
     return text.strip()
+
+
+def runtime_blockers(ctx: Ctx) -> list[str]:
+    blockers = [f"unharvested record {record.todo_id}" for record in ctx.store.all()
+                if not record.harvested_at]
+    paths = [Path(ctx.instants_dir).resolve()]
+    if ctx.home.name == '.fleet':
+        paths.append(ctx.home.parent.resolve())
+    for slot in ctx.pool.slots():
+        paths.append(ctx.pool.slot_path(slot).resolve())
+        if ctx.pool.lease(slot) is not None:
+            blockers.append(f"held lease {slot}")
+    blockers.extend(f"interrupted claim {item}" for item in ctx.pool.interrupted_claims(min_age_s=0))
+    for session in ctx.sessions.live():
+        cwd = session.cwd.resolve()
+        if any(cwd == path or path in cwd.parents for path in paths):
+            blockers.append(f"live {session.runtime} process {session.pid} at {cwd}")
+    return blockers
+
+
+def _do_runtime(ctx: Ctx, parsed: Parsed) -> int:
+    current, source = read_runtime(ctx.home)
+    requested = parsed.get('set')
+    if requested is not None:
+        requested = validate_runtime(requested)
+    if requested is not None and requested != current:
+        def check_and_write():
+            nonlocal current, source
+            current, source = read_runtime(ctx.home)
+            if current == requested:
+                return
+            blockers = runtime_blockers(ctx)
+            if blockers:
+                raise Refused('Runtime switch requires a completed fleet: ' + '; '.join(blockers))
+            if not ctx.dry_run:
+                write_runtime(ctx.home, requested)
+                current, source = read_runtime(ctx.home)
+        if ctx.dry_run:
+            check_and_write()
+        else:
+            with admission_lock(ctx.home):
+                check_and_write()
+    rows = [('runtime', current), ('source', source), ('home', str(ctx.home))]
+    if ctx.dry_run and requested:
+        rows.append(('would_set', requested))
+    _emit(ctx, 'runtime', rows)
+    return EXIT_OK
+
+
+def _message_target(ctx, parsed):
+    record = _record(ctx, parsed)
+    if record.closed_at or record.harvested_at:
+        raise Refused('Cannot message a closed or harvested worker')
+    lease = ctx.pool.lease(record.slot) if record.slot else None
+    if lease is None or lease.todo_id != record.todo_id:
+        raise Refused('Worker no longer owns its recorded lease')
+    layer = ctx.sessions_for(record)
+    matches = [item for item in layer.live() if item.name == record.tmux]
+    roots = (Path(lease.path).resolve(), _child_of(ctx, record).resolve())
+    if (not matches or any(item.runtime != record.runtime or
+                           not any(item.cwd.resolve() == root or root in item.cwd.resolve().parents
+                                   for root in roots) for item in matches)):
+        raise Refused('No matching live runtime process owns the recorded pane')
+    return record, layer
+
+
+def _do_send(ctx: Ctx, parsed: Parsed) -> int:
+    text = Path(parsed.get('message-file')).read_text()
+    messaging.validate_message(text)
+    record, layer = _message_target(ctx, parsed)
+    if ctx.dry_run:
+        if layer.observe(record.tmux).state != 'idle':
+            raise Refused('Message not sent: the worker input is not observed idle')
+        result = 'would-submit'
+    else:
+        result = messaging.send(ctx.home, layer, record, text,
+                                validate=lambda: _message_target(ctx, parsed))
+    _emit(ctx, 'send', [('todo_id', record.todo_id), ('delivery', result)])
+    return EXIT_OK
+
+
+def _verify_resume(ctx, layer, record, session_id):
+    if ctx.resume_verified is not None:
+        return ctx.resume_verified(record, session_id)
+    import time
+    probes = seedcheck.default_probes(record.runtime)
+    deadline = time.monotonic() + _seed_check_window()
+    while True:
+        pid = layer.pane_pid(record.tmux)
+        if pid:
+            worker_pid, argv = seedcheck.delivered_argv(pid, probes, depth=3)
+            if session_id in argv and seedcheck.is_worker(worker_pid, probes):
+                return True
+        if time.monotonic() >= deadline:
+            return False
+        time.sleep(0.05)
+
+
+def _do_revive(ctx: Ctx, parsed: Parsed) -> int:
+    record = _record(ctx, parsed)
+    if record.closed_at or record.harvested_at:
+        raise Refused('A closed or harvested record cannot be revived')
+    current, _ = read_runtime(ctx.home)
+    if current != record.runtime:
+        raise Refused('The recorded runtime differs from the fleet selection')
+    lease = ctx.pool.lease(record.slot) if record.slot else None
+    if lease is None or lease.todo_id != record.todo_id:
+        raise Refused('Revival requires the original lease to remain held')
+    layer = ctx.sessions_for(record)
+    if layer.alive(record.tmux):
+        raise Refused('The recorded pane is occupied; inspect it before revival')
+    if any(Path(item.cwd).resolve() == Path(lease.path).resolve() or
+           Path(lease.path).resolve() in Path(item.cwd).resolve().parents for item in layer.live()):
+        raise Refused('A live agent still holds this workspace; inspect it before revival')
+    if not record.runtime_executable or not record.runtime_config_dir:
+        if ctx.launch_settings is None:
+            raise BadInput('Legacy recovery requires an explicit launch configuration resolver')
+        settings = ctx.launch_settings(record.runtime, lease.path)
+        print('Legacy record: resolving executable and configuration from the owning workspace', file=ctx.err)
+    else:
+        from fleet.runtime import LaunchSettings
+        settings = LaunchSettings(record.runtime, record.runtime_executable, record.runtime_config_dir)
+    if not os.access(settings.executable, os.X_OK):
+        raise Refused('Recorded runtime executable is unavailable')
+    session_id = parsed.get('session-id')
+    transcript = runtime_launch.session_transcript(settings, session_id, lease.path)
+    child = _child_of(ctx, record)
+    if ctx.dry_run:
+        _emit(ctx, 'revive', [('todo_id', record.todo_id), ('session_id', session_id),
+                            ('transcript', str(transcript)), ('dry-run', 'nothing started')])
+        return EXIT_OK
+    record.child_instant = str(child)
+    launcher = runtime_launch.prepare(settings, record, child / '.fleet/seed.txt',
+                                     dict(ctx.launch_environment or {}, FLEET_HOME=str(ctx.home),
+                                          FLEET_INSTANTS=str(ctx.instants_dir)), session_id=session_id)
+    layer.start(record.tmux, lease.path, shlex.join(['bash', str(launcher)]))
+    if not _verify_resume(ctx, layer, record, session_id):
+        raise FleetError('Resume not verified; the lease is retained. Inspect the pane before retrying')
+    record.runtime_executable, record.runtime_config_dir = settings.executable, settings.config_dir
+    record.launched_at = ctx.now()
+    ctx.store.write(record)
+    _emit(ctx, 'revive', [('todo_id', record.todo_id), ('session_id', session_id), ('runtime', record.runtime)])
+    return EXIT_OK
 
 
 def _do_dispatch(ctx: Ctx, parsed: Parsed) -> int:
@@ -1408,7 +1573,16 @@ def _do_dispatch(ctx: Ctx, parsed: Parsed) -> int:
                         "INSTANT": "(dry-run)", "SLOT": "(dry-run)", "TODO_ID": "(dry-run)",
                         "PATH": "(dry-run)"})
 
-        verdicts = guards.evaluate_all(gctx, "dispatch")
+    verdicts = guards.evaluate_all(gctx, "dispatch")
+
+    settings = None
+    if all(verdict.allowed for verdict in verdicts):
+        if ctx.launch_settings is None:
+            raise BadInput('Dispatch needs an injected runtime launch resolver')
+        candidate_slot = parsed.get('slot') or ctx.pool.free_slots()[0]
+        settings = ctx.launch_settings(ctx.sessions.runtime, ctx.pool.slot_path(candidate_slot))
+
+    if ctx.dry_run:
         rows = [("dry-run", "every gate evaluated; nothing was claimed, created or started")]
         rows += [("coordinator", str(coordinator) if coordinator else
                   "(none — the child will have no origin.json and `propose` will stay LOCAL)"),
@@ -1424,6 +1598,7 @@ def _do_dispatch(ctx: Ctx, parsed: Parsed) -> int:
         return _guard_code(ctx, verdicts, gctx)
 
     guards.enforce_all(gctx, "dispatch")
+    assert settings is not None
 
     name = InstantName.new(base=base, now=_stamp(ctx.now()), optype=optype, title=title)
     child = ctx.instants_dir / name.format()
@@ -1463,6 +1638,7 @@ def _do_dispatch(ctx: Ctx, parsed: Parsed) -> int:
 
     workspace = Workspace(ctx.home, git=ctx.git)
     claimed_milestone = None
+    started = False
     lease = ctx.pool.claim(todo_id=todo_id, tmux=tmux, base_instant=base,
                            child_instant=str(child), slot=parsed.get("slot"))
     try:
@@ -1474,6 +1650,8 @@ def _do_dispatch(ctx: Ctx, parsed: Parsed) -> int:
         ctx.pool.release(lease.slot, force=True)
         raise
     try:
+        if lease.slot != candidate_slot:
+            settings = ctx.launch_settings(ctx.sessions.runtime, lease.path)
         #: `F3`/`I-24c`. Extends the SAME shared context the dry-run path above validated, with the four
         #: keys only a won claim can supply — see `_dispatch_render_context` for why this may not be a
         #: second, hand-written dict.
@@ -1492,6 +1670,8 @@ def _do_dispatch(ctx: Ctx, parsed: Parsed) -> int:
                                 f"--- dispatch-specific briefing, from {parsed.get('seed-extra')} ---\n\n"
                                 f"{seed_extra}\n")
         record = Record(todo_id=todo_id, child_instant=str(child), base_instant=base,
+                        runtime=settings.runtime, runtime_executable=settings.executable,
+                        runtime_config_dir=settings.config_dir,
                         slot=lease.slot, tmux=tmux, profile=str(profile.path),
                         golden=str(lease.path), lineage_base=parsed.get("lineage-base") or "",
                         lineage_mode=lineage_mode, title=title,
@@ -1527,44 +1707,17 @@ def _do_dispatch(ctx: Ctx, parsed: Parsed) -> int:
         # The registry's WRITER: the base is registered and THEN the record is written, one call, in that
         # order. A record whose effort nobody watches is `OBS-68` — invisible because unlisted.
         source = ctx.harvest.record_dispatch(ctx.store, record)
-        ctx.sessions.start(tmux, lease.path, "claude")
-        #: POST-LAUNCH SEED INTEGRITY — the control this class was missing.
-        #:
-        #: `dispatch` renders the seed above and starts the worker with the bare string "claude". tmux
-        #: resolves that against the SERVER's PATH, not this process's, so WHAT gets started is decided by
-        #: an environment no dispatcher controls. On 2026-08-07 that handed a fleet-infra worker the
-        #: v2stack COORDINATOR's briefing, byte for byte, and every gate passed because nothing compared
-        #: the seed rendered here to the seed actually delivered. `FI-78` checks the seed FILE; it has
-        #: never checked what was DELIVERED.
-        #:
-        #: A FOREIGN briefing REFUSES: the raise falls into the rollback path below, which gives the lease
-        #: back and disowns the milestone. The session is killed FIRST and deliberately — a worker holding
-        #: another instant's briefing acts on it, and the one instance of this we have was harmless only
-        #: because that worker happened to notice by itself.
-        #:
-        #: NOT-DELIVERED does NOT refuse, and that asymmetry is the point. `fleet` delivers no seed, so
-        #: every caller that delivers by send-keys legitimately shows nothing in argv at this moment, and
-        #: refusing there would break every dispatch on the box to fix one. It is reported instead —
-        #: loudly, and never as a pass (`seedcheck.Verdict.ok` is VERIFIED only).
+        launch_env = dict(ctx.launch_environment or {}, FLEET_HOME=str(ctx.home),
+                          FLEET_INSTANTS=str(ctx.instants_dir))
+        launcher = runtime_launch.prepare(settings, record, seed, launch_env)
+        ctx.sessions.start(tmux, lease.path, shlex.join(['bash', str(launcher)]))
+        started = True
         seed_verdict = _verify_seed_delivery(ctx, tmux, rendered["seed"])
-        if seed_verdict is not None and seed_verdict.state == seedcheck.FOREIGN:
-            ctx.sessions.kill(tmux)
-            raise Refused(
-                f"SEED MISDELIVERY — {tmux} was started with a briefing that is NOT the one rendered for "
-                f"{child}. {seed_verdict.detail}. The session has been KILLED and this dispatch is "
-                f"rolled back, because a worker holding another instant's briefing acts on it. The usual "
-                f"cause is a stale `claude` shim first on the TMUX SERVER's PATH holding a hardcoded seed "
-                f"file: read it with `tmux -L <socket> show-environment -g | grep '^PATH='`, then "
-                f"regenerate or remove that launcher and dispatch again.",
-                clears_when="the launcher that delivers the seed is corrected, or removed from the tmux "
-                            "server's PATH",
-                clears_who="whoever owns the tmux server that dispatch starts sessions on")
-        if seed_verdict is not None and seed_verdict.state == seedcheck.NOT_DELIVERED:
-            print(f"WARNING: seed delivery to {tmux} could NOT be verified. {seed_verdict.detail}. "
-                  f"`fleet` renders the seed but does not deliver it, so this is also what a correct "
-                  f"send-keys delivery looks like from here — it is not evidence that anything is wrong, "
-                  f"and it is not evidence that anything is right. Re-check once delivery has settled: "
-                  f"`fleet seed-check --id {todo_id}`.", file=ctx.err)
+        if seed_verdict is None or not seed_verdict.ok:
+            record.gate_verdict = 'seed delivery needs attention'
+            ctx.store.write(record)
+            raise FleetError(f"Seed delivery to {tmux} is not verified: "
+                             + (seed_verdict.detail if seed_verdict else 'pane process unobservable'))
         record.launched_at = ctx.now()
         ctx.store.write(record)
         # The claim is the LAST mutation, so every earlier failure leaves the roadmap untouched and there is
@@ -1573,8 +1726,18 @@ def _do_dispatch(ctx: Ctx, parsed: Parsed) -> int:
         if milestone_id is not None:
             Roadmap(coordinator).claim(milestone_id, str(child))
             claimed_milestone = milestone_id
-    except Exception:
-        ctx.pool.release(lease.slot, force=True)
+    except Exception as launch_error:
+        if started:
+            ctx.sessions.kill(tmux)
+            if ctx.sessions.alive(tmux):
+                print(f"dispatch needs attention: {tmux} is still observable; lease {lease.slot} retained",
+                      file=ctx.err)
+                raise
+        try:
+            ctx.pool.release(lease.slot, force=False)
+        except FleetError:
+            print(f"dispatch failed: {launch_error}; cleanup retained lease {lease.slot}", file=ctx.err)
+            raise
         # `SI-21` applied to the roadmap: a rollback must not strand state it created. If the claim landed
         # and something after it failed, the milestone would read as owned by an instant that is being
         # rolled back — so it is given back here, and the failure to give it back is reported rather than
@@ -1635,11 +1798,17 @@ def _do_resume(ctx: Ctx, parsed: Parsed) -> int:
     verdicts = guards.evaluate_all(gctx, "resume")
     todo_id = f"{name.name}-{name.curr}"
     tmux = parsed.get("tmux", f"dt-{name.name}")
+    observed = [item.runtime for item in ctx.sessions.live() if item.name == tmux]
+    if any(runtime != ctx.sessions.runtime for runtime in observed):
+        raise Refused('Cannot adopt a session whose runtime differs from the fleet selection')
     existing = None
     try:
         existing = ctx.store.read(todo_id)
     except BadInput:
         existing = None
+
+    if existing is not None and existing.runtime != ctx.sessions.runtime:
+        raise Refused('Recorded runtime differs from the fleet selection; resolve the existing record first')
 
     if ctx.dry_run:
         rows = [("dry-run", "nothing was adopted, claimed or written"),
@@ -1658,6 +1827,9 @@ def _do_resume(ctx: Ctx, parsed: Parsed) -> int:
                                child_instant=str(child), slot=slot)
     held = ctx.pool.lease(slot) if slot else None
     record = Record(todo_id=todo_id, child_instant=str(child), base_instant=name.base,
+                    runtime=existing.runtime if existing else ctx.sessions.runtime,
+                    runtime_executable=existing.runtime_executable if existing else '',
+                    runtime_config_dir=existing.runtime_config_dir if existing else '',
                     slot=slot or "", tmux=tmux,
                     profile=parsed.get("profile", existing.profile if existing else ""),
                     golden=str(held.path) if held else (existing.golden if existing else ""),
@@ -1735,6 +1907,9 @@ def _watcher_for_claim(ctx: Ctx, child: Path, attested=None) -> tuple:
     #: costs one word and would be typed reflexively; naming a watcher that does not exist requires an
     #: assertion the claimant has to knowingly falsify, and that is a much higher bar than any check this
     #: tool could run. The audit that deletes this as boilerplate removes the guard, not the paperwork.
+    claimed_record = _record_for(ctx, child)
+    if claimed_record is not None and claimed_record.runtime == 'codex':
+        raise Refused('Codex has no verified wakeup-capable watcher; keep this worker counted until it completes')
     if attested is not None:
         if not str(attested).strip():
             raise BadInput(
@@ -1747,11 +1922,12 @@ def _watcher_for_claim(ctx: Ctx, child: Path, attested=None) -> tuple:
     if not pane:
         return "", ("no dispatch record names a session for this instant, so there is no pane to read; "
                     "an instant that was never dispatched into a session is outside this gate's subject")
-    if not ctx.sessions.alive(pane):
+    layer = ctx.sessions_for(record)
+    if not layer.alive(pane):
         return "", (f"no live session {pane!r}; this gate reads a running pane and there is not one")
-    captured = ctx.sessions.capture(pane)
+    captured = layer.capture(pane)
     text = captured or ""
-    if captured is None and not ctx.sessions.is_claude_process(pane):
+    if captured is None and not layer.is_claude_process(pane):
         raise Refused(
             f"{pane} is alive but nothing about it could be read: the capture FAILED and no live claude "
             f"process is attributed to it. That is a FAILED OBSERVATION, not an observation that nothing "
@@ -1760,10 +1936,10 @@ def _watcher_for_claim(ctx: Ctx, child: Path, attested=None) -> tuple:
             clears_when="the pane can be read again — re-run the same command, and if it persists check "
                         "FLEET_TMUX_SOCKET names the server the instant was dispatched on",
             clears_who="the declaring instant")
-    if not _is_claude(ctx.sessions, text, pane):
+    if not _is_claude(layer, text, pane):
         return "", (f"{pane} is alive and is not a claude pane, so there is no status line to read and no "
                     f"harness watcher to arm; outside this gate's subject")
-    watchers = ctx.sessions.watchers(text)
+    watchers = layer.watchers(text)
     if watchers:
         return watchers, ""
     raise Refused(
@@ -2734,6 +2910,27 @@ def _release_slot_or_name_the_partial_state(ctx: Ctx, record, child: Path) -> No
         ) from exc
 
 
+def _abort_inputs(ctx, parsed):
+    child = _instant(ctx, parsed)
+    name = InstantName.parse(child.name)
+    reason = str(parsed.get("reason") or "")
+    if not reason.strip():
+        raise BadInput(
+            f"abort: the reason is empty (got {reason!r}). It is mandatory and it is recorded: an abort "
+            "with no reason is a deletion with a nicer name (FD-12), and the successor who finds an "
+            "`-abort-` folder has no other way to learn why the work stopped. State the reason in words "
+            "a reader who was not here can act on — what changed, and what it invalidated.")
+    if name.state != "inflight":
+        raise BadInput(
+            f"{child.name} is already `-{name.state}-`, and `abort` renames an inflight instant. An "
+            "instant may hold only one state (OBS-14); re-aborting a terminal instant would either "
+            "collide with the folder that exists or silently rewrite a recorded outcome.")
+    target = child.parent / name.with_state("abort").format()
+    if target.exists():
+        raise BadInput(f"{target} already exists; an instant may hold only one state (OBS-14)")
+    return child, name, reason, target
+
+
 def _do_abort(ctx: Ctx, parsed: Parsed) -> int:
     """Abandon an inflight instant, WITH A RECORDED REASON, as one transaction.
 
@@ -2775,23 +2972,7 @@ def _do_abort(ctx: Ctx, parsed: Parsed) -> int:
     instant B is running, and when the roadmap says somebody else holds it, the abort completes and reports
     whose it is.
     """
-    child = _instant(ctx, parsed)
-    name = InstantName.parse(child.name)
-    reason = str(parsed.get("reason") or "")
-    if not reason.strip():
-        raise BadInput(
-            f"abort: the reason is empty (got {reason!r}). It is mandatory and it is recorded: an abort "
-            "with no reason is a deletion with a nicer name (FD-12), and the successor who finds an "
-            "`-abort-` folder has no other way to learn why the work stopped. State the reason in words "
-            "a reader who was not here can act on — what changed, and what it invalidated.")
-    if name.state != "inflight":
-        raise BadInput(
-            f"{child.name} is already `-{name.state}-`, and `abort` renames an inflight instant. An "
-            "instant may hold only one state (OBS-14); re-aborting a terminal instant would either "
-            "collide with the folder that exists or silently rewrite a recorded outcome.")
-    target = child.parent / name.with_state("abort").format()
-    if target.exists():
-        raise BadInput(f"{target} already exists; an instant may hold only one state (OBS-14)")
+    child, name, reason, target = _abort_inputs(ctx, parsed)
     record = _record_for(ctx, child)
     #: `SI-59`, and it belongs here — among the fallible steps, BEFORE the rename. Abort's own ordering
     #: rule is that every step that can refuse happens before either irreversible step; a caller pointed at
@@ -2889,7 +3070,14 @@ def _pane_refusal(ctx: Ctx, record: Record):
     layer = ctx.sessions_for(record)
     if not tmux or not layer.alive(tmux):
         return None
-    text = layer.pane(tmux)
+    captured = layer.capture(tmux)
+    text = captured or ''
+    if any(item.name == tmux and item.runtime != record.runtime for item in layer.live()):
+        return ('indeterminate', f'{tmux} runtime differs from its record',
+                'resolve the runtime mismatch before closing', record.todo_id)
+    if captured is None or (layer.is_agent_process(tmux) and observe(layer.runtime, text).state in ('unknown', 'dialog')):
+        return ('indeterminate', f'{tmux} input state cannot be established',
+                'inspect the pane and wait for a recognizable idle input', record.todo_id)
     if layer.busy(text):
         return (PANE_GUARD_CODES[PANE_MID_TURN],
                 f"{tmux} is still offering a way to interrupt, so it is mid-turn: closing it now ends a "
@@ -3154,7 +3342,15 @@ def _do_peers(ctx: Ctx, parsed: Parsed) -> int:
     actually addressing them are separate powers, and a verb that did both would be one mistake away
     from messaging a stranger.
     """
-    rows = peers_mod.load_peers()
+    live = ctx.sessions.live()
+    if ctx.sessions.runtime == 'claude':
+        rows = peers_mod.load_peers()
+        native_pids = {int(row['pid']) for row in rows}
+        rows += peers_mod.from_live_sessions([item for item in live
+                                              if item.runtime == 'codex' or item.pid not in native_pids],
+                                             socket=ctx.sessions.socket)
+    else:
+        rows = peers_mod.from_live_sessions(live, socket=ctx.sessions.socket)
     leases = peers_mod.load_leases(str(ctx.home / "records"))
     results = peers_mod.classify(rows, leases)
     only = parsed.on("addressable-only")
@@ -3937,8 +4133,10 @@ def _is_claude(sessions, text: str, name: str = "") -> bool:
     process probe cannot attribute (a claude the pane owns indirectly, or a pane on a server we can see
     but whose processes we cannot).
     """
-    if sessions.is_claude_process(name):
+    if sessions.is_agent_process(name):
         return True
+    if sessions.runtime == 'codex':
+        return False
     #: `pane_plain`, because the capture carries SGR attributes since `FI-208`. A marker is a PHRASE and
     #: the TUI styles its hints: one colour change inside `esc to interrupt` and a raw substring match
     #: stops finding it. That direction reports a live claude as `12 not-claude`, the one code the
@@ -4026,13 +4224,17 @@ def _do_pane_guard(ctx: Ctx, parsed: Parsed) -> int:
         #: None on failure and `""` for an empty pane, so this asks the question that was always meant.
         captured = layer.capture(pane)
         text = captured or ""
-        if captured is None and not layer.is_claude_process(pane):
+        if captured is None:
             code, detail = PANE_INDETERMINATE, (
                 f"{pane} is alive but nothing about it could be read: no live claude process is "
                 f"attributed to it and the pane capture FAILED — tmux did not answer. That is a failed "
                 f"observation, not an observation of a non-claude pane; an empty pane that captured "
                 f"cleanly is reported {PANE_NOT_CLAUDE}, not this. WAIT and re-poll; do not send, and "
                 f"do not close")
+        elif any(item.name == pane and item.runtime != layer.runtime for item in layer.live()):
+            code, detail = PANE_INDETERMINATE, f'{pane} runtime differs from the recorded or selected runtime'
+        elif layer.is_agent_process(pane) and observe(layer.runtime, text).state in ('unknown', 'dialog'):
+            code, detail = PANE_INDETERMINATE, f'{pane} is a {layer.runtime} worker with an unrecognized or modal input'
         elif not _is_claude(layer, text, pane):
             code, detail = PANE_NOT_CLAUDE, (f"{pane} is alive and nothing in its tail is claude; a send "
                                              "here goes to somebody else's shell")
@@ -4933,6 +5135,17 @@ def _verb(name: str, handler: Callable, read_only: bool, help_text: str, flags=(
 
 
 VERBS = {spec.name: spec for spec in (
+    _verb('revive', _do_revive, False, 'resume an explicit session in its recorded workspace', (
+        Flag('--id', True, required=True, help='open worker record'),
+        Flag('--session-id', True, required=True, help='exact native session UUID'),
+    )),
+    _verb('send', _do_send, False, 'send one message through observed tmux delivery', (
+        Flag('--id', True, required=True, help='open worker record'),
+        Flag('--message-file', True, required=True, help='UTF-8 file containing the literal message'),
+    )),
+    _verb('runtime', _do_runtime, False, 'read or change the fleet runtime between completed runs', (
+        Flag('--set', True, help='claude or codex; each CLI uses its configured model'),
+    )),
     _verb("init", _do_init, False, "bootstrap a new instant from the layout matrix", (
         Flag("--name", True, True, "the instantName, dashless camelCase after normalisation"),
         Flag("--base", True, False, f"the base instant ({ROOT_BASE} is the root)"),
@@ -5224,6 +5437,9 @@ VERBS = {spec.name: spec for spec in (
 #: The porcelain schema per verb, declared as data so a consumer and a test read the column count off the
 #: surface rather than off a comment that can go stale (`W2-20`'s class).
 PORCELAIN_COLUMNS = {
+    'revive': KV_COLUMNS,
+    'send': KV_COLUMNS,
+    'runtime': KV_COLUMNS,
     "peers": peers_mod.PEER_COLUMNS,
     "init": KV_COLUMNS,
     "dispatch": KV_COLUMNS,
@@ -5382,7 +5598,23 @@ def main(argv: list, *, stdout=None, stderr=None, context=None) -> int:
     _cadence(ctx, verb)
 
     try:
-        code = spec.handler(ctx, parsed)
+        admitted = verb in ('dispatch', 'resume', 'revive')
+        with admission_lock(ctx.home) if admitted and not ctx.dry_run else nullcontext():
+            if admitted:
+                runtime, _ = read_runtime(ctx.home)
+                if ctx.sessions.runtime != runtime:
+                    ctx.sessions = SessionLayer(ctx.sessions.probes, runtime)
+            locked_record = None
+            if not ctx.dry_run:
+                if verb in ('close', 'revive') or (verb == 'harvest' and parsed.get('id')):
+                    locked_record = _record(ctx, parsed)
+                elif verb == 'abort':
+                    child, _, _, _ = _abort_inputs(ctx, parsed)
+                    locked_record = _record_for(ctx, child)
+            lock = (pane_lock(ctx.home, ctx.sessions_for(locked_record).socket, locked_record.tmux)
+                    if locked_record and locked_record.tmux else nullcontext())
+            with lock:
+                code = spec.handler(ctx, parsed)
     except FleetError as exc:
         _report_error(exc, err)
         code = exc.exit_code

@@ -21,6 +21,9 @@ TMP="$(mktemp -d)"
 trap 'tmux -L "$SOCK" kill-server 2>/dev/null; rm -rf "$TMP"' EXIT
 
 export FLEET_HOME="$TMP/home" FLEET_INSTANTS="$TMP/instants" FLEET_TMUX_SOCKET="$SOCK"
+export FLEET_CLAUDE_BIN=/bin/true CLAUDE_OWNERS_MAP="$TMP/owners.tsv"
+printf '%s\t%s\n' "$TMP" test > "$CLAUDE_OWNERS_MAP"
+mkdir -p "$TMP/.claude"
 mkdir -p "$FLEET_HOME" "$FLEET_INSTANTS" "$TMP/slotA" "$TMP/slotB"
 
 fails=0

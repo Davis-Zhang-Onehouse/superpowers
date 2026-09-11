@@ -9,7 +9,7 @@ description: Use when this session IS a dispatched worker instant — created by
 
 You are one worker instant among several, created by `fleet dispatch` into a leased slot, and you exist to
 carry exactly one milestone. Your `CHARTER.md` is authoritative for your scope; `.fleet/seed.txt` is generic to
-your profile and does no more than point you here.
+your profile, with any coordinator instructions supplied through `--seed-extra`. Read those instructions too.
 
 You do not own the roadmap. The coordinator that dispatched you does: you **report** with `fleet propose`, it
 **applies**. Where your prose and its roadmap disagree, the roadmap wins — its entries arrived as evidence.
@@ -19,6 +19,10 @@ command its message names and move on; what follows is only what no mechanism ca
 ## Announce at start
 
 "I'm using the working-as-a-dispatched-instant skill."
+
+The same contract applies in Claude and Codex. Use the file-reading and shell tools your harness exposes
+to load the named skills and run fleet commands. A Codex worker cannot declare `awaiting-ci` here: keep
+its slot counted, wait through a supported foreground operation, and report the actual result.
 
 ## Your first two commands
 

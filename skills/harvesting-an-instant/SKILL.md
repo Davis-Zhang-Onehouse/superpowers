@@ -63,6 +63,7 @@ observation, and this one is known to lie.
 
 Distrust "not-claude" and "unknown-pane" outright while the board still calls the worker live. And note
 that `pane-guard`'s "indeterminate" is a **failed observation**, not an observation of emptiness.
+The same checks apply to Claude and Codex; an unfamiliar or modal input is also indeterminate.
 
 `pane-guard`'s "awaiting-operator" (`15`) is neither of those close-out shapes: it means the worker is
 sitting at an `AskUserQuestion` selection dialog, blocked on a human, not on a turn that will finish or a

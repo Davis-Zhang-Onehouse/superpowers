@@ -18,6 +18,8 @@ import tempfile
 import unittest
 
 from fleet import EXIT_OK, EXIT_REFUSED
+from fleet.runtime import LaunchSettings
+from fleet import seedcheck
 from fleet import cli
 from tests import hermetic_environment
 from fleet.harvest import Harvest
@@ -64,7 +66,9 @@ class Fixture:
 
     def context(self):
         def build(parsed, out, err):
-            return cli.Ctx(home=self.home, instants_dir=self.instants, store=self.store,
+            return cli.Ctx(launch_settings=lambda runtime, slot: LaunchSettings(runtime, '/test/bin/' + runtime, '/test/config'),
+                           seed_delivery=lambda name, text: seedcheck.Verdict(seedcheck.ATTESTED, detail='hermetic fixture delivery'),
+                           home=self.home, instants_dir=self.instants, store=self.store,
                            pool=self.pool, sessions=self.sessions, harvest=self.harvest,
                            out=out, err=err, dry_run=parsed.on("dry-run"),
                            porcelain=parsed.on("porcelain"), now=lambda: NOW,

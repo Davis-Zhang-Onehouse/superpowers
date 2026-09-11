@@ -27,7 +27,7 @@ it what to do.
 | 2 | **Take the base from the chain manifest, then confirm it on the remote.** | `fleet` checks that the slot *arrives* at the sha; nothing checks that it was the right sha. |
 | 3 | **Ask the guard for the cap. Never compute it.** | The guard counts records; you would be counting your recollection. |
 | 4 | **Declare the surface each worker will touch, or sequence them.** | Two workers on one file is a real event, not a hypothetical. |
-| 5 | **`dispatch` → write the scope → *then* release the seed.** | The seed is the release signal, and the window is 180 seconds. |
+| 5 | **Prepare the scope and profile → `dispatch --seed-extra`.** | Dispatch launches immediately with the complete rendered seed. |
 | 6 | **Verify the launched process carried the right environment.** | A worker can come up attributed to somebody else. |
 | 7 | **Write briefs one milestone ahead, never two.** | A brief written early decays faster than it is consumed. |
 
@@ -113,37 +113,26 @@ the other and saying who resolves.
 The reason to do this at dispatch rather than at integration is that a collision found at integration is a
 merge conflict you resolve blind — neither worker is still around to say what they meant.
 
-## Step 5 — scope before seed, and the window is 180 seconds
+## Step 5 — finish scope before dispatch
 
-This is the ordering that costs the most when it is wrong.
+Prepare each worker's scope and acceptance criteria before starting it. Put the finished charter in a
+worker-specific profile, preserving the profile's identity and lineage placeholders. Prepare any extra
+instructions in a UTF-8 file. Do not edit a shared profile while another dispatch is reading it.
 
-`fleet dispatch` creates the child instant and writes its `CHARTER.md` **rendered from the profile**,
-which means the scope section is whatever placeholder the profile carries. The launcher shim then waits up
-to **180 seconds** for a seed; if none arrives it starts an interactive session anyway, and the worker
-comes up holding a milestone claim with no briefing.
+```bash
+fleet dispatch --profile "$PREPARED_PROFILE" --title "$TITLE" --base "$BASE" \
+  --from "$INSTANT" --milestone "$M" --cap "$CAP" \
+  --lineage-base "repo=$SHA" --seed-extra "$TASK_BRIEF" --dry-run
+# Once the gates allow, run the same command without --dry-run.
+```
 
-You fill the real scope into the child's `CHARTER.md` inside that window. So:
+`fleet dispatch` renders the charter and seed, appends `--seed-extra` to the seed, and starts the selected
+CLI with that complete seed as one argument. It owns the launcher and delivery; there is no post-dispatch
+handoff or waiting shim. A missing or empty seed cannot start an unbriefed worker.
 
-1. `fleet dispatch` (the instant now exists, with a placeholder scope)
-2. write the real scope and acceptance criteria into the child's `CHARTER.md`
-3. **only then** compose and release the seed
-
-**Treat the seed as the release signal.** It is the last thing you do, and the worker does not begin until
-it lands.
-
-Two ways this goes wrong, both measured:
-
-- **You take longer than 180 seconds.** One dispatch missed it by about a second; the worker booted with
-  no seed argument at all.
-- **The worker reads the charter while you are writing it.** One worker read a charter *growing under it*
-  — 28,609 bytes, then 37,401 — and filed a decision on the premise that its scope and acceptance criteria
-  were empty. They were mid-write. It withdrew the claim itself, which is luck, not a mechanism.
-
-Nothing on your side catches this today. The `authoring-placeholder` lint does not run from any command a
-coordinator can type (`SI-45`), and it would not match the HTML-comment placeholder convention anyway
-(`SI-46`). **The only working defence is a self-check in the profile** — a first instruction telling the
-worker to park if its scope block is still a placeholder rather than infer scope from the milestone title.
-Put one in every worker-facing profile you author.
+**Treat dispatch as the release signal.** Scope and acceptance criteria must be complete before it.
+Keep the profile's self-check that tells the worker to park when its charter scope remains a placeholder;
+never ask it to infer scope from a milestone title.
 
 ## Step 6 — verify what actually launched
 
@@ -169,7 +158,7 @@ did. Then a claim that turns out wrong is attributable to a measurement rather t
 | Thought | Reality |
 |---|---|
 | "Cap 3 for three workers" | `--cap` counts records, not intentions, and whether yours is among them depends on how you were created. Read the guard. |
-| "I'll fix the charter right after it boots" | The 180-second window is the whole race. Scope first, seed last. |
+| "I'll fix the charter right after it boots" | Dispatch starts the worker immediately. Complete the scope before dispatch. |
 | "These two milestones are unrelated" | Seven files once said otherwise. Declare the surface; do not assume it. |
 | "The profile lints clean" | Nothing lints a profile from the command line. That claim is not re-derivable today. |
 | "The roadmap says two are ready" | It says a *number*, in prose. Name the rows before you dispatch them. |

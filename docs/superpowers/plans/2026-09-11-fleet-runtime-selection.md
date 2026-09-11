@@ -70,6 +70,17 @@ New CLI helpers are `fleet send --id ID --message-file PATH` and
 contracts currently spread across shell recipes. Neither creates a second
 communication system. `fleet resume` keeps its existing meaning: adopt an instant.
 
+## Execution status — 2026-09-11
+
+Implementation is active in `.worktrees/fleet-runtime` on `feat/fleet-runtime-selection`.
+Native Codex bootstrap is committed as `4d94241`. Runtime selection, direct launch, recorded recovery,
+both-runtime discovery, guarded messaging and skill updates are implemented. Twelve independent CLI
+reference sessions and both exact bootstrap prompts are captured. A real Codex worker passed message,
+crash/revive, watcher/cap refusal, debugging and harvest checks. Live Claude testing exposed and fixed
+a symlink/process-name regression. The complete acceptance matrix and final committed-tree checks
+remain in progress; the evidence report records limitations rather than treating checkboxes as passes.
+
+
 ## Task 1: Establish terminal and bootstrap evidence
 
 **Files:** Create `fleet/it/fixtures/runtime/README.md`, frame files and

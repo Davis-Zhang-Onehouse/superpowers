@@ -55,6 +55,7 @@ bash "$IT_ROOT/bin/source-pin.sh" before "$IT_ROOT" | tee -a "$LOG"
 
 # name : command  — order is cheapest-first so a broken harness is found in seconds, not after §E.
 RUNNERS=(
+  "runtime:bash $IT_ROOT/run-runtime.sh --stubs"
   "w1:bash $IT_ROOT/run-w1.sh"
   "m9mut:bash $IT_ROOT/run-m9-mutation.sh"
   "e9leak:bash $IT_ROOT/run-e9-leak.sh"

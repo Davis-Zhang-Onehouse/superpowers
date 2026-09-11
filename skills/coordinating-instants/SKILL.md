@@ -1,6 +1,6 @@
 ---
 name: coordinating-instants
-description: Use when a Claude session is the standing coordinator of a multi-milestone effort executed by dispatched worker instants, or is resuming that role. Triggers include "you are the coordinator instant", "dispatch one instant per milestone", "what's the fleet status", "resume coordinating", "apply the workers' proposals", "harvest the finished worker".
+description: Use when an agent session is the standing coordinator of a multi-milestone effort executed by dispatched worker instants, or is resuming that role. Triggers include "you are the coordinator instant", "dispatch one instant per milestone", "what's the fleet status", "resume coordinating", "apply the workers' proposals", "harvest the finished worker".
 ---
 
 # Coordinating Instants
@@ -27,7 +27,11 @@ Three facts define the role, and each is a mechanism rather than a resolution:
   producer. So a status that reaches you always arrives attributed and with a path behind it.
 
 The verb surface, exit codes, porcelain schema and store environment are in **superpowers:using-fleet**.
-Read it once; this skill does not restate it.
+Read it once; this skill does not restate it. Check `fleet runtime` when entering the role and
+use its selected CLI. Change runtimes only after closing out the fleet and exiting this coordinator.
+Prepare the complete worker profile and task brief before dispatch; pass additional instructions with
+`--seed-extra`. Send corrections through `fleet send --id ... --message-file ...`.
+Codex workers remain counted while waiting for CI because no wake mechanism has been verified.
 
 **If you were dispatched by `fleet dispatch`, your cwd is the leased SLOT and not your instant folder**, so
 `--instant .` names the wrong directory. Your seed exports `$INSTANT`; every command below uses it.

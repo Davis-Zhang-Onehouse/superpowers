@@ -140,6 +140,10 @@ it_section() {            # it_section <name> -> own FLEET_HOME, own slots, own 
   # Set BEFORE the assertion below, so a section is already sandboxed on the call that establishes the
   # baseline. The eleven runners that name `$EV/instants` for themselves two lines later still override it;
   # they are unaffected either way.
+  # Explicit test ownership prevents automatic dispatch from borrowing an account.
+  mkdir -p "$EV/.claude"
+  export CLAUDE_OWNERS_MAP="$EV/claude-owners.tsv"
+  printf '%s\t%s\n' "$EV" 'integration-test' > "$CLAUDE_OWNERS_MAP"
   export FLEET_INSTANTS="$FLEET_HOME/instants"
   mkdir -p "$FLEET_INSTANTS"
   # This section's OWN instants baseline. Scoping it to the section is also what makes the comparison mean
