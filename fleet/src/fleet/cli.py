@@ -1661,6 +1661,7 @@ def _do_dispatch(ctx: Ctx, parsed: Parsed) -> int:
                                        lineage=lineage),
                                    "INSTANT": name.format(), "SLOT": lease.slot, "TODO_ID": todo_id,
                                    "PATH": str(child)})
+        rendered["seed"] = runtime_launch.seed_cli_header() + rendered["seed"]
         #: `SI-53`. Appended HERE, before the seed is written and before the delivery check reads it, so
         #: there is one seed and not two: `seed.txt`, `_verify_seed_delivery` and `seed-check` all compare
         #: against the same combined text. Marked with its source path because a worker reading two
