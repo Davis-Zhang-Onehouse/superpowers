@@ -42,6 +42,22 @@ class DiscoveryTests(unittest.TestCase):
             with self.assertRaises(FleetError):
                 default_probes(both_runtimes=True).list_processes()
 
+    def test_denied_tmux_access_is_not_an_empty_server(self):
+        def run(argv, **kw):
+            error = 'error connecting to /tmp/tmux-1000/test (Operation not permitted)' if argv[0] == 'tmux' else ''
+            return subprocess.CompletedProcess(argv, 1, '', error)
+        with patch('subprocess.run', run):
+            with self.assertRaisesRegex(FleetError, 'Operation not permitted'):
+                default_probes(both_runtimes=True).list_processes()
+
+    def test_absent_tmux_server_allows_initial_dispatch_inventory(self):
+        for error in ('no server running on /tmp/tmux-1000/test',
+                      'error connecting to /tmp/tmux-1000/test (No such file or directory)'):
+            def run(argv, **kw):
+                return subprocess.CompletedProcess(argv, 1, '', error if argv[0] == 'tmux' else '')
+            with patch('subprocess.run', run):
+                self.assertEqual(default_probes(both_runtimes=True).list_processes(), [])
+
     def test_exited_workers_are_omitted_but_unreadable_live_workers_refuse(self):
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)

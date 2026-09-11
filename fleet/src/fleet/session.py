@@ -409,7 +409,11 @@ def default_probes(process_name: str = "claude", tmux_socket=_FROM_ENV, *,
         done = run(tmux + ["list-panes", "-a", "-F", "#{pane_pid} #{session_name}"])
         owners = {}
         if done.returncode != 0:
-            return owners
+            error = done.stderr.strip()
+            if (error.startswith("no server running on ") or
+                    error.endswith("(No such file or directory)")):
+                return owners
+            raise FleetError(f"Cannot inspect tmux server: {error or 'list-panes failed'}")
         for line in done.stdout.splitlines():
             parts = line.split(None, 1)
             if len(parts) == 2 and parts[0].isdigit():
