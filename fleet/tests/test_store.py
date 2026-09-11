@@ -11,6 +11,20 @@ def rec(**kw):
     return Record(**base)
 
 class TestRecord(unittest.TestCase):
+    def test_runtime_metadata_and_legacy_defaults(self):
+        old = rec().to_json()
+        for field in ('runtime', 'runtime_executable', 'runtime_config_dir'):
+            old.pop(field, None)
+        restored = Record.from_json(old)
+        self.assertEqual(restored.runtime, 'claude')
+        self.assertEqual(restored.runtime_config_dir, '')
+        candidate = rec(runtime='codex', runtime_executable='/bin/codex',
+                        runtime_config_dir='/config/codex')
+        self.assertEqual(Record.from_json(candidate.to_json()), candidate)
+        for runtime in ('gpt', [], None, True):
+            with self.subTest(runtime=runtime), self.assertRaises(BadInput):
+                Record.from_json(dict(old, runtime=runtime))
+
     def setUp(self):
         self.home = pathlib.Path(tempfile.mkdtemp())
         self.store = Store(self.home)

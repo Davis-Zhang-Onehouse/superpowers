@@ -70,5 +70,23 @@
     "columns": 100,
     "rows": 35,
     "evidence": "Captured while running sleep 8: claude-busy-usable.frame"
+  },
+  {
+    "runtime": "claude",
+    "cli_version": "2.1.268",
+    "state": "queued",
+    "frame": "claude-multiline.frame",
+    "columns": 100,
+    "rows": 35,
+    "evidence": "Captured literal multiline input in the isolated runtime test"
+  },
+  {
+    "runtime": "codex",
+    "cli_version": "0.154.0",
+    "state": "queued",
+    "frame": "codex-multiline.frame",
+    "columns": 100,
+    "rows": 35,
+    "evidence": "Captured literal multiline input in the isolated runtime test"
   }
 ]

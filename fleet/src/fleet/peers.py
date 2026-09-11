@@ -70,6 +70,18 @@ class PeersUnavailable(FleetError):
     """The peer listing could not be established well enough to classify. Never downgraded."""
 
 
+def from_live_sessions(sessions, socket=""):
+    """Normalize the process census without inventing native messaging names."""
+    rows = []
+    for session in sessions:
+        row = dict(pid=session.pid, cwd=str(session.cwd), name=session.name or "",
+                   status="live", runtime=session.runtime, transport="tmux",
+                   tmux=session.name or "", tmux_socket=socket)
+        _validate_provenance(len(rows), row)
+        rows.append(row)
+    return rows
+
+
 def _claude_bin():
     return os.environ.get("FLEET_CLAUDE_BIN") or os.environ.get("REAL_CLAUDE") or DEFAULT_CLAUDE_BIN
 
@@ -360,6 +372,9 @@ def classify(rows, leases, self_pid=None, proc_root="/proc"):
         rec = {
             "name": row["name"], "pid": pid, "cwd": row["cwd"], "status": row["status"],
             "session_id": row.get("sessionId", ""),
+            "runtime": row.get("runtime", "claude"),
+            "transport": row.get("transport", "native"),
+            "tmux_socket": row.get("tmux_socket", ""),
             "instant": "", "milestone": "", "tmux": "", "todo_id": "",
         }
 
@@ -403,6 +418,12 @@ def classify(rows, leases, self_pid=None, proc_root="/proc"):
         elif lease is None:
             rec.update(verdict=FOREIGN,
                        why="cwd is not the slot of any OPEN lease in this FLEET_HOME")
+        elif row.get("runtime", "claude") != lease.get("runtime", "claude"):
+            rec.update(verdict=FOREIGN, why="live runtime differs from the recorded runtime")
+        elif row.get("transport") == "tmux" and (
+                not row.get("tmux") or row["tmux"] != lease.get("tmux")
+                or (lease.get("tmux_socket") and row.get("tmux_socket") != lease["tmux_socket"])):
+            rec.update(verdict=FOREIGN, why="live tmux address differs from the recorded address")
         else:
             _attach()
             rec.update(verdict=OURS,
@@ -485,6 +506,9 @@ def render(results, addressable_only=False):
             f"{_cell(r['status']):<6} {_cell(r['milestone']):<6} {_cell(r['tmux'])}"
         )
         lines.append(f"         cwd={_cell(r['cwd'])}")
+        lines.append(f"         runtime={_cell(r.get('runtime', 'claude'))} "
+                     f"transport={_cell(r.get('transport', 'native'))} "
+                     f"socket={_cell(r.get('tmux_socket', ''))}")
         if r["instant"]:
             lines.append(f"         instant={_cell(r['instant'])}")
         lines.append(f"         why={_cell(r['why'])}")
