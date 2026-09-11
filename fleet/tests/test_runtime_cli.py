@@ -1,9 +1,11 @@
 import shutil
+import subprocess
 import unittest
 from pathlib import Path
+from unittest.mock import patch
 
 from fleet.runtime_config import admission_lock, read_runtime, write_runtime
-from fleet.session import LiveSession
+from fleet.session import LiveSession, SessionLayer, default_probes
 from tests.test_cli import Fleet, snapshot
 
 
@@ -70,6 +72,27 @@ class RuntimeCliTests(unittest.TestCase):
         launcher = Path(record.child_instant) / '.fleet/launch-worker.sh'
         self.assertIn(str(launcher), self.f.started[0][2])
         self.assertIn('/test/bin/codex', launcher.read_text())
+
+    def test_tmux_permission_failure_does_not_create_pending_worker(self):
+        original = self.f.context
+        def context():
+            build = original()
+            def candidate(parsed, out, err):
+                ctx = build(parsed, out, err)
+                ctx.sessions = SessionLayer(default_probes(tmux_socket='private', both_runtimes=True))
+                return ctx
+            return candidate
+        self.f.context = context
+        denied = subprocess.CompletedProcess([], 1, '',
+                    'error connecting to /tmp/tmux-1000/private (Operation not permitted)')
+        with patch('subprocess.run', return_value=denied):
+            code, _, err = self.f.run(['dispatch', '--profile', str(self.f.profile()), '--title', 'denied'])
+        self.assertEqual(code, 1, err)
+        self.assertIn('Operation not permitted', err)
+        self.assertEqual(self.f.store.all(), [])
+        self.assertIsNone(self.f.pool.lease('ws1'))
+        self.assertIsNone(self.f.pool.lease('ws2'))
+        self.assertEqual(self.f.started, [])
 
     def test_send_checks_the_record_and_delivers_once(self):
         self.f.worker('active', slot='ws1', pane='❯ \n? for shortcuts')
