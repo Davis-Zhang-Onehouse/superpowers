@@ -1,0 +1,15 @@
+root /home/ubuntu/davis_root/superpowers/.worktrees/fleet-runtime/fleet/it/E/home/e1/i1 ($FLEET_HOME)
+slot      s1
+path      /home/ubuntu/davis_root/superpowers/.worktrees/fleet-runtime/fleet/it/E/slots/e1/i1/s1
+enrolled  1
+slots     s1
+root /home/ubuntu/davis_root/superpowers/.worktrees/fleet-runtime/fleet/it/E/home/e1/i1 ($FLEET_HOME)
+slot      s2
+path      /home/ubuntu/davis_root/superpowers/.worktrees/fleet-runtime/fleet/it/E/slots/e1/i1/s2
+enrolled  2
+slots     s1, s2
+root /home/ubuntu/davis_root/superpowers/.worktrees/fleet-runtime/fleet/it/E/home/e1/i1 ($FLEET_HOME)
+slot      s3
+path      /home/ubuntu/davis_root/superpowers/.worktrees/fleet-runtime/fleet/it/E/slots/e1/i1/s3
+enrolled  3
+slots     s1, s2, s3

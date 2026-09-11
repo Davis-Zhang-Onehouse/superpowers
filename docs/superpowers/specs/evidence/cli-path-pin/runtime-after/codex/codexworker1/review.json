@@ -1,0 +1,29 @@
+{
+  "schema_version": 1,
+  "rounds": [
+    {
+      "number": 1,
+      "scope": "all",
+      "verdict": "READY",
+      "at": "2026-09-11T20:02:15Z",
+      "findings": [
+        {
+          "id": "RV-1",
+          "severity": "Minor",
+          "status": "applied",
+          "location": "evidence/INDEX.md",
+          "finding": "Original source and failing and passing test outputs captured",
+          "action": "none"
+        },
+        {
+          "id": "RV-2",
+          "severity": "Minor",
+          "status": "applied",
+          "location": "evidence/change.diff",
+          "finding": "One operator fix reviewed and existing test unchanged",
+          "action": "none"
+        }
+      ]
+    }
+  ]
+}

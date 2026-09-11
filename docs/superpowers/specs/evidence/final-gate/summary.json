@@ -1,0 +1,85 @@
+{
+  "revision": "b3516c70b823261796807b371ea77ed3c727c12c",
+  "runners": 17,
+  "batch_verdict": "attention",
+  "batch_exit_code": 1,
+  "failed_cases": [
+    "E1"
+  ],
+  "totals": {
+    "PASS": 250,
+    "SKIP": 10,
+    "FAIL": 1
+  },
+  "sections": {
+    "runtime": {
+      "PASS": 3
+    },
+    "w1": {
+      "PASS": 14,
+      "SKIP": 2
+    },
+    "m9mut": {
+      "PASS": 7
+    },
+    "e9leak": {
+      "PASS": 6
+    },
+    "A": {
+      "SKIP": 4,
+      "PASS": 28
+    },
+    "B": {
+      "PASS": 18
+    },
+    "C": {
+      "PASS": 16,
+      "SKIP": 1
+    },
+    "D": {
+      "PASS": 19,
+      "SKIP": 2
+    },
+    "Q": {
+      "PASS": 8
+    },
+    "i7": {
+      "PASS": 8
+    },
+    "rmw": {
+      "PASS": 4
+    },
+    "K": {
+      "PASS": 15,
+      "SKIP": 1
+    },
+    "group5": {
+      "PASS": 61
+    },
+    "E": {
+      "PASS": 13,
+      "FAIL": 1
+    },
+    "R": {
+      "PASS": 11
+    },
+    "S": {
+      "PASS": 12
+    },
+    "RH": {
+      "PASS": 5
+    },
+    "all": {
+      "PASS": 2
+    }
+  },
+  "targeted_correction": {
+    "case": "E1",
+    "exit_code": 0,
+    "iterations": 20,
+    "failures": 0,
+    "source_tests_unchanged": true,
+    "runner_sha256": "374fc4568262d6dc7b73db5212eb5e89920918180b3fa08da84ad97d30c79e95",
+    "full_batch_repeated": false
+  }
+}
