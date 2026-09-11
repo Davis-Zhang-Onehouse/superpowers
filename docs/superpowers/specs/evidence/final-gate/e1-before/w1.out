@@ -1,0 +1,13 @@
+root /home/ubuntu/davis_root/superpowers/.worktrees/fleet-runtime/fleet/it/E/home/e1/i1 ($FLEET_HOME)
+todo_id          e1I1W1-09112100
+instant          /home/ubuntu/davis_root/superpowers/.worktrees/fleet-runtime/fleet/it/E/instants/e1/i1/00000000-09112100-inflight-append-e1I1W1
+slot             s1
+tmux             dt-e1I1W1
+watched_source   00000000
+milestone        (none)
+override_reason  (none — no rule was overridden)
+lineage_base     (none)
+lineage_mode     (none)
+golden_base      (none recorded)
+coordinator      (none — this child has no origin.json, so its `propose` stays LOCAL)
+launched_at      2026-09-11T21:00:11Z

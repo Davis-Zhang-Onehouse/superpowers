@@ -1,0 +1,6 @@
+case	verdict	evidence	note
+ISOLATION-RH-enter	PASS		live-INSTANTS baseline ESTABLISHED on this call (1 folder(s) across 1 live tree(s)), so the instants half is vacuous here and binds from the next call on. live stores byte-identical; live instants trees unchanged in 1 live tree(s); live tmux session set byte-identical (0 sessions, incl. 0 dt-); section work is on socket itfleet-RH
+RH1	PASS	fleet/it/RH/out/RH1-propose.out	the round was recorded at the slot's current head (review exit 0) and `propose --status done` was admitted (exit 0) — the newest round and the slot agree
+RH2	PASS	fleet/it/RH/out/RH2-propose.out	a commit landed on the slot after the round the ledger reviewed; `propose --status done` was REFUSED (exit 4), naming `review-head` — the head being graded carries a commit no round has seen
+RH3	PASS	fleet/it/RH/out/RH3-propose.out	reviewing the new head (review exit 0) cleared the mismatch — `propose --status done` was admitted again (exit 0)
+ISOLATION-RH-leave	PASS		live stores byte-identical; live instants trees unchanged in 1 live tree(s); live tmux session set byte-identical (0 sessions, incl. 0 dt-); section work is on socket itfleet-RH

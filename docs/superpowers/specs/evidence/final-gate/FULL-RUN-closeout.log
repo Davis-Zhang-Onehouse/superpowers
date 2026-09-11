@@ -1,0 +1,612 @@
+=== pinning the source for the WHOLE run ===
+pinned 67 files
+roster: no full; 17 runner(s)
+
+=== runtime ===
+PASS ISOLATION-RT-enter live-INSTANTS baseline ESTABLISHED on this call (1 folder(s) across 1 live tree(s)), so the instants half is vacuous here and binds from the next call on. live stores byte-identical; live instants trees unchanged in 1 live tree(s); live tmux session set byte-identical (0 sessions, incl. 0 dt-); section work is on socket itfleet-RT
+pinned 67 files
+PASS RT1 both runtimes launch with attested seed bytes, refuse an early switch, and switch back after close-out
+PASS ISOLATION-RT-leave live stores byte-identical; live instants trees unchanged in 1 live tree(s); live tmux session set byte-identical (0 sessions, incl. 0 dt-); section work is on socket itfleet-RT
+STABLE — every verdict in this run is attributable to one tree state
+--- runtime exit=0  3 PASS / 0 FAIL / 0 SKIP
+
+=== w1 ===
+pinned 67 files
+PASS ISOLATION-W1-enter live-INSTANTS baseline ESTABLISHED on this call (1 folder(s) across 1 live tree(s)), so the instants half is vacuous here and binds from the next call on. live stores byte-identical; live instants trees unchanged in 1 live tree(s); live tmux session set byte-identical (0 sessions, incl. 0 dt-); section work is on socket itfleet-W1
+PASS W1-1 the product started itfleet-W1-probe-342246 and reports it alive, with the server taken from FLEET_TMUX_SOCKET=itfleet-W1 and no socket named in the call
+PASS W1-2 itfleet-W1-probe-342246 is on socket itfleet-W1
+PASS W1-3 the live server's session set is byte-identical across a session being created and made live on the private one (0 sessions, incl. 0 dt-)
+SKIP W1-4 no dt- session exists on the live server right now, so this cell cannot distinguish blindness from an empty world
+SKIP W1-5 no dt- session to be blind to
+PASS W1-6 cleanup removed itfleet-W1-probe-342246 from the private server by exact name and left the live server's session set byte-identical
+PASS W1-8 each group server shows ONLY its own session and neither shows the other's — both live, so the invisibility is measured and not vacuous. This is why the socket is per section rather than one shared 'itfleet'
+PASS W1-7 negative control: a live session set differing by ONE non-dt- name is reported FAIL — so W1-3 and W1-6 are assertions and not decoration. The pre-SI-1 check would have passed this, because nothing dt- moved
+PASS W1-7-restored the real baseline is byte-identical: the negative control ran against a repointed COPY and never wrote the shared file
+PASS W1-9 SI-25's attribution is FALSIFIABLE, both directions with a real process each: a claude-named process started INSIDE the instant attributes to the section (which is what makes an added worker FAIL), and one started outside does not (which is what stopped the operator's quantonOnSpark4 session being charged to §L/§M/§N). Without this the branch that accuses had never fired — inside-attributed=yes outside-attributed=correctly-foreign
+PASS W1-10 it_section sandboxed the instants directory BY CONSTRUCTION: FLEET_INSTANTS=/home/ubuntu/davis_root/superpowers/.worktrees/fleet-runtime/fleet/it/W1/home/instants is inside /home/ubuntu/davis_root/superpowers/.worktrees/fleet-runtime/fleet/it, so a runner cannot be exposed by forgetting to export it. Before this the caller's ambient value won, and ten strays reached a live effort tree
+PASS W1-11 negative control: a folder THIS SECTION NAMED, appearing in an instants tree outside /home/ubuntu/davis_root/superpowers/.worktrees/fleet-runtime/fleet/it, is reported FAIL — so every ISOLATION verdict about the instants directory is falsifiable. The pre-fix check had no instants term at all and passed while ten strays landed in a live effort tree (I2-11/FI-196)
+PASS W1-12 the twin: an instant appearing in a live tree under a name this section NEVER asked for is a NOTE and not a FAIL, so W1-11's alarm discriminates rather than firing on any change at all
+PASS W1-11-restored the negative control never wrote the shared instants baseline /home/ubuntu/davis_root/superpowers/.worktrees/fleet-runtime/fleet/it/live-instants-W1.txt: it ran against a repointed copy inside a subshell
+PASS ISOLATION-W1-leave live stores byte-identical; live instants trees unchanged in 1 live tree(s); live tmux session set byte-identical (0 sessions, incl. 0 dt-); section work is on socket itfleet-W1
+STABLE — every verdict in this run is attributable to one tree state
+W-1 done: IT_FAILED=0
+--- w1 exit=0  14 PASS / 0 FAIL / 2 SKIP
+
+=== m9mut ===
+PASS ISOLATION-M9mut-enter live stores byte-identical; live instants trees unchanged in 1 live tree(s); live tmux session set byte-identical (0 sessions, incl. 0 dt-); section work is on socket 
+extracted the M9 audit: 315 lines
+PASS M9-mut-baseline the real package passes the widened rule: every delete target is DERIVED (by following the assignments, not by matching a substring) from the store root or from that function's own parameters
+  M1 a second assignment putting the target under $HOME: injected
+  M2 a delete of an absolute literal: injected
+  M3 a brand-new undeclared delete site: injected
+  M4 a target read out of the environment: injected
+PASS M9-mut-1 KILLED by the named check (derived neither from the store root): a second assignment putting the delete target under $HOME. Reported SURVIVED-then-KILLED (FI-28's convention): it survived the first rule, which accepted a name if ANY of its assignments looked rooted, and forced the rule to require EVERY assignment to be safe
+PASS M9-mut-2 KILLED by the named check (could not name): a delete of an absolute string literal (quoted here as `<abs>` so the note itself does not trip lint-evidence-paths: the injected call is os.unlink of a hard-coded path under var-tmp). Caught on the UNVERIFIABLE branch, not the unrooted one: a string literal leaves no name to trace, so the audit refuses to vouch for it at all
+PASS M9-mut-3 KILLED by the named check (UNDECLARED DELETE SITE): a brand-new delete site the allowlist does not declare — the ceiling itself
+PASS M9-mut-4 KILLED by the named check (derived neither from the store root): a delete target read out of os.environ['HOME']
+PASS ISOLATION-M9mut-leave live stores byte-identical; live instants trees unchanged in 1 live tree(s); live tmux session set byte-identical (0 sessions, incl. 0 dt-); section work is on socket 
+M9 mutation check done: IT_FAILED=0
+--- m9mut exit=0  7 PASS / 0 FAIL / 0 SKIP
+
+=== e9leak ===
+PASS ISOLATION-E9leak-enter live-INSTANTS baseline ESTABLISHED on this call (1 folder(s) across 1 live tree(s)), so the instants half is vacuous here and binds from the next call on. live stores byte-identical; live instants trees unchanged in 1 live tree(s); live tmux session set byte-identical (0 sessions, incl. 0 dt-); section work is on socket itfleet-E9leak
+pinned 67 files
+claim dir: ['.lease.json.344896.6193248149840.e64e3293f9b7.tmp']
+PASS E9-leak-a the leases view reports s2 as INTERRUPTED, not free (it reported 'free' before the fix, while no claimant could take it)
+PASS E9-leak-b reap RECLAIMED the interrupted claim on s2 and named it under its own kind reap-reclaimed (rc=0). Before the fix this exited 0 reporting '0 of them leased; 0 freed, 0 could not be freed'
+free_slots(): ['s1', 's2', 's3']
+lease('s2') : None
+interrupted : []
+claim -> s2
+PASS E9-leak-c after the reap the slot is CLAIMABLE and no interrupted claim remains: free_slots(), lease() and the claim path all agree. Before the fix this raised NoCapacity('already leased by an unnamed claim') for the life of the store
+planted: ['.lease.json.344915.6193523594837.3d8b98ba7f1c.tmp']
+claim -> s1
+REFUSED: NoCapacity: every enrolled slot is leased (s1, s2, s3). 1 of them hold an INTERRUPTED claim with no lease body — 's3' — which is a dead writer and not work in progress; a reap clears those and names them. Release or reap one, or enroll another workspace.
+REFUSED: NoCapacity: every enrolled slot is leased (s1, s2, s3). 1 of them hold an INTERRUPTED claim with no lease body — 's3' — which is a dead writer and not work in progress; a reap clears those and names them. Release or reap one, or enroll another workspace.
+PASS E9-leak-d the exhausted-pool refusal now NAMES the interrupted claim ('s3'), says it is a dead writer rather than work in progress, and points at reap -- which E9-leak-b proves actually clears it. Before the fix the same sentence named a remedy that was inert, which is FI-30a's unclearable alarm
+PASS ISOLATION-E9leak-leave live stores byte-identical; live instants trees unchanged in 1 live tree(s); live tmux session set byte-identical (0 sessions, incl. 0 dt-); section work is on socket itfleet-E9leak
+STABLE — every verdict in this run is attributable to one tree state
+E9-leak done: IT_FAILED=0  (PASS here now means the FIX holds; these cases were inverted when it landed)
+--- e9leak exit=0  6 PASS / 0 FAIL / 0 SKIP
+
+=== A ===
+SKIP A0 NOT A §A CASE and NOT §A's doing: the live session set already differed from the recorded baseline BEFORE §A ran a single command — < . Measured at t0, ahead of it_section, so ISOLATION-A-enter's FAIL below is inherited drift, not contamination by §A. lib.sh offers no re-baselining path (REPORTED: a file this runner does not own)
+PASS ISOLATION-A-enter live-INSTANTS baseline ESTABLISHED on this call (1 folder(s) across 1 live tree(s)), so the instants half is vacuous here and binds from the next call on. live stores byte-identical; live instants trees unchanged in 1 live tree(s); live tmux session set byte-identical (0 sessions, incl. 0 dt-); section work is on socket itfleet-A
+PASS A1a no mutating verb created $HOME/.fleet with FLEET_HOME unset (29 verbs, a fresh sandbox HOME each)
+PASS A1b all 28 probed mutating verbs exited 2 with an attributable store refusal — either SI-15's 'writes to a store and no store was named' or, since per-root isolation, tier 6's 'could not tell which fleet it belongs to' — and NONE created $HOME/.fleet. Matched on those two exact sentences rather than on the flag name --home, which every verb's usage block also prints on any parse error (II-10, 39 of 39 measured). 0 verb(s) had no argv recipe and are A1d's business, not this case's; 1 verb(s) DECLARE they resolve no store and are excluded from the refusal count by that declaration, never by name: root-init(exit0) — they were still run, and still had to leave $HOME/.fleet alone above
+PASS A1d every one of the 29 mutating verbs in cli.VERBS has an argv recipe in a1_args, so A1a/A1b judge the whole population and not a subset of it
+PASS A1c the operator's real ~/.fleet is unchanged across the whole A1 probe: exists=yes before and after, and its content+mtime manifest is byte-identical (empty manifest = absent). Every probe ran with HOME redirected into the section tree, so the fallback could not reach it
+PASS A1 FLEET_HOME unset ⇒ every mutating verb refuses exit 2 with the SI-15 store refusal, nothing falls back to ~/.fleet, the operator's store is untouched, and every mutating verb had an argv recipe so the population judged is the whole one (A1a+A1b+A1c+A1d)
+PASS A2a the snapshot exists and covers BOTH live stores: 67 sha256 lines, 63 dispatch-board + 4 ws-pool entries, 0 malformed
+PASS A2b negative control: handed a snapshot differing by ONE entry, it_assert_isolation returns 1 and writes a FAIL saying THE LIVE STORES CHANGED — so the store comparison is an assertion, not decoration. The live stores themselves were not read by this runner and not perturbed; only the snapshot handed to the mechanism was
+PASS A2c all 25 run-*.sh runners source lib.sh and reach it_assert_isolation (via it_section or directly), so 'every later section re-diffs the snapshot' is structural rather than a convention
+PASS A2 the live-store snapshot exists and covers both stores, every runner re-diffs it, and the comparison FAILS when perturbed (A2a+A2b+A2c). §A adds no second implementation of the check
+PASS A3 import fleet succeeds from a second checkout of 30 modules at a different path, with cwd elsewhere and __pycache__ stripped; fleet.__file__ resolves INTO the second checkout
+PASS A3b a real verb ran from the second checkout and all 30 loaded fleet.* modules resolved INSIDE it — no module leaked from the primary tree
+PASS A4a AST scan of all 30 of 30 src/fleet/*.py modules (function-local imports included): every import root is stdlib or fleet. Roots seen: ['<relative>', '__future__', 'calendar', 'contextlib', 'dataclasses', 'datetime', 'fcntl', 'fleet', 'hashlib', 'json', 'os', 'pathlib', 'random', 're', 'shlex', 'shutil', 'socket', 'stat', 'subprocess', 'sys', 'tarfile', 'tempfile', 'time', 'typing', 'uuid']
+PASS A4b no importlib / __import__ / pkgutil / pkg_resources / eval / exec anywhere in src/fleet — so the A4a AST scan sees the WHOLE import surface and is not defeated by a name computed at runtime
+PASS A4c real run with the import surface restricted: python3 -S leaves 0 site/dist-packages entries on sys.path, all 30 fleet modules imported and 16 REAL verbs run (subprocess, /proc and git paths included) under a meta_path hook that refuses any non-stdlib import requested from a fleet frame — 0 refusals. The stdlib's own Jython probe (top-level 'org', from copy.py) is attributed elsewhere and allowed, which is exactly why the hook attributes by calling frame and not by module name
+PASS A4 no import outside the stdlib: static (A4a, all 30 modules incl. function-local imports), no dynamic escape hatch (A4b), and a real -S run with a frame-attributed deny hook (A4c)
+PASS A5a the matrix covers all 46 verbs read off cli.VERBS — the plan says 20, FD-12 added seven, and the count is derived rather than typed so a 28th verb fails this case
+PASS A5b every one of 83 real invocations returned a code inside registered_codes(verb) — the 5 base codes for 26 verbs and FD-10's 0/10/11/12/13 for pane-guard
+PASS A5c every driven cell returned the code its state calls for: 83 invocations, 0 mismatches. Cells whose code is state-dependent (selftest, the two harvest ticks) carry no want and are reported in A5e instead of asserted here
+PASS A5d all five registry codes were really produced: 0 ok (init/enroll/leases/...), 1 attention (lint on a forbidden STATE.md, review NOT-READY, complete on an unpassed gate), 2 bad-input (an undeclared flag, all 46 verbs), 3 no-capacity (dispatch --dry-run, 0 enrolled slots, guard named=yes), 4 refused (unenroll of a leased slot, message names the lease=yes; and dispatch --cap 0, wip-cap named=yes). Codes observed: 0 1 2 3 4 12 13 
+SKIP A5e NOT DRIVEN, stated rather than passed vacuously: (1) dispatch's ok/no-capacity/refused are driven through --dry-run only, because a real dispatch HARDCODES a dt-{name} tmux session (cli._do_dispatch) and the isolation contract forbids §A creating one — there is no --no-launch flag; (2) pane-guard's 0/10/11 need a pane rendering claude's input box, which §M10 already drives against real panes; (3) selftest returned 0 and is the one cell carrying no want: its code is a property of the working TREE (M13 shows dirt inside src/ or tests/ makes it 1) and other agents are editing that tree, so it is asserted for registry membership (A5b) alone. harvest's pair IS asserted (1 then 0) once given a home of its own — in the shared home the second tick cannot reach 0, which is A5f; (4) no-capacity and refused are reachable for dispatch and unenroll only — the other 25 verbs have no admission rule to refuse them, so 'drive EVERY verb into all five' is not a property this domain has
+PASS A5f harvest's attention code is clearable: tick1=1 (no prior state), tick2=0, and a resume from the default base leaves tick3=0 tick4=0 — the register stays readable
+PASS A5 all 46 verbs driven through 83 REAL invocations (no --dry-run except dispatch, and that is stated in A5e): every code came from the registry and every intended state produced its own code; all five base codes really occurred
+PASS A8a audited 26 harness files (lib.sh + every run-*.sh, this runner included, comments and string literals discounted): 0 git push / git merge / gh pr merge / rm -rf-on-home in an EXECUTED position; all 16 tmux kill-server/kill-session sites name a private server (tmux -L, or it_tmux which refuses when no section is entered), so none can reach the live tmux server
+PASS A8b 64 rm -rf site(s) across the harness and every one takes a $VARIABLE target ($EV / $FLEET_HOME / $SLOTS / $G3_SOCK / $A_EVDIR), so none is a literal path and none can widen past the section tree. The delete recipes that appear as text — the one run-group5.sh writes into a RUNBOOK.md for M12 to REFUSE, and the shapes M9 searches handlers for — are string literals and are correctly not counted as commands
+SKIP A8c 75 write site(s) land OUTSIDE <section>/ — the clause as written does not hold, and every one is deliberate: 62 site(s) write the register ($RESULTS) and the live-session baseline ($IT_ROOT/live-tmux-sessions.txt, $IT_ROOT/dt-sessions-seen-<S>.txt) at fleet/it level, which is right for state SHARED across sections but is outside <section>/; 13 site(s) touch $TMPDIR — chiefly it_own_cases staging the register through mktemp, the only write that leaves the instant at all, transient and never cited as evidence. What P-3 actually protects (no evidence path outside the instant) HOLDS. SKIP not FAIL: the clause is stricter than the design (SI-18), the register and the baseline are shared-across-sections BY DESIGN, and what P-3 protects — no evidence path outside the instant — holds and is enforced per-commit by lint-evidence-paths.sh
+PASS A8 the harness contains no push, no merge and no rm -rf on the home directory (A8a+A8b), audited over 26 files including run-A.sh itself. A8c is SKIPPED, not proven: its clause ('no write outside <section>/') is stricter than the design, because the register and the live-session baseline are shared ACROSS sections by construction — see A8c's own row for the enumeration and SI-18 for the adjudication. What P-3 protects is asserted elsewhere and enforced per-commit
+PASS A6 no claude was launched by this section (5 live before, 5 after). Compared as an attributed SET, not a count: the detector is live (it matched 5 processes before), so this is a measurement and not an empty world. §A starts and kills no claude; the only long-lived process it created is a tmux 'sleep 900' pane on the private server
+PASS A7 no dt- session was created or killed: the live server's dt- set is identical before and after by NAME AND session_created (0 session(s)), and §A's own private server (socket itfleet-A) carries 0 dt- sessions — the only session §A created is itfleet-A-a5shell. §A runs no real dispatch, only dispatch --dry-run, which claims/creates/starts nothing
+SKIP A7b the 'never WRITTEN TO' half cannot be asserted this run: there is no dt- session on the live server at all, so a check for 'not written to' would pass against an empty world — the distinction run-w1.sh's W1-4 skips for the same reason. What IS asserted: cli._do_dispatch hardcodes tmux=f'dt-{name.name}' at 10 site(s) in src/fleet (A7-product-dt-sites.txt) and routes every tmux call through FLEET_TMUX_SOCKET (4 reference(s) in session.py), which it_section exports as itfleet-A — so a real dispatch's dt- session lands on a private server. REPORTED as a product finding: there is no flag on any verb to choose the session name at dispatch (only resume has --tmux), so Plan 6's 'no session matching ^dt- is created' cannot be honoured from outside
+PASS ISOLATION-A-leave live stores byte-identical; live instants trees unchanged in 1 live tree(s); live tmux session set byte-identical (0 sessions, incl. 0 dt-); section work is on socket itfleet-A
+
+--- RESULTS-closeout-A.tsv ---
+case               verdict  evidence                               note
+A0                 SKIP     it/A/out/live-sessions-before.txt      NOT A §A CASE and NOT §A's doing: the live session set already differed from the recorded baseline BEFORE §A ran a single command — < . Measured at t0, ahead of it_section, so ISOLATION-A-enter's FAIL below is inherited drift, not contamination by §A. lib.sh offers no re-baselining path (REPORTED: a file this runner does not own)
+ISOLATION-A-enter  PASS                                            live-INSTANTS baseline ESTABLISHED on this call (1 folder(s) across 1 live tree(s)), so the instants half is vacuous here and binds from the next call on. live stores byte-identical; live instants trees unchanged in 1 live tree(s); live tmux session set byte-identical (0 sessions, incl. 0 dt-); section work is on socket itfleet-A
+A1a                PASS     it/A/out/A1-per-verb.txt               no mutating verb created $HOME/.fleet with FLEET_HOME unset (29 verbs, a fresh sandbox HOME each)
+A1b                PASS     it/A/out/A1-per-verb.txt               all 28 probed mutating verbs exited 2 with an attributable store refusal — either SI-15's 'writes to a store and no store was named' or, since per-root isolation, tier 6's 'could not tell which fleet it belongs to' — and NONE created $HOME/.fleet. Matched on those two exact sentences rather than on the flag name --home, which every verb's usage block also prints on any parse error (II-10, 39 of 39 measured). 0 verb(s) had no argv recipe and are A1d's business, not this case's; 1 verb(s) DECLARE they resolve no store and are excluded from the refusal count by that declaration, never by name: root-init(exit0) — they were still run, and still had to leave $HOME/.fleet alone above
+A1d                PASS     it/A/out/A1-per-verb.txt               every one of the 29 mutating verbs in cli.VERBS has an argv recipe in a1_args, so A1a/A1b judge the whole population and not a subset of it
+A1c                PASS     it/A/out/A1-real-fleet-after.manifest  the operator's real ~/.fleet is unchanged across the whole A1 probe: exists=yes before and after, and its content+mtime manifest is byte-identical (empty manifest = absent). Every probe ran with HOME redirected into the section tree, so the fallback could not reach it
+A1                 PASS     it/A/out/A1-per-verb.txt               FLEET_HOME unset ⇒ every mutating verb refuses exit 2 with the SI-15 store refusal, nothing falls back to ~/.fleet, the operator's store is untouched, and every mutating verb had an argv recipe so the population judged is the whole one (A1a+A1b+A1c+A1d)
+A2a                PASS     fleet/it/live-stores.sha256            the snapshot exists and covers BOTH live stores: 67 sha256 lines, 63 dispatch-board + 4 ws-pool entries, 0 malformed
+A2b                PASS     it/A/out/A2-negative-control.tsv       negative control: handed a snapshot differing by ONE entry, it_assert_isolation returns 1 and writes a FAIL saying THE LIVE STORES CHANGED — so the store comparison is an assertion, not decoration. The live stores themselves were not read by this runner and not perturbed; only the snapshot handed to the mechanism was
+A2c                PASS     it/A/out/A2-runner-coverage.txt        all 25 run-*.sh runners source lib.sh and reach it_assert_isolation (via it_section or directly), so 'every later section re-diffs the snapshot' is structural rather than a convention
+A2                 PASS     it/A/out/A2-negative-control.tsv       the live-store snapshot exists and covers both stores, every runner re-diffs it, and the comparison FAILS when perturbed (A2a+A2b+A2c). §A adds no second implementation of the check
+A3                 PASS     it/A/out/A3-cwd-elsewhere.stdout       import fleet succeeds from a second checkout of 30 modules at a different path, with cwd elsewhere and __pycache__ stripped; fleet.__file__ resolves INTO the second checkout
+A3b                PASS     it/A/out/A3b.out                       a real verb ran from the second checkout and all 30 loaded fleet.* modules resolved INSIDE it — no module leaked from the primary tree
+A4a                PASS     it/A/out/A4a.out                       AST scan of all 30 of 30 src/fleet/*.py modules (function-local imports included): every import root is stdlib or fleet. Roots seen: ['<relative>', '__future__', 'calendar', 'contextlib', 'dataclasses', 'datetime', 'fcntl', 'fleet', 'hashlib', 'json', 'os', 'pathlib', 'random', 're', 'shlex', 'shutil', 'socket', 'stat', 'subprocess', 'sys', 'tarfile', 'tempfile', 'time', 'typing', 'uuid']
+A4b                PASS     it/A/out/A4b-dynamic-import-sites.txt  no importlib / __import__ / pkgutil / pkg_resources / eval / exec anywhere in src/fleet — so the A4a AST scan sees the WHOLE import surface and is not defeated by a name computed at runtime
+A4c                PASS     it/A/out/A4c.out                       real run with the import surface restricted: python3 -S leaves 0 site/dist-packages entries on sys.path, all 30 fleet modules imported and 16 REAL verbs run (subprocess, /proc and git paths included) under a meta_path hook that refuses any non-stdlib import requested from a fleet frame — 0 refusals. The stdlib's own Jython probe (top-level 'org', from copy.py) is attributed elsewhere and allowed, which is exactly why the hook attributes by calling frame and not by module name
+A4                 PASS     it/A/out/A4c.out                       no import outside the stdlib: static (A4a, all 30 modules incl. function-local imports), no dynamic escape hatch (A4b), and a real -S run with a frame-attributed deny hook (A4c)
+A5a                PASS     it/A/out/A5-matrix.txt                 the matrix covers all 46 verbs read off cli.VERBS — the plan says 20, FD-12 added seven, and the count is derived rather than typed so a 28th verb fails this case
+A5b                PASS     it/A/out/A5-matrix.txt                 every one of 83 real invocations returned a code inside registered_codes(verb) — the 5 base codes for 26 verbs and FD-10's 0/10/11/12/13 for pane-guard
+A5c                PASS     it/A/out/A5-matrix.txt                 every driven cell returned the code its state calls for: 83 invocations, 0 mismatches. Cells whose code is state-dependent (selftest, the two harvest ticks) carry no want and are reported in A5e instead of asserted here
+A5d                PASS     it/A/out/A5-code-producers.txt         all five registry codes were really produced: 0 ok (init/enroll/leases/...), 1 attention (lint on a forbidden STATE.md, review NOT-READY, complete on an unpassed gate), 2 bad-input (an undeclared flag, all 46 verbs), 3 no-capacity (dispatch --dry-run, 0 enrolled slots, guard named=yes), 4 refused (unenroll of a leased slot, message names the lease=yes; and dispatch --cap 0, wip-cap named=yes). Codes observed: 0 1 2 3 4 12 13 
+A5e                SKIP     it/A/out/A5-matrix.txt                 NOT DRIVEN, stated rather than passed vacuously: (1) dispatch's ok/no-capacity/refused are driven through --dry-run only, because a real dispatch HARDCODES a dt-{name} tmux session (cli._do_dispatch) and the isolation contract forbids §A creating one — there is no --no-launch flag; (2) pane-guard's 0/10/11 need a pane rendering claude's input box, which §M10 already drives against real panes; (3) selftest returned 0 and is the one cell carrying no want: its code is a property of the working TREE (M13 shows dirt inside src/ or tests/ makes it 1) and other agents are editing that tree, so it is asserted for registry membership (A5b) alone. harvest's pair IS asserted (1 then 0) once given a home of its own — in the shared home the second tick cannot reach 0, which is A5f; (4) no-capacity and refused are reachable for dispatch and unenroll only — the other 25 verbs have no admission rule to refuse them, so 'drive EVERY verb into all five' is not a property this domain has
+A5f                PASS     it/A/out/A5f-summary.txt               harvest's attention code is clearable: tick1=1 (no prior state), tick2=0, and a resume from the default base leaves tick3=0 tick4=0 — the register stays readable
+A5                 PASS     it/A/out/A5-matrix.txt                 all 46 verbs driven through 83 REAL invocations (no --dry-run except dispatch, and that is stated in A5e): every code came from the registry and every intended state produced its own code; all five base codes really occurred
+A8a                PASS     it/A/out/A8-audit.txt                  audited 26 harness files (lib.sh + every run-*.sh, this runner included, comments and string literals discounted): 0 git push / git merge / gh pr merge / rm -rf-on-home in an EXECUTED position; all 16 tmux kill-server/kill-session sites name a private server (tmux -L, or it_tmux which refuses when no section is entered), so none can reach the live tmux server
+A8b                PASS     it/A/out/A8-audit.txt                  64 rm -rf site(s) across the harness and every one takes a $VARIABLE target ($EV / $FLEET_HOME / $SLOTS / $G3_SOCK / $A_EVDIR), so none is a literal path and none can widen past the section tree. The delete recipes that appear as text — the one run-group5.sh writes into a RUNBOOK.md for M12 to REFUSE, and the shapes M9 searches handlers for — are string literals and are correctly not counted as commands
+A8c                SKIP     it/A/out/A8-audit.txt                  75 write site(s) land OUTSIDE <section>/ — the clause as written does not hold, and every one is deliberate: 62 site(s) write the register ($RESULTS) and the live-session baseline ($IT_ROOT/live-tmux-sessions.txt, $IT_ROOT/dt-sessions-seen-<S>.txt) at fleet/it level, which is right for state SHARED across sections but is outside <section>/; 13 site(s) touch $TMPDIR — chiefly it_own_cases staging the register through mktemp, the only write that leaves the instant at all, transient and never cited as evidence. What P-3 actually protects (no evidence path outside the instant) HOLDS. SKIP not FAIL: the clause is stricter than the design (SI-18), the register and the baseline are shared-across-sections BY DESIGN, and what P-3 protects — no evidence path outside the instant — holds and is enforced per-commit by lint-evidence-paths.sh
+A8                 PASS     it/A/out/A8-audit.txt                  the harness contains no push, no merge and no rm -rf on the home directory (A8a+A8b), audited over 26 files including run-A.sh itself. A8c is SKIPPED, not proven: its clause ('no write outside <section>/') is stricter than the design, because the register and the live-session baseline are shared ACROSS sections by construction — see A8c's own row for the enumeration and SI-18 for the adjudication. What P-3 protects is asserted elsewhere and enforced per-commit
+A6                 PASS     it/A/out/claude-pids-after.txt         no claude was launched by this section (5 live before, 5 after). Compared as an attributed SET, not a count: the detector is live (it matched 5 processes before), so this is a measurement and not an empty world. §A starts and kills no claude; the only long-lived process it created is a tmux 'sleep 900' pane on the private server
+A7                 PASS     it/A/out/A7-dt-after.txt               no dt- session was created or killed: the live server's dt- set is identical before and after by NAME AND session_created (0 session(s)), and §A's own private server (socket itfleet-A) carries 0 dt- sessions — the only session §A created is itfleet-A-a5shell. §A runs no real dispatch, only dispatch --dry-run, which claims/creates/starts nothing
+A7b                SKIP     it/A/out/A7-product-dt-sites.txt       the 'never WRITTEN TO' half cannot be asserted this run: there is no dt- session on the live server at all, so a check for 'not written to' would pass against an empty world — the distinction run-w1.sh's W1-4 skips for the same reason. What IS asserted: cli._do_dispatch hardcodes tmux=f'dt-{name.name}' at 10 site(s) in src/fleet (A7-product-dt-sites.txt) and routes every tmux call through FLEET_TMUX_SOCKET (4 reference(s) in session.py), which it_section exports as itfleet-A — so a real dispatch's dt- session lands on a private server. REPORTED as a product finding: there is no flag on any verb to choose the session name at dispatch (only resume has --tmux), so Plan 6's 'no session matching ^dt- is created' cannot be honoured from outside
+ISOLATION-A-leave  PASS                                            live stores byte-identical; live instants trees unchanged in 1 live tree(s); live tmux session set byte-identical (0 sessions, incl. 0 dt-); section work is on socket itfleet-A
+--- A exit=0  28 PASS / 0 FAIL / 4 SKIP
+
+=== B ===
+PASS ISOLATION-B-enter live-INSTANTS baseline ESTABLISHED on this call (1 folder(s) across 1 live tree(s)), so the instants half is vacuous here and binds from the next call on. live stores byte-identical; live instants trees unchanged in 1 live tree(s); live tmux session set byte-identical (0 sessions, incl. 0 dt-); section work is on socket itfleet-B
+PASS B1 init created EXACTLY the canonical set and nothing else (10 entries: 6 documents + evidence/INDEX.md + 3 dirs), set-equal to the matrix's declaration; lint exit 0 with 0 violations
+PASS B2 STATE.md absent on disk after init in BOTH cells the bootstrap can reach ((inflight,append) and (inflight,compact)), and named in neither init's created list — the seed and the gate read one table (FD-7)
+PASS B3 clean before (exit 0); one hand-written STATE.md => exactly 1 violation, rule 'forbidden', NAMING 00000000-09112040-inflight-append-b3state/STATE.md, exit 1
+PASS B4 delete DECISIONS.md => exactly 1 'required' violation NAMING it, exit 1; an IRRELEVANT write (NOTES-b4.md) leaves the alarm up (control against a checker that clears on any change); restoring the NAMED file => 0 violations, exit 0. Both halves asserted.
+PASS B5 -inflight-compact- with no COMPACTED.md: rule 'due-later', severity info, 0 violations, exit 0. §K2 proved this for a DISPATCHED compaction; this angle is the bootstrap's own output — layout.bootstrap declines to seed a DUE_LATER file and layout.validate declines to fault it, so seed and gate agree in the same cell
+PASS B6 the SAME folder, three characters of its name changed and NOTHING else written: info becomes exactly 1 'required' violation naming COMPACTED.md, exit 1. §K7 reached this cell through the 'complete' VERB; this reaches it by an on-disk mv, so the verdict is provably the matrix row (complete,compact) and not something the 'complete' verb wrote
+PASS B7 writing COMPACTED.md into the -complete-compact- folder clears it: 0 violations, 0 COMPACTED.md rows at all, exit 0 — the alarm cleared by doing exactly what it named (W2-21's unclearable-alarm family)
+PASS B8 -abort-compact- with no COMPACTED.md: exit 0, 0 violations and NO COMPACTED.md row at all — not even an info. §K8 reached this through the 'abort' VERB; this reaches it by mv, and then mv's the same folder to -complete- (1 violation) and back to -abort- (silent again), which is what distinguishes a real (abort,compact)=OPTIONAL row from a fallthrough: an absent cell exits 2, not 0
+PASS B9 a 'main-…' name is refused exit 2 at BOTH doors — `init --base main` (before anything is written: 0 folders created) and `lint` on a main-… folder already on disk — and both messages name base_instant='main' and say `main` is deprecated
+PASS B10 a 4-digit base is refused exit 2 at both doors (`init --base 0715` and `lint` on a 0715-… folder), the message names base_instant='0715', 9 digits is refused too (exit 2), and the canonical 8-digit 00000000 is ACCEPTED (exit 0) — so the refusal is the width rule and not a blanket no
+PASS B11 a 6-dash-field folder is refused exit 2 and the message COUNTS the fields ('has 6 dash-separated fields', 'the grammar has exactly 5'); a 4-field folder is refused too, so the rule is the arity and not a fixed expectation
+PASS B12 an instantName containing a dash cannot exist: the only input surface (init --name 'two-words') NORMALISES to 'twoWords' (5 fields, dashless, lint clean) and an on-disk dash is refused exit 2. DIVERGENCE FROM THE PLAN, stated: init does NOT refuse (exit 0, by identity.camel's documented design), and a dash on disk is refused as B11's arity error, not by the <instantName> domain check — which is real and reachable (…-append-TwoWords => exit 2 naming instantName)
+PASS B13 -inflight- -> -complete- renamed on disk with no verb: status follows it (folder_state inflight->complete, evidence.instant becomes the NEW path, identity unchanged) while the record still names the STALE path, so the resolver is what did the work; and the watcher's memory is not orphaned — ONE seen file with the SAME name before and after, the post-rename tick reads '0 new' and stops reporting no-prior-state (exit 1 -> 0)
+PASS B14 same minute (curr=09112040), the -abort- sibling created FIRST and sorting first: the stale -inflight-…-beta path resolves to -complete-…-beta and NOT to the abort sibling that precedes it, the stale -inflight-…-alpha path resolves to -abort-…-alpha, and a THIRD same-minute name (gamma) resolves to nothing at all (exit 2) — the control that stops this passing on a resolver that cannot collide
+PASS ISOLATION-B-live-tmux live tmux session set byte-identical §B's own private server (itfleet-B) held: nothing — it was never started
+PASS ISOLATION-B-claude-count no claude was launched by this section (5 live before, 5 after). §B launches no process at all (A6)
+PASS ISOLATION-B-leave live stores byte-identical; live instants trees unchanged in 1 live tree(s); live tmux session set byte-identical (0 sessions, incl. 0 dt-); section work is on socket itfleet-B
+
+--- RESULTS-closeout-B.tsv ---
+case                      verdict  evidence                           note
+ISOLATION-B-enter         PASS                                        live-INSTANTS baseline ESTABLISHED on this call (1 folder(s) across 1 live tree(s)), so the instants half is vacuous here and binds from the next call on. live stores byte-identical; live instants trees unchanged in 1 live tree(s); live tmux session set byte-identical (0 sessions, incl. 0 dt-); section work is on socket itfleet-B
+B1                        PASS     it/B/out/b1/tree.txt               init created EXACTLY the canonical set and nothing else (10 entries: 6 documents + evidence/INDEX.md + 3 dirs), set-equal to the matrix's declaration; lint exit 0 with 0 violations
+B2                        PASS     it/B/out/b2/state-md.txt           STATE.md absent on disk after init in BOTH cells the bootstrap can reach ((inflight,append) and (inflight,compact)), and named in neither init's created list — the seed and the gate read one table (FD-7)
+B3                        PASS     it/B/out/b3/lint-dirty.out         clean before (exit 0); one hand-written STATE.md => exactly 1 violation, rule 'forbidden', NAMING 00000000-09112040-inflight-append-b3state/STATE.md, exit 1
+B4                        PASS     it/B/out/b4/lint-3-restored.out    delete DECISIONS.md => exactly 1 'required' violation NAMING it, exit 1; an IRRELEVANT write (NOTES-b4.md) leaves the alarm up (control against a checker that clears on any change); restoring the NAMED file => 0 violations, exit 0. Both halves asserted.
+B5                        PASS     it/B/out/b56/b5-lint.out           -inflight-compact- with no COMPACTED.md: rule 'due-later', severity info, 0 violations, exit 0. §K2 proved this for a DISPATCHED compaction; this angle is the bootstrap's own output — layout.bootstrap declines to seed a DUE_LATER file and layout.validate declines to fault it, so seed and gate agree in the same cell
+B6                        PASS     it/B/out/b56/b6-lint.out           the SAME folder, three characters of its name changed and NOTHING else written: info becomes exactly 1 'required' violation naming COMPACTED.md, exit 1. §K7 reached this cell through the 'complete' VERB; this reaches it by an on-disk mv, so the verdict is provably the matrix row (complete,compact) and not something the 'complete' verb wrote
+B7                        PASS     it/B/out/b56/b7-lint.out           writing COMPACTED.md into the -complete-compact- folder clears it: 0 violations, 0 COMPACTED.md rows at all, exit 0 — the alarm cleared by doing exactly what it named (W2-21's unclearable-alarm family)
+B8                        PASS     it/B/out/b8/b8-lint.out            -abort-compact- with no COMPACTED.md: exit 0, 0 violations and NO COMPACTED.md row at all — not even an info. §K8 reached this through the 'abort' VERB; this reaches it by mv, and then mv's the same folder to -complete- (1 violation) and back to -abort- (silent again), which is what distinguishes a real (abort,compact)=OPTIONAL row from a fallthrough: an absent cell exits 2, not 0
+B9                        PASS     it/B/out/b9/b9-init.out            a 'main-…' name is refused exit 2 at BOTH doors — `init --base main` (before anything is written: 0 folders created) and `lint` on a main-… folder already on disk — and both messages name base_instant='main' and say `main` is deprecated
+B10                       PASS     it/B/out/b10/b10-init.out          a 4-digit base is refused exit 2 at both doors (`init --base 0715` and `lint` on a 0715-… folder), the message names base_instant='0715', 9 digits is refused too (exit 2), and the canonical 8-digit 00000000 is ACCEPTED (exit 0) — so the refusal is the width rule and not a blanket no
+B11                       PASS     it/B/out/b11/b11-lint.out          a 6-dash-field folder is refused exit 2 and the message COUNTS the fields ('has 6 dash-separated fields', 'the grammar has exactly 5'); a 4-field folder is refused too, so the rule is the arity and not a fixed expectation
+B12                       PASS     it/B/out/b12/b12-what-happens.txt  an instantName containing a dash cannot exist: the only input surface (init --name 'two-words') NORMALISES to 'twoWords' (5 fields, dashless, lint clean) and an on-disk dash is refused exit 2. DIVERGENCE FROM THE PLAN, stated: init does NOT refuse (exit 0, by identity.camel's documented design), and a dash on disk is refused as B11's arity error, not by the <instantName> domain check — which is real and reachable (…-append-TwoWords => exit 2 naming instantName)
+B13                       PASS     it/B/out/b13h/b13.txt              -inflight- -> -complete- renamed on disk with no verb: status follows it (folder_state inflight->complete, evidence.instant becomes the NEW path, identity unchanged) while the record still names the STALE path, so the resolver is what did the work; and the watcher's memory is not orphaned — ONE seen file with the SAME name before and after, the post-rename tick reads '0 new' and stops reporting no-prior-state (exit 1 -> 0)
+B14                       PASS     it/B/out/b14/b14.txt               same minute (curr=09112040), the -abort- sibling created FIRST and sorting first: the stale -inflight-…-beta path resolves to -complete-…-beta and NOT to the abort sibling that precedes it, the stale -inflight-…-alpha path resolves to -abort-…-alpha, and a THIRD same-minute name (gamma) resolves to nothing at all (exit 2) — the control that stops this passing on a resolver that cannot collide
+ISOLATION-B-live-tmux     PASS     it/B/out/live-tmux-after.txt       live tmux session set byte-identical §B's own private server (itfleet-B) held: nothing — it was never started
+ISOLATION-B-claude-count  PASS     it/B/out/claude-count-after.txt    no claude was launched by this section (5 live before, 5 after). §B launches no process at all (A6)
+ISOLATION-B-leave         PASS                                        live stores byte-identical; live instants trees unchanged in 1 live tree(s); live tmux session set byte-identical (0 sessions, incl. 0 dt-); section work is on socket itfleet-B
+--- B exit=0  18 PASS / 0 FAIL / 0 SKIP
+
+=== C ===
+PASS ISOLATION-C-enter live-INSTANTS baseline ESTABLISHED on this call (1 folder(s) across 1 live tree(s)), so the instants half is vacuous here and binds from the next call on. live stores byte-identical; live instants trees unchanged in 1 live tree(s); live tmux session set byte-identical (0 sessions, incl. 0 dt-); section work is on socket itfleet-C
+PASS C1 two freshly enrolled slots read exactly 'free' (s1 s2), 2 rows; CONTROL: a third slot holding a bodiless claim reads 'interrupted' in the same view, so 'free' is earned and not the default for 'no lease body' (SI-7)
+PASS C2 enroll of a path that is not a directory: exit 2, the message names the path and says enrolment never creates the workspace, and the store+slots manifest (content+mtime) is unchanged
+PASS C3 second claim on the same named slot: exit 3 from pool.claim naming the holding todo (s2 was free, so the capacity guard passed and cannot be the source); no tmux session and no instant folder were created
+PASS C4 claim with no slot named on a full pool: exit 3 from the CLI (pool-capacity guard, naming both slots) AND exit 3 from pool.claim itself, whose message prescribes release/reap/enroll; with a bodiless claim in the pool the same exhaustion names it INTERRUPTED and prescribes reap (SI-7)
+PASS C5 release twice: exit 0 both times, freed=True then freed=False — the return value, not the absence of an exception, is what says which call did the freeing (FI-22); the claim directory is gone and leases reads 'free', not 'interrupted'
+PASS C6 a real sleep 300 with cwd inside the slot: release refused with exit 4 naming that exact pid in both the sentence and the clearing condition, and the lease body survived; killing exactly that pid made release return freed=True; a second live sleeper was force-released with exit 0 while asserted still alive, and was still alive afterwards (release kills nothing). Both pids reaped by this case.
+PASS C7 two leases on one pool, one tmux session really running on the private server and one name that never existed: reap freed exactly the dead slot (1 reaped row, 0 reclaimed/unfreed/refused) and left the live one held. Controls: neither slot had a cwd holder, so tmux liveness was the only discriminator; the freed slot reads 'free' not 'interrupted'; and after killing the live pane a second reap freed that slot too, so the survival was caused by the liveness.
+PASS C8 a stale lease owned by another base: reap --base <ours> exited 4, named that base, said 'Not yours to clear' and quoted the exact override token, and left the lease held; the SAME call freed our own stale lease in the same pool, so the refusal is provably ownership-scoped rather than a blanket no-op; reap --all then freed the foreign lease and the slot reads free.
+PASS C9 an undeclared golden raises BadInput whose exit_code is 2, and the sentence names the fix as `fleet set-golden --path` — a verb that is really in VERBS (FI-19a) — while naming the file it read; controls: a set golden reads back through a fresh consumer and an empty golden file is still unset. The class-to-code mapping is measured through a real CLI subprocess (exit 2), because NO verb consumes golden() and so the state itself is not reachable from a command line.
+SKIP C10 UNRUNNABLE, two independent reasons, both evidenced in the attached grep. (1) NO PRODUCER: nothing in src/fleet clones anything — the only occurrences of the word are three doc-comments — and _do_dispatch never calls Workspace.golden(); it records golden=str(lease.path), i.e. the slot itself, and the only thing it does to a slot is isolate_build_cache. Workspace.golden() has no consumer in the package at all, so the declared golden is write-only. A test would have to clone with git itself and then assert git cloned, which is K6's shape exactly. (2) The clone step would sit inside a SUCCEEDING dispatch, and dispatch hardcodes tmux=dt-<name> plus sessions.start, which this section is forbidden to create. Reported as a gap, not failed as a defect: set-golden works and is asserted here, so the missing piece is a consumer.
+PASS C11 both maven.config files name the POPULATED .m2-old (which exists) and not the empty .m2 that sorts first; re-running stacks nothing. A decoy EMPTY .m2 sits beside a populated .m2-old and sorts first, so a check that merely found a .m2* would have named the cold one.
+PASS C12 at-base/descendant/present/absent -> ok/ok/advisory/failed, four distinct positions from one call, every HEAD readable All four verdicts come from ONE base_check call over four real clones, so a check answering the same for every input cannot pass.
+PASS C13 alpha ok + beta absent -> failed (worst governs); the same pair with both bases met -> ok, so the aggregate is not constant beta's expected sha is a real commit that is simply not an object in beta, and beta's own HEAD is readable, so 'absent' is a missing object rather than a missing repo.
+PASS ISOLATION-C-live-tmux live tmux session set byte-identical (0 sessions, incl. 0 dt-); §C starts only itfleet-C-* sessions and only on socket itfleet-C
+PASS ISOLATION-C-claude-count no claude was launched by this section (5 live before, 5 after). §C starts none (A6)
+PASS ISOLATION-C-leave live stores byte-identical; live instants trees unchanged in 1 live tree(s); live tmux session set byte-identical (0 sessions, incl. 0 dt-); section work is on socket itfleet-C
+
+--- RESULTS-closeout-C.tsv ---
+case                      verdict  evidence                          note
+ISOLATION-C-enter         PASS                                       live-INSTANTS baseline ESTABLISHED on this call (1 folder(s) across 1 live tree(s)), so the instants half is vacuous here and binds from the next call on. live stores byte-identical; live instants trees unchanged in 1 live tree(s); live tmux session set byte-identical (0 sessions, incl. 0 dt-); section work is on socket itfleet-C
+C1                        PASS     it/C/out/c1/C1.txt                two freshly enrolled slots read exactly 'free' (s1 s2), 2 rows; CONTROL: a third slot holding a bodiless claim reads 'interrupted' in the same view, so 'free' is earned and not the default for 'no lease body' (SI-7)
+C2                        PASS     it/C/out/c2/C2.txt                enroll of a path that is not a directory: exit 2, the message names the path and says enrolment never creates the workspace, and the store+slots manifest (content+mtime) is unchanged
+C3                        PASS     it/C/out/c3/C3.txt                second claim on the same named slot: exit 3 from pool.claim naming the holding todo (s2 was free, so the capacity guard passed and cannot be the source); no tmux session and no instant folder were created
+C4                        PASS     it/C/out/c4/C4.txt                claim with no slot named on a full pool: exit 3 from the CLI (pool-capacity guard, naming both slots) AND exit 3 from pool.claim itself, whose message prescribes release/reap/enroll; with a bodiless claim in the pool the same exhaustion names it INTERRUPTED and prescribes reap (SI-7)
+C5                        PASS     it/C/out/c5/C5.txt                release twice: exit 0 both times, freed=True then freed=False — the return value, not the absence of an exception, is what says which call did the freeing (FI-22); the claim directory is gone and leases reads 'free', not 'interrupted'
+C6                        PASS     it/C/out/c6/C6.txt                a real sleep 300 with cwd inside the slot: release refused with exit 4 naming that exact pid in both the sentence and the clearing condition, and the lease body survived; killing exactly that pid made release return freed=True; a second live sleeper was force-released with exit 0 while asserted still alive, and was still alive afterwards (release kills nothing). Both pids reaped by this case.
+C7                        PASS     it/C/out/c7/C7.txt                two leases on one pool, one tmux session really running on the private server and one name that never existed: reap freed exactly the dead slot (1 reaped row, 0 reclaimed/unfreed/refused) and left the live one held. Controls: neither slot had a cwd holder, so tmux liveness was the only discriminator; the freed slot reads 'free' not 'interrupted'; and after killing the live pane a second reap freed that slot too, so the survival was caused by the liveness.
+C8                        PASS     it/C/out/c8/C8.txt                a stale lease owned by another base: reap --base <ours> exited 4, named that base, said 'Not yours to clear' and quoted the exact override token, and left the lease held; the SAME call freed our own stale lease in the same pool, so the refusal is provably ownership-scoped rather than a blanket no-op; reap --all then freed the foreign lease and the slot reads free.
+C9                        PASS     it/C/out/c9/C9.txt                an undeclared golden raises BadInput whose exit_code is 2, and the sentence names the fix as `fleet set-golden --path` — a verb that is really in VERBS (FI-19a) — while naming the file it read; controls: a set golden reads back through a fresh consumer and an empty golden file is still unset. The class-to-code mapping is measured through a real CLI subprocess (exit 2), because NO verb consumes golden() and so the state itself is not reachable from a command line.
+C10                       SKIP     it/C/out/c10/C10-no-producer.txt  UNRUNNABLE, two independent reasons, both evidenced in the attached grep. (1) NO PRODUCER: nothing in src/fleet clones anything — the only occurrences of the word are three doc-comments — and _do_dispatch never calls Workspace.golden(); it records golden=str(lease.path), i.e. the slot itself, and the only thing it does to a slot is isolate_build_cache. Workspace.golden() has no consumer in the package at all, so the declared golden is write-only. A test would have to clone with git itself and then assert git cloned, which is K6's shape exactly. (2) The clone step would sit inside a SUCCEEDING dispatch, and dispatch hardcodes tmux=dt-<name> plus sessions.start, which this section is forbidden to create. Reported as a gap, not failed as a defect: set-golden works and is asserted here, so the missing piece is a consumer.
+C11                       PASS     it/C/out/c11/C11.txt              both maven.config files name the POPULATED .m2-old (which exists) and not the empty .m2 that sorts first; re-running stacks nothing. A decoy EMPTY .m2 sits beside a populated .m2-old and sorts first, so a check that merely found a .m2* would have named the cold one.
+C12                       PASS     it/C/out/c12/C12.txt              at-base/descendant/present/absent -> ok/ok/advisory/failed, four distinct positions from one call, every HEAD readable All four verdicts come from ONE base_check call over four real clones, so a check answering the same for every input cannot pass.
+C13                       PASS     it/C/out/c13/C13.txt              alpha ok + beta absent -> failed (worst governs); the same pair with both bases met -> ok, so the aggregate is not constant beta's expected sha is a real commit that is simply not an object in beta, and beta's own HEAD is readable, so 'absent' is a missing object rather than a missing repo.
+ISOLATION-C-live-tmux     PASS     it/C/out/live-tmux-after.txt      live tmux session set byte-identical (0 sessions, incl. 0 dt-); §C starts only itfleet-C-* sessions and only on socket itfleet-C
+ISOLATION-C-claude-count  PASS     it/C/out/claude-count-after.txt   no claude was launched by this section (5 live before, 5 after). §C starts none (A6)
+ISOLATION-C-leave         PASS                                       live stores byte-identical; live instants trees unchanged in 1 live tree(s); live tmux session set byte-identical (0 sessions, incl. 0 dt-); section work is on socket itfleet-C
+--- C exit=0  16 PASS / 0 FAIL / 1 SKIP
+
+=== D ===
+PASS ISOLATION-D-enter live-INSTANTS baseline ESTABLISHED on this call (1 folder(s) across 1 live tree(s)), so the instants half is vacuous here and binds from the next call on. live stores byte-identical; live instants trees unchanged in 1 live tree(s); live tmux session set byte-identical (0 sessions, incl. 0 dt-); section work is on socket itfleet-D
+PASS D1 exit 0 and ZERO delta over 56 paths (sha256 AND mtime) across the store, the pool, the slots, the instants dir and the profile dir; 0 records and 0 lease dirs created. The identical command without --dry-run moves the same manifest by 30 lines, so the manifest is sensitive and the zero is a fact about the dry run
+SKIP D2 UNRUNNABLE AS SPECIFIED: no verb declares --no-launch (exit 2, the parser names it as undeclared). Without it every real dispatch launches a session and stamps launched_at, so the state D2 describes — child instant + record + LEASE HELD + no session + PENDING-LAUNCH — is unreachable: the only routes to PENDING-LAUNCH are a launch that FAILED (which releases the lease; see D10b) and a claim with no record (which has no instant and no record; see D11). D2b asserts the reachable half
+PASS D2b real dispatch, no flags withheld: child instant exists with a non-empty CHARTER.md, 1 record written, 1 lease HELD by the same todo_id, and the session the product named (dt-d2bWorker) exists on socket itfleet-D and on NO live server. status says RUNNING and NOT PENDING-LAUNCH, because dispatch launched the pane and stamped launched_at — which is exactly why D2 as written needs --no-launch
+PASS D3 the registry did not exist before the dispatch; after it, base 00000000 is a watched source in sources.json AND in the consumer's own view (harvest --dry-run prints a source row for it), and dispatch reported watched_source=00000000 itself. The only verbs run against this store are the two in verbs-run.txt — there is no register verb on the surface at all, which is the point: the transaction cannot forget it (harvest.record_dispatch)
+PASS D4 a record written straight to the store naming base 00000042 produces exactly one unregistered-base violation and exit 1; registering that base (via a real record_dispatch — there is NO register verb, so resume is the only slot-free route) clears the violation and lint exits 0. The population line moves from 1 source to 2, so the clear is a registration and not a narrowed scope
+PASS D5 the rendered CHARTER.md and .fleet/seed.txt of a real dispatch contain zero {{TOKEN}} occurrences; a profile whose seed names {{RUN_ID}} (which the dispatch context does not supply) is REFUSED with exit 2 naming the token and the six values it was given. FD-14's ordering is visible in the aftermath: 0 lease dirs, 0 instants, 0 records — the render is fallible and it runs before the folder exists, so this rollback had nothing to undo
+PASS D6 exit 4 with a free slot enrolled (so pool-capacity, which is evaluated last and would answer 3, cannot be the refuser); the diagnostic contains: declares kind='compaction', whose opType(s) are compact. Nothing was claimed and nothing was recorded
+PASS D7 exit 4 with a free slot enrolled (so pool-capacity, which is evaluated last and would answer 3, cannot be the refuser); the diagnostic contains: declares kind='worker', whose opType(s) are append. Nothing was claimed and nothing was recorded
+PASS D8 exit 2 with a free slot enrolled (so pool-capacity, which is evaluated last and would answer 3, cannot be the refuser); the diagnostic contains: an undeclared kind is an error, not a `worker`. Nothing was claimed and nothing was recorded
+PASS D8b exit 2 with a free slot enrolled (so pool-capacity, which is evaluated last and would answer 3, cannot be the refuser); the diagnostic contains: declares no kind: there is no profile.json. Nothing was claimed and nothing was recorded
+SKIP D9 INJECTION IS INERT, so there is no rollback to judge: with the declared golden at mode 000 the dispatch still exits 0, writes its record and holds its lease. dispatch never reads the golden and never clones it — _do_dispatch's only Workspace call is isolate_build_cache(lease.path), and the package contains no clone at all, so a slot is an EMPTY directory and record.golden is set to the SLOT path rather than to the golden. Reported as a defect; D9b injects the same PermissionError one step downstream, where it does land
+PASS D9b a REAL PermissionError (slot at mode 000) in the build-cache step — after the claim, after layout.bootstrap, after the charter write, before the record — rolls back exactly as FD-14 specifies: 0 lease dirs left, 0 records left, and the child folder already built is LEFT IN PLACE and NAMED in the rollback sentence, asserted against the path actually on disk. Judged against FD-14 rather than against 'no half-built instant': the folder is the named leftover the decision chose over a delete. And since SI-22 the operator gets the errno text plus a sentence with NO TRACEBACK (asserted), which is what §9's alarm contract asks for; the step is identified by the .m2 path in that text rather than by a stack frame, so renaming an internal function cannot break this case
+PASS D10a with a FILE at the exact child path, dispatch REFUSES before claiming anything: exit 4 (Refused, registered — not an unhandled traceback), the sentence names the occupied path, 0 lease dirs, 0 records, and the pre-existing file byte-identical. Stronger than the rollback this case originally asserted: SI-20 moved the check ahead of the claim, so there is nothing to undo and no rollback sentence at all. The plan's property (no leaked lease, no half-built instant, no record) is satisfied by not starting rather than by unwinding
+PASS D10b a second dispatch onto an existing child instant left the running worker's charter and record intact (second exit 4)
+PASS D11 12 of 12 iterations SIGKILLed with the claim already taken and the child folder not yet created — the killer logs the millisecond, ~115ms into a ~200ms transaction. 0 records and 0 instants in every one, so 'no half-built instant, no record' holds exactly where FD-14 orders it to. A lease is left in 12 of them (a killed process runs no rollback; FD-14 promises a NAMED leftover, not none) and in 12 of those the leftover is precisely SI-7's interrupted claim: the mkdir that won the slot, with the lease body still under its staging name. It is labelled before anyone acts (12 of 12, via the leases view's 'interrupted' — board cannot see it, there being no owner to build a subject from) and reap --base cleared every one and said so, 12 as reap-reclaimed and 0 as reaped, naming the dead writer's pid. Recovery was immediate, on the staging pid's liveness, not on the 30s floor
+PASS D11b the harder window: 8 of 8 iterations SIGKILLed INSIDE layout.bootstrap, ~170ms in. 8 left a genuinely half-built instant (the log carries each one's entry count and whether CHARTER.md made it), and 0 left a record — the record is written after the tree, so the two windows leak different things and neither leaks a record. Here the lease body HAD landed, so the leftover is a stale lease rather than SI-7's interrupted claim: reconcile names it as a stale-lease subject on the board (8 of 8) and reap --base gave every one back as 8 reaped row(s), naming the owner. Judged against FD-14, which orders the FALLIBLE steps before the folder and promises a NAMED leftover rather than none: a SIGKILL is not a fallible step and no rollback runs, so the plan's literal 'no half-built instant, no leaked lease' is unachievable in this window and is reported as needing amendment, not as a product defect
+PASS ISOLATION-D-live-tmux live tmux session set byte-identical (0 sessions, 0 of them dt-)
+PASS ISOLATION-D-private-leak none of the 6 session(s) this section created on socket itfleet-D appears on the default server (dt-* dispatch sessions: no name-shape rule can catch these, only the exact names)
+PASS ISOLATION-D-claude-count no claude was launched by this section (5 live before, 5 after) (A6)
+PASS ISOLATION-D-leave live stores byte-identical; live instants trees unchanged in 1 live tree(s); live tmux session set byte-identical (0 sessions, incl. 0 dt-); section work is on socket itfleet-D
+
+§D finished with IT_FAILED=0
+--- D exit=0  19 PASS / 0 FAIL / 2 SKIP
+
+=== Q ===
+PASS ISOLATION-Q-enter live-INSTANTS baseline ESTABLISHED on this call (1 folder(s) across 1 live tree(s)), so the instants half is vacuous here and binds from the next call on. live stores byte-identical; live instants trees unchanged in 1 live tree(s); live tmux session set byte-identical (0 sessions, incl. 0 dt-); section work is on socket itfleet-Q
+PASS Q1 cut 0.1.0: export present, ANNOTATED tag fleet/v0.1.0 (cat-file -t = tag), STATE=CANDIDATE, and not one payload path carries a write bit while .release/ stays writable so promote and verify can still record
+PASS Q2 a dirty tree refused the cut with exit 4 and created nothing (releases unchanged: fleet-v0.1.0 )
+PASS Q3 deploying a CANDIDATE was refused with exit 4; no 'current' exists afterwards, and — the independent half, since a post-state check alone cannot see a window — the refusal also left no RELEASE-HISTORY.tsv, so it returned before the lock rather than after a write it undid
+PASS Q4 current -> fleet-v0.1.0 and the register carries a DEPLOY row with the stated reason
+PASS Q5 rollback with no --to returned to 0.1.0, the version the register named as previous, and recorded a ROLLBACK row
+PASS Q6 0.1.1's own .release/CHANGELOG.md names the commit added since 0.1.0, and 0.1.0's lists no commits because it has no predecessor
+PASS ISOLATION-Q-leave live stores byte-identical; live instants trees unchanged in 1 live tree(s); live tmux session set byte-identical (0 sessions, incl. 0 dt-); section work is on socket itfleet-Q
+--- Q exit=0  8 PASS / 0 FAIL / 0 SKIP
+
+=== i7 ===
+PASS ISOLATION-i7-enter live-INSTANTS baseline ESTABLISHED on this call (1 folder(s) across 1 live tree(s)), so the instants half is vacuous here and binds from the next call on. live stores byte-identical; live instants trees unchanged in 1 live tree(s); live tmux session set byte-identical (0 sessions, incl. 0 dt-); section work is on socket itfleet-i7
+PASS i7-5 the capture fleet's OWN probe takes carries SGR 2 (DIM). That is the bit that separates the TUI's ghost suggestion from a message a human typed, and it used to be discarded at the capture site — below unsubmitted(), below pane-guard, below close's refusal and below every external monitor, where nothing above could recover it or even tell it was gone
+PASS i7-1 a DIM-wrapped body classifies as an EMPTY input box on a pane still recognised as claude (pane-guard=0). Classified by ATTRIBUTE, not by matching the text: the suggestion is model-generated prose, so a denylist of suggestion strings could never have been completed. Asserting 0 rather than '0 or 12' is deliberate — 12 would mean the ghost stopped being read as text AND the pane stopped being read as claude, which is a different, more dangerous answer wearing a passing grade
+PASS i7-6 a box holding REAL typed text on an ESC-PREFIXED row classifies NON-EMPTY, in every escaped form measured on a live pane (attribute before the caret, after it, and a truecolor body) — while an all-DIM body still classifies EMPTY. This is the control the coordinator required after accepting that '-e alone' is a false-safe: without it, adding -e turns every 10 queued-text into 0 safe and a send-keys lands in somebody's unsent draft
+PASS i7-2 genuinely typed text still returns 10 queued-text and the queued_text FIELD still carries it verbatim. send-keys DOES concatenate onto a draft — proven by execution, one user turn with no separator — so this guard is correct and the FI-208 fix must not weaken it. i7-1 without this case would be satisfied by a guard that had stopped looking
+PASS i7-3 close no longer refuses a worker whose box holds only the DIM suggestion (exit 0, would-close true). Before the fix this was exit 4 refused queued-text, naming a remedy of 'the text is submitted or cleared' that CANNOT BE PERFORMED because there is no text — leaving --force as the only exit and turning a guard into a toll
+PASS i7-4 close still REFUSES a pane holding genuinely typed text (exit 4, queued-text, the text quoted back), and the refusal still names --force. FI-9: text left in a box is what a rate-limit auto-resume concatenates with its retry and sends. i7-3 alone would have removed this protection rather than corrected it
+PASS ISOLATION-i7-exit live stores byte-identical; live instants trees unchanged in 1 live tree(s); live tmux session set byte-identical (0 sessions, incl. 0 dt-); section work is on socket itfleet-i7
+--- i7 exit=0  8 PASS / 0 FAIL / 0 SKIP
+
+=== rmw ===
+PASS ISOLATION-RMW-enter live-INSTANTS baseline ESTABLISHED on this call (1 folder(s) across 1 live tree(s)), so the instants half is vacuous here and binds from the next call on. live stores byte-identical; live instants trees unchanged in 1 live tree(s); live tmux session set byte-identical (0 sessions, incl. 0 dt-); section work is on socket itfleet-RMW
+pinned 67 files
+PASS RMW-review n=8 x 6 concurrent review rounds on one instant: every round survived in all 8 exercised iteration(s) (0 lost of 48 ). review._save's read-modify-write did NOT lose a write under this load
+PASS RMW-roadmap n=8 x 6 concurrent Roadmap.add calls on one instant: every milestone survived in all 8 exercised iteration(s) (0 lost of 48 ). roadmap._save's read-modify-write did NOT lose a write under this load
+PASS ISOLATION-RMW-leave live stores byte-identical; live instants trees unchanged in 1 live tree(s); live tmux session set byte-identical (0 sessions, incl. 0 dt-); section work is on socket itfleet-RMW
+STABLE — every verdict in this run is attributable to one tree state
+RMW done: IT_FAILED=0
+--- rmw exit=0  4 PASS / 0 FAIL / 0 SKIP
+
+=== K ===
+PASS ISOLATION-K-enter live-INSTANTS baseline ESTABLISHED on this call (1 folder(s) across 1 live tree(s)), so the instants half is vacuous here and binds from the next call on. live stores byte-identical; live instants trees unchanged in 1 live tree(s); live tmux session set byte-identical (0 sessions, incl. 0 dt-); section work is on socket itfleet-K
+PASS K1 born 00000000-09112041-inflight-compact-foldTheStack
+PASS K2 COMPACTED.md reported 'info', exit 0, 0 violations
+PASS K3a dispatch exit 4 naming 00000000-09112041-inflight-compact-foldTheStack
+PASS K3b resume exit 0 under the freeze (FD-9: refusing a resume is its own outage)
+PASS K4 names 00000000-09112041-inflight-compact-foldTheStack, exit 1, zero delta over store+pool+slots+instants (content+mtime)
+PASS K5 declared awaiting-ci: wip-cap says ROOM (allow: 0 of 1 active-dev slot(s) in use. examined 1 subject(s) of 00000000; 0 counted, 1 excluded (00000000-09112041-inflight-compact-foldTheStack (AWAITING-CI))), compaction-exclusive still REFUSES, real dispatch exit 4
+PASS K7 -complete-compact- without COMPACTED.md: 1 violation(s), exit 1; after writing it: clean exit 0; the freeze LIFTED (dispatch exit 0)
+SKIP K6 no verb produces COMPACTED.md and no rule checks its CONTENT (layout.validate is presence-only), so no assertion here can fail if the four-part contract is violated
+PASS K8 -abort-compact-: lint clean with NO COMPACTED.md row at all (optional, not even info); freeze lifted (dispatch exit 0). direct abort with the pane still live: exit 0
+PASS K9 exit 4 naming the profile, BEFORE any side effect: 0 leases, 0 records, 0 instants, zero delta (content+mtime)
+PASS K10 n=20 x 2 concurrent compaction dispatches: exactly one compaction existed every time, the second refused by the first
+PASS ISOLATION-K-live-tmux live tmux session set byte-identical
+PASS ISOLATION-K-private-leak none of the 23 session(s) this section created on socket itfleet-K appears on the default server (dt-* dispatch sessions: no name-shape rule can catch these, only the exact names)
+PASS ISOLATION-K-claude-count no claude was launched by this section (5 live before, 5 after) (A6)
+PASS ISOLATION-K-leave live stores byte-identical; live instants trees unchanged in 1 live tree(s); live tmux session set byte-identical (0 sessions, incl. 0 dt-); section work is on socket itfleet-K
+
+--- RESULTS-group3.tsv ---
+case                      verdict  evidence                                                                                               note
+ISOLATION-K-enter         PASS                                                                                                            live-INSTANTS baseline ESTABLISHED on this call (1 folder(s) across 1 live tree(s)), so the instants half is vacuous here and binds from the next call on. live stores byte-identical; live instants trees unchanged in 1 live tree(s); live tmux session set byte-identical (0 sessions, incl. 0 dt-); section work is on socket itfleet-K
+K1                        PASS     it/K/out/kA/k1-dispatch.out                                                                            born 00000000-09112041-inflight-compact-foldTheStack
+K2                        PASS     it/K/out/kA/k2-lint.out                                                                                COMPACTED.md reported 'info', exit 0, 0 violations
+K3a                       PASS     it/K/out/kA/k3-dispatch.out                                                                            dispatch exit 4 naming 00000000-09112041-inflight-compact-foldTheStack
+K3b                       PASS     it/K/out/kA/k3-resume.out                                                                              resume exit 0 under the freeze (FD-9: refusing a resume is its own outage)
+K4                        PASS     it/K/out/kA/k4.out                                                                                     names 00000000-09112041-inflight-compact-foldTheStack, exit 1, zero delta over store+pool+slots+instants (content+mtime)
+K5                        PASS     it/K/out/kA/k5-dryrun.out                                                                              declared awaiting-ci: wip-cap says ROOM (allow: 0 of 1 active-dev slot(s) in use. examined 1 subject(s) of 00000000; 0 counted, 1 excluded (00000000-09112041-inflight-compact-foldTheStack (AWAITING-CI))), compaction-exclusive still REFUSES, real dispatch exit 4
+K7                        PASS     it/K/out/kA/k7-lint-after.out                                                                          -complete-compact- without COMPACTED.md: 1 violation(s), exit 1; after writing it: clean exit 0; the freeze LIFTED (dispatch exit 0)
+K6                        SKIP     it/K/out/K6-why-not-runnable.txt                                                                       no verb produces COMPACTED.md and no rule checks its CONTENT (layout.validate is presence-only), so no assertion here can fail if the four-part contract is violated
+K8                        PASS     it/K/out/kB/lint.out                                                                                   -abort-compact-: lint clean with NO COMPACTED.md row at all (optional, not even info); freeze lifted (dispatch exit 0). direct abort with the pane still live: exit 0
+K9                        PASS     it/K/out/kC/dispatch.out                                                                               exit 4 naming the profile, BEFORE any side effect: 0 leases, 0 records, 0 instants, zero delta (content+mtime)
+K10                       PASS     it/K/out/K10-per-iteration.tsv                                                                         n=20 x 2 concurrent compaction dispatches: exactly one compaction existed every time, the second refused by the first
+ISOLATION-K-live-tmux     PASS     it/K/out/live-tmux-after.txt                                                                           live tmux session set byte-identical
+ISOLATION-K-private-leak  PASS     /home/ubuntu/davis_root/superpowers/.worktrees/fleet-runtime/fleet/it/K/out/private-tmux-sessions.txt  none of the 23 session(s) this section created on socket itfleet-K appears on the default server (dt-* dispatch sessions: no name-shape rule can catch these, only the exact names)
+ISOLATION-K-claude-count  PASS                                                                                                            no claude was launched by this section (5 live before, 5 after) (A6)
+ISOLATION-K-leave         PASS                                                                                                            live stores byte-identical; live instants trees unchanged in 1 live tree(s); live tmux session set byte-identical (0 sessions, incl. 0 dt-); section work is on socket itfleet-K
+--- K exit=0  15 PASS / 0 FAIL / 1 SKIP
+
+=== group5 ===
+source pinned: /home/ubuntu/davis_root/superpowers/.worktrees/fleet-runtime/fleet/it/SOURCE-PIN-group5-before.txt
+PASS ISOLATION-L-enter live-INSTANTS baseline ESTABLISHED on this call (1 folder(s) across 1 live tree(s)), so the instants half is vacuous here and binds from the next call on. live stores byte-identical; live instants trees unchanged in 1 live tree(s); live tmux session set byte-identical (0 sessions, incl. 0 dt-); section work is on socket itfleet-L
+PASS L1 OK L1: prime reported the count (3) as a number and reported no issue ids; the next tick is 0 new
+PASS L2 OK L2: new=['RI-40', 'RI-41'] (expected ['RI-40', 'RI-41'])
+PASS L3 OK L3: new=['RI-50'] (expected ['RI-50'])
+PASS L4 OK L4: new=none (expected zero new)
+PASS L5 OK L5: (a) ids_found=3 incl RI-9a from ### headings · (b) non-empty/zero-ids raises VacuousExtraction and reports exit 1 · (c) empty register is clean with an empty-register info row
+PASS L6 OK L6: both silent sources are rows that say 'produced nothing'; the population row counts 2
+PASS L7 every one of the 46 INVOKED verbs printed a stale-cadence line to stderr naming the stale source; every porcelain stdout parsed at its declared column count; verbs=46, failures=0, cadence-on-stdout=0, empty-stdout=11, unmapped=0
+PASS L7-coverage every verb in cli.VERBS has an argv recipe in verb_args, so L7's verdict covers the whole verb set and not a subset of it
+PASS L8 first run: exit 1 with a no-prior-state violation; second run: exit 0, clean
+PASS L9 OK L9: the shared advice is flagged at count 2 with one verifiable citation per instance (the id prefix RI-5 vs OI-9 and the bullet/heading markers are normalised away)
+PASS ISOLATION-L-leave live stores byte-identical; live instants trees unchanged in 1 live tree(s); live tmux session set byte-identical (0 sessions, incl. 0 dt-); section work is on socket itfleet-L
+PASS ISOLATION-M-enter live-INSTANTS baseline ESTABLISHED on this call (1 folder(s) across 1 live tree(s)), so the instants half is vacuous here and binds from the next call on. live stores byte-identical; live instants trees unchanged in 1 live tree(s); live tmux session set byte-identical (0 sessions, incl. 0 dt-); section work is on socket itfleet-M
+PASS M1 all 46 verbs ran and every exit code came from the registry (the plan says 20; FD-12 added seven, so the population is 46)
+PASS M2 no-args usage lists all 46 verbs (exit 2, on stderr — stdout stays data)
+PASS M6 unknown verb ⇒ exit 2 and the whole map (46 verbs) is printed
+PASS M3 OK M3: every declared flag of all 46 verbs appears in its own usage, with its value form and required marker
+PASS M4 an undeclared flag ⇒ exit 2 naming the token, for all 46 verbs
+PASS M5 every value-taking flag of every INVOKED verb (238 flag/verb pairs × 2 shapes) exited 2 with the 'needs a value' diagnostic inside timeout 5; NO flag hung (130 switch flags also checked for hang-freedom; selftest--porcelain exceeded 5s); 0 flag/verb pair(s) skipped for want of a recipe — see M5-coverage
+PASS M5-coverage every verb in cli.VERBS has an argv recipe in m_args, so M5's verdict covers every flag of every verb
+PASS M7 OK M7: board/leases/roadmap/status parse at their declared column counts with stderr discarded, and each view's human form reports the same (identity, state) set as its porcelain form
+PASS M8-base-check zero delta (content+mtime)
+PASS M8-board zero delta (content+mtime)
+PASS M8-brief zero delta (content+mtime)
+PASS M8-compaction-status zero delta (content+mtime)
+PASS M8-leases zero delta (content+mtime)
+PASS M8-lint zero delta (content+mtime)
+PASS M8-pane-guard zero delta (content+mtime)
+PASS M8-peers zero delta (content+mtime)
+PASS M8-reconcile zero delta (content+mtime)
+PASS M8-release-history zero delta (content+mtime)
+PASS M8-release-list zero delta (content+mtime)
+PASS M8-release-status zero delta (content+mtime)
+PASS M8-roadmap zero delta (content+mtime)
+PASS M8-seed-check zero delta (content+mtime)
+PASS M8-selftest zero delta (content+mtime)
+PASS M8-status zero delta (content+mtime)
+PASS M8-verify zero delta (content+mtime)
+PASS M8 each of the 17 read-only verbs left a zero delta over FLEET_HOME+slots, asserted per verb (content AND mtime)
+PASS M9 OK M9: across all 30 modules — no push/merge/publish/rm-rf shape anywhere; the only spawn sites are the 3 probe/runner factories (15 call sites), none reachable from a handler; every delete is one of 10 accounted-for sites, and each target is DERIVED (by following the assignments, not by matching 
+PASS M10 real panes: clean=0 queued=10 esc-to-interrupt=11 non-claude-shell=12 nonexistent=13
+PASS M11 the pane really renders e2 9d af c2 a0 (❯ + U+00A0) and pane-guard returns 10, quoting 'draft message'; hexdump in M11-caret-line.hex / M11-pane-tail.hex
+PASS M11b queued text is still seen with 31 blank line(s) of pane padding below the box
+PASS M12 1 recipe executed in the sandbox; 2 refused BEFORE execution (a redirect outside the sandbox and a delete) and each is also reported never-executed; the outside path was never created; exit 1
+PASS M13 dirt outside the covered paths ⇒ exit 0 WITH a tree stamp; dirt inside tests/ ⇒ exit 1 with a dirty-inside-coverage violation, and the stamp is printed in BOTH runs
+PASS M14 --help exits 0 for all 46 verbs and prints no source code
+PASS ISOLATION-M-leave live stores byte-identical; live instants trees unchanged in 1 live tree(s); live tmux session set byte-identical (0 sessions, incl. 0 dt-); section work is on socket itfleet-M
+PASS ISOLATION-N-enter live-INSTANTS baseline ESTABLISHED on this call (1 folder(s) across 1 live tree(s)), so the instants half is vacuous here and binds from the next call on. live stores byte-identical; live instants trees unchanged in 1 live tree(s); live tmux session set byte-identical (0 sessions, incl. 0 dt-); section work is on socket itfleet-N
+PASS N1 real session itfleet-N-w1 is live: status state=RUNNING, evidence.liveness=session, SessionLayer.alive=True
+PASS N2 OK N2: the captured text round-trips — probe == tmux, busy=False, unsubmitted=None, and pane-guard agrees (rc=12: a bash pane carries no claude marker)
+PASS N3 typed-not-submitted in a REAL bash pane rendering ❯+U+00A0 (e2 9d af c2 a0): pane-guard=10 and status reports 'draft message' verbatim (state=BLOCKED)
+PASS N4 after submitting, pane-guard=0 (no longer queued-text) and status state=RUNNING
+PASS N4b the same pane clears (pane-guard=0) once the submitted line is more than PROMPT_TAIL_LINES=8 rows above the box — which locates N4's failure exactly
+PASS N5 esc-to-interrupt in a real pane ⇒ pane-guard=11; close refused with exit 4 naming its override, and the session is still alive
+PASS N6 an external kill-session ⇒ status DEAD on the next poll; reap --base 00000000 (exit 0) took ns1 from held to free; a reap from a foreign base refused first (exit 4) and named the owner (2 hit)
+PASS N7 OK N7: the prefix name is not alive and does not capture the longer session's pane
+PASS N8 100 history lines in scrollback and the old ❯+U+00A0 prompt IS in the captured screen (1 hit), yet the empty box now ⇒ pane-guard=0, no queued text
+PASS N9 close ended only the session its record names (itfleet-N-own gone); the bystander and the history session are untouched, close never names them; on the LIVE server (N9-live-sessions-after.txt) 0 dt- session(s) are still present — REPORTED, not asserted: the binding live-server check is ISOLATION-N-leave
+PASS ISOLATION-N-leave live stores byte-identical; live instants trees unchanged in 1 live tree(s); live tmux session set byte-identical (0 sessions, incl. 0 dt-); section work is on socket itfleet-N
+source pinned: /home/ubuntu/davis_root/superpowers/.worktrees/fleet-runtime/fleet/it/SOURCE-PIN-group5-after.txt
+PASS SOURCE-STABLE src/fleet/*.py byte-identical for the whole run
+PASS CLAUDE-COUNT no claude appeared from this section. 2 claude process(es) DID start during the run with a cwd OUTSIDE this instant — 429907(~/davis2_root/tasks/hudiOSSBranchBackPortToInternal/instants) 434364(~/davis2_root/tasks/indexNativeRead/instants/main-09040005-complete-append-quanton15HfileReadPort)— which a section cannot cause: dispatch starts a worker in the slot it leased, so a cwd elsewhere is somebody else's session. Reported, not charged to this section. §L/§M/§N launch no claude: no verb here reaches sessions.start.
+
+== group 5 done; failures flagged: 0 ==
+--- group5 exit=0  61 PASS / 0 FAIL / 0 SKIP
+
+=== E ===
+PASS ISOLATION-E-enter live-INSTANTS baseline ESTABLISHED on this call (1 folder(s) across 1 live tree(s)), so the instants half is vacuous here and binds from the next call on. live stores byte-identical; live instants trees unchanged in 1 live tree(s); live tmux session set byte-identical (0 sessions, incl. 0 dt-); section work is on socket itfleet-E
+FAIL E1 n=20 iterations x 10 concurrent dispatch: 20 iteration(s) deviated (rate 20/20) — see the per-iteration log
+PASS E2 n=10 x 10 concurrent claims on ONE named slot: 1 winner / 9x exit 3 every time, lease body names the winner
+PASS E3 n=20 x 5 concurrent dispatch at cap 1: exactly one entered active dev every time, the rest exit 4 naming the cap
+PASS E4 n=50 iterations, 300 concurrent board reads against a live dispatch: no torn record, no short row, no traceback; all 50 records render with a state
+PASS E5 n=20 x 2 concurrent declare on one instant: file always valid JSON, last writer wins, every echo-back is a value a consumer could read
+PASS E6 n=5 x 2 concurrent harvest of DIFFERENT workers: both transactions completed (2 harvested rows), both slots free, both records stamped and readable, no violation other than the synthetic base's absent register
+PASS E7 n=20 x 2 concurrent record_dispatch for DIFFERENT bases: both bases in sources.json every time
+PASS E8 n=10 x 2 concurrent reap over 4 stale leases: every slot freed exactly once, never double-reported, no exception escaped
+PASS E9 n=20 SIGKILLs of a random one of 3 concurrent dispatchers at a random point: 1 of 20 iteration(s) ACTUALLY produced an orphaned lease and reap recovered every one of them by name. The exercised count is stated because a run that produced none proves nothing (SI-8)
+PASS ISOLATION-E-live-tmux live tmux session set byte-identical
+PASS ISOLATION-E-private-leak none of the 282 session(s) this section created on socket itfleet-E appears on the default server (dt-* dispatch sessions: no name-shape rule can catch these, only the exact names)
+PASS ISOLATION-E-claude-count no claude was launched by this section (7 live before, 7 after) (A6)
+PASS ISOLATION-E-leave live stores byte-identical; live instants trees unchanged in 1 live tree(s); live tmux session set byte-identical (0 sessions, incl. 0 dt-); section work is on socket itfleet-E
+
+--- RESULTS-group3.tsv ---
+case                      verdict  evidence                                                                                               note
+ISOLATION-E-enter         PASS                                                                                                            live-INSTANTS baseline ESTABLISHED on this call (1 folder(s) across 1 live tree(s)), so the instants half is vacuous here and binds from the next call on. live stores byte-identical; live instants trees unchanged in 1 live tree(s); live tmux session set byte-identical (0 sessions, incl. 0 dt-); section work is on socket itfleet-E
+E1                        FAIL     it/E/out/E1-per-iteration.tsv                                                                          n=20 iterations x 10 concurrent dispatch: 20 iteration(s) deviated (rate 20/20) — see the per-iteration log
+E2                        PASS     it/E/out/E2-per-iteration.tsv                                                                          n=10 x 10 concurrent claims on ONE named slot: 1 winner / 9x exit 3 every time, lease body names the winner
+E3                        PASS     it/E/out/E3-per-iteration.tsv                                                                          n=20 x 5 concurrent dispatch at cap 1: exactly one entered active dev every time, the rest exit 4 naming the cap
+E4                        PASS     it/E/out/E4-per-iteration.tsv                                                                          n=50 iterations, 300 concurrent board reads against a live dispatch: no torn record, no short row, no traceback; all 50 records render with a state
+E5                        PASS     it/E/out/E5-per-iteration.tsv                                                                          n=20 x 2 concurrent declare on one instant: file always valid JSON, last writer wins, every echo-back is a value a consumer could read
+E6                        PASS     it/E/out/E6-per-iteration.tsv                                                                          n=5 x 2 concurrent harvest of DIFFERENT workers: both transactions completed (2 harvested rows), both slots free, both records stamped and readable, no violation other than the synthetic base's absent register
+E7                        PASS     it/E/out/E7-per-iteration.tsv                                                                          n=20 x 2 concurrent record_dispatch for DIFFERENT bases: both bases in sources.json every time
+E8                        PASS     it/E/out/E8-per-iteration.tsv                                                                          n=10 x 2 concurrent reap over 4 stale leases: every slot freed exactly once, never double-reported, no exception escaped
+E9                        PASS     it/E/out/E9-per-iteration.tsv                                                                          n=20 SIGKILLs of a random one of 3 concurrent dispatchers at a random point: 1 of 20 iteration(s) ACTUALLY produced an orphaned lease and reap recovered every one of them by name. The exercised count is stated because a run that produced none proves nothing (SI-8)
+ISOLATION-E-live-tmux     PASS     it/E/out/live-tmux-after.txt                                                                           live tmux session set byte-identical
+ISOLATION-E-private-leak  PASS     /home/ubuntu/davis_root/superpowers/.worktrees/fleet-runtime/fleet/it/E/out/private-tmux-sessions.txt  none of the 282 session(s) this section created on socket itfleet-E appears on the default server (dt-* dispatch sessions: no name-shape rule can catch these, only the exact names)
+ISOLATION-E-claude-count  PASS                                                                                                            no claude was launched by this section (7 live before, 7 after) (A6)
+ISOLATION-E-leave         PASS                                                                                                            live stores byte-identical; live instants trees unchanged in 1 live tree(s); live tmux session set byte-identical (0 sessions, incl. 0 dt-); section work is on socket itfleet-E
+--- E exit=1  13 PASS / 1 FAIL / 0 SKIP
+
+=== R ===
+PASS ISOLATION-R-enter live-INSTANTS baseline ESTABLISHED on this call (1 folder(s) across 1 live tree(s)), so the instants half is vacuous here and binds from the next call on. live stores byte-identical; live instants trees unchanged in 1 live tree(s); live tmux session set byte-identical (0 sessions, incl. 0 dt-); section work is on socket itfleet-R
+pinned 67 files
+== root1 store ==
+itr1_root/.fleet/harvest/sources.json
+== root2 store ==
+itr2_root/.fleet/harvest/sources.json
+== root1 instants ==
+00000000-09112115-inflight-append-r1subject
+== root2 instants ==
+00000000-09112115-inflight-append-r2subject
+PASS R1 two marked roots each resolved their OWN store from the marker alone — FLEET_HOME unset in both calls — and neither store mentions the other's subject. Disjointness is asserted on CONTENT rather than on the two directories having different names, which would prove nothing
+root1 socket: fleet-itr1
+root2 socket: fleet-itr2
+== sessions on fleet-itr1 ==
+dt-collide
+== killing dt-collide on fleet-itr1 only ==
+== after: fleet-itr1 ==
+no server running on /tmp/tmux-1000/fleet-itr1
+== after: fleet-itr2 ==
+dt-collide
+PASS R2 the two roots derive DIFFERENT tmux servers from their declared names (fleet-itr1 / fleet-itr2), and killing session 'dt-collide' by name on one leaves the identically-named session on the other ALIVE. That kill-by-name is what close, abort and harvest do, so a shared server means one root can tear down the other's worker
+root /home/ubuntu/davis_root/superpowers/.worktrees/fleet-runtime/fleet/it/R/home/itr1_root (marker at /home/ubuntu/davis_root/superpowers/.worktrees/fleet-runtime/fleet/it/R/home/itr1_root/.fleet-root)
+BadInput: the instants directory /home/ubuntu/davis_root/superpowers/.worktrees/fleet-runtime/fleet/it/R/home/itr2_root/instants is outside this fleet's root /home/ubuntu/davis_root/superpowers/.worktrees/fleet-runtime/fleet/it/R/home/itr1_root. A dispatch that points out of its own root is how one root's worker ends up in another root's tree, and it is invisible afterwards because every verb resolves the child through its record (SI-56). Clears when: name a path under /home/ubuntu/davis_root/superpowers/.worktrees/fleet-runtime/fleet/it/R/home/itr1_root, or run from the root that owns /home/ubuntu/davis_root/superpowers/.worktrees/fleet-runtime/fleet/it/R/home/itr2_root/instants.
+PASS R3a a dispatch from root1 naming root2's instants tree is REFUSED (rc=2), the message names BOTH the offending directory and the root that owns the call, and no instant was created in root2. This is the live half of G1: records live inside a store, so the reachable defect is not a foreign record but a local record whose CONTENTS point out of the root
+seeded foreignroot-09060000 root= '/somewhere/else_root'
+seeded legacyroot-09060000 root= ''
+root /home/ubuntu/davis_root/superpowers/.worktrees/fleet-runtime/fleet/it/R/home/itr1_root (marker at /home/ubuntu/davis_root/superpowers/.worktrees/fleet-runtime/fleet/it/R/home/itr1_root/.fleet-root)
+BadInput: record 'foreignroot-09060000' was written under root /somewhere/else_root and this call resolved /home/ubuntu/davis_root/superpowers/.worktrees/fleet-runtime/fleet/it/R/home/itr1_root. Refusing: a store reached from the wrong root reports another fleet's work as this one's. Clears when: run from /somewhere/else_root, or pass `--root /somewhere/else_root`.
+lineage     legacyroot-09060000  info  no git lineage is recorded for this dispatch, so there is nothing to check and nothing gates a claim of done. That is correct for a coordinator, a compaction, or any dispatch made without --lineage-base
+population  legacyroot-09060000  info  expected (nothing) in None, lineage-mode=(none), 0 repo(s) blocking a claim of done
+PASS R3b three properties of the stamped-root guard, and two of them are limits rather than powers. (1) a verb ACTING on a record stamped with a foreign root refuses (rc=2, message names it). (2) a record carrying NO root still reads cleanly (rc=0) — 75 records in the live store predate this field, and treating their absent root as 'a different root' would refuse every one, which is FI-417's rule that a check unable to see something must not report an answer about it. (3) `board` still exits 0 (rc=0) with that same foreign record on disk: the READ path deliberately does not refuse, because one stray record making the board permanently unreadable is the FI-402 failure where a gate that is always red gets read past and takes the real alarm with it. This state is reachable only by COPYING a store between roots — dispatch containment and G3 prevent creating it — so the guard is cheap insurance, and saying so is the point
+root /home/ubuntu/davis_root/superpowers/.worktrees/fleet-runtime/fleet/it/R/home/itr1_root (marker at /home/ubuntu/davis_root/superpowers/.worktrees/fleet-runtime/fleet/it/R/home/itr1_root/.fleet-root)
+BadInput: /home/ubuntu/davis_root/superpowers/.worktrees/fleet-runtime/fleet/it/R/home/itr2_root/ws1 is outside this fleet's root /home/ubuntu/davis_root/superpowers/.worktrees/fleet-runtime/fleet/it/R/home/itr1_root, so it cannot be enrolled here. A pool that can lease a workspace belonging to another root is exactly the interference per-root isolation exists to remove. Enrol it from the root that owns it.
+PASS R4 enrolling root2's workspace from root1 is REFUSED (rc=2) naming both paths and registering nothing, while root1's OWN workspace enrolls cleanly (rc=0). Both directions, because a refusal alone is also what a broken `enroll` looks like
+BadInput: 'board' could not tell which fleet it belongs to: there is no .fleet-root at or above /home/ubuntu/davis_root/superpowers/.worktrees/fleet-runtime/fleet/it/R/home/unmarked (searched up to, and excluding, /home/ubuntu/davis_root/superpowers/.worktrees/fleet-runtime/fleet/it/R/home). Clears when: create .fleet-root in this fleet's root directory — `echo '{"name": "davis"}' > /home/ubuntu/davis_root/superpowers/.worktrees/fleet-runtime/fleet/it/R/home/davis_root/.fleet-root` — or name the destination explicitly with `--root <path>` or `--home <path>`, or by exporting FLEET_ROOT or FLEET_HOME.
+PASS R5 from an unmarked directory a READ-ONLY verb exits 2 naming the cwd it searched and what clears it, creates nothing, and does NOT fall through to the shared ~/.fleet that exists two directories away. SI-15 let reads default on the ground that 'nothing is enrolled' is a real answer; under isolation that answer is about a DIFFERENT ROOT's fleet, which is FI-417's shape — a true sentence answering the wrong question
+root /home/ubuntu/davis_root/superpowers/.worktrees/fleet-runtime/fleet/it/R/home/itr1_root (marker at /home/ubuntu/davis_root/superpowers/.worktrees/fleet-runtime/fleet/it/R/home/itr1_root/.fleet-root)
+BadInput: 'init' creates an instant and nothing named the directory to create it in. Pass `--instants-dir <path>` or export FLEET_INSTANTS. There is deliberately no derived default for a CREATE: `$FLEET_HOME/instants` used to be one, and it planted a dispatched child outside its effort tree at rc=0 with every guard green — invisible to every verb, because they all resolve the child through its record, until the endgame compaction could not find it (SI-56).
+PASS R6 creating an instant with the home DERIVED and no instants directory named is refused (rc=2, cites SI-56) and plants nothing under the derived store, while the same call with --instants-dir succeeds. This is NOT fixed by isolation and the guard is what closes it: under isolation the stray would land in $ROOT/.fleet/instants — the right root and still the wrong tree, invisible until an endgame compaction cannot find the worker
+root /home/ubuntu/davis_root/superpowers/.worktrees/fleet-runtime/fleet/it/R/r6b-store ($FLEET_HOME)
+BadInput: 'init' creates an instant and nothing named the directory to create it in. Pass `--instants-dir <path>` or export FLEET_INSTANTS. There is deliberately no derived default for a CREATE: `$FLEET_HOME/instants` used to be one, and it planted a dispatched child outside its effort tree at rc=0 with every guard green — invisible to every verb, because they all resolve the child through its record, until the endgame compaction could not find it (SI-56).
+PASS R6b with FLEET_HOME EXPORTED and FLEET_INSTANTS unset — the configuration `scripts/fleet-env.sh` produces on every shell on this box, and the one FI-382 happened in — creating an instant is refused (rc=2, cites SI-56) and nothing is planted in $FLEET_HOME/instants. Measured returning rc=0 and planting the child at 0.5.0, so the control shipped in 0.4.0 could not fire on the defect that motivated it. The `--home` FLAG still names the directory and still works, which is the asymmetry rather than a gap: a flag is typed for this invocation, an export was made by a shell rc nobody re-reads
+--home rc=0
+FLEET_HOME rc=0
+root /home/ubuntu/davis_root/superpowers/.worktrees/fleet-runtime/fleet/it/R/out/r7store (--home)
+PASS R7 both explicit forms still work from a directory with NO marker above it — `--home <store>` and `FLEET_HOME=<store>` each exit 0 — and the resolved-root line names the store AND the tier it came from. Run unmarked deliberately: under a marker this case would pass even if the flag path were broken, which is the shape of a control that certifies its own blind spot
+PASS ISOLATION-R-leave live stores byte-identical; live instants trees unchanged in 1 live tree(s); live tmux session set byte-identical (0 sessions, incl. 0 dt-); section work is on socket itfleet-R
+STABLE — every verdict in this run is attributable to one tree state
+§R done: IT_FAILED=0
+--- R exit=0  11 PASS / 0 FAIL / 0 SKIP
+
+=== S ===
+PASS ISOLATION-S-enter live-INSTANTS baseline ESTABLISHED on this call (1 folder(s) across 1 live tree(s)), so the instants half is vacuous here and binds from the next call on. live stores byte-identical; live instants trees unchanged in 1 live tree(s); live tmux session set byte-identical (0 sessions, incl. 0 dt-); section work is on socket itfleet-S
+pinned 67 files
+claimed: /home/ubuntu/davis_root/superpowers/.worktrees/fleet-runtime/fleet/it/S/instants/00000000-09112115-inflight-append-abortreleaser|(none)
+after abort: (none)|the baseline moved under it
+abort rc=0
+milestone	s1
+milestone_released	yes — s1 on /home/ubuntu/davis_root/superpowers/.worktrees/fleet-runtime/fleet/it/S/instants/00000000-09112115-inflight-append-coords is unowned again
+PASS S1 a dispatch claimed milestone s1, and aborting that instant GAVE THE CLAIM BACK — the milestone is unowned again and the roadmap records the abort's own reason for it. Before SI-51 the claim survived the abort forever: --override does not clear it, harvest refuses an aborted instant, and abort refuses to run twice, so the only escape was editing roadmap.json by hand
+abort rc=0
+owner after: /home/ubuntu/davis_root/superpowers/.worktrees/fleet-runtime/fleet/it/S/instants/00000000-07300001-inflight-append-theRealOwner|(none)
+milestone_released	no — milestone 's2' is claimed by '/home/ubuntu/davis_root/superpowers/.worktrees/fleet-runtime/fleet/it/S/instants/00000000-07300001-inflight-append-theRealOwner', not by '/home/ubuntu/davis_root/superpowers/.worktrees/fleet-runtime/fleet/it/S/instants/00000000-09112115-inflight-append-abortstaleorigin', so this release would free work somebody else is running. Refused. If '/home/ubuntu/davis_root/superpowers/.worktrees/fleet-runtime/fleet/it/S/instants/00000000-07300001-inflight-append-theRealOwner' is gone, release it with `fleet milestone --instant <coordinator> --id s2 --disown --reason <why>`, which checks whether that owner still has an open record before it clears anything.
+PASS S2 the aborted instant's origin named s2, the roadmap said a DIFFERENT instant was running it, and the abort left that claim exactly where it was while still completing — the folder is aborted and the output names whose claim it did not touch. A release that cleared whatever it found would have freed a live sibling's milestone, which is the failure `claim`'s two-workers-on-one-milestone refusal exists to prevent
+disown rc=0
+s3 owner after: (none)|aborted before abort released claims
+disown-while-open rc=4
+s3b owner after: /home/ubuntu/davis_root/superpowers/.worktrees/fleet-runtime/fleet/it/S/instants/00000000-09112115-inflight-append-stillrunning|(none)
+PASS S3 a claim held by an instant that no longer exists was released by `milestone --disown --reason`, recording why; and the same flag pointed at a milestone whose owner still has an OPEN record was refused (rc=4), naming that owner. Without the second half the repair verb would put two instants on one milestone by a door `claim` does not guard
+dispatch rc=0
+seed: /home/ubuntu/davis_root/superpowers/.worktrees/fleet-runtime/fleet/it/S/instants/00000000-09112115-inflight-append-seedextraworker/.fleet/seed.txt
+--- the addition, in the seed the worker is briefed from ---
+10:Coordinate with the sibling before touching the shared fixture.
+--- the profile's own text is still there ---
+7
+missing-file rc=2
+leases 2 -> 2
+instants 5 -> 5
+PASS S4 `--seed-extra` put the coordinator's sentence into the seed the worker is briefed from, inside the dispatch transaction — the profile's own text is still there and the seed names the file the addition came from, so a worker reading two paragraphs that disagree can tell which was written for it. A missing file was refused (rc=2) with leases 2->2 and instants 5->5: a typo costs a refusal, not a slot
+todo=seedextraworker-09112115 pane=dt-seedextraworker
+--pane rc=12
+--id rc=12
+both rc=2
+neither rc=2
+--- by --id ---
+code	12
+verdict	not-claude
+pane	dt-seedextraworker
+queued_text	
+detail	dt-seedextraworker is alive and nothing in its tail is claude; a send here goes to somebody else's shell
+PASS S5 `pane-guard --id seedextraworker-09112115` resolved the pane through the record and answered exactly what `--pane dt-seedextraworker` answered (both rc=12), naming the pane it resolved to. Naming both is refused (rc=2) because two identifiers that can disagree is a third failure mode, and naming neither is refused (rc=2) with BOTH flags in the message. Neither refusal returns a pane-guard code: a caller branching on the number must never read 'you did not say what to look at' as an observation of a pane
+resume rc=0
+pane argv:
+sh -c while :; do sleep 1; done eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee
+
+row: not-delivered	itfleet-S-longargv	info	pid=628506 todo=longargvsubject-09112115 rendered_md5=20f9b3ac87cdb970d004a62b0e61c232 delivered_md5=(none) :: no briefing-shaped argument was delivered to this process. fleet renders the seed but does not deliver it, so this is what a send-keys delivery looks like from here, and it is ALSO what a worker started with no briefing at all looks like. This is NOT a pass: it means the delivery could not be verified, not that it was correct. If this pane was briefed by send-keys, the actor that sent it can say so with `fleet seed-delivered --id <todo> --delivered <the file it sent>` (`SI-55`). No `claude` process was found at or below pid 628506, so nothing about this session's delivery was examined at all. A long argument on a non-worker descendant — a CI waiter is exactly that shape — is deliberately not read as a briefing (`SI-52`)		
+PASS S6 a pane whose process is `sh` holding a 400-character argument — the shape every awaiting-ci worker's CI waiter has — is reported NOT-DELIVERED and explicitly NOT foreign, and the detail says no claude process was found at or below it rather than implying one was examined. FOREIGN is the verdict that kills a session inside `dispatch`, so an uncertain probe must not be able to reach it
+record rc=0
+mismatch rc=2
+stored md5: 2c0ccd681292620e09575f3a9bf8a51c
+expected md5: 2c0ccd681292620e09575f3a9bf8a51c
+row: attested	itfleet-S-longargv	info	pid=628506 todo=longargvsubject-09112115 rendered_md5=20f9b3ac87cdb970d004a62b0e61c232 delivered_md5=2c0ccd681292620e09575f3a9bf8a51c :: nothing was delivered in argv, and the actor that briefed this pane RECORDED what it sent at 2026-09-11T21:15:28Z over send-keys (itfleet-S-longargv); the text it recorded carries this instant's rendered seed. This is the send-keys channel, not an observation of the worker's own argv		
+PASS S7 the actor that briefed a pane by send-keys recorded WHAT IT SENT, fleet digested it and compared it against the seed it had rendered, and `seed-check` now reports ATTESTED for that session — a fourth state whose detail names the channel, so no reader mistakes it for an observation of the worker's own argv. A preamble is accepted and a DIFFERENT briefing is refused at write time (rc=2) leaving the good record intact, which is the misdelivery class this module exists for
+resume rc=0 id=strayedsubject-09112115 recorded_socket=itfleet-S-otherserver
+read from itfleet-S: state=RUNNING asked=itfleet-S-otherserver liveness=session
+close rc=0
+root /home/ubuntu/davis_root/superpowers/.worktrees/fleet-runtime/fleet/it/S/home ($FLEET_HOME)
+record           strayedsubject-09112115
+closed           itfleet-S-strayed
+closed_at        2026-09-11T21:15:29Z
+forced           false
+slot_still_held  slot6 — released by `fleet harvest --id strayedsubject-09112115` when the delta lands, or by `fleet reap --base 00000000` once nothing is sitting in it
+disarmed         the monitor's arm set is recomputed from the join; this pane is no longer in it
+session alive on itfleet-S-otherserver after close: 0
+closed_at: 2026-09-11T21:15:29Z
+PASS S8 a record dispatched on another tmux server records it (itfleet-S-otherserver), and a reader on this section's own server FOLLOWS that address rather than reporting the absence it sees locally: state=RUNNING liveness=session asked_server=itfleet-S-otherserver. `close` then acts THERE — rc=0, the session is gone from itfleet-S-otherserver and the record is stamped — which is doing what was asked instead of refusing and making somebody pin a socket in a runbook
+resume rc=0 id=unaddressedsubject-09112115
+close rc=1
+root /home/ubuntu/davis_root/superpowers/.worktrees/fleet-runtime/fleet/it/S/home ($FLEET_HOME)
+FleetError: 'itfleet-S-unaddressed' is not on the tmux server this command is talking to ('itfleet-S'), but it IS alive on 'itfleet-S-otherserver'. Acting now would report success for a pane it never touched: `close` would stamp the record closed and disarm the monitor while the worker kept running. · clears when: `export FLEET_TMUX_SOCKET=itfleet-S-otherserver` and run it again · clears who: whoever is running this command
+session alive on itfleet-S-otherserver: 1
+closed_at: <empty>
+PASS S9 a record that names NO server, whose session turns up on another one, is REFUSED (rc=1) naming both the server searched and the server it is on; the session is still alive there and the record carries no closed_at. This is the state every pre-0.5.3 record is in, and the one case where acting would be a guess
+resume rc=0 id=guardedsubject-09112115 session=itfleet-S-guarded on itfleet-S-otherserver
+--id   rc=12 verdict=not-claude
+code	12
+verdict	not-claude
+pane	itfleet-S-guarded
+queued_text	
+detail	itfleet-S-guarded is alive and nothing in its tail is claude; a send here goes to somebody else's shell
+--pane rc=13 verdict=unknown-pane
+code	13
+verdict	unknown-pane
+pane	itfleet-S-guarded
+queued_text	
+detail	no live process and no session answer for 'itfleet-S-guarded'; sending keys to a pane nobody can name is the send with no target
+PASS S10 `pane-guard --id` resolved the pane on the server the RECORD names and returned an observation of it (verdict=not-claude, rc=12) instead of `unknown-pane`, which is what it answered at 0.5.4 about a pane `status` could see from the same shell. `--pane itfleet-S-guarded` from the same shell still answers unknown-pane, because a bare session name carries no address and picking a server for the caller is the guess every other half of SI-59 refuses
+PASS ISOLATION-S-leave live stores byte-identical; live instants trees unchanged in 1 live tree(s); live tmux session set byte-identical (0 sessions, incl. 0 dt-); section work is on socket itfleet-S
+STABLE — every verdict in this run is attributable to one tree state
+§S done: IT_FAILED=0
+--- S exit=0  12 PASS / 0 FAIL / 0 SKIP
+
+=== RH ===
+PASS ISOLATION-RH-enter live-INSTANTS baseline ESTABLISHED on this call (1 folder(s) across 1 live tree(s)), so the instants half is vacuous here and binds from the next call on. live stores byte-identical; live instants trees unchanged in 1 live tree(s); live tmux session set byte-identical (0 sessions, incl. 0 dt-); section work is on socket itfleet-RH
+pinned 67 files
+lineage base L = 11e50d491257822921ca8286502ce501479a6370
+slot HEAD      = 11e50d491257822921ca8286502ce501479a6370
+PASS RH1 the round was recorded at the slot's current head (review exit 0) and `propose --status done` was admitted (exit 0) — the newest round and the slot agree
+PASS RH2 a commit landed on the slot after the round the ledger reviewed; `propose --status done` was REFUSED (exit 4), naming `review-head` — the head being graded carries a commit no round has seen
+PASS RH3 reviewing the new head (review exit 0) cleared the mismatch — `propose --status done` was admitted again (exit 0)
+PASS ISOLATION-RH-leave live stores byte-identical; live instants trees unchanged in 1 live tree(s); live tmux session set byte-identical (0 sessions, incl. 0 dt-); section work is on socket itfleet-RH
+STABLE — every verdict in this run is attributable to one tree state
+§RH done: IT_FAILED=0
+--- RH exit=0  5 PASS / 0 FAIL / 0 SKIP
+
+=== pinning the source AFTER the whole run ===
+STABLE — every verdict in this run is attributable to one tree state
+the whole validation run is attributable to ONE tree state
+
+=== merging into RESULTS.tsv (one writer) ===
+merged 261 fresh row(s) for 270 owned id(s); 85 untouched; 0 NOT-RUN
+duplicate case ids: none
+
+PASS     335
+FAIL     1
+SKIP     10
+NOT-RUN  0
+NOT-RUN sections: 
+FAIL rows: E1 
+
+per-runner exit codes:
+  runtime=0
+  RH=0
+  e9leak=0
+  i7=0
+  S=0
+  R=0
+  Q=0
+  K=0
+  E=1
+  D=0
+  C=0
+  B=0
+  A=0
+  group5=0
+  w1=0
+  m9mut=0
+  rmw=0
+
+BATCH VERDICT: attention — 1 FAIL row(s) across the 17 runner(s) this run executed; runners exiting non-zero: E(exit1)

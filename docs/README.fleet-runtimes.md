@@ -2,9 +2,12 @@
 
 One fleet uses one CLI runtime. Claude is the default for an existing store. Model choice remains in
 that CLI's normal configuration; fleet does not translate model names or mix runtimes within a run.
+Run these commands from the updated checkout. `fleet-env.sh` normally selects the root's deployed
+release, so the next line selects this checkout's CLI for this shell.
 
 ```bash
 . scripts/fleet-env.sh /absolute/path/to/instants
+export PATH="$PWD/bin:$PATH"
 fleet runtime
 fleet runtime --set codex
 # Start a Codex coordinator in the fleet root, then dispatch normally:
@@ -26,6 +29,8 @@ fleet runtime --set claude
 A switch refuses while an unharvested record, held/interrupted lease, or live in-scope agent remains.
 A crashed worker still owns unfinished work. Recover it or deliberately abort and close out its record;
 do not delete store files to bypass the refusal. Read and dry-run commands do not create the setting.
+Admission commands wait up to five seconds for another admission to finish. A named lock-timeout
+refusal starts no worker; retry after the holder finishes.
 
 ## Setup
 
@@ -35,8 +40,12 @@ an indeterminate observation, which refuses messaging rather than guessing input
 
 Codex uses the dispatching shell's `CODEX_HOME`, or `$HOME/.codex` when unset. Claude uses the existing
 `scripts/claude-config-dir.sh` workspace-owner mapping (`CLAUDE_OWNERS_MAP` can name an explicit map).
-The selected configuration directory must exist. `FLEET_CODEX_BIN` and `FLEET_CLAUDE_BIN` can name the
-actual executable; do not point them at a seed-delivery shim. Claude's existing `REAL_CLAUDE` override
+The selected configuration directory must exist. Codex may ask for ordinary approval to run fleet commands
+outside its sandbox because tmux sockets and peer-process inspection require host access. Approve the
+specific fleet command through the CLI; no global permission-mode change is needed. Denied tmux access
+fails before dispatch creates a worker record or lease, so an approved retry does not consume capacity
+twice. `FLEET_CODEX_BIN` and `FLEET_CLAUDE_BIN` can name the actual executable; do not point them at
+a seed-delivery shim. Claude's existing `REAL_CLAUDE` override
 remains supported. Executable, configuration directory and runtime are recorded for recovery; credentials
 are never copied into fleet records or launchers.
 
@@ -65,7 +74,8 @@ is supported for the captured layouts; large or unfamiliar editor layouts can be
 
 `revive` requires the original lease and an unoccupied pane/workspace. It validates the explicit UUID
 against a transcript in the recorded configuration and the original workspace. It never selects the
-newest transcript or starts fresh as a fallback. `scripts/fleet-revive.sh` retains its `plan`,
+newest transcript or starts fresh as a fallback. Revival verifies the exact native resume argument;
+`seed-check` may still be unverifiable for a resumed session. `scripts/fleet-revive.sh` retains its `plan`,
 `transcripts`, `launcher`, and `start` entry points. `fleet resume` still means adoption.
 
 Codex has no verified background CI wake mechanism in this integration. `awaiting-ci` is refused even
@@ -73,9 +83,9 @@ with a watcher attestation, and that worker continues to consume capacity. Claud
 is unchanged. Systematic debugging's evidence and phase requirements apply in either harness.
 
 Use the updated fleet CLI for all operations on records containing runtime metadata. Older binaries
-cannot safely operate on the extended records. This implementation is under validation; unit and stub
-results alone do not establish a complete live lifecycle. See the runtime evidence reports before
-promoting or deploying it.
+cannot safely operate on the extended records. Both native CLI lifecycles have been exercised, including
+messaging, debugging, exact-session revival and harvest. See the [validation report](superpowers/specs/evidence/2026-09-11-fleet-runtime-validation.md)
+for the measured revisions, integration results and remaining evaluation limits before deployment.
 
 ## Repeating validation
 

@@ -1,0 +1,5 @@
+root /home/ubuntu/davis_root/superpowers/.worktrees/fleet-runtime/fleet/it/E/home/e1/i1 ($FLEET_HOME)
+NoCapacity: every enrolled slot is leased (s1, s2, s3). examined 3 enrolled slot(s)
+  blocker: s1, s2, s3
+  clears when: a lease is released, a stale lease is reaped by its owning base, or another workspace is enrolled
+  clears who: the base owning a stale lease, or the operator

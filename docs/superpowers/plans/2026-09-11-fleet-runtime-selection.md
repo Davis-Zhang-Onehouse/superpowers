@@ -72,13 +72,25 @@ communication system. `fleet resume` keeps its existing meaning: adopt an instan
 
 ## Execution status — 2026-09-11
 
-Implementation is active in `.worktrees/fleet-runtime` on `feat/fleet-runtime-selection`.
-Native Codex bootstrap is committed as `4d94241`. Runtime selection, direct launch, recorded recovery,
-both-runtime discovery, guarded messaging and skill updates are implemented. Twelve independent CLI
-reference sessions and both exact bootstrap prompts are captured. A real Codex worker passed message,
-crash/revive, watcher/cap refusal, debugging and harvest checks. Live Claude testing exposed and fixed
-a symlink/process-name regression. The complete acceptance matrix and final committed-tree checks
-remain in progress; the evidence report records limitations rather than treating checkboxes as passes.
+Implemented in `.worktrees/fleet-runtime` on `feat/fleet-runtime-selection`. The commits include
+native Codex bootstrap, saved fleet selection, direct launch, exact-session recovery, both-runtime
+discovery, guarded messaging, and the six fleet skill updates. The original task checklists below
+remain the implementation plan; the following evidence is the execution record.
+
+| Area | Outcome and evidence |
+| --- | --- |
+| Native bootstrap and terminal fixtures | Both exact react-todo prompts triggered brainstorming before implementation; captured terminal fixtures cover both CLIs. |
+| Runtime selection, locks and lifecycle | 1,849 unit tests passed before `b3516c7`; exported commit also passed all 1,849. Multiprocessing checks cover dispatch/switch and send/close serialization. |
+| Dispatch, communication and harvest | Real Claude and Codex two-worker lifecycles passed, including proposals/apply and switch-back. Standard real-Claude P1–P4 passed separately. |
+| Recovery and debugging | Both CLIs resumed explicit UUIDs, rejected invalid recovery, and automatically used systematic-debugging on captured failing tests. |
+| Native coordinator dispatch | Codex issued the prepared dispatch itself. A sandbox-denial pending-record leak was reproduced, fixed, and the approved retry passed. |
+| Skills | Twelve baseline/candidate reference sessions support the mechanism changes. External Quorum evaluation was unavailable. |
+| Final integration gate | The full default batch ran on `b3516c7`: 250 passes, ten skips, and one outdated E1 timeout expectation. The corrected E1 passed its targeted 20-iteration retest; the original batch exit 1 is retained. |
+
+The [validation report](../specs/evidence/2026-09-11-fleet-runtime-validation.md) attributes the native
+runs to source revisions and records limitations. Codex CI wake is unsupported and refuses; Claude's
+external watcher-positive path was not re-evaluated. Resume verifies the exact session without claiming
+new seed-delivery attestation. No deployment, live-fleet migration or PR submission is part of this work.
 
 
 ## Task 1: Establish terminal and bootstrap evidence

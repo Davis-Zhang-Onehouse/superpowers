@@ -1,0 +1,5 @@
+case	verdict	evidence	note
+ISOLATION-RMW-enter	PASS		live-INSTANTS baseline ESTABLISHED on this call (1 folder(s) across 1 live tree(s)), so the instants half is vacuous here and binds from the next call on. live stores byte-identical; live instants trees unchanged in 1 live tree(s); live tmux session set byte-identical (0 sessions, incl. 0 dt-); section work is on socket itfleet-RMW
+RMW-review	PASS	fleet/it/RMW/out/review-per-iteration.tsv	n=8 x 6 concurrent review rounds on one instant: every round survived in all 8 exercised iteration(s) (0 lost of 48 ). review._save's read-modify-write did NOT lose a write under this load
+RMW-roadmap	PASS	fleet/it/RMW/out/roadmap-per-iteration.tsv	n=8 x 6 concurrent Roadmap.add calls on one instant: every milestone survived in all 8 exercised iteration(s) (0 lost of 48 ). roadmap._save's read-modify-write did NOT lose a write under this load
+ISOLATION-RMW-leave	PASS		live stores byte-identical; live instants trees unchanged in 1 live tree(s); live tmux session set byte-identical (0 sessions, incl. 0 dt-); section work is on socket itfleet-RMW

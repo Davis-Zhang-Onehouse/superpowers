@@ -1,0 +1,3 @@
+case	verdict	evidence	note
+ISOLATION-ALL-enter	PASS		live stores byte-identical; live instants trees unchanged in 1 live tree(s); live tmux session set byte-identical (0 sessions, incl. 0 dt-); section work is on socket 
+ISOLATION-ALL-leave	PASS		live stores byte-identical; live instants trees unchanged in 1 live tree(s); live tmux session set byte-identical (0 sessions, incl. 0 dt-); section work is on socket 

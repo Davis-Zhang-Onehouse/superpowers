@@ -1,0 +1,9 @@
+case	verdict	evidence	note
+ISOLATION-Q-enter	PASS		live-INSTANTS baseline ESTABLISHED on this call (1 folder(s) across 1 live tree(s)), so the instants half is vacuous here and binds from the next call on. live stores byte-identical; live instants trees unchanged in 1 live tree(s); live tmux session set byte-identical (0 sessions, incl. 0 dt-); section work is on socket itfleet-Q
+Q1	PASS	fleet/it/Q/out/Q1-cut.out	cut 0.1.0: export present, ANNOTATED tag fleet/v0.1.0 (cat-file -t = tag), STATE=CANDIDATE, and not one payload path carries a write bit while .release/ stays writable so promote and verify can still record
+Q2	PASS	fleet/it/Q/out/Q2-dirty.out	a dirty tree refused the cut with exit 4 and created nothing (releases unchanged: fleet-v0.1.0 )
+Q3	PASS	fleet/it/Q/out/Q3-deploy.out	deploying a CANDIDATE was refused with exit 4; no 'current' exists afterwards, and — the independent half, since a post-state check alone cannot see a window — the refusal also left no RELEASE-HISTORY.tsv, so it returned before the lock rather than after a write it undid
+Q4	PASS	fleet/it/Q/out/Q4.out	current -> fleet-v0.1.0 and the register carries a DEPLOY row with the stated reason
+Q5	PASS	fleet/it/Q/out/Q5-rollback.out	rollback with no --to returned to 0.1.0, the version the register named as previous, and recorded a ROLLBACK row
+Q6	PASS	fleet/it/Q/out/Q5-cut.out	0.1.1's own .release/CHANGELOG.md names the commit added since 0.1.0, and 0.1.0's lists no commits because it has no predecessor
+ISOLATION-Q-leave	PASS		live stores byte-identical; live instants trees unchanged in 1 live tree(s); live tmux session set byte-identical (0 sessions, incl. 0 dt-); section work is on socket itfleet-Q

@@ -1,0 +1,26 @@
+{
+  "schema_version": 1,
+  "pending": [],
+  "applied": [
+    {
+      "instant": "/home/ubuntu/davis_root/superpowers/.worktrees/fleet-runtime/fleet/it/RTL-codex-238803/attempt-QjBI71/instants/00000000-09112000-inflight-append-codexworker1",
+      "milestone": "m1",
+      "status": "done",
+      "evidence": [
+        "evidence/INDEX.md"
+      ],
+      "at": "2026-09-11T20:02:20Z",
+      "note": ""
+    },
+    {
+      "instant": "/home/ubuntu/davis_root/superpowers/.worktrees/fleet-runtime/fleet/it/RTL-codex-238803/attempt-QjBI71/instants/00000000-09112001-inflight-append-codexworker2",
+      "milestone": "m2",
+      "status": "done",
+      "evidence": [
+        "evidence/INDEX.md"
+      ],
+      "at": "2026-09-11T20:02:16Z",
+      "note": ""
+    }
+  ]
+}

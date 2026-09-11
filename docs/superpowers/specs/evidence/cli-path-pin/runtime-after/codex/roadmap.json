@@ -1,0 +1,29 @@
+{
+  "schema_version": 1,
+  "milestones": [
+    {
+      "id": "m1",
+      "title": "addition 1",
+      "status": "done",
+      "deps": [],
+      "evidence": [
+        "evidence/INDEX.md"
+      ],
+      "owner": "/home/ubuntu/davis_root/superpowers/.worktrees/fleet-runtime/fleet/it/RTL-codex-238803/attempt-QjBI71/instants/00000000-09112000-inflight-append-codexworker1",
+      "retired_reason": "",
+      "disowned_reason": ""
+    },
+    {
+      "id": "m2",
+      "title": "addition 2",
+      "status": "done",
+      "deps": [],
+      "evidence": [
+        "evidence/INDEX.md"
+      ],
+      "owner": "/home/ubuntu/davis_root/superpowers/.worktrees/fleet-runtime/fleet/it/RTL-codex-238803/attempt-QjBI71/instants/00000000-09112001-inflight-append-codexworker2",
+      "retired_reason": "",
+      "disowned_reason": ""
+    }
+  ]
+}

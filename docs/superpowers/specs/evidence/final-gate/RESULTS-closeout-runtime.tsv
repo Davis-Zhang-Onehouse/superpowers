@@ -1,0 +1,4 @@
+case	verdict	evidence	note
+ISOLATION-RT-enter	PASS		live-INSTANTS baseline ESTABLISHED on this call (1 folder(s) across 1 live tree(s)), so the instants half is vacuous here and binds from the next call on. live stores byte-identical; live instants trees unchanged in 1 live tree(s); live tmux session set byte-identical (0 sessions, incl. 0 dt-); section work is on socket itfleet-RT
+RT1	PASS	fleet/it/RT/out/runtime.json	both runtimes launch with attested seed bytes, refuse an early switch, and switch back after close-out
+ISOLATION-RT-leave	PASS		live stores byte-identical; live instants trees unchanged in 1 live tree(s); live tmux session set byte-identical (0 sessions, incl. 0 dt-); section work is on socket itfleet-RT

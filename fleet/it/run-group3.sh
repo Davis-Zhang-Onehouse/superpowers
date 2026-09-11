@@ -302,12 +302,14 @@ PY
 # ===================================================================================================
 
 # E1 — GIVEN three enrolled slots and ten dispatchers held at a start barrier, WHEN the barrier opens,
-# THEN exactly three exit 0 onto three DISTINCT slots, seven exit 3, and three leases are held — on every
-# one of twenty iterations. The distinctness is the load-bearing half: a pool that hands the same slot to
+# THEN exactly three exit 0 onto three DISTINCT slots and three leases are held. Waiting callers may
+# receive the bounded admission-lock refusal; after the competing calls finish, one explicit retry of
+# each such caller must return no-capacity without changing records, leases or instants. All seven
+# losers therefore reach exit 3, on every one of twenty iterations. The distinctness is the load-bearing half: a pool that hands the same slot to
 # two winners still produces 3x exit 0, so counting exit codes alone would pass a double-lease.
 e1_ten_dispatchers_three_slots() {
   local iters=20 procs=10 log="$EV/out/E1-per-iteration.tsv" bad=0 i k
-  printf 'iter\texit0\texit3\tother\tdistinct_slots\tleases_held\tverdict\n' > "$log"
+  printf 'iter\texit0\tinitial_exit3\tlock_timeouts\tretry_exit3\tother\tdistinct_slots\tleases_held\tretry_state_unchanged\tverdict\n' > "$log"
   for i in $(seq 1 "$iters"); do
     g3_home "e1/i$i" 3
     g3_barrier_new
@@ -323,18 +325,41 @@ e1_ten_dispatchers_three_slots() {
 
     local n0 n3 other slots distinct held verdict
     n0="$(g3_count_rc "$rcs" 0)"; n3="$(g3_count_rc "$rcs" 3)"
-    other=$((procs - n0 - n3))
+    # The admission lock has a bounded wait. Verify that specific refusal,
+    # then retry only after every original caller has exited. Never accept an
+    # arbitrary exit 4 as no-capacity, or allow a retry to allocate more work.
+    local lock_timeouts=0 retry_n3=0 rc before_retry after_retry unchanged=no
+    local initial_rcs=()
+    mapfile -t initial_rcs < "$rcs"
+    before_retry="$(it_manifest "$FLEET_HOME/records" "$FLEET_HOME/pool/leases" "$FLEET_INSTANTS")"
+    : > "$CD/retry-rc.tsv"
+    for k in $(seq 1 "$procs"); do
+      if [ "${initial_rcs[k-1]}" = 4 ] && grep -Fxq \
+          "Refused: Another operation holds $FLEET_HOME/.runtime-admission.lock; retry when it finishes" \
+          "$CD/w$k.out"; then
+        lock_timeouts=$((lock_timeouts+1))
+        python3 -m fleet.cli dispatch --profile "$P_WORKER" --title "e1 i$i w$k" \
+          --base 00000000 --cap 10 > "$CD/retry-w$k.out" 2>&1
+        rc=$?
+        printf '%s\t%s\n' "$k" "$rc" >> "$CD/retry-rc.tsv"
+        [ "$rc" = 3 ] && retry_n3=$((retry_n3+1))
+      fi
+    done
+    after_retry="$(it_manifest "$FLEET_HOME/records" "$FLEET_HOME/pool/leases" "$FLEET_INSTANTS")"
+    [ "$before_retry" = "$after_retry" ] && unchanged=yes
+    other=$((procs - n0 - n3 - lock_timeouts))
     slots="$(awk '$1=="slot"{print $2}' "$CD"/w*.out | sort)"
     distinct="$(printf '%s\n' "$slots" | sort -u | grep -c . )"
     held="$(fleet leases --porcelain 2>/dev/null | awk -F'\t' '$2=="held"' | wc -l | tr -d ' ')"
-    if [ "$n0" = 3 ] && [ "$n3" = 7 ] && [ "$other" = 0 ] && [ "$distinct" = 3 ] \
-       && [ "$held" = 3 ]; then verdict=ok; else verdict=BAD; bad=$((bad+1)); fi
-    printf '%s\t%s\t%s\t%s\t%s\t%s\t%s\n' "$i" "$n0" "$n3" "$other" "$distinct" "$held" "$verdict" \
-      >> "$log"
+    if [ "$n0" = 3 ] && [ "$((n3+retry_n3))" = 7 ] && [ "$other" = 0 ] \
+       && [ "$retry_n3" = "$lock_timeouts" ] && [ "$distinct" = 3 ] && [ "$held" = 3 ] \
+       && [ "$unchanged" = yes ]; then verdict=ok; else verdict=BAD; bad=$((bad+1)); fi
+    printf '%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\n' \
+      "$i" "$n0" "$n3" "$lock_timeouts" "$retry_n3" "$other" "$distinct" "$held" "$unchanged" "$verdict" >> "$log"
     g3_kill_sessions
   done
   if [ "$bad" = 0 ]; then
-    g3_pass E1 "$log" "n=$iters iterations x $procs concurrent dispatch, 3 slots: every iteration 3x exit 0 / 7x exit 3, 3 distinct slots"
+    g3_pass E1 "$log" "n=$iters iterations x $procs concurrent dispatch, 3 slots: every iteration 3 winners on 3 distinct leases; all 7 losers reached no-capacity, including explicit retries of named admission-lock refusals; retries left records, leases and instants unchanged"
   else
     g3_fail E1 "$log" "n=$iters iterations x $procs concurrent dispatch: $bad iteration(s) deviated (rate $bad/$iters) — see the per-iteration log"
   fi
