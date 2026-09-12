@@ -187,6 +187,20 @@ class HarvestCase(unittest.TestCase):
         self.assertEqual(self.rows(again, NO_MEMORY), [])
         self.assertEqual(exit_code(again), EXIT_OK)
 
+    def test_a_first_tick_labels_its_count_as_a_population_not_a_delta(self):
+        """`I-25`. A memoryless observer reports EVERYTHING, which reads as a surge. The mirror of the
+        blind-zero failure: the observer's state mistaken for the subject's."""
+        self.write_register(*BASELINE)
+        self.registered()
+        rows = self.h.run(self.base)
+
+        source = self.one(rows, SOURCE)
+        self.assertIn("population", source.detail.lower(),
+                      f"a first tick's count is a population, and the row does not say so: {source.detail!r}")
+        kinds = [r.kind for r in rows]
+        self.assertLess(kinds.index(NO_MEMORY), kinds.index(SOURCE),
+                        "the caveat must be readable BEFORE the count it qualifies")
+
     # ---- 3. the population, and the two halves of the vacuity guard -------------------------------
 
     def test_ids_found_is_reported_separately_from_the_new_count(self):
