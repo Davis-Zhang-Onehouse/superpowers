@@ -1,7 +1,7 @@
 # Fleet runtime selection: Claude Code and Codex CLI
 
 Date: 2026-09-11
-Status: Design direction approved in conversation; written spec awaiting review.
+Status: Written spec approved in conversation on 2026-09-11; implementation planning authorized.
 
 ## Purpose and agreed scope
 
