@@ -48,7 +48,7 @@ from pathlib import Path
 
 from fleet import EXIT_ATTENTION, EXIT_OK
 from fleet.atomic import atomic_update, atomic_write
-from fleet.errors import BadInput, FleetError
+from fleet.errors import AmbiguousId, BadInput, FleetError
 from fleet.identity import ROOT_BASE, InstantName, resolve
 from fleet.layout import INFO, VIOLATION, Violation, seed_headings
 from fleet.store import SCHEMA_VERSION
@@ -288,6 +288,47 @@ def _base_key(base: str) -> str:
         return str(base)
 
 
+def _curr_of(name: str) -> str | None:
+    """A folder name's `curr` field, or `None` if it does not parse as an instant.
+
+    A directory that is not an instant (a scratch folder, a leftover, anything else living beside the
+    instants this store manages) must not crash a dispatch just because `_register_path_for` glob-scanned
+    over it.
+    """
+    try:
+        return InstantName.parse(name).curr
+    except FleetError:
+        return None
+
+
+def _register_path_for(rec) -> str:
+    """The base instant's register, resolved to an ABSOLUTE path at registration time (`I-18`).
+
+    `rec.base_instant` is a bare 8-digit id, so joining it with the register name produced a path
+    relative to nothing — unreadable from the tick, and silently so: the source simply reported nothing,
+    which is indistinguishable from a register with nothing to say. The instants directory is not a field
+    on this object, but `child_instant` is absolute, and the base's folder is its sibling.
+
+    `ROOT_BASE` is synthetic and resolves to no folder; it falls through to the bare join, which is what
+    `unharvestable()` already exempts (`A5f`). An already-absolute `base_instant` (the pre-existing
+    transaction test, and any caller migrated ahead of production) takes the same fallthrough — it names
+    its own directory already and needs no resolution here.
+    """
+    base = str(rec.base_instant).strip()
+    if base == ROOT_BASE or "/" in base:
+        return str(Path(base) / REGISTER_NAME)
+    instants = Path(rec.child_instant).parent
+    matches = sorted(p for p in instants.glob("*") if p.is_dir() and _curr_of(p.name) == base)
+    if len(matches) > 1:
+        raise AmbiguousId(
+            f"base {base!r} names {len(matches)} instant folders in {instants} "
+            f"({', '.join(p.name for p in matches)}), so the register to watch is ambiguous. An instant "
+            f"may hold only one state (OBS-14); resolve the duplicate before dispatching.")
+    if not matches:
+        return str(Path(base) / REGISTER_NAME)
+    return str(matches[0] / REGISTER_NAME)
+
+
 class Harvest:
     """The watched-source registry and everything derived from it.
 
@@ -405,7 +446,7 @@ class Harvest:
             raise BadInput(
                 f"record {rec.todo_id!r} names no base instant, so there is nothing to watch. A dispatch "
                 "with no base is not a dispatch (FD-2).")
-        source = self.register(str(rec.base_instant), str(Path(rec.base_instant) / REGISTER_NAME))
+        source = self.register(str(rec.base_instant), _register_path_for(rec))
         store.write(rec)
         return source
 
@@ -453,6 +494,20 @@ class Harvest:
         *key* rename-tolerant did nothing for the *path*. `FI-17`: this module was the one that never
         adopted the resolver `reconcile` has always used, so a single renamed base exited 2 and took the
         whole tick with it. Resolution is on the full stable key with only `state` varying (`OI-16`).
+
+        **This closes the second half of `I-18`/`I-24(second)` for a source `record_dispatch` registers,
+        proven by `test_a_bare_base_registered_by_dispatch_survives_its_own_completion_rename`.** The
+        renamed-folder case (harvesting `m7.3` renamed its base `-inflight-` -> `-complete-` and a
+        correctly-absolute row silently stopped resolving) was never actually un-handled BY THIS
+        function — it was unreachable for a `record_dispatch` row, because `_register_path_for` used to
+        hand it a path relative to nothing (`I-18`'s first half), which is not a file and whose parent is
+        not a real instant directory either, so this resolver had nothing to walk from. Once
+        `_register_path_for` resolves the bare id to the real instant folder AT REGISTRATION, `path.parent`
+        is a real, fully-formed `InstantName` directory and the rename tolerance already implemented here
+        applies unchanged. Left open: a source registered by some OTHER writer with an absolute path that
+        is not a well-formed instant directory name (e.g. hand-repaired to a path this grammar cannot
+        parse) still falls through `resolve()` to `None` and reports `UNREADABLE`, loudly rather than
+        silently — that is `unharvestable()`'s and this function's existing contract, not a new gap.
         """
         path = Path(source.issues_path)
         if path.is_file():
