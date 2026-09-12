@@ -22,7 +22,7 @@ import tempfile
 import unittest
 
 from fleet import EXIT_OK
-from fleet.errors import BadInput
+from fleet.errors import AmbiguousId, BadInput
 from fleet.harvest import (EMPTY_REGISTER, NO_ISSUES_FILED, NO_MEMORY, POPULATION, REGISTER_NAME,
                            SOURCE, STALE, UNREADABLE, UNREGISTERED_BASE, VACUOUS, Harvest, Issue,
                            Repetition, Source, VacuousExtraction, exit_code)
@@ -104,6 +104,65 @@ class HarvestCase(unittest.TestCase):
         self.assertEqual(self.store.read(rec.todo_id).base_instant, str(self.base))
         # And the other half agrees — the lint that exists for hand-written records has nothing to say.
         self.assertEqual([v for v in self.h.lint(self.store) if v.rule == UNREGISTERED_BASE], [])
+
+    def test_a_dispatch_registers_an_ABSOLUTE_register_path_for_a_bare_base_id(self):
+        """`I-18`. Production passes `--base` as a bare 8-digit id, not a path — so the registration
+        built `09101704/ISSUES.md`, relative to nothing, and the source silently contributed nothing to
+        every tick after it. Seven recurrences, repaired by hand each time.
+
+        The pre-existing transaction test passes `base_instant=str(self.base)`, an absolute path this
+        code path never sees in production; that fixture is why the suite has never failed on this.
+        """
+        bare = InstantName.parse(self.base.name).curr
+        rec = self.record(base=bare)
+        self.h.record_dispatch(self.store, rec)
+
+        registered = self.h.sources()[0]
+        self.assertEqual(registered.base, bare, "the base must stay the bare id — `lint` reads that field")
+        self.assertTrue(pathlib.Path(registered.issues_path).is_absolute(),
+                        f"registered a relative register path: {registered.issues_path!r}")
+        self.assertEqual(registered.issues_path, str(self.base / REGISTER_NAME))
+
+    def test_a_root_base_registration_is_unchanged(self):
+        """`A5f`. The synthetic root resolves to no directory and is exempt from harvest; resolution must
+        fall through rather than refuse, or the integration case that pins this flips red."""
+        rec = self.record(base=ROOT_BASE)
+        source = self.h.record_dispatch(self.store, rec)
+        self.assertEqual(source.base, ROOT_BASE)
+
+    def test_an_ambiguous_bare_base_refuses_rather_than_guesses(self):
+        """Two folders (an abort and a retry) can share one bare id. Picking either silently would watch
+        the wrong effort's register; `AmbiguousId` exists so this refuses instead (F2's third constraint)."""
+        bare = InstantName.parse(self.base.name).curr
+        abort_sibling = self.base.with_name(self.base.name.replace("-inflight-", "-abort-"))
+        abort_sibling.mkdir()
+        rec = self.record(base=bare)
+        with self.assertRaises(AmbiguousId):
+            self.h.record_dispatch(self.store, rec)
+
+    def test_a_bare_base_registered_by_dispatch_survives_its_own_completion_rename(self):
+        """Closes the second half of `I-18`/`I-24(second)` for a `record_dispatch` registration: the
+        harvest tick renamed `m7.3`'s base folder `-inflight-` -> `-complete-` and a correctly-absolute
+        row silently stopped resolving. Once registration resolves the bare id to the REAL instant
+        directory (rather than a garbage relative join), the pre-existing rename-tolerant
+        `register_path` (`FI-17`) covers the rest — proven here, not assumed."""
+        bare = InstantName.parse(self.base.name).curr
+        rec = self.record(base=bare)
+        source = self.h.record_dispatch(self.store, rec)
+        self.write_register(*BASELINE, instant=self.base)
+        self.assertEqual(self.h.prime(source), 3)
+
+        renamed = self.base.with_name(self.base.name.replace("-inflight-", "-complete-"))
+        self.base.rename(renamed)
+        self.write_register(*(BASELINE + (("RI-12", "an issue filed after the effort completed"),)),
+                            instant=renamed)
+
+        self.assertEqual(self.h.ids_found(source), 4,
+                         "the register was read at its registered path and the rename was not followed")
+        rows = self.h.report()
+        self.assertEqual(self.rows(rows, UNREADABLE), [],
+                         "a resolvable rename on a record_dispatch-registered source was UNREADABLE")
+        self.assertEqual(exit_code(rows), EXIT_OK)
 
     def test_a_lint_flags_a_record_whose_base_is_not_registered(self):
         # A record written straight to the store, bypassing the transaction. This is exactly OBS-68's
