@@ -668,12 +668,35 @@ class Harvest:
                 clears_who="the owner of that effort, or the coordinator that registered it",
                 ids_found=0, new_count=0)]
         new = self.new_issues(src)
-        rows = [Row(
+        rows = []
+        if not had_memory:
+            # `I-25`/F7. This row is emitted BEFORE the `SOURCE` row below on purpose: the caveat that
+            # qualifies a count must be readable before the count itself, or the count reads as a result
+            # ("36 new") rather than what a memoryless tick actually produced (its whole register). Text
+            # unchanged from before F7 — only the position moved.
+            rows.append(Row(
+                kind=NO_MEMORY, subject=src.base,
+                detail=(f"this tick had NO state file for {src.base}, so its diff had no memory and "
+                        f"{len(new)} of {len(issues)} id(s) read as new. RI-28..31 were harvested exactly "
+                        f"this way, on the first tick of the loop that wrote the lesson. The memory has "
+                        f"now been written, so the NEXT tick is trustworthy — this one is not."),
+                severity=VIOLATION,
+                clears_when="the next tick runs against the state file this one wrote",
+                clears_who="this loop, on its next tick",
+                ids_found=len(issues), new_count=len(new)))
+        # `I-25`/F7. A first tick's count is not a delta — there is no prior state for it to be a delta
+        # FROM — so the wording says "population" rather than "new" whenever `had_memory` is False. The
+        # `no-prior-state` row above already carries this fact for `clears_when` to hang off; this is the
+        # same fact stated in the row a reader actually looks at for the count.
+        counted = (f"{len(new)} new" if had_memory else
+                   f"{len(new)} of {len(issues)} id(s) read as new because this tick had no memory — "
+                   f"a POPULATION, not a delta")
+        rows.append(Row(
             kind=SOURCE, subject=src.base,
-            detail=(f"{len(issues)} id(s) in {src.issues_path}, {len(new)} new"
+            detail=(f"{len(issues)} id(s) in {src.issues_path}, {counted}"
                     + (f": {', '.join(i.id for i in new)}" if new else
                        " — this source produced nothing, which is the observation and not an omission")),
-            severity=INFO, ids_found=len(issues), new_count=len(new))]
+            severity=INFO, ids_found=len(issues), new_count=len(new)))
         if not issues and unfiled(text, src.base):
             rows.append(Row(
                 kind=NO_ISSUES_FILED, subject=src.base,
@@ -689,17 +712,6 @@ class Harvest:
                         "failed: an empty register is news, and a check that goes RED for it is the "
                         "always-red alarm OBS-21 avoided."),
                 severity=INFO, ids_found=0, new_count=0))
-        if not had_memory:
-            rows.append(Row(
-                kind=NO_MEMORY, subject=src.base,
-                detail=(f"this tick had NO state file for {src.base}, so its diff had no memory and "
-                        f"{len(new)} of {len(issues)} id(s) read as new. RI-28..31 were harvested exactly "
-                        f"this way, on the first tick of the loop that wrote the lesson. The memory has "
-                        f"now been written, so the NEXT tick is trustworthy — this one is not."),
-                severity=VIOLATION,
-                clears_when="the next tick runs against the state file this one wrote",
-                clears_who="this loop, on its next tick",
-                ids_found=len(issues), new_count=len(new)))
         return rows
 
     def report(self, now: str = None, max_age_s: int = DEFAULT_MAX_AGE_S,
