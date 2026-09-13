@@ -343,3 +343,39 @@ matters when you are changing the pipeline rather than using it.
   written into the artifact's own `.release/CHANGELOG.md`. "What changed in the version I am holding" is
   a different question from "the whole history", and the holder of one artifact should not have to
   answer it by diffing two.
+
+**Three wrapper scripts turn skill prose into actual checks, one per operator moment.** None of them talks
+to `release-verify`'s ~45-minute run except `release-gate.sh`, which launches it; the other two only read
+state that already exists.
+
+- **`scripts/release-preflight.sh [--reap]`** — reports what makes this a bad moment to cut: this root's
+  live `dt-` sessions and every other root's (through the environment's own **derived**
+  `FLEET_TMUX_SOCKET`, never a bare `-L fleet`), any `board` subject still `COMPLETE` and holding a slot,
+  the 03:30 UTC sync-cron window, and orphaned `.fleet-v*.tmp` verify worktrees. Advisory (`WARN:`, exit
+  0) except one hard refusal (exit 2) when `FLEET_TMUX_SOCKET` is unset or literally `fleet` — a broken
+  environment must not read as a quiet box. `--reap` deletes only the worktrees it just classified
+  ORPHAN, restoring write access to a read-only §Q export first.
+
+  ```bash
+  bash scripts/tests/release-preflight.sh   # ~0.3s, spends no claude — stubs `fleet` and a scratch release area
+  ```
+
+- **`scripts/release-gate.sh <version> [--full]`** — the sanctioned way to launch and wait on
+  `release-verify`: `setsid`, no pipe, no `timeout`, unbounded wait on `VERDICT.tsv` or the pid. Three
+  outcomes: a verdict → exit 0 or 1 with FAIL rows from the per-runner files; the pid gone with no
+  verdict → **exit 3**, printing `hermetic.log`'s size/mtime and the launch log's tail; "still running" is
+  unreachable by construction. Runs the gate **once** — re-running is a separate invocation.
+
+  ```bash
+  bash scripts/tests/release-gate.sh   # ~0.3s, spends no claude — never a real ~45-minute release-verify
+  ```
+
+- **`scripts/release-postflight.sh <version>`** — proves a deployment reached every root that shares this
+  release area (`current`'s target, each root's marketplace path, every `.version-bump.json` manifest,
+  the deployed evidence's verdict), invoking `fleet` **not at all** — `release-status` from a second root
+  reports relative to whichever `FLEET_HOME` it is handed, which is what read a correct deployment as
+  `current DEV / head unknown` from `davis2_root`. Read-only: it proves a deployment, never performs one.
+
+  ```bash
+  bash scripts/tests/release-postflight.sh   # ~2s, spends no claude — a fake box under mktemp -d, never the real roots
+  ```
