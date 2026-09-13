@@ -30,19 +30,38 @@ REPO="$(cd "$HERE/.." && pwd)"
 # a confusing, wrong-looking warning at the top of the one script this task exists to make trustworthy.
 V="${1:-}"
 if [ -z "$V" ]; then
-  echo "usage: $(basename "$0") <version> [--full]" >&2
+  echo "usage: $(basename "$0") <version> [--full] [--repo <path>]" >&2
   exit 2
 fi
+shift
 
+# `--repo` is passed straight through because `release-verify` needs it for a release cut before
+# MANIFEST.tsv carried `source_repo` (II-7). Without it such a release refuses INSIDE the detached
+# process, writes no VERDICT.tsv, and this script would classify a legible refusal as outcome 3, "the
+# run died" -- a wrong diagnosis produced by the launcher rather than by the gate. Not live today (all
+# ten retained releases carry `source_repo`), which is why it is a passthrough and not a default.
 FULL=""
-case "${2:-}" in
-  "") ;;
-  --full) FULL="--full" ;;
-  *)
-    echo "$(basename "$0"): unknown argument '$2' (only --full)" >&2
-    exit 2
-    ;;
-esac
+REPO_ARG=()
+while [ $# -gt 0 ]; do
+  case "$1" in
+    --full)
+      FULL="--full"
+      shift
+      ;;
+    --repo)
+      if [ $# -lt 2 ] || [ -z "$2" ]; then
+        echo "$(basename "$0"): --repo needs a path" >&2
+        exit 2
+      fi
+      REPO_ARG=(--repo "$2")
+      shift 2
+      ;;
+    *)
+      echo "$(basename "$0"): unknown argument '$1' (only --full and --repo <path>)" >&2
+      exit 2
+      ;;
+  esac
+done
 set --
 
 # shellcheck source=scripts/fleet-env.sh
@@ -128,7 +147,7 @@ echo "$(basename "$0"): launching release-verify for $V (log: $LOG)"
 # The launch line the four incidents are each a violation of: no pipe (Trap: `| tail` ate the exit
 # status), no `timeout` (Trap: rc=124 on a guessed duration), `setsid` (Trap: a harness background task's
 # process group took the run down with it on teardown).
-setsid nohup "$FLEET" release-verify --version "$V" --releases "$R" $FULL \
+setsid nohup "$FLEET" release-verify --version "$V" --releases "$R" $FULL ${REPO_ARG[@]+"${REPO_ARG[@]}"} \
   >"$LOG" 2>&1 </dev/null &
 pid=$!
 echo "$pid" >"$PIDFILE"
@@ -169,7 +188,16 @@ echo "$(basename "$0"): pid $pid is gone and this run never wrote $EV/VERDICT.ts
 if [ "$STALE_VERDICT" != "none" ]; then
   # Named, never printed as a verdict: a file this run did not write is evidence of the attempt BEFORE
   # it, and letting it stand in for this one is the defect the identity snapshot above exists to prevent.
-  echo "(a VERDICT.tsv from an earlier attempt is still in $EV — it is NOT this run's and was not read)" >&2
+  #
+  # WHERE it is now is checked rather than asserted. If the run got far enough to call
+  # `archive_previous_attempt` before dying, that file has already been renamed into
+  # `$EV/attempt-<n>-<verdict>/` and saying it "is still in $EV" would be false -- a message about
+  # provenance that is itself wrong about provenance is worse than no message.
+  if [ -f "$EV/VERDICT.tsv" ]; then
+    echo "(a VERDICT.tsv from an earlier attempt is still in $EV — it is NOT this run's and was not read)" >&2
+  else
+    echo "(the earlier attempt's VERDICT.tsv was archived into $EV/attempt-*/ — this run wrote none)" >&2
+  fi
 fi
 if [ -f "$EV/hermetic.log" ]; then
   stat --format='hermetic.log: %s bytes, modified %y' "$EV/hermetic.log"
