@@ -1,5 +1,31 @@
 # fleet — changelog
 
+## fleet/v0.5.9 — 2026-09-13T03:37:19Z
+Cut from 93b685a on `live` (upstream base snapshot/2026-08-17-221146). 18 commit(s) since fleet/v0.5.8.
+
+Every release ships the whole repository — all skills, `commands/`, `hooks/` and the plugin manifest, not only `fleet/`.
+Payload: fleet (10 files), skills (3 files), docs (4 files).
+Skills changed: coordinating-instants, harvesting-an-instant, using-fleet.
+
+- 31f2c2b docs: specify fleet runtime selection for Claude and Codex
+- 72f4701 docs: land the fleet runtime selection plan and mark its spec approved
+- b9a586b Design: the 0.5.8 dogfooding issue batch, seven fixes and six sanctions
+- 86e9a62 Plan: the 0.5.8 issue batch, eight tasks
+- 41ed7e4 harvest: a first tick's count reads as a population, not a surge (I-25)
+- a4029e4 harvest: registration resolves a bare base id to an absolute register path (I-18, I-9)
+- fe040a1 dispatch: --dry-run catches an undeclared placeholder, not the real dispatch (I-24c)
+- 29ef78f dispatch: fix review findings on the F3 dry-run placeholder check
+- b461c79 abort: a refused slot release names the partial state and the re-run that completes it (I-27)
+- 882927f apply: say so when the milestone's worker session is still alive (I-10)
+- 661d943 pane-guard: a pane blocked at a selection dialog is not a quiet pane (I-16)
+- bde54e2 pane-guard: --capture preserves the evidence behind a verdict (I-21, I-26); close refuses a pane awaiting an operator (I-16)
+- cb959ab pane-guard: review fixes for --capture (I-21, I-26) -- guard the write, cover code 14
+- 837bf12 the 0.5.8 rulings: --retire, --base and init say their grammar out loud (I-24a, I-24b, I-1, I-26)
+- 83d1456 fix: scope the --base path hint to base/curr, not any path-shaped value (review)
+- 16c0ab4 it/run-P.sh: accept pane-guard 15 in P1/P2, stop-and-report it in P4
+- d3dc809 fix pane-guard code-set docs/comments now stale after code 15 landed
+- 93b685a CLAUDE.md: say what J8 actually proves; carry the unbuilt §O case in the spec
+
 ## fleet/v0.5.8 — 2026-09-09T01:35:04Z
 Cut from df52db1 on `live` (upstream base snapshot/2026-08-17-221146). 2 commit(s) since fleet/v0.5.7.
 
