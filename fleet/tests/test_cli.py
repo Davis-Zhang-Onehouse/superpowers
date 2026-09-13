@@ -357,6 +357,30 @@ class Fleet:
             "Read CHARTER.md. Run `fleet declare --instant \"$INSTANT\" --phase awaiting-ci`.\n")
         return path
 
+    def profile_with_every_placeholder(self, kind: str = "worker") -> pathlib.Path:
+        """A profile whose charter and seed use every placeholder a real dispatch's render context
+        supplies — the same 11-key set `skills/using-fleet/profiles/worker/charter.md` and `seed.txt`
+        use between them (`TITLE`, `INSTANT`, `SLOT`, `TODO_ID`, `BASE`, `PATH`, `MILESTONE`,
+        `COORDINATOR`, `LINEAGE_BASE`, `LINEAGE_MODE`, `CHECKOUT`). `profile()`'s fixture only ever
+        carries `{{TITLE}}` and `{{INSTANT}}`, so a dry-run's positive-direction test built on it would
+        still pass if the dry-run context silently dropped most of its keys — this exists so that
+        direction is actually exercised."""
+        path = self.profiles_dir / f"{kind}-with-every-placeholder"
+        path.mkdir(exist_ok=True)
+        (path / "profile.json").write_text(json.dumps({"kind": kind}))
+        (path / "charter.md").write_text(
+            "# {{TITLE}} ({{INSTANT}})\n\n"
+            "slot={{SLOT}} todo={{TODO_ID}} base={{BASE}} path={{PATH}}\n"
+            "milestone={{MILESTONE}} coordinator={{COORDINATOR}}\n"
+            "lineage_base={{LINEAGE_BASE}} lineage_mode={{LINEAGE_MODE}}\n\n"
+            "{{CHECKOUT}}\n\n"
+            "Run `fleet declare --instant \"$INSTANT\" --phase awaiting-ci` when CI is queued.\n")
+        (path / "seed.txt").write_text(
+            "Read CHARTER.md at {{PATH}}. milestone={{MILESTONE}} coordinator={{COORDINATOR}}\n\n"
+            "{{CHECKOUT}}\n\n"
+            "Run `fleet declare --instant \"$INSTANT\" --phase awaiting-ci`.\n")
+        return path
+
     def profile_with_charter(self, extra: str, kind: str = "worker") -> pathlib.Path:
         """Like `profile()`, but the charter carries additional text — e.g. a plausible-but-undeclared
         placeholder a coordinator invented by hand (`I-24c`). A directory of its own, never `kind` alone:
@@ -895,10 +919,12 @@ class TestDryRun(CliCase):
 
     def test_dry_run_with_only_declared_placeholders_still_dry_runs_clean(self):
         """The other direction of `F3`: a validator that refuses everything passes the test above too.
-        A profile whose charter and seed carry only the placeholders the real dispatch supplies must
-        still dry-run clean and exit exactly as it did before this change."""
+        Exercises the FULL 11-key set a real dispatch's render context supplies (`profile_with_every_
+        placeholder`), not just `{{TITLE}}`: a dry-run context that silently dropped a key — say
+        `MILESTONE`, by a typo — would leave that token unresolved and this would catch it, where the
+        single-placeholder `profile("worker")` fixture could not."""
         fleet = self.loaded()
-        profile = str(fleet.profile("worker"))
+        profile = str(fleet.profile_with_every_placeholder())
 
         code, out, err = fleet.run(["dispatch", "--dry-run", "--profile", profile,
                                     "--title", "probe", "--base", "00000000"])
