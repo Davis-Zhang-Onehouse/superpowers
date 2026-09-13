@@ -150,7 +150,16 @@ if [ -d "$ROOTS_PARENT" ]; then
     in_scope "$root" && IN_SCOPE_ROOTS+=("$root")
   done
 fi
-ok "${#IN_SCOPE_ROOTS[@]} root(s) under $ROOTS_PARENT share this release area: ${IN_SCOPE_ROOTS[*]:-<none>}"
+# A population of ZERO is not an OK. Assertions 2 and 3 below are a loop over this list, so labelling an
+# empty one `OK:` makes both of them vacuous -- in a script whose entire purpose is proving a deployment
+# reached every root. The box always has at least this root's own, so zero means the derivation found
+# nothing, which is "could not tell", not "fine". Same rule as assertion 4 below, one notch milder.
+if [ "${#IN_SCOPE_ROOTS[@]}" -eq 0 ]; then
+  mismatch "0 root(s) under $ROOTS_PARENT share this release area — assertions 2 and 3 have nothing to" \
+           "check, so they prove nothing about this deployment"
+else
+  ok "${#IN_SCOPE_ROOTS[@]} root(s) under $ROOTS_PARENT share this release area: ${IN_SCOPE_ROOTS[*]}"
+fi
 
 # --- assertions 2 & 3: every in-scope root agrees, both by the release symlink and by the settings ------
 for root in "${IN_SCOPE_ROOTS[@]}"; do
@@ -181,31 +190,29 @@ done
 # The only check in this whole pipeline that covers .hermes-plugin/plugin.yaml. The file list is read out
 # of the deployed .version-bump.json itself, never hardcoded, so a file added or removed there is covered
 # automatically.
+#
+# The file list is read into a VARIABLE and the read is CHECKED before the loop, rather than feeding the
+# loop from `done < <(python3 ...)`. Fed directly, this assertion passed VACUOUSLY whenever the generator
+# produced nothing: the body never ran, no `ok` and no `mismatch` was recorded, FAILED stayed 0, and the
+# script exited 0. Reproduced against this script:
+#
+#   * deployed `.version-bump.json` = `{"files": []}`  -> exit 0, three OK lines, assertion 4 absent
+#   * deployed `.version-bump.json` malformed          -> exit 0, a Python traceback printed mid-report,
+#                                                         assertion 4 absent, still "OK"
+#
+# The real-box verification counted 16 OK lines; that count would have dropped to 3 with nothing failing,
+# and this is the ONLY check in the whole pipeline covering `.hermes-plugin/plugin.yaml`. It contradicted
+# this script's own contract, stated two dozen lines above: "could not read" must never look like "fine".
+# So: a non-zero status is a mismatch, an empty list is a mismatch, and the rows actually asserted are
+# COUNTED -- zero of them is a mismatch too, because a list that is non-empty but yields nothing
+# assertable is the same silence wearing a different hat.
 VB="$CUR/.version-bump.json"
 WANT_SUFFIX="+fleet.$V"
 if [ ! -f "$VB" ]; then
   mismatch "$VB does not exist"
 else
-  while IFS=$'\t' read -r relpath field; do
-    [ -n "$relpath" ] || continue
-    fpath="$CUR/$relpath"
-    if [ ! -f "$fpath" ]; then
-      mismatch "$fpath (field $field, from $VB) does not exist"
-      continue
-    fi
-    if val="$(read_field "$fpath" "$field" 2>&1)"; then
-      case "$val" in
-        *"$WANT_SUFFIX")
-          ok "$relpath#$field = $val (carries $WANT_SUFFIX)"
-          ;;
-        *)
-          mismatch "$relpath#$field = $val, wanted a value ending in $WANT_SUFFIX"
-          ;;
-      esac
-    else
-      mismatch "$relpath#$field could not be read: $val"
-    fi
-  done < <(python3 - "$VB" <<'PY'
+  VB_ERR="$(mktemp)"
+  VB_ROWS="$(python3 - "$VB" 2>"$VB_ERR" <<'PY'
 import json
 import sys
 
@@ -214,7 +221,43 @@ with open(sys.argv[1]) as fh:
 for f in data.get("files", []):
     print(f"{f['path']}\t{f['field']}")
 PY
-  )
+  )"
+  VB_RC=$?
+  VB_MSG="$(tr '\n' ' ' <"$VB_ERR")"
+  rm -f "$VB_ERR"
+  if [ "$VB_RC" != 0 ]; then
+    mismatch "$VB could not be read (python3 exited $VB_RC): ${VB_MSG:-no message}"
+  elif [ -z "$VB_ROWS" ]; then
+    mismatch "$VB names no files to check — assertion 4 is the only check in this pipeline that" \
+             "covers .hermes-plugin/plugin.yaml, and an empty list silently removes it"
+  else
+    asserted=0
+    while IFS=$'\t' read -r relpath field; do
+      [ -n "$relpath" ] || continue
+      asserted=$((asserted + 1))
+      fpath="$CUR/$relpath"
+      if [ ! -f "$fpath" ]; then
+        mismatch "$fpath (field $field, from $VB) does not exist"
+        continue
+      fi
+      if val="$(read_field "$fpath" "$field" 2>&1)"; then
+        case "$val" in
+          *"$WANT_SUFFIX")
+            ok "$relpath#$field = $val (carries $WANT_SUFFIX)"
+            ;;
+          *)
+            mismatch "$relpath#$field = $val, wanted a value ending in $WANT_SUFFIX"
+            ;;
+        esac
+      else
+        mismatch "$relpath#$field could not be read: $val"
+      fi
+    #: A here-string, never a pipe: a piped loop runs in a subshell and every `mismatch` inside it would
+    #: set FAILED in a shell that exits a line later -- this same defect with a different cause.
+    done <<<"$VB_ROWS"
+    [ "$asserted" -gt 0 ] \
+      || mismatch "$VB yielded $asserted checkable row(s) — assertion 4 asserted nothing"
+  fi
 fi
 
 # --- assertion 5: the deployed release's own evidence says GREEN or EXEMPT ------------------------------
