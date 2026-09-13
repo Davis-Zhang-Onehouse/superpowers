@@ -42,11 +42,16 @@ class TestParse(unittest.TestCase):
                     InstantName.parse(bad)
 
 class TestAPathShapedFieldGetsANamedHint(unittest.TestCase):
-    """S4 / I-24b. `--base` (and `--optype`/`--name` via the same constructor) takes a bare 8-digit id,
-    never a path: a base is a stable KEY, but an instant's own folder is renamed at every state
-    transition, so a path stored as a base goes stale the moment that instant moves. The generic domain
-    error already named the rule; it did not help a caller who copy-pasted an `--instant`-shaped path
-    into `--base` find their way back — the message now names the likely intended id.
+    """S4 / I-24b. `base`/`curr` take a bare 8-digit id, never a path: a base is a stable KEY, but an
+    instant's own folder is renamed at every state transition, so a path stored as a base goes stale the
+    moment that instant moves. The generic domain error already named the rule; it did not help a caller
+    who copy-pasted an `--instant`-shaped path into `--base` find their way back — the message now names
+    the likely intended id.
+
+    Scoped to `base_instant`/`curr_instant` ONLY, not to "any value containing a `/`": `instantName` is
+    also user-supplied (`--name`/`--title`) and its rule is dashless camelCase, not id-vs-path, so a
+    path-shaped `instantName` must NOT get the base/curr sentence — that was the finding on review of the
+    first version, reproduced below as `test_a_path_shaped_instantName_gets_no_base_curr_hint`.
     """
 
     def test_a_slash_in_the_rejected_value_names_the_tail_as_the_likely_id(self):
@@ -65,6 +70,30 @@ class TestAPathShapedFieldGetsANamedHint(unittest.TestCase):
         with self.assertRaises(InstantNameError) as caught:
             InstantName(base="0715", curr="07300312", state="inflight", optype="append", name="x")
         self.assertNotRegex(str(caught.exception), r"(?i)looks like a path")
+
+    def test_a_path_shaped_instantName_gets_no_base_curr_hint(self):
+        """The reviewer's repro: `instantName` fails its OWN rule (dashless camelCase) when given a
+        path, and that failure must not be reported with a hint that misattributes an 8-digit-id rule to
+        a field that did not fail and never takes an id at all."""
+        with self.assertRaises(InstantNameError) as caught:
+            InstantName(base="00000000", curr="07300312", state="inflight", optype="append",
+                       name="some/path/thing")
+        message = str(caught.exception)
+        self.assertIn("instantName", message, f"the failing field is not named: {message!r}")
+        self.assertNotRegex(message, r"(?i)looks like a path",
+                            f"a path-shaped instantName got the base/curr hint anyway: {message!r}")
+        self.assertNotIn("base/curr take a bare 8-digit id", message,
+                         f"the base/curr rule was misattributed to instantName: {message!r}")
+
+    def test_a_bare_slash_names_no_empty_tail(self):
+        """Minor from review: `Path('/').name == ''`, so the naive hint used to read "The tail component
+        '' looks like the id you meant" — harmless but useless. A bare `/` still gets the base/curr
+        sentence; it just does not also claim an empty string is the likely id."""
+        with self.assertRaises(InstantNameError) as caught:
+            InstantName(base="/", curr="07300312", state="inflight", optype="append", name="x")
+        message = str(caught.exception)
+        self.assertRegex(message, r"(?i)looks like a path", f"no hint for a bare slash: {message!r}")
+        self.assertNotIn("''", message, f"an empty tail was named as the likely id: {message!r}")
 
 
 class TestStableKey(unittest.TestCase):
