@@ -77,9 +77,16 @@ CUT_MANIFESTS = ("package.json", ".claude-plugin/plugin.json", ".cursor-plugin/p
 #: thing that must be recognised is the line `release-cut` rewrites with `re.sub`.
 _VERSION_LINE = re.compile(r'^\s*__version__\s*=\s*["\'][^"\']*["\']\s*$', re.MULTILINE)
 
-#: `"version": "…"` in a JSON manifest, as a whole line. The same question as `_VERSION_LINE` asks of a
-#: Python module, for the seven files a cut stamps.
-_VERSION_FIELD = re.compile(r'^\s*"version"\s*:\s*"[^"]*"\s*,?\s*$', re.MULTILINE)
+#: `version: …` as a whole line, however the manifest spells it. Mirrors `release_stamp._rewrite`'s
+#: pattern deliberately: the quotes are optional and the closing one is back-referenced to the opening
+#: one, so `"version": "6.2.0"` and a YAML `version: 6.2.0` are both matched and a half-quoted value by
+#: neither. That module is the WRITE half of this question and had it right from the start; this one was
+#: JSON-only, so `.hermes-plugin/plugin.yaml` (a CUT_MANIFEST since upstream 6.3.0) was put back into
+#: `requiring` on every cut and no release from 0.5.2 to 0.5.11 could be EXEMPT. Kept as ONE pattern
+#: rather than a per-suffix dispatch: a dispatch is a second place for the manifest list to acquire a
+#: family the other half does not know about, which is the defect being fixed.
+_VERSION_FIELD = re.compile(
+    r'^[ \t]*"?version"?[ \t]*:[ \t]*(?P<q>["\']?)[^"\']*(?P=q)[ \t]*,?[ \t]*$', re.MULTILINE)
 
 
 def without_version_line(text: str) -> str:
@@ -93,11 +100,13 @@ def without_version_line(text: str) -> str:
 
 
 def without_version_field(text: str) -> str:
-    """`text` with any `"version": "…"` line removed, for comparing two stamps of one JSON manifest.
+    """`text` with any `version` line removed, for comparing two stamps of one manifest -- JSON or not.
 
-    The JSON counterpart of `without_version_line`, and it exists for the identical reason: `classify`
-    treats `CUT_MANIFESTS` as inert because the cut rewrites them on every release, and something has to
-    tell that rewrite apart from an author renaming the plugin in the same file.
+    Handles any manifest whose version is a whole `version:` line, however it is quoted, because
+    `CUT_MANIFESTS` is not JSON-only: `.hermes-plugin/plugin.yaml` spells it as bare YAML. It exists for
+    the same reason as `without_version_line`: `classify` treats `CUT_MANIFESTS` as inert because the cut
+    rewrites them on every release, and something has to tell that rewrite apart from an author renaming
+    the plugin in the same file.
     """
     return _VERSION_FIELD.sub("", text or "")
 
