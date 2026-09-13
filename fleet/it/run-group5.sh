@@ -670,6 +670,16 @@ PY
   VERBS_ALL="$(python3 -c 'from fleet.cli import VERBS; print(" ".join(sorted(VERBS)))')"
   NVERBS="$(printf '%s\n' $VERBS_ALL | wc -l | tr -d ' ')"
 
+  # `selftest` is the one verb whose real work IS the hermetic suite (`_do_selftest`, cli.py). Every
+  # other verb here is a CLI-surface probe that finishes in well under a second; `selftest` alone runs
+  # `python3 -m unittest discover -s tests` for real, which crossed the 120s wall this matrix used
+  # everywhere once the suite grew from 1733 to 1767 tests (measured 112-116s unloaded, 167.9s in the
+  # gate's own hermetic.log under load). Raising the ceiling for every verb would blunt this matrix's
+  # actual job — catching a genuine hang fast — so only `selftest` gets the wider wall; the guard
+  # against unbounded recursion is `FLEET_SELFTEST` (SELFTEST_GUARD, cli.py), not the size of this
+  # timeout, and stays effective at any ceiling.
+  m_timeout() { [ "$1" = selftest ] && echo 300 || echo 120; }
+
   # ---- M1 ---------------------------------------------------------------------------------------
   M1LOG="$EV/M1-per-verb.txt"; : > "$M1LOG"
   m1_bad=0
@@ -677,7 +687,7 @@ PY
     args="$(m_args "$v")"
     allowed="$(python3 -c "from fleet.cli import registered_codes; print(' '.join(str(c) for c in sorted(registered_codes('$v'))))")"
     # shellcheck disable=SC2086
-    timeout 120 python3 -m fleet.cli "$v" $args > "$EV/M1-$v.stdout" 2> "$EV/M1-$v.stderr"; rc=$?
+    timeout "$(m_timeout "$v")" python3 -m fleet.cli "$v" $args > "$EV/M1-$v.stdout" 2> "$EV/M1-$v.stderr"; rc=$?
     ok=no
     for c in $allowed; do [ "$rc" = "$c" ] && ok=yes; done
     printf '%-20s rc=%-4s allowed=[%s] %s\n' "$v" "$rc" "$allowed" "$ok" >> "$M1LOG"
@@ -791,9 +801,11 @@ PY
       timeout 5 python3 -m fleet.cli "$v" $args "$f" > /dev/null 2>&1; rcs=$?
       extra=""
       if [ "$rcs" = 124 ]; then
-        # not a hang until it fails to terminate with a generous wall too
+        # not a hang until it fails to terminate with a generous wall too — `m_timeout` above (300s
+        # for `selftest`, unchanged 120s otherwise) so the real hermetic-suite run this verb performs
+        # is not mistaken for a hang at the 120s wall every other verb is held to.
         # shellcheck disable=SC2086
-        timeout 120 python3 -m fleet.cli "$v" $args "$f" > /dev/null 2>&1; rc2=$?
+        timeout "$(m_timeout "$v")" python3 -m fleet.cli "$v" $args "$f" > /dev/null 2>&1; rc2=$?
         extra="retry120:rc=$rc2"
         [ "$rc2" = 124 ] && m5_hang=$((m5_hang+1)) || m5_slow="$m5_slow $v$f"
       fi
