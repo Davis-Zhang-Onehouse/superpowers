@@ -1829,6 +1829,23 @@ class CliCase(ReleaseCliFixture, unittest.TestCase):
         rows = [line.split("\t") for line in self.out.getvalue().splitlines()]
         self.assertEqual([(row[0], row[3]) for row in rows], [("0.1.0", ""), ("0.2.0", "*")])
 
+    def test_release_list_tells_an_abandoned_candidate_from_an_unverified_one(self):
+        """Four situations collapse into the word CANDIDATE -- cut and abandoned RED, cut and never
+        verified, GREEN awaiting promote, and a verify killed mid-flight. 0.5.9 (RED) and 0.5.11 (no
+        VERDICT.tsv at all) were indistinguishable on this box, which is what a stale-candidate report
+        would have existed to say; the column says it instead."""
+        from fleet import EXIT_OK
+        from fleet.release_verify import GATE_ROSTER, RED, write_verdict
+        rel, version = self.seed("0.5.9")
+        write_verdict(rel.dir_for(version) / ".release",
+                      [("hermetic", RED, "e", "n"), ("it", "GREEN", "e", "n")], GATE_ROSTER, result=RED)
+        self.seed("0.5.11")
+        code = self.run_verb("release-list", "--porcelain", "--releases", str(self.releases))
+        self.assertEqual(code, EXIT_OK, self.err.getvalue())
+        rows = {row[0]: row for row in (line.split("\t") for line in self.out.getvalue().splitlines())}
+        self.assertEqual(rows["0.5.9"][4], "RED")
+        self.assertEqual(rows["0.5.11"][4], "-")
+
     # --- the dry run -------------------------------------------------------------------------------
 
     def test_no_mutating_release_verb_touches_anything_under_dry_run(self):
