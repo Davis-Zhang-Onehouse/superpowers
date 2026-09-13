@@ -255,6 +255,67 @@ case "$out" in
 esac
 cp "$TMP/version-bump.json.bak" "$R/fleet-v$VERSION/.version-bump.json"
 
+# --- assertion 4 must never pass VACUOUSLY: an empty file list is a MISMATCH, not silence ----------------
+# Fed straight into `done < <(python3 ...)`, the loop body simply never ran: no ok, no mismatch, FAILED
+# stayed 0, and the script exited 0 having printed three OK lines. The real-box run counts 16, so the
+# count would have dropped to 3 with nothing failing -- and assertion 4 is the ONLY check in the whole
+# pipeline that covers .hermes-plugin/plugin.yaml. Against this script's own contract: "could not read"
+# must never look like "fine".
+printf '{"files": []}\n' >"$R/fleet-v$VERSION/.version-bump.json"
+out="$(run 2>&1)"
+rc=$?
+check "an empty .version-bump.json file list exits 1, not 0 with assertion 4 silently absent" "1" "$rc"
+case "$out" in
+  *"MISMATCH"*"names no files to check"*)
+    note "ok   an empty file list is reported as a mismatch naming what it silently removed"
+    ;;
+  *)
+    note "FAIL an empty file list did not produce a mismatch: $out"
+    fails=1
+    ;;
+esac
+case "$out" in
+  *"OK: package.json#version"*)
+    note "FAIL assertion 4 claims to have checked a file the empty list never named"
+    fails=1
+    ;;
+  *) note "ok   no assertion-4 OK line was printed for a list that named nothing" ;;
+esac
+
+# --- and a manifest that does not parse at all: a traceback mid-report used to still exit 0 --------------
+printf 'this is not json\n' >"$R/fleet-v$VERSION/.version-bump.json"
+out="$(run 2>&1)"
+rc=$?
+check "a malformed .version-bump.json exits 1, not 0 with a traceback printed mid-report" "1" "$rc"
+case "$out" in
+  *"MISMATCH"*"could not be read (python3 exited"*)
+    note "ok   a manifest that will not parse is reported as a mismatch naming the exit status"
+    ;;
+  *)
+    note "FAIL a malformed manifest did not produce a mismatch: $out"
+    fails=1
+    ;;
+esac
+cp "$TMP/version-bump.json.bak" "$R/fleet-v$VERSION/.version-bump.json"
+
+# --- assertions 2 and 3 must never pass VACUOUSLY either: zero in-scope roots is a MISMATCH -------------
+# One notch milder than the case above and the same shape: `ok "0 root(s) ... : <none>"` labelled a
+# population of zero `OK:` in a script whose entire purpose is proving a deployment reached every root.
+EMPTY_PARENT="$TMP/no-roots-here"
+mkdir -p "$EMPTY_PARENT"
+out="$(FLEET_RELEASES="$R" RELEASE_POSTFLIGHT_ROOTS_PARENT="$EMPTY_PARENT" bash "$SCRIPT" "$VERSION" 2>&1)"
+rc=$?
+check "zero in-scope roots exits 1 rather than reporting OK for a population of none" "1" "$rc"
+case "$out" in
+  *"MISMATCH: 0 root(s)"*)
+    note "ok   a zero-root population is a mismatch, so assertions 2 and 3 cannot be vacuous"
+    ;;
+  *)
+    note "FAIL zero in-scope roots was not reported as a mismatch: $out"
+    fails=1
+    ;;
+esac
+
 # --- assertion 4b: the one entry with a NESTED dotted field (plugins.0.version) ---------------------------
 cp "$R/fleet-v$VERSION/.claude-plugin/marketplace.json" "$TMP/marketplace.json.bak"
 printf '{"plugins": [{"version": "6.3.0+fleet.%s"}]}\n' "$OLD_VERSION" \
@@ -310,7 +371,10 @@ if [ "$fails" = 0 ]; then
        "points at the previous version (naming both the actual and wanted target), catches a stale" \
        "marketplace path, catches an unbumped file for both a flat YAML field and a nested dotted JSON" \
        "field (.hermes-plugin/plugin.yaml and plugins.0.version), classifies RED vs EXEMPT/GREEN verdicts," \
-       "refuses a missing version or an unset FLEET_RELEASES with exit 2, and mutates nothing it inspects"
+       "refuses a missing version or an unset FLEET_RELEASES with exit 2, never lets an assertion pass" \
+       "vacuously -- an empty or unparseable .version-bump.json file list and a zero-root population are" \
+       "each a MISMATCH with a non-zero exit, not silence that reads as OK -- and mutates nothing it" \
+       "inspects"
   exit 0
 fi
 echo FAIL
