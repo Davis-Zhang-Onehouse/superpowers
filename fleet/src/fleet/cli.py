@@ -4544,20 +4544,26 @@ def _do_release_verify(ctx: Ctx, parsed: Parsed) -> int:
     #:
     #: `Verify.repo()`'s OWN refusal -- no `--repo` and no `source_repo` in the MANIFEST at all, so there
     #: is not even a repository to diff -- is a DIFFERENT question from the anchor-tag one above, and only
-    #: a dry run may swallow it: it says nothing about whether this release could be exempt, only that a
-    #: real run could not spawn a worktree either, and `RI-32`/`OBS-70`'s dry-run invariant (test_release.
-    #: py's `test_no_mutating_release_verb_touches_anything_under_dry_run`) asserts a dry run reports
-    #: SOMETHING rather than refusing early over a question the roster line never depended on. The real
-    #: run below still resolves eagerly and still refuses before anything is spawned, exactly as it always
-    #: has -- `Verify.run()` calls `self.repo()` again on the same unset `_repo_obj` and raises the
-    #: identical refusal.
+    #: a dry run may swallow it AS AN EXCEPTION: it says nothing about whether this release could be
+    #: exempt, only that a real run could not spawn a worktree either, and `RI-32`/`OBS-70`'s dry-run
+    #: invariant (test_release.py's `test_no_mutating_release_verb_touches_anything_under_dry_run`)
+    #: asserts a dry run reports SOMETHING and exits 0 rather than raising over a question the roster line
+    #: never depended on. But swallowing the exception must not swallow what it SAYS: a dry run that fell
+    #: through to the ordinary `would-run` line here would be indistinguishable from one that genuinely
+    #: determined the gate roster was needed, which is this task's own bug in a narrower shape --
+    #: `repo_refusal` carries the message through so the dry run can name it instead (`would-refuse`). The
+    #: real run below still resolves eagerly and still refuses before anything is spawned, exactly as it
+    #: always has -- `Verify.run()` calls `self.repo()` again on the same unset `_repo_obj` and raises the
+    #: identical refusal, uncaught.
+    repo_refusal = None
     if repo is not None:
         scope_repo = repo
     elif ctx.dry_run:
         try:
             scope_repo = Verify(rel, version, ctx.runner).repo()
-        except Refused:
+        except Refused as exc:
             scope_repo = None
+            repo_refusal = exc
     else:
         scope_repo = Verify(rel, version, ctx.runner).repo()
     exempted, scope = ((None, None) if scope_repo is None else
@@ -4566,7 +4572,12 @@ def _do_release_verify(ctx: Ctx, parsed: Parsed) -> int:
     if ctx.dry_run:
         rows = [("dry-run", "no suite was run and no evidence was written"),
                 ("would-verify", f"{version} at {export}")]
-        if exempted is not None:
+        if repo_refusal is not None:
+            #: Not `would-run` -- that line must stay reachable ONLY by a release for which the roster
+            #: was genuinely determined necessary, never by one the question could not even be asked
+            #: about. Still `EXIT_OK`: the refusal is reported, not raised, so the dry-run invariant holds.
+            rows.append(("would-refuse", str(repo_refusal)))
+        elif exempted is not None:
             rows.append(("would-exempt", str(exempted[0])))
         else:
             rows.append(("would-run", f"the {roster} roster"))

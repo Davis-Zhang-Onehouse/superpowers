@@ -346,15 +346,22 @@ class DryRunCase(unittest.TestCase):
                    dry_run=parsed.on("dry-run"), porcelain=parsed.on("porcelain"),
                    git=self._fake_git(changed, tags), runner=None, live_work=False)
 
-    def _run(self, changed, tags=("fleet/v0.1.0", "fleet/v0.1.1")):
-        """Drive `release-verify --dry-run` through the real `main`. Returns `(code, stdout, stderr)`."""
+    def _run(self, changed, tags=("fleet/v0.1.0", "fleet/v0.1.1"), repo_flag=True):
+        """Drive `release-verify --dry-run` through the real `main`. Returns `(code, stdout, stderr)`.
+
+        `repo_flag=False` omits `--repo` entirely, and the target release's MANIFEST (built in `setUp`)
+        never records `source_repo` either -- so `Verify.repo()` has nothing to resolve, the same state
+        a release cut before that field existed is in.
+        """
         import io
 
         from fleet.cli import main
+        argv = ["release-verify", "--dry-run", "--porcelain", "--version", "0.1.1",
+                "--releases", str(self.rel.root)]
+        if repo_flag:
+            argv += ["--repo", str(self.repo_path)]
         out, err = io.StringIO(), io.StringIO()
-        code = main(["release-verify", "--dry-run", "--porcelain", "--version", "0.1.1",
-                     "--releases", str(self.rel.root), "--repo", str(self.repo_path)],
-                    stdout=out, stderr=err,
+        code = main(argv, stdout=out, stderr=err,
                     context=lambda parsed, o, e: self._ctx(changed, tags, parsed, o, e))
         return code, out.getvalue(), err.getvalue()
 
@@ -389,6 +396,43 @@ class DryRunCase(unittest.TestCase):
         self.assertEqual(code, self.REFUSED)
         self.assertEqual(out, "", "a refused dry run must print nothing, not a fabricated decision")
         self.assertIn("fleet/v0.1.0", err)
+
+    def test_dry_run_reports_a_refusal_instead_of_a_fabricated_would_run(self):
+        """The narrower repeat of this task's own bug. With no `--repo` and no `source_repo` in the
+        MANIFEST, `Verify.repo()` refuses -- there is not even a repository to diff, so the exemption
+        question cannot be asked any more than the anchor-tag case can. But this refusal is caught (dry
+        run only) so the `RI-32`/`OBS-70` invariant holds; the risk is that the caught refusal reads as an
+        ordinary, computed `would-run` -- textually identical to a release for which the roster really
+        was determined necessary. It must not: the real run refuses at this exact point before ever
+        reaching the roster (`test_a_real_run_refuses_before_spawning_anything_when_no_repo_is_known`
+        proves the other half), so a dry run that said `would-run` here would be reporting a decision
+        nobody made."""
+        code, out, err = self._run(changed=["docs/x.md"], repo_flag=False)
+        self.assertEqual(code, 0, err)
+        rows = [tuple(line.split("\t", 1)) for line in out.splitlines()]
+        self.assertNotIn(("would-run", "the gate roster"), rows,
+                         "a dry run must never print the same would-run line for a genuinely-determined "
+                         "roster and for a question it could not ask at all")
+        refusals = [value for field, value in rows if field == "would-refuse"]
+        self.assertEqual(len(refusals), 1, rows)
+        self.assertIn("does not record the checkout", refusals[0])
+
+    def test_a_real_run_refuses_before_spawning_anything_when_no_repo_is_known(self):
+        """The other half of the case above: the REAL run must still fail fast, uncaught, before
+        `Verify.run()` ever spawns the hermetic suite -- swallowing `Verify.repo()`'s refusal is a
+        dry-run-only affordance, never a real-run one."""
+        code, out, err = self._run(changed=["docs/x.md"], repo_flag=False)     # dry run, for the fixture
+        self.assertEqual(code, 0)                                             # sanity: dry run is clean
+        import io
+
+        from fleet.cli import main
+        out2, err2 = io.StringIO(), io.StringIO()
+        code2 = main(["release-verify", "--porcelain", "--version", "0.1.1",
+                     "--releases", str(self.rel.root)],
+                    stdout=out2, stderr=err2,
+                    context=lambda parsed, o, e: self._ctx(["docs/x.md"], (), parsed, o, e))
+        self.assertEqual(code2, self.REFUSED)
+        self.assertIn("does not record the checkout", err2.getvalue())
 
 
 class PromoteGateCase(unittest.TestCase):
