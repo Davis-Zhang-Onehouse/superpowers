@@ -91,6 +91,23 @@ _VERSION_LINE = re.compile(r'^\s*__version__\s*=\s*["\'][^"\']*["\']\s*$', re.MU
 #: JSON-only pattern put it back into `requiring` on every cut -- no release from 0.5.2 to 0.5.11 could be
 #: EXEMPT. Kept as ONE pattern rather than a per-suffix dispatch: a dispatch is a second place for the
 #: manifest list to acquire a family the other half does not know about, which is the defect being fixed.
+#:
+#: What makes the tolerant KEY safe is not that this is the read half -- that says why it must be tolerant,
+#: not why it cannot be wrong. The MECHANISM is one module over: `release_stamp.stamp_plugin_version` calls
+#: `_declared_value` UNCONDITIONALLY and raises `BadInput`, refusing the whole cut, on a field it cannot
+#: locate. A manifest this pattern would misread therefore never reaches a release; the cut dies first.
+#:
+#: The one thing that mechanism does NOT cover is MULTIPLICITY. This strips EVERY line it matches, while
+#: `_rewrite` rewrites exactly one (it refuses unless exactly one `version: <old value>` matches, which is
+#: value-scoped). In a manifest with two version-shaped whole lines the second is therefore erased from
+#: both sides of `exemption_for`'s content re-check, and an author's edit to it rides out on the stamp --
+#: reproduced with a `marketplace.json` whose second plugin entry was bumped 1.0.0 -> 2.0.0: identical
+#: strips, inert, EXEMPT. `_read_textual_field` refuses on two `version:` lines but only for NON-JSON
+#: files, and `.claude-plugin/marketplace.json` is declared with the dotted field `plugins.0.version`,
+#: explicitly an array of plugins. Guarded where the filesystem is available --
+#: `test_release_payload.test_every_stamped_manifest_survives_its_own_stamp` asserts exactly one match per
+#: CUT_MANIFEST -- and deliberately NOT by scoping this pattern to the declared field, which would make
+#: this module read `.version-bump.json` and break the leaf constraint the module docstring states.
 _VERSION_FIELD = re.compile(
     r'^[ \t]*(?P<kq>["\']?)version(?P=kq)[ \t]*:[ \t]*(?:"[^"]*"|\'[^\']*\'|[^\s"\',]+)[ \t]*,?[ \t]*$',
     re.MULTILINE)
