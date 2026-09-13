@@ -166,11 +166,14 @@ it_tmux capture-pane -p -t "$TMUXN" > "$OUT/P1-pane.txt" 2>&1 || true
 # a second derivation that can disagree — which it did: the grep said no while pane-guard said 0 (safe).
 fleet pane-guard --pane "$TMUXN" > "$OUT/P1-guard.out" 2>&1
 p1_guard=$?
-p1_is_claude=0; case "$p1_guard" in 0|10|11) p1_is_claude=1 ;; esac
+#: `15 PANE_AWAITING_OPERATOR` is only reachable AFTER `_is_claude` passes (`cli._do_pane_guard` checks
+#: `busy`/`unsubmitted`/`asking` only once the pane has already classified as a live claude), so it belongs
+#: in the accept set here alongside 0/10/11, not with the not-claude/unknown codes below.
+p1_is_claude=0; case "$p1_guard" in 0|10|11|15) p1_is_claude=1 ;; esac
 P_PID="$(it_tmux list-panes -t "$TMUXN" -F '#{pane_pid}' 2>/dev/null | head -1)"
 if [ "$p1_alive" = 1 ] && [ "$p1_is_claude" = 1 ]; then
   it_pass P1 "fleet/it/P/out/P1-pane.txt" \
-    "a REAL dispatch produced a live session $TMUXN (pane pid $P_PID), and \`pane-guard\` classifies it as $p1_guard — one of 0/10/11, all of which mean 'a claude pane', rather than 12 not-claude or 13 unknown. Asked of the product rather than of a grep for glyphs, because pane-guard already owns that judgement and a homemade heuristic is a second derivation that can disagree (it did: the grep said no while pane-guard said safe). Everything else in this harness substitutes a stub for the worker; this is the one case where the thing on the other end is a model"
+    "a REAL dispatch produced a live session $TMUXN (pane pid $P_PID), and \`pane-guard\` classifies it as $p1_guard — one of 0/10/11/15, all of which mean 'a claude pane', rather than 12 not-claude or 13 unknown. Asked of the product rather than of a grep for glyphs, because pane-guard already owns that judgement and a homemade heuristic is a second derivation that can disagree (it did: the grep said no while pane-guard said safe). Everything else in this harness substitutes a stub for the worker; this is the one case where the thing on the other end is a model"
 else
   it_fail P1 "fleet/it/P/out/P1-pane.txt" \
     "the pane is not a live claude: alive=$p1_alive pane-guard=$p1_guard (12=not-claude, 13=unknown)"
@@ -180,9 +183,10 @@ fi
 # The send contract, against a live model rather than a fixture. Read-only: it captures and classifies.
 fleet pane-guard --pane "$TMUXN" > "$OUT/P2-guard.out" 2>&1
 p2_rc=$?
+#: 15 (awaiting-operator) is only reachable after the pane has already classified as claude, same as P1.
 case "$p2_rc" in
-  0|10|11) it_pass P2 "fleet/it/P/out/P2-guard.out" \
-      "pane-guard classified a REAL claude pane as $p2_rc (0 safe / 10 queued / 11 mid-turn) rather than 12 not-claude or 13 unknown — so the contract an external monitor branches on before any send-keys works against a live model, not only against the stub §D uses" ;;
+  0|10|11|15) it_pass P2 "fleet/it/P/out/P2-guard.out" \
+      "pane-guard classified a REAL claude pane as $p2_rc (0 safe / 10 queued / 11 mid-turn / 15 awaiting-operator) rather than 12 not-claude or 13 unknown — so the contract an external monitor branches on before any send-keys works against a live model, not only against the stub §D uses" ;;
   *) it_fail P2 "fleet/it/P/out/P2-guard.out" \
       "pane-guard returned $p2_rc against a real claude pane (12=not-claude, 13=unknown both mean it could not see it)" ;;
 esac
@@ -235,6 +239,10 @@ p4_apply=$?
 # contract is `pane-guard`: 10 (queued-text) and 11 (mid-turn) mean WAIT; 0 (safe), 12 (not-claude) and 13
 # (unknown-pane, i.e. it has already gone) mean the pane can be closed. Finishing the contract and finishing
 # the TURN are different moments, and a coordinator that conflates them either forces a close or gets refused.
+# `15` (awaiting-operator) is NEITHER of those: it means the pane broke the wait loop but is blocked at an
+# unanswered `AskUserQuestion` dialog, and `close` now refuses it too (`I-16`) — teardown must not proceed
+# through a decision in progress. Stop and report that, rather than calling `close` and reading its correct
+# refusal as an unexplained P4 failure.
 p4_guard=11
 p4_waited=0
 while [ "$p4_waited" -lt 40 ]; do
@@ -243,27 +251,40 @@ while [ "$p4_waited" -lt 40 ]; do
   case "$p4_guard" in 10|11) : ;; *) break ;; esac
   sleep 15; p4_waited=$((p4_waited+1))
 done
-fleet close --id "$TODO" --porcelain > "$OUT/P4-close.out" 2>&1
-p4_close=$?
-# The pid needs a moment to actually leave the slot before the cwd-holder check can pass.
-for _ in 1 2 3 4 5 6 7 8 9 10; do
-  [ -n "$P_PID" ] && kill -0 "$P_PID" 2>/dev/null || break
-  sleep 2
-done
-p4_status="$(fleet roadmap --instant "$COORD" --porcelain 2>/dev/null | awk -F'\t' '$2=="p1"{print $3}' | head -1)"
-fleet harvest --id "$TODO" --porcelain > "$OUT/P4-harvest.tsv" 2>&1
-p4_slotfree=1; [ -d "$FLEET_HOME/pool/leases/$(basename "$SLOT")" ] && p4_slotfree=0
-p4_offboard=1; fleet board --porcelain 2>/dev/null | grep -q "$TODO" && p4_offboard=0
-p4_done=0
-python3 - "$COORD" > "$OUT/P4-milestone.txt" 2>&1 <<'PY'
+if [ "$p4_guard" = 15 ]; then
+  p4_close=4
+  echo "pane-guard=15 (awaiting-operator) after ${p4_waited}x15s: teardown withheld, close was not attempted" \
+    > "$OUT/P4-close.out"
+  p4_status="$(fleet roadmap --instant "$COORD" --porcelain 2>/dev/null | awk -F'\t' '$2=="p1"{print $3}' | head -1)"
+  p4_slotfree=0
+  p4_offboard=0
+  p4_done=0
+else
+  fleet close --id "$TODO" --porcelain > "$OUT/P4-close.out" 2>&1
+  p4_close=$?
+  # The pid needs a moment to actually leave the slot before the cwd-holder check can pass.
+  for _ in 1 2 3 4 5 6 7 8 9 10; do
+    [ -n "$P_PID" ] && kill -0 "$P_PID" 2>/dev/null || break
+    sleep 2
+  done
+  p4_status="$(fleet roadmap --instant "$COORD" --porcelain 2>/dev/null | awk -F'\t' '$2=="p1"{print $3}' | head -1)"
+  fleet harvest --id "$TODO" --porcelain > "$OUT/P4-harvest.tsv" 2>&1
+  p4_slotfree=1; [ -d "$FLEET_HOME/pool/leases/$(basename "$SLOT")" ] && p4_slotfree=0
+  p4_offboard=1; fleet board --porcelain 2>/dev/null | grep -q "$TODO" && p4_offboard=0
+  p4_done=0
+  python3 - "$COORD" > "$OUT/P4-milestone.txt" 2>&1 <<'PY'
 import pathlib, sys
 from fleet.roadmap import Roadmap
 m = Roadmap(pathlib.Path(sys.argv[1])).milestone("p1")
 print("status:", m.status)
 print("evidence:", m.evidence)
 PY
-grep -q '^status: done$' "$OUT/P4-milestone.txt" && p4_done=1
-if [ "$p4_apply" = 0 ] && [ "$p4_close" = 0 ] && [ "$p4_done" = 1 ] && [ "$p4_slotfree" = 1 ] \
+  grep -q '^status: done$' "$OUT/P4-milestone.txt" && p4_done=1
+fi
+if [ "$p4_guard" = 15 ]; then
+  it_fail P4 "fleet/it/P/out/P4-guard.out" \
+    "the pane is awaiting an operator's answer at an AskUserQuestion dialog (pane-guard=15) after ${p4_waited}x15s of waiting: teardown must not proceed through a decision in progress, so \`close\` was not attempted. This needs a human to answer the dialog, not a longer wait"
+elif [ "$p4_apply" = 0 ] && [ "$p4_close" = 0 ] && [ "$p4_done" = 1 ] && [ "$p4_slotfree" = 1 ] \
    && [ "$p4_offboard" = 1 ]; then
   it_pass P4 "fleet/it/P/out/P4-harvest.tsv" \
     "the coordinator closed the loop on real work: \`apply\` moved p1 to done carrying the worker's own evidence; \`pane-guard\` was polled until the pane left mid-turn (it reached $p4_guard) because \`close\` REFUSES a turn in progress even after the worker has renamed itself complete; then \`close\` ended the session and \`harvest\` released the slot so the row LEFT the board. AC-11 end to end — dispatch, a real model doing the job, propose, apply, wait, close, harvest"
