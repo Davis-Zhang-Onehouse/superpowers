@@ -746,11 +746,19 @@ class Harvest:
         counted = (f"{len(new)} new" if had_memory else
                    f"{len(new)} of {len(issues)} id(s) read as new because this tick had no memory — "
                    f"a POPULATION, not a delta")
+        # B13 half 2 / I-25 follow-up: the population/delta correction above must not cost the reader
+        # the id list. When `had_memory`, the ids already follow "new" with a colon ("3 new: IT-3,
+        # IT-4"). When not, `counted` ends on "not a delta" rather than the word "new", so the colon
+        # alone would announce the ids with no label at all — dropping the very thing a coordinator
+        # needs from a first tick (which ids exist). So the no-memory branch gets its own explicit
+        # "new:" label instead of reusing `counted`'s trailing punctuation, naming the population
+        # honestly (above) and the ids (here) in the same row.
+        ids_suffix = ((f": {', '.join(i.id for i in new)}" if had_memory else
+                       f" (new: {', '.join(i.id for i in new)})") if new else
+                      " — this source produced nothing, which is the observation and not an omission")
         rows.append(Row(
             kind=SOURCE, subject=src.base,
-            detail=(f"{len(issues)} id(s) in {src.issues_path}, {counted}"
-                    + (f": {', '.join(i.id for i in new)}" if new else
-                       " — this source produced nothing, which is the observation and not an omission")),
+            detail=f"{len(issues)} id(s) in {src.issues_path}, {counted}{ids_suffix}",
             severity=INFO, ids_found=len(issues), new_count=len(new)))
         if not issues and unfiled(text, src.base):
             rows.append(Row(
