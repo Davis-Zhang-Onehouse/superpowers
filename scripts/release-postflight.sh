@@ -40,7 +40,8 @@ if [ -z "$R" ]; then
 fi
 
 command -v python3 >/dev/null 2>&1 || {
-  echo "$(basename "$0"): python3 is not on PATH — needed to read the JSON/YAML manifest fields" >&2
+  echo "$(basename "$0"): python3 is not on PATH — needed to read the JSON manifest fields and match" \
+       "the YAML manifest's version line" >&2
   exit 2
 }
 
@@ -58,28 +59,54 @@ FAILED=0
 ok() { echo "OK: $*"; }
 mismatch() { echo "MISMATCH: $*" >&2; FAILED=1; }
 
-# Read a dotted field path (e.g. "plugins.0.version") out of a JSON or YAML file. JSON and YAML both
-# because the files declared in .version-bump.json are a mix of both -- most are JSON, but
-# .hermes-plugin/plugin.yaml is not, and that file is exactly the one this script exists to cover (a
-# separate task in this plan found it invisible to the release scope classifier for ten releases).
+# Read a dotted field path (e.g. "plugins.0.version") out of a manifest file, JSON or not. No YAML
+# parser: fleet/src/fleet/release_stamp.py's _read_textual_field hits the identical problem (it has to
+# read `version` out of this same .hermes-plugin/plugin.yaml) and refuses to add one, staying stdlib-only
+# on purpose ("Reading it as text rather than adding a YAML parser keeps this module a leaf"). This
+# mirrors that: a file that fails to parse as JSON is matched as a flat `key: value` line instead, and a
+# DOTTED field against such a file is refused outright, not walked -- nesting cannot be established from
+# a flat text scan, and guessing which nested value was meant is exactly what must not happen here.
+#
+# Refuses loudly (nonzero exit, a message naming the file and the reason) rather than returning nothing on
+# any failure: this script's whole point is that "could not read" must never look like "fine".
 read_field() { # read_field <file> <dotted-field>
   python3 - "$1" "$2" <<'PY'
-import sys, json
+import json
+import re
+import sys
 
 path, field = sys.argv[1], sys.argv[2]
-if path.endswith((".yaml", ".yml")):
-    import yaml
+with open(path) as fh:
+    text = fh.read()
 
-    with open(path) as fh:
-        data = yaml.safe_load(fh)
-else:
-    with open(path) as fh:
-        data = json.load(fh)
+try:
+    data = json.loads(text)
+except ValueError:
+    data = None
 
-cur = data
-for part in field.split("."):
-    cur = cur[int(part)] if isinstance(cur, list) else cur[part]
-print(cur)
+if data is not None:
+    cur = data
+    for part in field.split("."):
+        try:
+            cur = cur[int(part)] if isinstance(cur, list) else cur[part]
+        except (KeyError, IndexError, ValueError, TypeError) as exc:
+            sys.exit(f"{path}: field {field!r} not found ({exc})")
+    if not isinstance(cur, str):
+        sys.exit(f"{path}: field {field!r} is not a string ({cur!r})")
+    print(cur)
+    sys.exit(0)
+
+# Not JSON: match the field as flat text, exactly like _read_textual_field above.
+if "." in field:
+    sys.exit(f"{path}: declares the nested field {field!r} but does not parse as JSON; a nested field "
+              f"cannot be located in a file this can only read as flat text")
+found = re.findall(rf'^[ \t]*"?{re.escape(field)}"?[ \t]*:[ \t]*(.+?)[ \t]*$', text, re.MULTILINE)
+if len(found) != 1:
+    sys.exit(f"{path}: {len(found)} field(s) spelled {field!r}, wanted exactly one")
+value = found[0].strip().strip('"').strip("'")
+if not value:
+    sys.exit(f"{path}: field {field!r} is empty")
+print(value)
 PY
 }
 
@@ -136,19 +163,17 @@ for root in "${IN_SCOPE_ROOTS[@]}"; do
   fi
 
   settings="$root/.claude/settings.json"
-  mp=""
-  if [ -f "$settings" ]; then
-    mp="$(read_field "$settings" "extraKnownMarketplaces.$MARKETPLACE_KEY.source.path" 2>/dev/null)" || mp=""
-  fi
-  if [ -z "$mp" ]; then
-    mismatch "$settings has no extraKnownMarketplaces.$MARKETPLACE_KEY.source.path, wanted a path resolving to $CUR_TARGET"
-  else
+  if [ ! -f "$settings" ]; then
+    mismatch "$settings does not exist, wanted a marketplace path resolving to $CUR_TARGET"
+  elif mp="$(read_field "$settings" "extraKnownMarketplaces.$MARKETPLACE_KEY.source.path" 2>&1)"; then
     mp_target="$(readlink -f "$mp")"
     if [ "$mp_target" = "$CUR_TARGET" ]; then
       ok "$settings marketplace path $mp -> $mp_target matches $CUR_TARGET"
     else
       mismatch "$settings marketplace path $mp -> $mp_target, wanted $CUR_TARGET"
     fi
+  else
+    mismatch "$settings marketplace path could not be read: $mp"
   fi
 done
 
@@ -168,15 +193,18 @@ else
       mismatch "$fpath (field $field, from $VB) does not exist"
       continue
     fi
-    val="$(read_field "$fpath" "$field" 2>/dev/null)" || val=""
-    case "$val" in
-      *"$WANT_SUFFIX")
-        ok "$relpath#$field = $val (carries $WANT_SUFFIX)"
-        ;;
-      *)
-        mismatch "$relpath#$field = ${val:-<unreadable>}, wanted a value ending in $WANT_SUFFIX"
-        ;;
-    esac
+    if val="$(read_field "$fpath" "$field" 2>&1)"; then
+      case "$val" in
+        *"$WANT_SUFFIX")
+          ok "$relpath#$field = $val (carries $WANT_SUFFIX)"
+          ;;
+        *)
+          mismatch "$relpath#$field = $val, wanted a value ending in $WANT_SUFFIX"
+          ;;
+      esac
+    else
+      mismatch "$relpath#$field could not be read: $val"
+    fi
   done < <(python3 - "$VB" <<'PY'
 import json
 import sys
