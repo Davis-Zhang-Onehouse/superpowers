@@ -151,17 +151,46 @@ fi
 # This is the only deletion any script in this plan performs. `orphans` already holds only directories
 # that (a) were classified ORPHAN above and (b) matched $ORPHAN_RE -- but the pattern is checked again
 # here, literally, rather than trusted from the loop above: a deletion is refused, not guessed at.
+#
+# A verify worktree that got as far as running the IT suite's §Q holds a release EXPORT under
+# fleet/it/Q/releases/<version> -- made read-only (dr-xr-xr-x) by the release pipeline on purpose, because
+# a deployed export is not writable. `rm -rf` cannot unlink entries inside a directory with no write bit,
+# so it silently fails on exactly those paths unless something restores write access first. That
+# restoration is scoped as tightly as the delete itself -- same pattern check, same ORPHAN
+# classification, applied only to a path the delete is about to touch anyway -- so it cannot be pointed at
+# anything the delete could not reach.
+#
+# Printing "reaped:" is not permission to assume it worked: this is the same defect shape the whole plan
+# exists to eliminate (a control that reports success for work it did not do -- the piped gate reporting
+# exit 0 over a dead run is the sibling case, quoted at the top of this file). So the directory's absence
+# is checked, per directory, before anything is printed, and a `--reap` that could not reap exits non-zero
+# -- one stubborn tree must not hide the others' success, but it also must not be reported as success.
 if [ "$REAP" = 1 ]; then
+  reap_failed=0
+  reaped_any=0
   for d in "${orphans[@]}"; do
     base="$(basename "$d")"
     if [[ "$base" =~ $ORPHAN_RE ]]; then
-      rm -rf -- "$d"
-      echo "reaped: $d"
+      chmod -R u+w -- "$d" 2>/dev/null || true
+      rm_err="$(rm -rf -- "$d" 2>&1 1>/dev/null)"
+      if [ -e "$d" ]; then
+        echo "FAILED: $d -- ${rm_err:-still present after rm -rf}" >&2
+        reap_failed=1
+      else
+        echo "reaped: $d"
+        reaped_any=1
+      fi
     else
       echo "$(basename "$0"): refusing to reap '$d' -- name does not match the orphan pattern exactly" >&2
     fi
   done
-  git -C "$REPO" worktree prune
+  # Pruning only after removals, and only if at least one actually succeeded: a failed reap must not
+  # strip a worktree's registration while its directory is still on disk. That exact mismatch is what
+  # turned three failed removals into unregistered half-deleted husks on this box -- `rm` had deleted
+  # enough of each tree, including its `.git` file, for `git worktree` to read it as corrupt and drop the
+  # registration on the next prune, even though most of the directory (the read-only skeleton) remained.
+  [ "$reaped_any" = 1 ] && git -C "$REPO" worktree prune
+  [ "$reap_failed" = 1 ] && exit 1
 fi
 
 exit 0
