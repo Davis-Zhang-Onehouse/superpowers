@@ -2427,6 +2427,48 @@ def _do_propose(ctx: Ctx, parsed: Parsed) -> int:
     return EXIT_OK
 
 
+def _live_session_warning(ctx: Ctx, proposal) -> str:
+    """`I-10`. Empty unless BOTH `proposal.status` is terminal (`fleet.roadmap.TERMINAL`) AND the
+    proposer's own session still reads alive; otherwise a sentence naming it.
+
+    Scoped to terminal statuses on purpose: a worker legitimately proposes `running` from wherever it
+    happens to be while it is still working (`_do_propose`'s own comment), so warning on every applied
+    proposal would fire on the routine case and teach the coordinator to ignore it. The real defect this
+    closes is narrower — a TERMINAL status (`done`/`dropped`) was applied to a milestone whose worker
+    session was still being iterated. The `-complete-` folder, the board's `COMPLETE`, a `READY` review
+    round and the proposal's own "done" note all agreed, and all four were wrong — a live attached pane
+    outranks every one of them, and `apply` had no way to say so. `apply` has no inverse and `milestone`
+    refuses to amend a row, so the revert was a hand edit of `roadmap.json`.
+
+    This reads `session.alive`, the SAME liveness signal `_pane_refusal` (`close`'s guard) and
+    `pane-guard` itself both read — not a fresher or more trustworthy one. That signal has its own
+    measured unreliability (pane-guard read an empty input box three times running for a pane that
+    visibly held text), which is a separate, later defect: this warning raises the floor by putting the
+    answer in front of the coordinator instead of nowhere; it does not make the signal trustworthy, and
+    it does not close that hole. Nor is this "the protection `close` already has" — `close` refuses only
+    on its two pane-guard codes (busy, queued-text); a live-but-idle pane closes without complaint there
+    too.
+
+    A warning, never a refusal: a legitimately finished worker may leave its pane open, and refusing
+    would block a correct close-out. Silent (not merely absent-from-emit) when the status is not
+    terminal, the proposer's instant has no record here, the record names no session, or that session no
+    longer answers.
+    """
+    if proposal.status not in TERMINAL:
+        return ""
+    record = _record_for(ctx, Path(proposal.instant))
+    if record is None or not record.tmux:
+        return ""
+    if not ctx.sessions_for(record).alive(record.tmux):
+        return ""
+    return (f"{proposal.instant}'s session ({record.tmux}) reads ALIVE right now: this {proposal.status!r} "
+            f"proposal may be describing a worker that has since moved past it. Not a refusal — a "
+            f"finished worker may leave its pane open — and not proof either way: this reads the same "
+            f"liveness signal pane-guard does, which is not fully trustworthy on its own (see "
+            f"pane-guard's own known-gap). Look at the pane before trusting the status this just "
+            f"applied.")
+
+
 def _do_apply(ctx: Ctx, parsed: Parsed) -> int:
     """The COORDINATOR's verb and the only path that changes a milestone status."""
     child = _instant(ctx, parsed)
@@ -2447,6 +2489,10 @@ def _do_apply(ctx: Ctx, parsed: Parsed) -> int:
         applied = roadmap.apply(proposal)
         rows.append(("applied", f"{applied.id} -> {applied.status}"))
         rows.append(("evidence", ", ".join(applied.evidence)))
+        #: Reported, never refused (`I-10`) — the exit code below is untouched by this branch on purpose.
+        warning = _live_session_warning(ctx, proposal)
+        if warning:
+            rows.append(("warning", warning))
     _emit(ctx, "apply", rows)
     return EXIT_OK
 

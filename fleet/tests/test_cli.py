@@ -2415,6 +2415,62 @@ if __name__ == "__main__":
     unittest.main()
 
 
+class TestApplyWarnsWhileTheWorkersSessionIsStillLive(CliCase):
+    """`I-10`/F5. A coordinator applied a terminal status to a milestone whose worker was still being
+    iterated. Every signal read finished — the folder was `-complete-`, the board `COMPLETE`, the review
+    `READY`, the proposal note said "done" — and all four were wrong. `apply` has no inverse and
+    `milestone` refuses to amend a row, so the revert was a hand edit of `roadmap.json`.
+
+    A warning, not a refusal: a legitimately finished worker may keep its pane open, and refusing would
+    block a correct close-out. This reads the SAME liveness signal `close`'s pane-guard refusal reads
+    (`session.alive`, which `pane-guard` also answers from) — not a fresh one, and not a more trustworthy
+    one. That signal's own unreliability (an empty input box read three times running for a pane that
+    visibly held text) is a separate, later defect; this warning raises the floor, it does not close the
+    hole. Note also `close` has no GENERAL liveness refusal to be symmetric with — only its two pane-guard
+    codes (busy, queued-text) — so this is not "the same protection `apply` was missing".
+    """
+
+    def _coordinator_with(self, fleet, milestone_id="m7"):
+        coordinator = fleet.paths["readyWorker"]
+        Roadmap(coordinator).add(Milestone(id=milestone_id, title="closing out", status="blocked",
+                                           deps=[], evidence=[]))
+        return coordinator
+
+    def test_apply_warns_while_the_worker_session_is_still_alive(self):
+        """A live attached pane outranks a `-complete-` folder, a READY review and a "done" note — all
+        three were present in the real defect and all three were wrong about whether the work was over."""
+        fleet = self.loaded()
+        coordinator = self._coordinator_with(fleet)
+        worker = fleet.worker("stillGoing", slot="ws4")            # live=True by default
+        code, _, err = fleet.run(["propose", "--instant", str(worker), "--to", str(coordinator),
+                                  "--milestone", "m7", "--status", "done",
+                                  "--evidence", "evidence/INDEX.md"])
+        self.assertEqual(EXIT_OK, code, err)
+
+        code, out, err = fleet.run(["apply", "--instant", str(coordinator), "--milestone", "m7"])
+
+        self.assertEqual(code, EXIT_OK, "apply must not refuse — a finished worker may keep its pane")
+        self.assertIn("alive", (out + err).lower(),
+                      f"apply said nothing about the live session: {out}{err}")
+
+    def test_apply_is_quiet_when_the_workers_session_is_gone(self):
+        """The quiet direction: a proposal whose worker session has genuinely ended emits no warning. A
+        warning that fires unconditionally is not a warning."""
+        fleet = self.loaded()
+        coordinator = self._coordinator_with(fleet)
+        worker = fleet.worker("actuallyDone", slot="ws4", live=False)
+        code, _, err = fleet.run(["propose", "--instant", str(worker), "--to", str(coordinator),
+                                  "--milestone", "m7", "--status", "done",
+                                  "--evidence", "evidence/INDEX.md"])
+        self.assertEqual(EXIT_OK, code, err)
+
+        code, out, err = fleet.run(["apply", "--instant", str(coordinator), "--milestone", "m7"])
+
+        self.assertEqual(code, EXIT_OK, err)
+        self.assertNotIn("alive", (out + err).lower(),
+                         f"apply warned about liveness for a worker with no live session: {out}{err}")
+
+
 class TestProposeTakesTwoInstants(CliCase):
     """`SI-23`. `propose` has a PROPOSER and a DESTINATION roadmap, and this handler passed the same value
     for both — so a worker could not propose at all (the milestone was looked up in its own empty roadmap)
