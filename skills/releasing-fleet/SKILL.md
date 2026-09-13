@@ -46,7 +46,7 @@ no per-release judgement call**.
 | Changed since the last GREEN release | Verdict | Time |
 |---|---|---|
 | only `docs/`, `assets/`, root docs, or skills **other than** `using-fleet` | `EXEMPT` | seconds |
-| anything else — `fleet/`, `scripts/`, `hooks/`, `bin/`, `tests/`, `skills/using-fleet/`, a new directory | suites run | ~24 min |
+| anything else — `fleet/`, `scripts/`, `hooks/`, `bin/`, `tests/`, `skills/using-fleet/`, a new directory | suites run | ~24–45 min (Trap 3) |
 
 **`skills/using-fleet/**` is deliberately NOT exempt.** Two suite call-sites read it: `test_contracts.py`
 asserts verb parity against its `SKILL.md` in both directions, and `fleet/it/run-P.sh` copies its
@@ -83,6 +83,29 @@ at each section boundary and require equality. Polling a run you are driving fai
 the background and make **zero** tool calls until it reports; a background shell that already exec'd is
 safe, because its own forks are `comm=bash`.
 
+**Two things "in the background" does not say, and each cost a run on 2026-09-13 (0.5.9/0.5.10):**
+
+- **Never pipe the control.** `release-verify … | tail` reports *`tail`'s* exit status, not the verb's —
+  the hard rule `fleet/CLAUDE.md` states for every control, and it applies here. A run that died after
+  the hermetic half exited `0` through the pipe and read as a finished gate. The giveaway was the
+  evidence directory: `hermetic.log` and nothing else.
+- **Launch it with `setsid`,** so the run does not sit in your session's process group. A background task
+  that is stopped — by an interrupt, a teardown, or your own cleanup — takes the whole group with it,
+  leaving a CANDIDATE with no `VERDICT.tsv` and no error anywhere. This happened twice before the cause
+  was obvious.
+
+```bash
+setsid nohup "$FLEET" release-verify --version X.Y.Z --releases "$FLEET_RELEASES" \
+  > /tmp/verify-X.Y.Z.log 2>&1 < /dev/null &
+```
+
+Then wait on a **condition** — `VERDICT.tsv` appearing, or the pid exiting — never on a fixed sleep. One
+background shell doing that loop is safe: its own forks are `comm=bash`.
+
+**The run prints nothing between its header and its verdict,** and it took **~45 minutes** measured here
+(2026-09-13, 0.5.10, with one other root's worker live on the box) against the ~24 the table above quotes.
+An apparently idle gate is the normal shape; do not read it as a hang.
+
 **Trap 3b — AN IT RUN DIRTIES THE TREE, AND `release cut` REFUSES ON ANY DIRTY ROW.**
 `Repo.dirty()` counts **untracked** rows too, so a single `??` refuses the cut. Running any IT runner in
 the checkout rewrites tracked registers — `fleet/it/RESULTS.tsv` via the merge step, and historically the
@@ -99,6 +122,20 @@ remedy, what happens?" An unwritten pre-cut step is exactly that shape, and it c
 ⚠️ **Do not clear this refusal by `git add`-ing the offending scratch file.** Somebody did that once for
 the group5 pins, which is why they then showed `M` on every run forever and each new refusal tempted the
 next person to add one more. Per-run scratch gets a `.gitignore` entry; a register gets committed.
+
+**To re-run one section without dirtying anything** — which is what you want when checking a fix for a
+RED — point `IT_RESULTS` at a scratch file. The runner replaces its rows there and the tracked
+`fleet/it/RESULTS.tsv` is never written:
+
+```bash
+cd fleet/it
+R="$PWD/RESULTS-scratch-$$.tsv"; printf 'case\tverdict\tevidence\tnote\n' > "$R"
+IT_RESULTS="$R" bash run-B.sh
+IT_RESULTS="$R" bash run-group5.sh L M N
+```
+
+Delete the scratch file when done, and run `git status --short` regardless — a section can still touch
+something you did not expect, and you need the tree clean for the cut either way.
 
 **Trap 4 — quiet the box first.** A **COMPLETE** worker still holding a slot with a live pane is a
 scheduled contamination event: it exits mid-run, moving both the board and the claude count. Harvest
@@ -127,7 +164,22 @@ PYTHONDONTWRITEBYTECODE=1 PYTHONPATH="$REPO/fleet/src" python3 -m unittest disco
 
 **Trap 7 — do not start a release near 03:30 UTC.** A cron rebases `live` onto upstream then, rewriting
 every commit the fork carries. The pipeline is tag-based for exactly this reason, but a run straddling it
-is asking for trouble.
+is asking for trouble. The job is real and checkable — `crontab -l` shows
+`30 3 * * * … .superpowers-sync/sync.sh`. Since the gate runs ~45 minutes (Trap 3), anything started after
+about 02:45 UTC straddles it; wait the window out rather than racing it.
+
+**Trap 8 — an absent `VERDICT.tsv` is not a verdict.** The file is written at the end, so its absence
+means the run *did not finish* — killed, crashed, or piped into something that swallowed its status. That
+is not RED, and the exit status will not tell you which (Trap 3). Check in this order: the file, then the
+pid, then `hermetic.log`'s mtime to see how far it got. A directory holding only `hermetic.log` and an
+empty `live-subjects-before.tsv` never reached the IT suite at all.
+
+**Trap 9 — fixing a RED does not fix the artifact you already cut.** The export and the tag are taken at
+cut time, so a commit landed to clear a RED is **not in them**, and `release-cut` has no `--force` and
+refuses an existing tag (Trap 2). Cut the next patch version from the fixed tree and let the failed one
+stand as a CANDIDATE that never shipped — that is exactly what the state means, and `release-list` is the
+honest record of it. Deleting a published tag to reuse its number is the destructive option and buys
+nothing but a tidier number. (`0.5.9` is the worked example: cut, RED, fixed, superseded by `0.5.10`.)
 
 ## Reading the verdict
 
@@ -203,6 +255,11 @@ what the next person reads when they ask why `current` moved.
 | Creating `fleet/vX.Y.Z` before cutting | The cut makes it; pre-creating refuses (Trap 2) |
 | Hand-editing `CHANGELOG.md` / `__version__` / a plugin manifest before a cut | The cut writes all of them; the edit only makes the tree dirty, which is refused |
 | Polling the gate run from the session driving it | Silence protocol (Trap 3) |
+| `release-verify … \| tail` | Never pipe a control — the pipe's exit status is not the verb's (Trap 3) |
+| Backgrounding the gate inside the session's process group | `setsid`, or a stopped task kills the run with it (Trap 3) |
+| Reading a missing `VERDICT.tsv` as RED, or as a hang | Absent means the run did not finish; the gate is also silent for ~45 min (Traps 3, 8) |
+| Re-verifying the same version after fixing a RED | The tag predates the fix; cut the next patch version (Trap 9) |
+| Running a section to check a fix, then finding the cut refused | `IT_RESULTS=<scratch>` keeps `RESULTS.tsv` clean (Trap 3b) |
 | Copying the evidence out by hand before re-verifying | The tool archives it: `evidence/attempt-<n>-<verdict>/` (Trap 5) |
 | Reading the verdict off `run-all.sh` or `it-RESULTS.tsv` | Per-runner `it-RESULTS-closeout-*.tsv` FAIL rows |
 | `release-deploy --force` to skip a slow gate | That is what `EXEMPT` is for; `--force` records the release UNVERIFIED |
