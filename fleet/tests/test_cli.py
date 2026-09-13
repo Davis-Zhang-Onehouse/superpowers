@@ -889,6 +889,42 @@ class TestTheFlagSpec(CliCase):
                                  f"the read-only verb {name} advertises a dry run it cannot need")
 
 
+class TestDispatchBaseIsAnIdNotAPath(CliCase):
+    """S4 / I-24b. `--from`, `--profile` and `--instant` all take paths; `dispatch --base` takes a bare
+    8-digit id, and that asymmetry is deliberate, not an oversight: a base is a stable KEY, while an
+    instant's own folder is renamed at every state transition (`inflight` -> `complete`/`abort`), so a
+    path stored as a base would go stale the moment the base instant finished — Task 2 of this batch is
+    what that going stale looks like in the other direction. The rule used to be learnable only by having
+    a path refused; the help text says it up front, and the refusal itself now names the id a path-shaped
+    value probably meant.
+    """
+
+    def test_the_help_text_says_it_is_an_id_and_says_why(self):
+        flag = next(f for f in cli.VERBS["dispatch"].flags if f.name == "--base")
+        self.assertRegex(flag.help, r"(?i)\b8.digit\b.*\bid\b",
+                         f"--base's help does not say it takes a bare 8-digit id: {flag.help!r}")
+        self.assertRegex(flag.help, r"(?i)not a path",
+                         f"--base's help does not say a path is refused: {flag.help!r}")
+        self.assertRegex(flag.help, r"(?i)renam",
+                         f"--base's help does not carry the REASON — an instant's folder is renamed at "
+                         f"every state transition: {flag.help!r}")
+
+    def test_a_path_shaped_base_is_refused_with_the_likely_id_named(self):
+        """The other half: the refusal itself, not just the help text. A caller who copy-pastes an
+        `--instant`-shaped path into `--base` (the exact mistake the asymmetry above invites) gets the
+        tail component of that path named as the id they probably meant."""
+        fleet = self.loaded()
+        bogus = str(fleet.instants / "00000000-07300312-inflight-append-fleetInfraRebuild")
+
+        code, out, err = fleet.run(["dispatch", "--profile", str(fleet.profile("worker")),
+                                    "--title", "pathAsBase", "--base", bogus])
+
+        self.assertEqual(EXIT_BAD_INPUT, code, f"a path-shaped base was accepted: {out}{err}")
+        self.assertIn("fleetInfraRebuild", err,
+                      f"the refusal does not name the tail component as the likely intended id: {err!r}")
+        self.assertRegex(err, r"(?i)looks like a path", f"the refusal carries no hint: {err!r}")
+
+
 class TestDryRun(CliCase):
     """`RI-32`/`OBS-70`: two actors created stray instants in another effort's tree probing a guard, one
     of them AFTER reading and citing the warning against it. A guard you cannot interrogate
@@ -2844,6 +2880,33 @@ class TestMilestoneHasAVerb(CliCase):
 
         self.assertEqual(2, code, "propose accepted an unknown milestone id")
         self.assertNotIn("invented", {m.id for m in Roadmap(fleet.paths["readyWorker"]).milestones()})
+
+
+class TestRetireSaysTheIdIsSpentForGood(CliCase):
+    """S3 / I-24a. Retiring frees the ROW, not the id: on a live effort `m8` could not be re-raised and
+    became `m9`, then `m12`->`m15`, `m13`->`m16`, `m14`->`m17`. That permanence is correct — `OBS-14`,
+    append-only registers, and a roadmap full of cross-references that depend on an id meaning one thing
+    forever — but the cost used to be a grammar fact learnable only by trying to reuse a retired id and
+    finding `add` silently take a different one. `--retire`'s own output now says so, in the same call
+    that spends the id.
+    """
+
+    def test_retire_output_says_the_id_will_never_be_reissued(self):
+        fleet = self.loaded()
+        ready = str(fleet.paths["readyWorker"])
+        code, out, err = fleet.run(["milestone", "--instant", ready, "--id", "spent",
+                                    "--title", "will be retired"])
+        self.assertEqual(0, code, err)
+
+        code, out, err = fleet.run(["milestone", "--porcelain", "--instant", ready, "--id", "spent",
+                                    "--retire", "--reason", "superseded by the v0..v3 split"])
+
+        self.assertEqual(0, code, err)
+        self.assertIn("spent", out, "the row does not name the id it is talking about")
+        self.assertRegex(out, r"(?i)(retired permanently|never (be )?reissued)",
+                         f"the output does not say the id is spent for good: {out!r}")
+        self.assertRegex(out, r"(?i)(--add|new id)",
+                         f"the output does not say the next add takes a NEW id: {out!r}")
 
 
 class TestTheDispatchMilestoneJoin(CliCase):
