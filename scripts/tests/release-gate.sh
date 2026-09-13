@@ -78,6 +78,23 @@ case "${STUB_MODE:-green}" in
     printf 'stub: hermetic half ran, then died\n' >"$ev/hermetic.log"
     exit 1
     ;;
+  archive | archive-die)
+    # What `Verify.run()` actually does, in its actual order: `archive_previous_attempt` FIRST -- a
+    # RENAME of everything loose in evidence/ into `attempt-<n>-<verdict>/` -- and only AFTER fork, arg
+    # parsing, `_refuse_if_self_deployed` and the whole exemption diff (a `git diff` plus up to ten
+    # `git show` subprocesses). The two sleeps stand in for those two delays; the gate's wait loop fires
+    # its first check microseconds after the pidfile write, so without them there is no race to lose and
+    # the case would pass against the defective script too.
+    sleep "${STUB_ARCHIVE_DELAY:-1}"
+    mkdir -p "$ev/attempt-1-RED"
+    [ -f "$ev/VERDICT.tsv" ] && mv "$ev/VERDICT.tsv" "$ev/attempt-1-RED/VERDICT.tsv"
+    sleep "${STUB_ARCHIVE_DELAY:-1}"
+    if [ "${STUB_MODE}" = "archive-die" ]; then
+      printf 'stub: archived the previous attempt, then died\n' >"$ev/hermetic.log"
+      exit 1
+    fi
+    printf 'suite\tverdict\tevidence\tnote\nverdict\tGREEN\t-\tthis run\n' >"$ev/VERDICT.tsv"
+    ;;
 esac
 STUB_EOF
 chmod +x "$STUB"
@@ -156,12 +173,52 @@ case "$out" in
   *) note "FAIL hermetic.log was not mentioned on a dead run: $out"; fails=1 ;;
 esac
 
+# --- outcome 1, re-verified: a PREVIOUS attempt's VERDICT.tsv must never be reported as this run's -------
+# Every case above starts from an empty evidence directory, which is exactly why this was invisible. The
+# workflow the skill prescribes -- re-verify a version after an INCONCLUSIVE on a quiet box -- always
+# starts from a NON-empty one, and `fleet-v0.5.9`/`fleet-v0.5.6` are CANDIDATE with RED VERDICT.tsv files
+# on this box right now. Against a wait loop that tests mere PRESENCE, this prints the stale RED and exits
+# 1 in under a second, while leaving a real ~45-minute detached run nobody is waiting on.
+mkdir -p "$FLEET_RELEASES/fleet-v1.0.3/.release/evidence"
+STALE="$FLEET_RELEASES/fleet-v1.0.3/.release/evidence/VERDICT.tsv"
+printf 'suite\tverdict\tevidence\tnote\nverdict\tRED\t-\tSTALE previous attempt\n' >"$STALE"
+out="$(STUB_MODE=archive STUB_ARCHIVE_DELAY=1 run_gate 1.0.3 2>&1)"; rc=$?
+check "a re-verify over a previous attempt's VERDICT.tsv reports THIS run's verdict" "0" "$rc"
+case "$out" in
+  *"STALE previous attempt"*)
+    note "FAIL the previous attempt's verdict row was reported as this run's: $out"
+    fails=1
+    ;;
+  *"GREEN"*"this run"*) note "ok   the verdict reported is the one this run wrote, not the stale one" ;;
+  *) note "FAIL neither verdict was reported: $out"; fails=1 ;;
+esac
+case "$out" in
+  *"No such file"*)
+    # The first attempt at this fix compared identity alone, which changes to "absent" the moment the
+    # archive's rename unlinks the path -- so the wait broke out into a file that was not there yet.
+    note "FAIL the wait broke out before the verdict existed (the archive's rename, not this run's write)"
+    fails=1
+    ;;
+  *) note "ok   the wait did not break out on the archive's own rename" ;;
+esac
+
+# --- outcome 3 over a stale verdict: a dead run must still be a dead run, not the old attempt's answer ---
+mkdir -p "$FLEET_RELEASES/fleet-v1.0.4/.release/evidence"
+printf 'suite\tverdict\tevidence\tnote\nverdict\tGREEN\t-\tSTALE previous attempt\n' \
+  >"$FLEET_RELEASES/fleet-v1.0.4/.release/evidence/VERDICT.tsv"
+out="$(STUB_MODE=archive-die STUB_ARCHIVE_DELAY=1 run_gate 1.0.4 2>&1)"; rc=$?
+check "a dead run over a previous attempt's VERDICT.tsv still exits 3" "3" "$rc"
+case "$out" in
+  *"earlier attempt"*) note "ok   the surviving earlier attempt is named, and not read as a verdict" ;;
+  *) note "FAIL the earlier attempt's file was not named on the dead-run path: $out"; fails=1 ;;
+esac
+
 # --- fleet binary not executable: exit 2 -----------------------------------------------------------------
 FLEET_BIN="$TMP/no-such-fleet" bash "$GATE" 1.0.0 >/dev/null 2>&1
 check "a non-executable fleet binary exits 2" "2" "$?"
 
 if [ "$fails" = 0 ]; then
-  echo "PASS: release-gate.sh launches release-verify with no pipe on the launch line and setsid present, classifies GREEN -> exit 0, RED -> exit 1 with FAIL rows attributed from the per-runner it-RESULTS-closeout files only (never the merged file), a dead run with no VERDICT.tsv -> exit 3 with hermetic.log surfaced, and refuses a missing version, a nonexistent release, or a non-executable fleet binary with exit 2"
+  echo "PASS: release-gate.sh launches release-verify with no pipe on the launch line and setsid present, classifies GREEN -> exit 0, RED -> exit 1 with FAIL rows attributed from the per-runner it-RESULTS-closeout files only (never the merged file), a dead run with no VERDICT.tsv -> exit 3 with hermetic.log surfaced, waits for THIS run's verdict rather than a previous attempt's surviving VERDICT.tsv (and without breaking out on the archive's own rename), still reports a dead run as exit 3 when an earlier attempt's verdict is on disk, and refuses a missing version, a nonexistent release, or a non-executable fleet binary with exit 2"
   exit 0
 fi
 echo FAIL
