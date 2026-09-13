@@ -86,12 +86,62 @@ if [ -d "$BADNAME_DIR" ]; then note "ok   --reap left the non-matching name alon
 else note "FAIL --reap deleted a directory that did not match the exact orphan pattern"; fails=1; fi
 rm -rf "$BADNAME_DIR"
 
+# --- the normal shape of a real orphan: a read-only release export under fleet/it/Q/releases/... -------
+# Every verify worktree that got as far as the IT suite's §Q has one of these (dr-xr-xr-x, by design --
+# a deployed export is not writable), and `rm -rf` cannot unlink entries inside a directory with no write
+# bit. This is not a corner case for the reaper; it is what most real orphans on this box look like.
+RO_DIR="$RELEASES/.fleet-v0.0.3.$DEAD_PID.3.cafe.tmp"
+mkdir -p "$RO_DIR/fleet/it/Q/releases/fleet-v0.1.0/bin"
+echo "fleet" >"$RO_DIR/fleet/it/Q/releases/fleet-v0.1.0/bin/fleet"
+chmod -R 0555 "$RO_DIR/fleet/it/Q/releases/fleet-v0.1.0"
+out="$(bash "$SCRIPT" --reap 2>&1)"; rc=$?
+check "--reap exits 0 against a read-only §Q export" "0" "$rc"
+printf '%s' "$out" | grep -q "reaped: $RO_DIR" \
+  || { note "FAIL no reaped: line for the read-only export"; note "$out"; fails=1; }
+if [ -e "$RO_DIR" ]; then note "FAIL --reap left the read-only export in place"; fails=1
+else note "ok   --reap removed a read-only §Q export after restoring write access"; fi
+
+# --- the assertion that would have caught the real bug: a removal that genuinely fails must be reported
+# FAILED, not reaped, and must make the run exit non-zero. A stub `rm` stands in for the real failure mode
+# (permission denied deep inside a read-only export) because that failure is owner-fixable and therefore
+# not reproducible as a fixture running as this test's own uid -- the stub reproduces the OBSERVABLE
+# behaviour (rm exits non-zero, the tree survives) without needing root or a foreign owner.
+STUBBORN_DIR="$RELEASES/.fleet-v0.0.4.$DEAD_PID.4.beef.tmp"
+mkdir -p "$STUBBORN_DIR/keep"
+mkdir -p "$TMP/bin"
+cat >"$TMP/bin/rm" <<EOF
+#!/usr/bin/env bash
+# Test stub standing in for a real 'Permission denied' deep inside a read-only export: refuses to
+# remove exactly the one directory this test is checking, and defers to the real rm for everything else
+# (including the trap cleanup at exit, which never invokes this path again after the test below).
+for a in "\$@"; do
+  if [ "\$a" = "$STUBBORN_DIR" ]; then
+    echo "rm: cannot remove '\$a': Permission denied (test stub)" >&2
+    exit 1
+  fi
+done
+exec /bin/rm "\$@"
+EOF
+chmod +x "$TMP/bin/rm"
+
+out="$(PATH="$TMP/bin:$PATH" bash "$SCRIPT" --reap 2>&1)"; rc=$?
+check "a directory rm genuinely cannot remove makes --reap exit non-zero" "1" "$rc"
+printf '%s' "$out" | grep -q "FAILED: $STUBBORN_DIR" \
+  || { note "FAIL no FAILED: line for the directory rm could not remove"; note "$out"; fails=1; }
+printf '%s' "$out" | grep -q "reaped: $STUBBORN_DIR" \
+  && { note "FAIL a directory rm could not remove was still reported reaped:"; fails=1; }
+if [ -d "$STUBBORN_DIR" ]; then note "ok   the stubborn directory was left in place, not silently dropped"
+else note "FAIL the stubborn directory is gone even though rm reported failure"; fails=1; fi
+rm -rf "$STUBBORN_DIR"
+
 if [ "$fails" = 0 ]; then
   echo "PASS: release-preflight refuses (exit 2) only when FLEET_TMUX_SOCKET is unset or literally" \
        "'fleet' -- the environment fleet-env.sh guarantees can never be a real fleet socket -- reports" \
        "everything else as advisory WARN lines with exit 0, classifies a tmp worktree ORPHAN unless BOTH" \
        "its pid is alive AND that pid's cmdline says release-verify, and --reap deletes only directories" \
-       "matching the exact orphan name pattern, leaving anything else alone"
+       "matching the exact orphan name pattern, leaving anything else alone; --reap also restores write" \
+       "access to a read-only §Q export before removing it, and reports FAILED (exit non-zero) rather" \
+       "than reaped: for a directory it did not actually manage to remove"
   exit 0
 fi
 echo FAIL
