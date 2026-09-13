@@ -171,6 +171,22 @@ if [ "$REAP" = 1 ]; then
   for d in "${orphans[@]}"; do
     base="$(basename "$d")"
     if [[ "$base" =~ $ORPHAN_RE ]]; then
+      # A symlink is refused BEFORE the chmod, not reasoned about afterwards. GNU `chmod -R`
+      # DEREFERENCES a symlink given as its command-line ARGUMENT -- it declines only to follow links it
+      # meets during traversal, which is the case an earlier adversarial review tested; the argument case
+      # escaped it. Reproduced: modes on an unrelated tree well outside the release area were widened
+      # from `dr-xr-xr-x`/`-r-xr-xr-x` to `drwxr-xr-x`/`-rwxr-xr-x`. Nothing outside is deleted -- `rm -rf`
+      # removes only the link -- so no file is lost, but modes are changed on an arbitrary tree, and this
+      # script's whole sanction is that it never touches anything outside the `.fleet-v*.tmp` pattern.
+      # `Verify._worktree()` only ever creates real directories, so a symlink here is anomalous and
+      # refusing is the correct answer, not a limitation. Counted as a reap FAILURE, like every other
+      # thing this loop could not do: it must not be reported as success, and it must not let the prune
+      # below run over a registration whose tree is still there.
+      if [ -L "$d" ]; then
+        echo "$(basename "$0"): refusing to reap '$d' -- it is a symlink" >&2
+        reap_failed=1
+        continue
+      fi
       chmod -R u+w -- "$d" 2>/dev/null || true
       rm_err="$(rm -rf -- "$d" 2>&1 1>/dev/null)"
       if [ -e "$d" ]; then
@@ -189,7 +205,13 @@ if [ "$REAP" = 1 ]; then
   # turned three failed removals into unregistered half-deleted husks on this box -- `rm` had deleted
   # enough of each tree, including its `.git` file, for `git worktree` to read it as corrupt and drop the
   # registration on the next prune, even though most of the directory (the read-only skeleton) remained.
-  [ "$reaped_any" = 1 ] && git -C "$REPO" worktree prune
+  # BOTH conditions, per orphan-batch. `reaped_any` alone is batch-wide: with two orphans where A reaps
+  # cleanly and B's `rm -rf` deletes B's `.git` file and then fails on a read-only subtree, `reaped_any`
+  # is 1, the prune runs, and it strips B's registration while B's directory is still on disk -- exactly
+  # the husk state described above, one orphan narrower, and that state already cost a manual cleanup
+  # once. A stale registration left behind by a stubborn tree is harmless and prunable by hand; a
+  # stripped registration over a surviving tree is not.
+  [ "$reaped_any" = 1 ] && [ "$reap_failed" = 0 ] && git -C "$REPO" worktree prune
   [ "$reap_failed" = 1 ] && exit 1
 fi
 
