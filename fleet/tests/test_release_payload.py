@@ -229,13 +229,39 @@ class CutFootprintCase(unittest.TestCase):
         asks by stripping. A stripper that does not understand a manifest's spelling answers "yes" on
         every release, which makes EXEMPT unreachable -- SI-19's shape, and what the JSON-only
         `_VERSION_FIELD` did to `.hermes-plugin/plugin.yaml` for ten releases (0.5.2..0.5.11 have no
-        EXEMPTION.tsv between them). Asserted over the FAMILY so the next manifest cannot repeat it."""
+        EXEMPTION.tsv between them). Asserted over the FAMILY so the next manifest cannot repeat it.
+
+        It also asserts the OTHER half, which stamping alone cannot see: that each manifest carries
+        EXACTLY ONE version-shaped whole line. `_VERSION_FIELD` strips every line it matches, while
+        `release_stamp._rewrite` rewrites exactly one -- it refuses unless exactly one
+        `version: <old value>` matches, which is value-scoped -- so in a manifest with two of them the
+        second is erased from BOTH sides of `exemption_for`'s content re-check and becomes invisible.
+        Reproduced: a `marketplace.json` with two plugin entries, where the author's only real change is
+        bumping the second plugin 1.0.0 -> 2.0.0, strips identically on both sides, stays inert, and goes
+        EXEMPT. `_read_textual_field` does refuse on two `version:` lines, but only for NON-JSON files,
+        and `.claude-plugin/marketplace.json` is declared with the dotted field `plugins.0.version` --
+        explicitly an array of plugins -- so a second entry is the ordinary case, not an exotic one.
+
+        Not live: all nine manifests carry exactly one today. The point is that stamping only the
+        DECLARED field would keep passing on the day a second plugin lands, so nothing would fail while
+        the gate silently widened. The guard is here and not in `release_scope` deliberately: scoping the
+        stripper to the declared field would make that module read `.version-bump.json` and break its
+        leaf constraint -- it is a pure function of a list of strings, by design.
+        """
+        from fleet.release_scope import _VERSION_FIELD
         repo = pathlib.Path(__file__).resolve().parents[2]
         for relative in CUT_MANIFESTS:
             path = repo / relative
             if not path.is_file():
                 continue  # `.version-bump.json` lists every harness ever shipped for; absence is ordinary
             with self.subTest(manifest=relative):
+                matches = _VERSION_FIELD.findall(path.read_text())
+                self.assertEqual(len(matches), 1,
+                                 f"{relative} carries {len(matches)} version-shaped whole lines, and "
+                                 f"`_VERSION_FIELD` strips ALL of them while the cut stamps exactly one. "
+                                 f"Every line past the first is erased from both sides of "
+                                 f"`exemption_for`'s content re-check, so an author's edit to it rides "
+                                 f"out on the cut's stamp and the release goes EXEMPT unverified")
                 scratch = self.tmp / relative
                 scratch.parent.mkdir(parents=True, exist_ok=True)
                 scratch.write_text(path.read_text())
