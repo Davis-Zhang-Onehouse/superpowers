@@ -472,6 +472,80 @@ class GitCase(unittest.TestCase):
                          "the patch-id delta must carry exactly the unreleased commits, whatever the "
                          "rebase did to their hashes")
 
+    def test_a_rename_out_of_fleet_is_named_on_BOTH_sides_and_stays_requiring(self):
+        """THE case every exemption test is blind to.
+
+        `test_release_exemption`'s `FakeRepo` is handed a hand-written path list, so nothing in that file
+        can see what git actually prints -- the same blindness
+        `test_release_scope.test_the_declared_manifests_match_the_repositorys_own_version_config` exists
+        to cover one duplication over. This needs REAL git.
+
+        With rename detection on, `git diff --name-only A..B` reports only the DESTINATION of a rename.
+        A release that moves a module OUT of `fleet/` into `docs/`, or renames `skills/using-fleet/` --
+        the one directory `REQUIRING_SKILLS` protects -- therefore produced a changeset `classify` read
+        as entirely inert, and the gate was skipped on a diff that deleted a fleet module. Measured, on
+        exactly this fixture:
+
+            $ git diff --name-only A..B
+            docs/mod.py
+            skills/using-fleet2/SKILL.md           <- both inert, scope.exempt True
+
+        The hole is one-directional and in the dangerous direction: moving INTO `fleet/` names a `fleet/`
+        path and correctly forces the gate. `--no-renames` names both sides, so it fails towards
+        `requiring` -- which is `release_scope`'s own stated sanction ("a denylist would be fail-open…
+        this way the failure mode is a needless test run").
+        """
+        from fleet.release_git import Repo
+        from fleet.release_scope import classify
+        for relative in ("fleet/src/fleet/mod.py", "skills/using-fleet/SKILL.md"):
+            path = self.repo / relative
+            path.parent.mkdir(parents=True, exist_ok=True)
+            path.write_text("content\n")
+        self.run("add", "-A")
+        self.run("commit", "-q", "-m", "base")
+        self.run("tag", "-a", "fleet/v0.1.0", "-m", "r1")
+
+        (self.repo / "docs").mkdir(parents=True, exist_ok=True)
+        self.run("mv", "fleet/src/fleet/mod.py", "docs/mod.py")
+        self.run("mv", "skills/using-fleet", "skills/using-fleet2")
+        self.run("commit", "-q", "-a", "-m", "move the module out, rename the carve-out skill")
+        self.run("tag", "-a", "fleet/v0.1.1", "-m", "r2")
+
+        changed = Repo(self.repo).changed_paths("fleet/v0.1.0", "fleet/v0.1.1")
+        self.assertIn("fleet/src/fleet/mod.py", changed,
+                      "the SOURCE of a rename out of fleet/ is missing from the diff, so the gate cannot "
+                      "see that a fleet module was removed")
+        self.assertIn("skills/using-fleet/SKILL.md", changed,
+                      "the SOURCE of a rename of the REQUIRING_SKILLS carve-out is missing from the diff")
+        self.assertIn("docs/mod.py", changed)
+        self.assertIn("skills/using-fleet2/SKILL.md", changed)
+
+        scope = classify(changed)
+        self.assertFalse(scope.exempt,
+                         "a release that moved a fleet module out and renamed skills/using-fleet/ went "
+                         "EXEMPT -- the allowlist became a fail-open denylist for renames")
+        self.assertEqual(sorted(scope.requiring),
+                         ["fleet/src/fleet/mod.py", "skills/using-fleet/SKILL.md"])
+
+    def test_a_rename_INTO_fleet_was_never_the_hole_and_still_is_not(self):
+        """The other direction, asserted so the fix above is not mistaken for the whole story: a move
+        INTO `fleet/` names a `fleet/` path as its destination, so it forced the gate before this change
+        and must still force it after."""
+        from fleet.release_git import Repo
+        from fleet.release_scope import classify
+        (self.repo / "docs").mkdir(parents=True, exist_ok=True)
+        (self.repo / "docs" / "mod.py").write_text("content\n")
+        self.run("add", "-A")
+        self.run("commit", "-q", "-m", "base")
+        self.run("tag", "-a", "fleet/v0.1.0", "-m", "r1")
+        (self.repo / "fleet" / "src" / "fleet").mkdir(parents=True)
+        self.run("mv", "docs/mod.py", "fleet/src/fleet/mod.py")
+        self.run("commit", "-q", "-a", "-m", "move it in")
+        self.run("tag", "-a", "fleet/v0.1.1", "-m", "r2")
+        scope = classify(Repo(self.repo).changed_paths("fleet/v0.1.0", "fleet/v0.1.1"))
+        self.assertIn("fleet/src/fleet/mod.py", scope.requiring)
+        self.assertFalse(scope.exempt)
+
     def test_the_changelog_names_the_rebase_when_the_tag_left_the_branch(self):
         from fleet.release_git import changelog_section
         text = changelog_section(Version.parse("0.2.0"), head="abc1234", branch="live",

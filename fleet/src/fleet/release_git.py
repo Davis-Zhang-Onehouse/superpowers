@@ -123,8 +123,38 @@ class Repo:
 
         A missing ref surfaces as `BadInput` from `_git`, naming the command, rather than as an empty
         list: "nothing changed" and "I could not tell" must never be the same answer here.
+
+        `--no-renames` is load-bearing; do not "clean it up". With rename detection ON, git reports only
+        the DESTINATION of a detected rename, and the hole that opens is one-directional and in the
+        dangerous direction. Measured on a real repository:
+
+            $ git mv fleet/src/fleet/mod.py docs/mod.py && git mv skills/using-fleet skills/using-fleet2
+            $ git diff --name-only A..B
+            docs/mod.py                            <- inert
+            skills/using-fleet2/SKILL.md           <- inert
+            $ git diff --name-only --no-renames A..B
+            docs/mod.py
+            fleet/src/fleet/mod.py                 <- requiring
+            skills/using-fleet/SKILL.md            <- requiring (REQUIRING_SKILLS, the carve-out)
+            skills/using-fleet2/SKILL.md
+
+        So a release that moves a file OUT of `fleet/` into `docs/`, `skills/` or a root doc -- or renames
+        `skills/using-fleet/`, the one directory `REQUIRING_SKILLS` exists to protect -- produced a
+        changeset `classify` read as entirely inert: `scope.requiring` empty, `scope.exempt` True, the
+        gate skipped on a diff that deleted a fleet module. `exemption_for`'s content re-check does not
+        help; it revisits only `CUT_STAMPED` and `CUT_MANIFESTS`. Moving INTO `fleet/` was always safe,
+        because that names a `fleet/` path.
+
+        `release_scope`'s own docstring is the sanction: it is an allowlist because "a denylist would be
+        fail-open… this way the failure mode is a needless test run." Rename detection silently converted
+        that allowlist into a fail-open denylist for one class of change. `--no-renames` names BOTH sides
+        of every rename, so it fails towards `requiring`.
+
+        The other caller wants it too: `_do_release_cut`'s payload description (`cli.py`) omitted the
+        SOURCE of every rename from `PAYLOAD.tsv`, and that classifier's stated rule is that a
+        description must fail towards naming the path.
         """
-        out = self._git("diff", "--name-only", f"{from_ref}..{to_ref}")
+        out = self._git("diff", "--name-only", "--no-renames", f"{from_ref}..{to_ref}")
         return [line.strip() for line in out.splitlines() if line.strip()]
 
     # --- mutation ----------------------------------------------------------------------------------
