@@ -1869,6 +1869,27 @@ class TestPaneGuard(CliCase):
             self.assertEqual(out_with, out_without,
                              f"--capture changed the printed row for {pane}: {out_with!r} vs {out_without!r}")
 
+        #: Review fix (Important 1). `14 PANE_INDETERMINATE` (`FI-7`) — precisely the failed-capture case
+        #: this whole task is about — is checked SEPARATELY, after the loop above, rather than folded into
+        #: `expected`: `live_sessions_fail` is a single global switch on the fixture (unlike `capture_fails`,
+        #: which is per-pane), and flipping it before the loop would silently reclassify every OTHER pane
+        #: in `expected` too, since `_is_claude` consults the process probe first. Setup mirrors
+        #: `test_a_failed_capture_stays_distinguishable_from_an_empty_one_in_the_file`.
+        indeterminate_pane = "dt-solo"
+        fleet.live_sessions_fail = True
+        fleet.capture_fails.add(indeterminate_pane)
+        without, out_without, _ = fleet.run(["pane-guard", "--porcelain", "--pane", indeterminate_pane])
+        target = fleet.tmp / "capture-indeterminate.txt"
+        with_capture, out_with, _ = fleet.run(["pane-guard", "--porcelain", "--pane", indeterminate_pane,
+                                               "--capture", str(target)])
+        self.assertEqual(without, cli.PANE_INDETERMINATE, f"baseline verdict is not 14: {out_without}")
+        self.assertEqual(with_capture, without,
+                         f"--capture changed the verdict for the indeterminate case: {without} -> "
+                         f"{with_capture}")
+        self.assertEqual(out_with, out_without,
+                         f"--capture changed the printed row for the indeterminate case: {out_with!r} vs "
+                         f"{out_without!r}")
+
     def test_a_failed_capture_stays_distinguishable_from_an_empty_one_in_the_file(self):
         """`FI-7` extended to the artifact: `None` (capture failed / never attempted) must not collapse
         into `""` (captured cleanly, genuinely empty) once it is written to a file."""
@@ -1909,6 +1930,26 @@ class TestPaneGuard(CliCase):
 
         self.assertEqual(code, cli.PANE_UNKNOWN, f"{out}{err}")
         self.assertFalse(target.exists(), "an unknown pane wrote a capture file for text nobody read")
+
+    def test_a_capture_path_that_cannot_be_written_does_not_break_the_verdict(self):
+        """Review fix (Important 2). `--capture` takes an arbitrary CALLER path, unlike the fleet-managed
+        paths this package's other `write_text` callers create with `mkdir(parents=True, exist_ok=True)`
+        first. An unwritable path (missing parent here) must not raise past `_emit`: a diagnostic that
+        takes down the verdict output it exists to back up is the inverse of "must not perturb what it
+        observes"."""
+        fleet = self.loaded()
+        fleet.panes["dt-solo"] = IDLE_PANE
+        bad_target = fleet.tmp / "no-such-parent-dir" / "capture.txt"
+
+        code, out, err = fleet.run(["pane-guard", "--porcelain", "--pane", "dt-solo",
+                                    "--capture", str(bad_target)])
+
+        self.assertEqual(code, cli.PANE_SAFE, "an unwritable --capture path changed the verdict")
+        printed = dict(line.split("\t", 1) for line in out.splitlines())
+        self.assertEqual(printed.get("code"), "0",
+                         f"the porcelain row was lost when the capture failed to write: {out!r}")
+        self.assertFalse(bad_target.exists())
+        self.assertIn(str(bad_target), err, "the failure to write is not reported anywhere")
 
 
 class TestTheArgvTable(CliCase):
@@ -2068,8 +2109,9 @@ class TestAbort(CliCase):
 
 class TestClose(CliCase):
     """FD-10: the external monitor is required to call `pane-guard` before any send-keys, and `close`
-    disarms it. Plan 6 §J8/§N5: a busy pane and a pane holding unsubmitted input are both refused, and
-    **each refusal names its override** — a refusal with no override is a wall."""
+    disarms it. Plan 6 §J8/§N5: a busy pane and a pane holding unsubmitted input are both refused; a pane
+    awaiting an operator's answer at an `AskUserQuestion` dialog is a third (`I-16`) — and **each refusal
+    names its override** — a refusal with no override is a wall."""
 
     def test_close_refuses_a_busy_pane_and_a_pane_holding_unsubmitted_input(self):
         fleet = self.loaded()

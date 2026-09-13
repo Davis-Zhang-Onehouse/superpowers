@@ -2860,7 +2860,7 @@ def _do_abort(ctx: Ctx, parsed: Parsed) -> int:
 def _pane_refusal(ctx: Ctx, record: Record):
     """Why this pane must not be closed, as `(guard, reason, clears_when, clears_who)`, or `None`.
 
-    The predicates are `session`'s and `pane-guard`'s — the SAME two, not a third copy. DA-2 enumerated
+    The predicates are `session`'s and `pane-guard`'s — the SAME three, not a fourth copy. DA-2 enumerated
     six send paths, and a predicate restated per caller is how five of them keep the old behaviour.
     """
     tmux = record.tmux
@@ -4055,7 +4055,16 @@ def _do_pane_guard(ctx: Ctx, parsed: Parsed) -> int:
     #: file's own existence is what tells a later reader "this was observed" apart from "this was empty".
     capture_to = parsed.get("capture")
     if capture_to and captured is not None:
-        Path(capture_to).write_text(captured)
+        #: Review fix (Important 2). `--capture` names an arbitrary CALLER path, not one of this
+        #: package's own managed paths (contrast the seed/reason-file writers, which `mkdir(parents=True,
+        #: exist_ok=True)` a path THEY chose before writing it) — a missing parent or an unwritable
+        #: directory is the caller's mistake, not this verb's, and it must not cost the verdict this flag
+        #: exists to back up. Reported, never swallowed: silence here would be its own false-safe.
+        try:
+            Path(capture_to).write_text(captured)
+        except OSError as exc:
+            print(f"WARNING: --capture {capture_to!r} could not be written ({exc.strerror or exc}); "
+                  f"the verdict below is unaffected.", file=ctx.err)
     _emit(ctx, PANE_GUARD, [("code", str(code)), ("verdict", PANE_GUARD_CODES[code]),
                             ("pane", pane), ("queued_text", queued or ""), ("detail", detail)])
     return code
