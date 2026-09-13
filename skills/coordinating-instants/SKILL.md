@@ -55,9 +55,10 @@ are long-lived and will restart mid-effort, and memory is not a source.
 `-complete-` may still be mid-turn, and `close` refuses one: *"still offering a way to interrupt, so closing it
 now ends a turn in progress and whatever that turn had not yet written down."* Poll the contract before you
 close — `fleet pane-guard --pane <session>`, where `10` (queued text), `11` (mid-turn) and `14`
-(indeterminate) mean wait, and `0`, `12` or `13` mean the pane can go. Then `close`, then `harvest`.
-Finishing the work and finishing the turn are different moments; conflating them means either a refusal or
-a `--force` you did not need.
+(indeterminate) mean wait, `15` (awaiting-operator) means STOP AND ANSWER IT — it is blocked on a selection
+dialog, not on a turn that will finish by itself, and no amount of waiting clears it — and `0`, `12` or
+`13` mean the pane can go. Then `close`, then `harvest`. Finishing the work and finishing the turn are
+different moments; conflating them means either a refusal or a `--force` you did not need.
 
 **`14` is the one to read twice, and it is why this list changed.** It means the pane is ALIVE but nothing
 about it could be read — no claude process attributed to it, and an empty capture. That is a FAILED

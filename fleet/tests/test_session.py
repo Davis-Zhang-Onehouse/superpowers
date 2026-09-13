@@ -479,6 +479,61 @@ class TestTrustModalIsNotBusy(unittest.TestCase):
                         "the fix must not cost us the case busy() exists for")
 
 
+class TestAskUserQuestionDialogIsNotAnIdlePane(unittest.TestCase):
+    """`I-16`. Amends `SI-37`'s claim that `unsubmitted` "ALREADY detects the modal's selected line as
+    text in the input position" for EVERY modal. It is true for the trust modal above, whose selected row
+    renders `> 1. …` — a `_CARET` character. It is measured FALSE here: `AskUserQuestion` draws its
+    options as plain numbered rows with no caret at all, so both `busy` and `unsubmitted` miss it and it
+    would otherwise fall through to `0 safe` — the same code an idle worker gets, for a worker blocked on
+    an unanswered question."""
+
+    #: From the register, verbatim (`I-16`).
+    DIALOG_PANE = "\n".join([
+        "Delete it on this lineage, or carry it?",
+        "  1. Delete it on this lineage",
+        "  2. Keep it and carry the note",
+        "",
+        "Enter to select · Tab/Arrow keys to navigate · Esc to cancel",
+    ])
+
+    def setUp(self):
+        self.sessions, _, _ = layer()
+
+    def test_the_dialog_is_not_busy(self):
+        self.assertFalse(self.sessions.busy(self.DIALOG_PANE),
+                         "the dialog offers nothing to interrupt; it is waiting on a human, not working")
+
+    def test_the_dialog_is_NOT_detected_as_unsubmitted_text(self):
+        """The measurement that amends `SI-37`: this is the modal `unsubmitted` does NOT catch."""
+        self.assertIsNone(self.sessions.unsubmitted(self.DIALOG_PANE),
+                          "SI-37 claimed unsubmitted already covers every modal's selected line — false "
+                          "here, because AskUserQuestion renders no caret at all")
+
+    def test_the_dialog_IS_detected_as_asking(self):
+        self.assertTrue(self.sessions.asking(self.DIALOG_PANE),
+                        "the AskUserQuestion hint line was not recognised")
+
+    def test_an_idle_pane_is_not_asking(self):
+        idle = "\n".join(["done", "", "❯ try \"fix the failing test\"", "  ? for shortcuts"])
+        self.assertFalse(self.sessions.asking(idle),
+                         "an ordinary idle pane was mistaken for a blocked question dialog")
+
+    def test_a_working_pane_that_merely_discusses_the_dialog_is_not_asking(self):
+        """The prose-matching trap `_WATCHER_MARKER` was written to avoid: an agent's own turn can discuss
+        this exact defect — pick an option with Enter, move between choices with arrow keys, back out with
+        Escape — in its own words, and that discussion must not be mistaken for the banner itself. The
+        fragments are required VERBATIM and TOGETHER on one row precisely so ordinary prose describing the
+        same mechanic in different words does not satisfy it."""
+        prose = "\n".join([
+            "I'm fixing pane-guard so it can tell a dialog apart from an idle pane: you pick an option by",
+            "pressing Enter, move between the choices with the arrow keys, and back out with Escape.",
+            "Thinking...",
+            "  esc to interrupt",
+        ])
+        self.assertFalse(self.sessions.asking(prose),
+                         "prose that discusses the mechanic in its own words was matched as the banner")
+
+
 class TestIsClaudeProcess(unittest.TestCase):
     """`SI-38`. Process evidence outranks screen scraping for 'is this a claude pane'."""
 

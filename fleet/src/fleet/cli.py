@@ -187,6 +187,20 @@ PANE_UNKNOWN = 13
 #:
 #: 14 is deliberately OUTSIDE the can-go set. A guard whose failure mode is "go ahead" is not a guard.
 PANE_INDETERMINATE = 14
+#: `I-16`. The pane is showing an `AskUserQuestion` selection dialog: nothing queued, nothing mid-turn,
+#: but blocked on an operator's answer and going nowhere without one. Before this code existed the pane
+#: fell through `busy()` and `unsubmitted()` — neither fires for this dialog, see `session.SI-37`'s
+#: amendment — and landed on `0 safe`, whose detail reads "a quiet claude pane with an empty input box".
+#: For a coordinator "idle" and "blocked on you" are opposite facts, and a scheduled poll saw the healthy
+#: reading forever.
+#:
+#: Deliberately OUTSIDE the can-go set `coordinating-instants` documents (`0`, `12`, `13`), for a
+#: different reason than `14`'s: `14` is a FAILED observation and safe to retry; this is a SUCCESSFUL
+#: observation of a pane that will not move on its own. Closing it would discard a decision in progress —
+#: exactly what `close`'s queued-text refusal already protects against for typed text — and it is not a
+#: "wait and re-poll" code either, the way `10`/`11`/`14` are: no amount of waiting clears an unanswered
+#: question. The pane needs an operator to read it and answer.
+PANE_AWAITING_OPERATOR = 15
 
 PANE_GUARD_CODES = {
     PANE_SAFE: "safe",
@@ -195,6 +209,7 @@ PANE_GUARD_CODES = {
     PANE_NOT_CLAUDE: "not-claude",
     PANE_INDETERMINATE: "indeterminate",
     PANE_UNKNOWN: "unknown-pane",
+    PANE_AWAITING_OPERATOR: "awaiting-operator",
 }
 
 #: Every code any verb in this package may return, base registry first.
@@ -3989,6 +4004,13 @@ def _do_pane_guard(ctx: Ctx, parsed: Parsed) -> int:
             queued = layer.unsubmitted(text)
             code, detail = PANE_QUEUED_TEXT, (f"{pane} holds unsubmitted text in its input box "
                                               f"({queued!r}); a send would concatenate onto it")
+        elif layer.asking(text):
+            #: `I-16`. Checked LAST, after `busy` and `unsubmitted`, so a pane that is genuinely mid-turn
+            #: or genuinely holding typed text keeps that stronger, more specific answer — this is the
+            #: shape neither of those two covers.
+            code, detail = PANE_AWAITING_OPERATOR, (
+                f"{pane} is showing a selection dialog and is blocked on an operator's answer; nothing "
+                "will happen here until somebody answers it — waiting will not clear this")
         else:
             code, detail = PANE_SAFE, f"{pane} is a quiet claude pane with an empty input box"
     #: `queued_text` is a FIELD, not a sentence to be parsed back out of `detail`.
