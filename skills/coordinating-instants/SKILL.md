@@ -71,6 +71,14 @@ in ~118 against a live claude, with `11` on the polls either side (`FI-7`).
 Never treat a code you do not recognise as permission. A guard whose failure mode is "go ahead" is not a
 guard, and this contract read one that way for as long as it existed.
 
+**Capture the pane before any teardown.** `pane-guard` answers *is it safe to type into this pane right
+now*, not *does this pane hold nothing* — its verdict is a send-keys/close-out gate, and `0`, `12` or `13`
+is not proof the box was empty. Twice a `0 safe` verdict was wrong about a box that visibly held text, and
+both times the raw capture was gone by the time anyone asked why (`I-21`/`I-26`). Run `fleet pane-guard
+--pane <session> --capture <path>` before `close`, and keep the file: it is the exact text the verdict was
+computed from — for every code, not just `10` — and a failed capture stays distinguishable from a
+genuinely empty one in the file too.
+
 **There is a FIFTH step, and it is a second wait.** `harvest` run straight after `close` is refused:
 
 ```
