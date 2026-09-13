@@ -294,10 +294,10 @@ still pass, because the argv builders are untouched and the prefix goes on at th
 
 **The bigger win is still not done.** The monitor sends `Continue…` on a rate-limit banner **without
 consulting `fleet pane-guard`**, which is precisely the guard for that hazard (`0` safe / `10` queued-text /
-`11` mid-turn / `12` not-claude / `13` unknown). Gating the send would need a change inside the vendored
-`claude-auto-retry` monitor, not in this repo. `J8` proves `fleet close` refuses both dangerous pane shapes; the
-monitor has no such gate. Note what the switch above did and did not buy: it fixed WHICH sessions get armed,
-not what a monitor does once armed.
+`11` mid-turn / `12` not-claude / `13` unknown / `14` indeterminate / `15` awaiting-operator). Gating the send
+would need a change inside the vendored `claude-auto-retry` monitor, not in this repo. `J8` proves `fleet
+close` refuses all three dangerous pane shapes; the monitor has no such gate. Note what the switch above did
+and did not buy: it fixed WHICH sessions get armed, not what a monitor does once armed.
 
 ## Known gaps
 
