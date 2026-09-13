@@ -74,6 +74,16 @@ is a person mid-sentence. A pane with unsubmitted text, no human, and a busy age
 will deliver itself. Only a pane with an unanswered permission prompt is the case teardown logic exists
 for. Reading all of these as "stuck" is how you interrupt someone.
 
+**Capture the pane before any teardown.** `pane-guard` answers *is it safe to type into this pane right
+now*; it is not evidence that the pane holds nothing. Twice a `0 safe` verdict was wrong about a box that
+visibly held text — three consecutive samples the first time, and the second time the text named real
+outstanding work — and both times the raw capture was already gone by the time anyone asked why
+(`I-21`/`I-26`). `queued_text` is populated only for code `10`, so it is no substitute. Run `fleet
+pane-guard --pane <session> --capture <path>` before you close, and keep the file: it is written from the
+exact text the verdict was computed from, for every code, and a failed capture stays distinguishable from
+a genuinely empty one (nothing is written when the capture failed or was never attempted). A verdict you
+cannot re-examine afterward is an anecdote.
+
 ## The review gate, exactly
 
 `fleet review` gates the worker's `fleet complete`. The grammar is unforgiving and each mistake costs a

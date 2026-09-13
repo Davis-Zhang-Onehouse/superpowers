@@ -2884,6 +2884,19 @@ def _pane_refusal(ctx: Ctx, record: Record):
                 f"the text is submitted or cleared, or `fleet close --id {record.todo_id} {FORCE}` is "
                 f"said out loud",
                 record.base_instant or record.todo_id)
+    if layer.asking(text):
+        #: Task 6 shipped `15 PANE_AWAITING_OPERATOR` for exactly this pane shape and nothing consulted
+        #: it here — so `close` would tear down a pane blocked at an unanswered `AskUserQuestion` dialog,
+        #: which is *"the one case teardown logic exists for is an unanswered prompt"*, the harm the
+        #: original incident describes. Checked LAST, after `busy` and `unsubmitted`, for the same reason
+        #: `pane-guard` itself orders them that way (`I-16`): a pane that is genuinely mid-turn or
+        #: genuinely holding typed text keeps that stronger, more specific refusal.
+        return (PANE_GUARD_CODES[PANE_AWAITING_OPERATOR],
+                f"{tmux} is showing a selection dialog and is blocked on an operator's answer: closing it "
+                f"now discards a decision in progress",
+                f"the dialog is answered, or `fleet close --id {record.todo_id} {FORCE}` is said out "
+                f"loud",
+                record.base_instant or record.todo_id)
     return None
 
 
@@ -2896,14 +2909,16 @@ def _do_close(ctx: Ctx, parsed: Parsed) -> int:
     NAMED, by slot — FD-14's rule, that a transaction which stops short says what it left rather than
     leaving it to be discovered.
 
-    The two refusals are `pane-guard`'s own two non-safe answers for a live pane, and **each names its
-    override**: a refusal a human cannot act on is a refusal that gets forced blindly (`OBS-48`), while a
-    guard with no override is an alarm that blocks the fix (FD-9).
+    The three refusals are `pane-guard`'s own non-safe answers for a live pane that are judgements about
+    work in progress — a busy pane, a queued pane, a pane awaiting an operator's answer — and **each names
+    its override**: a refusal a human cannot act on is a refusal that gets forced blindly (`OBS-48`), while
+    a guard with no override is an alarm that blocks the fix (FD-9).
     """
     record = _record(ctx, parsed)
-    #: Before `--force` is even consulted. `--force` overrides the pane's own two refusals — a busy pane,
-    #: a queued pane — which are judgements about work in progress. Being pointed at the wrong server is
-    #: not a judgement to override; forcing it would kill nothing and stamp the record anyway.
+    #: Before `--force` is even consulted. `--force` overrides the pane's own three refusals — a busy
+    #: pane, a queued pane, a pane awaiting an operator's answer — which are judgements about work in
+    #: progress. Being pointed at the wrong server is not a judgement to override; forcing it would kill
+    #: nothing and stamp the record anyway.
     _refuse_a_session_on_another_server(ctx, record)
     refusal = None if parsed.on("force") else _pane_refusal(ctx, record)
 
@@ -3970,6 +3985,10 @@ def _do_pane_guard(ctx: Ctx, parsed: Parsed) -> int:
     branches on the number, never on the sentence.
     """
     pane, layer = _pane_subject(ctx, parsed)
+    #: `I-21`/`I-26`. What `--capture` preserves, when given one: the SAME value the verdict below is
+    #: computed from, never re-read. `None` when no capture was even attempted (this branch) or when the
+    #: attempt failed (`FI-7`) — kept as `None`, not `""`, so the two stay distinguishable once written.
+    captured = None
     if not layer.alive(pane):
         code, detail = PANE_UNKNOWN, (f"no live process and no session answer for {pane!r}; sending keys "
                                       "to a pane nobody can name is the send with no target")
@@ -4029,6 +4048,14 @@ def _do_pane_guard(ctx: Ctx, parsed: Parsed) -> int:
     #: Empty for every code but `10`, and that is not a hedge — no other code asserts anything about the
     #: box, and emitting a best guess there would invent a fact.
     queued = layer.unsubmitted(text) if code == PANE_QUEUED_TEXT else None
+    #: `I-21`/`I-26`. Written AFTER the verdict is fully decided and from the SAME `captured` the decision
+    #: used — never re-captured — so this can never disagree with the row it backs, and never perturbs it
+    #: either: nothing above this line reads `parsed.get("capture")`. Skipped for `None` on purpose (see
+    #: the comment above `captured = None`): a failed or never-attempted capture writes NOTHING, so the
+    #: file's own existence is what tells a later reader "this was observed" apart from "this was empty".
+    capture_to = parsed.get("capture")
+    if capture_to and captured is not None:
+        Path(capture_to).write_text(captured)
     _emit(ctx, PANE_GUARD, [("code", str(code)), ("verdict", PANE_GUARD_CODES[code]),
                             ("pane", pane), ("queued_text", queued or ""), ("detail", detail)])
     return code
@@ -5027,6 +5054,13 @@ VERBS = {spec.name: spec for spec in (
              "the record whose session to ask about — the same key `close`, `harvest` and `status` take. "
              "Resolved through the record's `tmux` field; use it instead of retyping a session name that "
              "differs from the todo id by a timestamp suffix"),
+        Flag("--capture", True, False,
+             "write the raw pane capture that produced this verdict to PATH (`I-21`/`I-26`). No raw "
+             "capture survives otherwise, so a wrong verdict cannot be re-examined after the fact. The "
+             "verdict and every field of the row are UNCHANGED by this flag — a diagnostic that perturbs "
+             "what it observes is worse than none. Nothing is written when no capture was attempted or "
+             "the capture FAILED (`FI-7`'s `None`): the file's own existence is what keeps a failed "
+             "observation distinguishable from a genuinely empty pane"),
     )),
     _verb("compaction-status", _do_compaction_status, True,
           "whether a compaction is holding every dispatch", checker=True, flags=(
