@@ -39,8 +39,9 @@ from fleet.release_scope import (CUT_MANIFESTS, CUT_STAMPED, Scope, classify, wi
                                  without_version_line)
 
 __all__ = ["EXEMPT", "EXEMPT_ROSTER", "FULL_ROSTER", "GATE_ROSTER", "GREEN", "INCONCLUSIVE",
-           "PROMOTABLE", "RED", "Verify", "archive_previous_attempt", "exemption_for", "last_green",
-           "read_verdict", "verdict_for", "write_exemption", "write_verdict"]
+           "PROMOTABLE", "RED", "Verify", "_exemption_and_scope", "archive_previous_attempt",
+           "exemption_for", "last_green", "read_verdict", "verdict_for", "write_exemption",
+           "write_verdict"]
 
 GREEN = "GREEN"
 RED = "RED"
@@ -236,23 +237,35 @@ def last_green(releases: Releases, version: Version):
     return None
 
 
-def exemption_for(releases: Releases, version: Version, repo, full: bool = False):
-    """`(anchor, scope)` when the suites are not required for this release, else `None`.
+def _exemption_and_scope(releases: Releases, version: Version, repo, full: bool = False):
+    """`(exempted, scope)` -- the decision and the scope it was decided from.
 
-    Returns None -- meaning "run them" -- for every uncertainty, never a guess:
+    `exempted` is exactly what `exemption_for` returns: `(anchor, scope)` when the suites are not
+    required, else `None`. `exemption_for` answers only that decision, but a dry run needs the REASON --
+    which paths landed in `requiring` -- and that only exists on `scope`. Returning it alongside the
+    decision, rather than adding a second function that recomputes the diff, is what keeps this the only
+    `classify` call and the only `changed_paths` diff for an exemption check: two of either could disagree.
+
+    `scope` is `None` exactly when `exempted` is unconditionally `None` and no diff was even attempted --
+    `--full` was asked for, or there is no GREEN release to anchor against. Once a diff is taken, `scope`
+    is always returned, exempt or not.
+
+    Returns `(None, None)` -- meaning "run them, and there is nothing to report" -- for:
 
       * `--full` was asked for. An operator who names the full roster gets the full roster.
       * no GREEN release exists to anchor against, so there is nothing to claim identity with.
+
+    And raises `Refused`, which callers (a dry run included) must let propagate:
+
       * the anchor's tag is gone from the checkout, so the diff cannot be computed. `changed_paths`
         raises rather than returning empty, and that refusal is allowed to propagate: a release skipping
         its suites because a git command quietly failed is the one outcome worth crashing over.
-      * any changed path is not in the declared inert set (`release_scope`).
     """
     if full:
-        return None
+        return None, None
     anchor = last_green(releases, version)
     if anchor is None:
-        return None
+        return None, None
     anchor_tag = (releases.manifest(anchor).get("tag") or anchor.tag)
     this_tag = (releases.manifest(version).get("tag") or version.tag)
     if not repo.tag_exists(anchor_tag):
@@ -287,7 +300,18 @@ def exemption_for(releases: Releases, version: Version, repo, full: bool = False
     if put_back:
         scope = Scope([p for p in scope.inert if p not in put_back],
                       list(scope.requiring) + put_back)
-    return (anchor, scope) if scope.exempt else None
+    return (anchor, scope) if scope.exempt else None, scope
+
+
+def exemption_for(releases: Releases, version: Version, repo, full: bool = False):
+    """`(anchor, scope)` when the suites are not required for this release, else `None`.
+
+    Delegates to `_exemption_and_scope`, which is where the reasoning for each `None` and the `Refused`
+    is written down -- this is the decision half only, for callers that do not need `scope` on the
+    not-exempt path too (a dry run does; see `_exemption_and_scope`).
+    """
+    exempted, _ = _exemption_and_scope(releases, version, repo, full)
+    return exempted
 
 
 def write_exemption(meta_dir, version: Version, anchor: Version, anchor_tag: str, this_tag: str,

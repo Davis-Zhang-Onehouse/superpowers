@@ -284,6 +284,113 @@ class ExemptionCase(unittest.TestCase):
         self.assertEqual(verdict["roster"], EXEMPT_ROSTER)
 
 
+class DryRunCase(unittest.TestCase):
+    """`release-verify --dry-run` reports the exemption decision, driven through the real `main`.
+
+    `Repo` still enforces its own contract -- a real `.git` marker on disk, `tag_exists`,
+    `changed_paths` raising on a bad ref -- so this exercises the same wiring `_do_release_verify` runs
+    in production. Only the git PROCESS is faked, at the seam `Repo` already takes (`git`): the same
+    reasoning `GitCase` (`test_release.py`) gives for using real git elsewhere applies in reverse here --
+    the interesting behaviour is what the dry run does with the decision, not whether `Repo` can spell
+    its own flags, so the diff is declared rather than produced.
+    """
+
+    def setUp(self):
+        import shutil
+        self.tmp = pathlib.Path(tempfile.mkdtemp(prefix="fleet-dryrun-"))
+        self.addCleanup(shutil.rmtree, self.tmp, True)
+        self.rel = Releases(self.tmp / "releases")
+        self.repo_path = self.tmp / "repo"
+        (self.repo_path / ".git").mkdir(parents=True)
+        self.anchor = Version.parse("0.1.0")
+        self.target = Version.parse("0.1.1")
+        (self.rel.dir_for(self.anchor) / META_DIR).mkdir(parents=True)
+        self.rel.write_manifest(self.anchor, {"version": "0.1.0", "tag": "fleet/v0.1.0"})
+        write_verdict(self.rel.dir_for(self.anchor) / META_DIR,
+                      [("hermetic", GREEN, "e", "-"), ("it", GREEN, "e", "-")], GATE_ROSTER)
+        (self.rel.dir_for(self.target) / META_DIR).mkdir(parents=True)
+        self.rel.write_manifest(self.target, {"version": "0.1.1", "tag": "fleet/v0.1.1"})
+
+    #: `main` converts a `Refused` into this exit code (`errors.EXIT_REFUSED`); named here the way
+    #: `PromoteGateCase.REFUSED` already does, so a regression shows as the wrong CODE, not a caught
+    #: exception nobody asserted on.
+    REFUSED = 4
+
+    def _fake_git(self, changed, tags):
+        """`(args, cwd) -> (rc, stdout)` -- `Repo`'s injected seam, answering only what the exemption
+        path asks: whether a tag exists, and the diff between two of them."""
+        def git(args, cwd):
+            if args[0] == "tag" and args[1] == "-l":
+                return (0, args[2] + "\n") if args[2] in tags else (0, "")
+            if args[0] == "diff" and args[1] == "--name-only":
+                return (0, "\n".join(changed))
+            if args[0] == "show":
+                return (0, "")
+            raise AssertionError(f"DryRunCase's fake git received an unexpected call: {args}")
+        return git
+
+    def _ctx(self, changed, tags, parsed, out, err):
+        from fleet.cli import Ctx
+        from fleet.harvest import Harvest
+        from fleet.pool import Pool
+        from fleet.session import Probes, SessionLayer
+        from fleet.store import Store
+        home = self.tmp / "home"
+        sessions = SessionLayer(Probes(list_processes=lambda: [], capture_pane=lambda name: "",
+                                       has_session=lambda name: False,
+                                       start_session=lambda name, cwd, cmd: None,
+                                       kill_session=lambda name: None))
+        return Ctx(home=home, instants_dir=home / "instants", store=Store(home),
+                   pool=Pool(home, cwd_probe=lambda path: [], alive=sessions.alive),
+                   sessions=sessions, harvest=Harvest(home), out=out, err=err,
+                   dry_run=parsed.on("dry-run"), porcelain=parsed.on("porcelain"),
+                   git=self._fake_git(changed, tags), runner=None, live_work=False)
+
+    def _run(self, changed, tags=("fleet/v0.1.0", "fleet/v0.1.1")):
+        """Drive `release-verify --dry-run` through the real `main`. Returns `(code, stdout, stderr)`."""
+        import io
+
+        from fleet.cli import main
+        out, err = io.StringIO(), io.StringIO()
+        code = main(["release-verify", "--dry-run", "--porcelain", "--version", "0.1.1",
+                     "--releases", str(self.rel.root), "--repo", str(self.repo_path)],
+                    stdout=out, stderr=err,
+                    context=lambda parsed, o, e: self._ctx(changed, tags, parsed, o, e))
+        return code, out.getvalue(), err.getvalue()
+
+    def verify_dry_run(self, changed, tags=("fleet/v0.1.0", "fleet/v0.1.1")):
+        """Like `_run`, but for the two ordinary cases: asserts the run exited clean and returns its
+        porcelain rows as `(field, value)` tuples."""
+        code, out, err = self._run(changed, tags)
+        self.assertEqual(code, 0, err)
+        return [tuple(line.split("\t", 1)) for line in out.splitlines()]
+
+    def test_dry_run_names_the_paths_that_force_the_suites(self):
+        """The dry run's only job is to report the decision, and `would-run the gate roster` prints
+        identically for an exempt release -- which is how a skills-only 0.5.11 cost a 45-minute run
+        before anyone learned it was `.hermes-plugin/plugin.yaml` that forced it."""
+        out = self.verify_dry_run(changed=["fleet/src/fleet/cli.py", "docs/x.md"])
+        self.assertIn(("would-run", "the gate roster"), out)
+        self.assertIn(("requiring", "fleet/src/fleet/cli.py"), out)
+        self.assertNotIn(("requiring", "docs/x.md"), out)
+
+    def test_dry_run_names_the_anchor_when_it_would_exempt(self):
+        out = self.verify_dry_run(changed=["docs/x.md"])
+        self.assertIn(("would-exempt", str(self.anchor)), out)
+        self.assertNotIn(("would-run", "the gate roster"), out)
+
+    def test_dry_run_propagates_refused_when_the_anchor_tag_is_missing(self):
+        """The failure a dry run must never swallow: `exemption_for`'s `Refused` when the anchor's tag is
+        gone from the checkout. A dry run that answered exit 0 here would report a release as verifiable
+        when the question of whether it may skip the suites could not even be asked -- see
+        `test_a_missing_anchor_tag_is_refused_not_treated_as_no_change` above, the non-dry-run half of the
+        same guarantee."""
+        code, out, err = self._run(changed=["docs/x.md"], tags=("fleet/v0.1.1",))    # anchor tag absent
+        self.assertEqual(code, self.REFUSED)
+        self.assertEqual(out, "", "a refused dry run must print nothing, not a fabricated decision")
+        self.assertIn("fleet/v0.1.0", err)
+
+
 class PromoteGateCase(unittest.TestCase):
     """`release-promote` reads what `verify` left. These are the admission rules over that file."""
 
