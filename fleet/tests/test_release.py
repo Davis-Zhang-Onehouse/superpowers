@@ -1227,6 +1227,10 @@ class ReleaseCliFixture:
         self.addCleanup(self._restore_env)
         self.calls = []
         self.rc = 0
+        #: `None` here would ask `Ctx.live_work_now()` to derive it from the stub session layer and
+        #: store, which is always empty in this fixture -- a case that cares sets this explicitly instead
+        #: of fighting the derivation.
+        self.live_work = False
 
     # --- the fixture -----------------------------------------------------------------------------
 
@@ -1262,7 +1266,7 @@ class ReleaseCliFixture:
                    pool=Pool(self.home, cwd_probe=lambda path: [], alive=sessions.alive),
                    sessions=sessions, harvest=Harvest(self.home), out=out, err=err,
                    dry_run=parsed.on("dry-run"), porcelain=parsed.on("porcelain"),
-                   git=default_git(), runner=self._runner, live_work=False)
+                   git=default_git(), runner=self._runner, live_work=self.live_work)
 
     def run_verb(self, *argv):
         from fleet.cli import main
@@ -1456,6 +1460,19 @@ class CliCase(ReleaseCliFixture, unittest.TestCase):
         # The export comes from the TAG, so the version bump has to be in the tag.
         self.assertIn('__version__ = "0.1.0"',
                       (export / "fleet" / "src" / "fleet" / "__init__.py").read_text())
+
+    def test_release_cut_says_when_the_box_has_live_work(self):
+        """`ctx.live_work_now()` was called in exactly one place, `_do_release_verify`. The CUT is the
+        earlier and more expensive decision -- a cut you regret costs a version number and a tag that is
+        never moved -- and it asked nobody. A NOTE, not a refusal: other roots' sessions are an
+        uncontrollable residual on a shared box and refusing on them would make releases impossible."""
+        from fleet import EXIT_OK
+        repo = self.repo()
+        self.live_work = True
+        code = self.run_verb("release-cut", "--version", "0.9.9", "--repo", str(repo),
+                             "--releases", str(self.releases), "--home", str(self.home))
+        self.assertEqual(code, EXIT_OK, self.err.getvalue())
+        self.assertIn("live fleet work", self.err.getvalue())
 
     def test_a_cut_freezes_the_payload_and_leaves_the_release_metadata_writable(self):
         """The freeze may not cover `.release`, or nothing can ever be promoted.
