@@ -1364,35 +1364,23 @@ def _do_dispatch(ctx: Ctx, parsed: Parsed) -> int:
 
     gctx = ctx.guard_ctx(parsed, base=base, cap=cap, profile=profile, optype=optype,
                          override_reason=parsed.get("override"))
-    verdicts = guards.evaluate_all(gctx, "dispatch")
 
     if ctx.dry_run:
         # `F3`/`I-24c`. A charter or seed written with a plausible-but-undeclared placeholder (a
         # coordinator's invented `{{LINEAGE_BASE_SHA}}`, say) used to be refused only at the REAL
-        # dispatch below (`profile.render`, `profiles.py:157-176`), by which point a lease was already
+        # dispatch below (`profile.render`, `profiles.py:158-176`), by which point a lease was already
         # claimed and a full rollback — plus verifying the rollback was complete — was the cost of a
-        # fact `--dry-run` exists to answer for free.
-        #
-        # `Profile.render` substitutes `context[name]` when the name is a context KEY and leaves the
-        # token otherwise, then raises on leftovers — so detection depends on the render context's KEY
-        # SET only, and never on its values. This calls the exact same `render`, with the same key set
-        # the real render below supplies, but marked placeholder values for the ones this path has not
-        # computed yet (`name`, `lease.slot`, `todo_id`, `child`): it validates honestly and discards the
-        # result. No `pool.claim`, no slot, no instant — `--dry-run`'s zero-delta contract is unchanged.
-        #
-        # `profiles.lint()` was considered and is the wrong vehicle: it checks profile-AUTHORING defects
-        # that hold for every dispatch of a profile (stray authoring stubs, a pinned sha, a missing
-        # required clause) and never sees a per-dispatch render context, so it cannot tell a declared
-        # placeholder from an invented one. `render` is the mechanism that already answers exactly this
-        # question; reusing it here avoids a second, parallel validator that could disagree with it.
-        profile.render({"TITLE": title, "INSTANT": "(dry-run)", "SLOT": "(dry-run)",
-                        "TODO_ID": "(dry-run)", "BASE": base, "PATH": "(dry-run)",
-                        "MILESTONE": milestone_id or "",
-                        "COORDINATOR": str(coordinator) if coordinator else "",
-                        "LINEAGE_BASE": parsed.get("lineage-base") or "",
-                        "LINEAGE_MODE": lineage_mode or "",
-                        "CHECKOUT": _checkout_instruction(lineage, lineage_mode)})
+        # fact `--dry-run` exists to answer for free. See `_dispatch_render_context` for the shared key
+        # set and why `profiles.lint()` is not the vehicle. Run BEFORE `guards.evaluate_all` below: both
+        # are pure reads, so the zero-delta contract holds either order, and this way a bad placeholder
+        # fails without spending a guard pass first.
+        profile.render({**_dispatch_render_context(
+                            title=title, base=base, milestone_id=milestone_id, coordinator=coordinator,
+                            parsed=parsed, lineage_mode=lineage_mode, lineage=lineage),
+                        "INSTANT": "(dry-run)", "SLOT": "(dry-run)", "TODO_ID": "(dry-run)",
+                        "PATH": "(dry-run)"})
 
+        verdicts = guards.evaluate_all(gctx, "dispatch")
         rows = [("dry-run", "every gate evaluated; nothing was claimed, created or started")]
         rows += [("coordinator", str(coordinator) if coordinator else
                   "(none — the child will have no origin.json and `propose` will stay LOCAL)"),
@@ -1458,18 +1446,15 @@ def _do_dispatch(ctx: Ctx, parsed: Parsed) -> int:
         ctx.pool.release(lease.slot, force=True)
         raise
     try:
-        rendered = profile.render({"TITLE": title, "INSTANT": name.format(), "SLOT": lease.slot,
-                                   "TODO_ID": todo_id, "BASE": base, "PATH": str(child),
-                                   # `SI-27`: a profile's seed can now name the worker's own milestone and
-                                   # coordinator, so the contract a worker reads first is specific to it.
-                                   "MILESTONE": milestone_id or "",
-                                   "COORDINATOR": str(coordinator) if coordinator else "",
-                                   # `SI-32`/`OI-1`: ONE datum, rendered into every document. A seed and a
-                                   # charter that both say `{{LINEAGE_BASE}}` cannot disagree about the base;
-                                   # two hand-written prose statements did, and the worker had to arbitrate.
-                                   "LINEAGE_BASE": parsed.get("lineage-base") or "",
-                                   "LINEAGE_MODE": lineage_mode or "",
-                                   "CHECKOUT": _checkout_instruction(lineage, lineage_mode)})
+        #: `F3`/`I-24c`. Extends the SAME shared context the dry-run path above validated, with the four
+        #: keys only a won claim can supply — see `_dispatch_render_context` for why this may not be a
+        #: second, hand-written dict.
+        rendered = profile.render({**_dispatch_render_context(
+                                       title=title, base=base, milestone_id=milestone_id,
+                                       coordinator=coordinator, parsed=parsed, lineage_mode=lineage_mode,
+                                       lineage=lineage),
+                                   "INSTANT": name.format(), "SLOT": lease.slot, "TODO_ID": todo_id,
+                                   "PATH": str(child)})
         #: `SI-53`. Appended HERE, before the seed is written and before the delivery check reads it, so
         #: there is one seed and not two: `seed.txt`, `_verify_seed_delivery` and `seed-check` all compare
         #: against the same combined text. Marked with its source path because a worker reading two
@@ -1987,6 +1972,36 @@ def _checkout_instruction(lineage: dict, mode: str) -> str:
             "so. `base-check` warns about stale native artifacts when it can tell, and after a copy that "
             "warning is about mtime, not about your product pair.")
     return "\n".join(lines)
+
+
+def _dispatch_render_context(*, title: str, base: str, milestone_id: str, coordinator,
+                             parsed: Parsed, lineage_mode: str, lineage: dict) -> dict:
+    """The render-context fields that need no claimed lease and no minted instant name.
+
+    `F3`/`I-24c`. `_do_dispatch` renders this profile TWICE — once here, honestly and speculatively, on
+    the `--dry-run` path, and once for real after a lease is claimed and `InstantName.new` has run. The
+    two contexts must agree on every key except the four this function cannot supply (`INSTANT`, `SLOT`,
+    `TODO_ID`, `PATH`), because `Profile.render` (`profiles.py:158-176`) raises on a leftover
+    `{{TOKEN}}` and detection therefore depends on the KEY SET matching, never on the values. Two
+    hand-written dict literals were exactly the "two validators that could disagree" shape this task
+    rejected `profiles.lint()` for, reintroduced one level down: a placeholder added to one copy and
+    forgotten in the other would make the dry-run's key-set check silently stale. Factored out so both
+    call sites extend the SAME dict with their own `INSTANT`/`SLOT`/`TODO_ID`/`PATH`.
+    """
+    return {
+        "TITLE": title,
+        "BASE": base,
+        # `SI-27`: a profile's seed can now name the worker's own milestone and coordinator, so the
+        # contract a worker reads first is specific to it.
+        "MILESTONE": milestone_id or "",
+        "COORDINATOR": str(coordinator) if coordinator else "",
+        # `SI-32`/`OI-1`: ONE datum, rendered into every document. A seed and a charter that both say
+        # `{{LINEAGE_BASE}}` cannot disagree about the base; two hand-written prose statements did, and
+        # the worker had to arbitrate.
+        "LINEAGE_BASE": parsed.get("lineage-base") or "",
+        "LINEAGE_MODE": lineage_mode or "",
+        "CHECKOUT": _checkout_instruction(lineage, lineage_mode),
+    }
 
 
 def _slot_of(ctx: Ctx, record: Record) -> Path:
