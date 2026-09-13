@@ -64,6 +64,11 @@ observation, and this one is known to lie.
 Distrust "not-claude" and "unknown-pane" outright while the board still calls the worker live. And note
 that `pane-guard`'s "indeterminate" is a **failed observation**, not an observation of emptiness.
 
+`pane-guard`'s "awaiting-operator" (`15`) is neither of those close-out shapes: it means the worker is
+sitting at an `AskUserQuestion` selection dialog, blocked on a human, not on a turn that will finish or a
+pane you can safely retry (`I-16`). Sampling it three more times will not change it — go answer the pane,
+or park the worker, before doing anything else with it.
+
 **Check attachment before treating anything as stuck.** A pane with unsubmitted text and a human attached
 is a person mid-sentence. A pane with unsubmitted text, no human, and a busy agent is a queued note that
 will deliver itself. Only a pane with an unanswered permission prompt is the case teardown logic exists
