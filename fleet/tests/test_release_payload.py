@@ -249,6 +249,26 @@ class CutFootprintCase(unittest.TestCase):
                                  f"{relative}: the stripper cannot undo the stamper, so every release "
                                  f"puts this file back into `requiring` and EXEMPT is unreachable")
 
+    def test_the_unquoted_branch_is_bounded_like_the_stamper(self):
+        """No current `CUT_MANIFESTS` file exercises this boundary, which is exactly why it needs its own
+        test rather than riding on the round trip above. `_rewrite` terminates an unquoted value at the
+        first whitespace/comma/EOL; an unbounded `_VERSION_FIELD` would strip `version: 6.3.0 # note`
+        whole, so an author's edit to ONLY the comment would read as identical before and after the cut's
+        stamp and the file would go EXEMPT on a change nobody checked -- the failure this module exists
+        to prevent, one line short of the family test above catching it."""
+        stripped = ("version: 6.3.0", '"version": "6.3.0"', '"version": "6.3.0",', "'version': '6.3.0'")
+        for line in stripped:
+            with self.subTest(line=line):
+                self.assertEqual(without_version_field(line).strip(), "",
+                                 f"{line!r} should have been recognised as a version line")
+
+        kept = ('version: 6.3.0 # a comment', 'version: "6.3.0', 'version: 6.3.0"',
+                'Version: 6.3.0', 'previousVersion: 6.3.0')
+        for line in kept:
+            with self.subTest(line=line):
+                self.assertEqual(without_version_field(line), line,
+                                 f"{line!r} was stripped; it must survive so the file stays `requiring`")
+
 
 class AreasCase(unittest.TestCase):
     """`RI-13`. Naming the payload is a DESCRIPTION, not a gate, and the two have opposite safe defaults."""

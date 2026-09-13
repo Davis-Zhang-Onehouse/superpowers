@@ -78,15 +78,22 @@ CUT_MANIFESTS = ("package.json", ".claude-plugin/plugin.json", ".cursor-plugin/p
 _VERSION_LINE = re.compile(r'^\s*__version__\s*=\s*["\'][^"\']*["\']\s*$', re.MULTILINE)
 
 #: `version: …` as a whole line, however the manifest spells it. Mirrors `release_stamp._rewrite`'s
-#: pattern deliberately: the quotes are optional and the closing one is back-referenced to the opening
-#: one, so `"version": "6.2.0"` and a YAML `version: 6.2.0` are both matched and a half-quoted value by
-#: neither. That module is the WRITE half of this question and had it right from the start; this one was
-#: JSON-only, so `.hermes-plugin/plugin.yaml` (a CUT_MANIFEST since upstream 6.3.0) was put back into
-#: `requiring` on every cut and no release from 0.5.2 to 0.5.11 could be EXEMPT. Kept as ONE pattern
-#: rather than a per-suffix dispatch: a dispatch is a second place for the manifest list to acquire a
-#: family the other half does not know about, which is the defect being fixed.
+#: pattern deliberately: a quoted value is matched by its own quote character end to end, and an unquoted
+#: value is bounded the same way `_rewrite` bounds it -- at the first whitespace, comma, or end of line --
+#: rather than running greedy to end-of-line. That boundary is not decoration: an unbounded unquoted
+#: branch would match `version: 6.3.0 # a comment` whole, so an author's edit to ONLY the trailing comment
+#: would strip identically before and after the cut's stamp and the file would read as untouched -- an
+#: EXEMPT on a change nobody checked, the exact failure this module exists to prevent. The KEY is quoted
+#: the same tolerant way (optional, and whatever quote is used must match on both sides) even though
+#: `_rewrite` only ever emits a bare or double-quoted key: this is the READ half, so it must recognise a
+#: manifest's existing spelling rather than only the one the stamper would itself write.
+#: `.hermes-plugin/plugin.yaml` (a CUT_MANIFEST since upstream 6.3.0) is a bare-YAML key, and the old
+#: JSON-only pattern put it back into `requiring` on every cut -- no release from 0.5.2 to 0.5.11 could be
+#: EXEMPT. Kept as ONE pattern rather than a per-suffix dispatch: a dispatch is a second place for the
+#: manifest list to acquire a family the other half does not know about, which is the defect being fixed.
 _VERSION_FIELD = re.compile(
-    r'^[ \t]*"?version"?[ \t]*:[ \t]*(?P<q>["\']?)[^"\']*(?P=q)[ \t]*,?[ \t]*$', re.MULTILINE)
+    r'^[ \t]*(?P<kq>["\']?)version(?P=kq)[ \t]*:[ \t]*(?:"[^"]*"|\'[^\']*\'|[^\s"\',]+)[ \t]*,?[ \t]*$',
+    re.MULTILINE)
 
 
 def without_version_line(text: str) -> str:
