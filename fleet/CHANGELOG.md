@@ -1,5 +1,13 @@
 # fleet — changelog
 
+## fleet/v0.5.10 — 2026-09-13T06:22:50Z
+Cut from 65f2d4e on `live` (upstream base snapshot/2026-08-17-221146). 1 commit(s) since fleet/v0.5.9.
+
+Every release ships the whole repository — all skills, `commands/`, `hooks/` and the plugin manifest, not only `fleet/`.
+Payload: fleet (2 files).
+
+- 65f2d4e fix: restore B13's first-tick id announcement; widen selftest's harness timeout (gate RED)
+
 ## fleet/v0.5.9 — 2026-09-13T03:37:19Z
 Cut from 93b685a on `live` (upstream base snapshot/2026-08-17-221146). 18 commit(s) since fleet/v0.5.8.
 
