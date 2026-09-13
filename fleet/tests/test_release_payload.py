@@ -23,7 +23,7 @@ import tempfile
 import unittest
 
 from fleet.errors import BadInput
-from fleet.release_scope import areas, classify, without_version_field
+from fleet.release_scope import CUT_MANIFESTS, areas, classify, without_version_field
 from fleet.release_stamp import (VERSION_CONFIG, core_of, declared_version_files, plugin_version,
                                  stamp_plugin_version)
 
@@ -185,6 +185,12 @@ class CutFootprintCase(unittest.TestCase):
     because they fed `classify` hand-written path lists rather than a real cut's diff.
     """
 
+    def setUp(self):
+        self.tmp = pathlib.Path(tempfile.mkdtemp(prefix="fleet-exempt-"))
+        self.addCleanup(shutil.rmtree, self.tmp, True)
+        repo = pathlib.Path(__file__).resolve().parents[2]
+        shutil.copy(repo / VERSION_CONFIG, self.tmp / VERSION_CONFIG)
+
     def test_the_manifests_the_cut_stamps_are_inert_as_PATHS(self):
         for path in sorted(MANIFESTS):
             with self.subTest(path=path):
@@ -217,6 +223,31 @@ class CutFootprintCase(unittest.TestCase):
         before = '{\n  "name": "superpowers",\n  "version": "6.2.0+fleet.0.3.7"\n}\n'
         after = '{\n  "name": "renamed",\n  "version": "6.2.0+fleet.0.3.8"\n}\n'
         self.assertNotEqual(without_version_field(before), without_version_field(after))
+
+    def test_every_stamped_manifest_survives_its_own_stamp(self):
+        """`exemption_for` asks each CUT_MANIFEST "did anything OTHER than the version change", and it
+        asks by stripping. A stripper that does not understand a manifest's spelling answers "yes" on
+        every release, which makes EXEMPT unreachable -- SI-19's shape, and what the JSON-only
+        `_VERSION_FIELD` did to `.hermes-plugin/plugin.yaml` for ten releases (0.5.2..0.5.11 have no
+        EXEMPTION.tsv between them). Asserted over the FAMILY so the next manifest cannot repeat it."""
+        repo = pathlib.Path(__file__).resolve().parents[2]
+        for relative in CUT_MANIFESTS:
+            path = repo / relative
+            if not path.is_file():
+                continue  # `.version-bump.json` lists every harness ever shipped for; absence is ordinary
+            with self.subTest(manifest=relative):
+                scratch = self.tmp / relative
+                scratch.parent.mkdir(parents=True, exist_ok=True)
+                scratch.write_text(path.read_text())
+                before = scratch.read_text()
+                moved = stamp_plugin_version(self.tmp, "9.9.9")
+                self.assertTrue(any(row[0] == relative for row in moved),
+                                f"{relative} was not stamped, so this asserts nothing")
+                after = scratch.read_text()
+                self.assertNotEqual(before, after, f"{relative} did not move")
+                self.assertEqual(without_version_field(before), without_version_field(after),
+                                 f"{relative}: the stripper cannot undo the stamper, so every release "
+                                 f"puts this file back into `requiring` and EXEMPT is unreachable")
 
 
 class AreasCase(unittest.TestCase):
