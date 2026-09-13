@@ -134,14 +134,107 @@ if [ -d "$STUBBORN_DIR" ]; then note "ok   the stubborn directory was left in pl
 else note "FAIL the stubborn directory is gone even though rm reported failure"; fails=1; fi
 rm -rf "$STUBBORN_DIR"
 
+# --- an orphan that is itself a SYMLINK must be refused BEFORE the chmod ------------------------------
+# GNU `chmod -R` DEREFERENCES a symlink handed to it as a command-line ARGUMENT; it declines only to
+# follow links it meets during traversal, and it is the traversal case an earlier adversarial review
+# tested. Reproduced against the real script: modes on an unrelated tree well outside the release area
+# went from dr-xr-xr-x/-r-xr-xr-x to drwxr-xr-x/-rwxr-xr-x. Nothing outside is deleted -- `rm -rf` removes
+# only the link -- but this script's sanction is that it touches nothing outside the `.fleet-v*.tmp`
+# pattern, and widening modes on an arbitrary tree breaks it. `Verify._worktree()` only ever creates real
+# directories, so a symlink here is anomalous and refusing is the right answer.
+OUTSIDE="$TMP/somebody-elses-tree"
+mkdir -p "$OUTSIDE/sub"
+echo important >"$OUTSIDE/sub/file"
+chmod -R 0555 "$OUTSIDE"
+modes_before="$(stat -c '%A %n' "$OUTSIDE" "$OUTSIDE/sub" "$OUTSIDE/sub/file")"
+LINK_DIR="$RELEASES/.fleet-v0.0.5.$DEAD_PID.5.f00d.tmp"
+ln -s "$OUTSIDE" "$LINK_DIR"
+
+out="$(bash "$SCRIPT" --reap 2>&1)"; rc=$?
+check "an orphan that is a symlink makes --reap exit non-zero" "1" "$rc"
+printf '%s' "$out" | grep -q "refusing to reap '$LINK_DIR' -- it is a symlink" \
+  || { note "FAIL the symlink orphan was not refused by name"; note "$out"; fails=1; }
+modes_after="$(stat -c '%A %n' "$OUTSIDE" "$OUTSIDE/sub" "$OUTSIDE/sub/file")"
+check "--reap changes no mode outside the release area when the orphan is a symlink" \
+  "$modes_before" "$modes_after"
+if [ -L "$LINK_DIR" ]; then note "ok   the refused symlink was left in place, not unlinked"
+else note "FAIL the refused symlink was removed anyway"; fails=1; fi
+if [ -d "$OUTSIDE" ]; then note "ok   the tree the symlink pointed at still exists"
+else note "FAIL the tree outside the release area was deleted"; fails=1; fi
+rm -f "$LINK_DIR"
+chmod -R u+w "$OUTSIDE"
+rm -rf "$OUTSIDE"
+
+# --- `git worktree prune` runs only when EVERY reap in the batch succeeded ----------------------------
+# `reaped_any` is batch-wide. Two orphans, A clean and B stubborn: `rm` has already deleted enough of B
+# -- including its `.git` file -- for `git worktree` to read it as corrupt and drop the registration on
+# the next prune, while most of B's directory is still on disk. That husk state already cost a manual
+# cleanup once, and a batch-wide flag reintroduces it one orphan narrower. A stale registration left by a
+# stubborn tree is harmless and prunable by hand; a stripped registration over a surviving tree is not.
+#
+# The `git` stub also keeps the test off the REAL repository: `--reap` otherwise runs
+# `git -C <this checkout> worktree prune` for real, on every case above.
+mkdir -p "$TMP/bin6"
+GIT_LOG="$TMP/git-calls.log"
+cat >"$TMP/bin6/git" <<EOF
+#!/usr/bin/env bash
+# Records and does nothing else. release-preflight.sh's only git call is \`worktree prune\`, so recording
+# it is enough to observe whether it ran -- and not executing it keeps this test off the real checkout.
+echo "\$*" >>"$GIT_LOG"
+EOF
+chmod +x "$TMP/bin6/git"
+
+# Positive control FIRST, so the assertion below cannot pass because the stub simply never fires.
+CLEAN_DIR="$RELEASES/.fleet-v0.0.6.$DEAD_PID.6.aaaa.tmp"
+mkdir -p "$CLEAN_DIR/keep"
+out="$(PATH="$TMP/bin6:$PATH" bash "$SCRIPT" --reap 2>&1)"; rc=$?
+check "a batch where every reap succeeded exits 0" "0" "$rc"
+grep -q "worktree prune" "$GIT_LOG" 2>/dev/null \
+  || { note "FAIL an all-clean batch did not prune, so the assertion below proves nothing"; fails=1; }
+: >"$GIT_LOG"
+
+# Now the partial failure: A reaps cleanly, B's rm fails.
+A_DIR="$RELEASES/.fleet-v0.0.7.$DEAD_PID.7.bbbb.tmp"
+B_DIR="$RELEASES/.fleet-v0.0.8.$DEAD_PID.8.cccc.tmp"
+mkdir -p "$A_DIR/keep" "$B_DIR/keep"
+cat >"$TMP/bin6/rm" <<EOF
+#!/usr/bin/env bash
+for a in "\$@"; do
+  if [ "\$a" = "$B_DIR" ]; then
+    echo "rm: cannot remove '\$a': Permission denied (test stub)" >&2
+    exit 1
+  fi
+done
+exec /bin/rm "\$@"
+EOF
+chmod +x "$TMP/bin6/rm"
+
+out="$(PATH="$TMP/bin6:$PATH" bash "$SCRIPT" --reap 2>&1)"; rc=$?
+check "a batch with one failed reap exits non-zero" "1" "$rc"
+printf '%s' "$out" | grep -q "reaped: $A_DIR" \
+  || { note "FAIL the clean orphan in the batch was not reaped"; note "$out"; fails=1; }
+printf '%s' "$out" | grep -q "FAILED: $B_DIR" \
+  || { note "FAIL the stubborn orphan was not reported FAILED"; note "$out"; fails=1; }
+if grep -q "worktree prune" "$GIT_LOG" 2>/dev/null; then
+  note "FAIL a batch with a failed reap still pruned -- that strips a registration whose tree survives"
+  fails=1
+else
+  note "ok   a batch with a failed reap did not prune, so no surviving tree loses its registration"
+fi
+rm -f "$TMP/bin6/rm"
+chmod -R u+w "$B_DIR" 2>/dev/null
+rm -rf "$A_DIR" "$B_DIR"
+
 if [ "$fails" = 0 ]; then
   echo "PASS: release-preflight refuses (exit 2) only when FLEET_TMUX_SOCKET is unset or literally" \
        "'fleet' -- the environment fleet-env.sh guarantees can never be a real fleet socket -- reports" \
        "everything else as advisory WARN lines with exit 0, classifies a tmp worktree ORPHAN unless BOTH" \
        "its pid is alive AND that pid's cmdline says release-verify, and --reap deletes only directories" \
        "matching the exact orphan name pattern, leaving anything else alone; --reap also restores write" \
-       "access to a read-only §Q export before removing it, and reports FAILED (exit non-zero) rather" \
-       "than reaped: for a directory it did not actually manage to remove"
+       "access to a read-only §Q export before removing it, reports FAILED (exit non-zero) rather" \
+       "than reaped: for a directory it did not actually manage to remove, refuses an orphan that is" \
+       "itself a symlink BEFORE the chmod that would otherwise widen modes on an arbitrary tree outside" \
+       "the release area, and prunes worktree registrations only when every reap in the batch succeeded"
   exit 0
 fi
 echo FAIL
