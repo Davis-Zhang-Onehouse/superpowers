@@ -1,5 +1,35 @@
 # fleet — changelog
 
+## fleet/v0.5.12 — 2026-09-13T18:34:17Z
+Cut from 0eac6da on `live` (upstream base snapshot/2026-08-17-221146). 22 commit(s) since fleet/v0.5.11.
+
+Every release ships the whole repository — all skills, `commands/`, `hooks/` and the plugin manifest, not only `fleet/`.
+Payload: fleet (8 files), skills (1 file), scripts (6 files), docs (2 files).
+Skills changed: releasing-fleet.
+
+- ee98590 spec: mechanise the fleet release traps that still cost a run on 0.5.9-0.5.11
+- a4caa42 plan: fleet release mechanisation, 7 tasks
+- 629c9b7 fix: the exemption stripper must match what the cut's stamper writes
+- 69ff32e fix: bound the unquoted branch of _VERSION_FIELD like the stamper does
+- 3c4e780 feat: scripts/release-gate.sh — launch the gate detached, unpiped, and wait on the verdict
+- 548e40e fix: release-verify --dry-run reports the exemption decision it already computes
+- 01c5072 feat: scripts/release-preflight.sh — box quietness through the derived socket, and an orphan reaper
+- fe81000 fix: scripts/release-gate.sh — stop leaking $1 into fleet-env.sh, and give the wait loop a poll seam
+- 0ad3099 fix: release-verify --dry-run must not fabricate would-run over a refusal it swallowed
+- 7bdf678 fix: release-preflight --reap must verify removal before claiming reaped
+- 12e853d feat: release-list carries each release's verdict
+- 999bab3 feat: release-cut warns when the box has live fleet work
+- 9148323 feat: scripts/release-postflight.sh — prove the deployment reached every root
+- aea915e fix: release-postflight.sh — drop the PyYAML import, match release_stamp.py's textual read
+- ff221c0 docs: point each mechanised trap at the script that now enforces it
+- 7efb313 fix: release-gate.sh must wait for THIS run's verdict, not a previous attempt's
+- c834f27 fix: changed_paths must name BOTH sides of a rename, or EXEMPT skips real code removal
+- 3814fe4 fix: release-postflight.sh must not let an assertion pass by asserting nothing
+- fa67324 test: guard the multiplicity `_VERSION_FIELD` cannot see, and state the mechanism that makes it safe
+- 2360250 fix: --reap must refuse a symlink orphan, and must not prune after a partial failure
+- e3ce31f fix: a failed `git show` must answer "run the suites", not "exempt"
+- 0eac6da docs: fleet/CLAUDE.md — the gate waits for THIS run's verdict
+
 ## fleet/v0.5.11 — 2026-09-13T15:41:51Z
 Cut from de0ccd9 on `live` (upstream base snapshot/2026-08-17-221146). 1 commit(s) since fleet/v0.5.10.
 
