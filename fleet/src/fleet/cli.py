@@ -81,7 +81,7 @@ from fleet.release_git import Repo, changelog_section
 from fleet.release_scope import areas, skills_changed
 from fleet.release_stamp import stamp_plugin_version
 from fleet.release_verify import (EXEMPT, EXEMPT_ROSTER, FULL_ROSTER, GATE_ROSTER, GREEN, PROMOTABLE,
-                                  Verify, archive_previous_attempt, exemption_for, read_verdict,
+                                  Verify, _exemption_and_scope, archive_previous_attempt, read_verdict,
                                   write_exemption, write_verdict)
 from fleet.review import Finding, Review, exit_code_for
 from fleet import origin as origin_mod
@@ -4511,17 +4511,6 @@ def _do_release_verify(ctx: Ctx, parsed: Parsed) -> int:
         raise BadInput(f"no release {version} at {export}. `release-list` shows what has been cut.")
     roster = FULL_ROSTER if parsed.on("full") else GATE_ROSTER
 
-    if ctx.dry_run:
-        _emit(ctx, "release-verify", [
-            ("dry-run", "no suite was run and no evidence was written"),
-            ("would-verify", f"{version} at {export}"),
-            ("would-run", f"the {roster} roster")])
-        return EXIT_OK
-
-    if ctx.live_work_now():
-        print("note: this box has live fleet work. The IT suite baselines the live session set, so a "
-              "failure may be contamination rather than a defect — that is what INCONCLUSIVE records.",
-              file=ctx.err)
     # `ctx.runner` is the seam every handler is handed, and `Verify` REQUIRES it: a `subprocess` default
     # inside `release_verify` would be a fourth spawn site in the package (`FI-27a`).
     #
@@ -4530,17 +4519,67 @@ def _do_release_verify(ctx: Ctx, parsed: Parsed) -> int:
     # release cut after that field existed carries its own, and one cut before it must be told.
     repo = Repo(parsed.get("repo"), git=ctx.git) if parsed.get("repo") else None
 
-    #: The exemption check, BEFORE anything is spawned. A release is a `git archive` of the whole
-    #: repository, so a docs- or skills-only release otherwise pays ~24 minutes to prove that `fleet/` --
-    #: which it did not touch -- still works. The alternative in use before this was
-    #: `release-deploy --force`, which is not a decision but an override: it discards the gate and records
-    #: the release UNVERIFIED, which is how `0.3.2` came to be deployed without evidence.
+    #: The exemption check, BEFORE anything is spawned -- and BEFORE the dry-run return. Reporting the
+    #: decision is the one thing a dry run is asked for, and `would-run the gate roster` used to print
+    #: identically whether or not the release was exempt: that is how a skills-only 0.5.11 read the
+    #: roster line as a decision and went looking in `release_scope` by hand, burning the 45-minute gate
+    #: it was trying to avoid (measured on this box; an earlier version of this comment said ~24).
     #:
-    #: Fail-safe: `exemption_for` answers None -- run them -- for every uncertainty, and the classifier
-    #: is an allowlist, so an unrecognised path can never skip the gate. The repository is resolved the
-    #: same way the suites resolve it, because the diff needs the anchor's tag.
-    scope_repo = repo or Verify(rel, version, ctx.runner).repo()
-    exempted = exemption_for(rel, version, scope_repo, full=parsed.on("full"))
+    #: A release is a `git archive` of the whole repository, so a docs- or skills-only release otherwise
+    #: pays that cost to prove that `fleet/` -- which it did not touch -- still works. The alternative in
+    #: use before this was `release-deploy --force`, which is not a decision but an override: it discards
+    #: the gate and records the release UNVERIFIED, which is how `0.3.2` came to be deployed without
+    #: evidence.
+    #:
+    #: The hoist is safe because this check is PURE with respect to the release area: a
+    #: `git diff --name-only` between two tags plus a `git show` on at most ten files, no spawns and no
+    #: writes, so a dry run stays a dry run. A `Refused` from `_exemption_and_scope` (the missing-anchor-
+    #: tag case) PROPAGATES here on purpose -- a dry run that swallowed it would report a release as
+    #: verifiable when the question of whether it may skip the suites cannot even be asked.
+    #:
+    #: Fail-safe: `_exemption_and_scope` answers `(None, None)` -- run them, nothing to report -- for
+    #: every uncertainty, and the classifier is an allowlist, so an unrecognised path can never skip the
+    #: gate. The repository is resolved the same way the suites resolve it, because the diff needs the
+    #: anchor's tag.
+    #:
+    #: `Verify.repo()`'s OWN refusal -- no `--repo` and no `source_repo` in the MANIFEST at all, so there
+    #: is not even a repository to diff -- is a DIFFERENT question from the anchor-tag one above, and only
+    #: a dry run may swallow it: it says nothing about whether this release could be exempt, only that a
+    #: real run could not spawn a worktree either, and `RI-32`/`OBS-70`'s dry-run invariant (test_release.
+    #: py's `test_no_mutating_release_verb_touches_anything_under_dry_run`) asserts a dry run reports
+    #: SOMETHING rather than refusing early over a question the roster line never depended on. The real
+    #: run below still resolves eagerly and still refuses before anything is spawned, exactly as it always
+    #: has -- `Verify.run()` calls `self.repo()` again on the same unset `_repo_obj` and raises the
+    #: identical refusal.
+    if repo is not None:
+        scope_repo = repo
+    elif ctx.dry_run:
+        try:
+            scope_repo = Verify(rel, version, ctx.runner).repo()
+        except Refused:
+            scope_repo = None
+    else:
+        scope_repo = Verify(rel, version, ctx.runner).repo()
+    exempted, scope = ((None, None) if scope_repo is None else
+                       _exemption_and_scope(rel, version, scope_repo, full=parsed.on("full")))
+
+    if ctx.dry_run:
+        rows = [("dry-run", "no suite was run and no evidence was written"),
+                ("would-verify", f"{version} at {export}")]
+        if exempted is not None:
+            rows.append(("would-exempt", str(exempted[0])))
+        else:
+            rows.append(("would-run", f"the {roster} roster"))
+            if scope is not None:
+                rows += [("requiring", path) for path in scope.requiring]
+        _emit(ctx, "release-verify", rows)
+        return EXIT_OK
+
+    if ctx.live_work_now():
+        print("note: this box has live fleet work. The IT suite baselines the live session set, so a "
+              "failure may be contamination rather than a defect — that is what INCONCLUSIVE records.",
+              file=ctx.err)
+
     if exempted is not None:
         anchor, scope = exempted
         anchor_tag = rel.manifest(anchor).get("tag") or anchor.tag
