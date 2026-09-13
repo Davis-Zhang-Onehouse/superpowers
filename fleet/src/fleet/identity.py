@@ -37,10 +37,26 @@ class InstantName:
             ("instantName", self.name, _NAME.match(self.name)),
         ):
             if not ok:
+                #: S4 / I-24b. `base`/`curr` are a stable KEY, not a path — an instant's own folder is
+                #: renamed at every state transition, so a path stored as a base would go stale the
+                #: moment that instant moves (Task 2 of this batch is what that going-stale looks like
+                #: from the other side). The generic domain message below already named the rule; it
+                #: did nothing for the caller who copy-pasted an `--instant`-shaped path into `--base`
+                #: and had to work out by hand which segment was the id they meant. `/` is the tell —
+                #: nothing in this grammar's declared domain ever contains one — so the tail component
+                #: is named as the likely intended id, on a best-effort basis: it is a hint, not a
+                #: second validation.
+                hint = ""
+                if "/" in str(value):
+                    hint = (f" {value!r} looks like a path — base/curr take a bare 8-digit id, never a "
+                            f"path, because the instant it names gets renamed at every state transition "
+                            f"and a stored path would go stale. The tail component {Path(str(value)).name!r} "
+                            f"looks like the id you meant.")
                 raise InstantNameError(
                     f"{field}={value!r} is outside its declared domain. "
                     f"base/curr are 8 digits ({ROOT_BASE} is the root; `main` is deprecated), "
                     f"state in {STATES}, opType in {OPTYPES}, instantName is dashless camelCase."
+                    f"{hint}"
                 )
 
     @classmethod

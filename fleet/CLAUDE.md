@@ -312,6 +312,11 @@ not what a monitor does once armed.
 - **§C10 is the one structural SKIP worth knowing about.** It needs a *succeeding* dispatch, which §C's own
   contract forbids, so it cannot be asserted there. Its second reason — "there is no clone to observe" — was
   removed by `fleet clone` (`SI-19`); the first still stands.
+- **`init` is not idempotent, correctly — but deleting the folder it made is only half the cleanup.**
+  Instant names embed a minute-resolution timestamp, so two runs a minute apart are two legal, different
+  instants; a same-minute re-run IS refused (`target.exists()`). But `init` also registers a watched
+  source (`ctx.harvest.register`) in the same call, so deleting a stray instant folder by hand leaves a
+  dangling registry row behind — the register still names a source whose folder is gone (S1 / I-1).
 
 ## The release pipeline — internals
 
