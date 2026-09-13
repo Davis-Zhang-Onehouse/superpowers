@@ -37,6 +37,15 @@ $FLEET release-deploy  --version X.Y.Z --releases "$FLEET_RELEASES" --reason "�
 `--dry-run` exists on every mutating verb. Use it on `release-cut` — it names the commit, the tag and the
 commit count without writing anything.
 
+After a deploy, `scripts/release-postflight.sh <version>` proves it actually reached every root that
+shares this release area — `current`'s target, each root's marketplace path, every `.version-bump.json`
+manifest, and the deployed evidence's own verdict — **without invoking `fleet` at all**. That is
+deliberate: on this box `davis2_root/fleet-releases` is a symlink alias of this release area, and
+`fleet release-status` run from that second root reports relative to whichever `FLEET_HOME` it was
+handed, which once printed a misleading `current DEV / head unknown` for a deployment that was perfectly
+correct. Postflight answers the box-relative question directly instead of inheriting the artifact that
+caused the confusion, and it is read-only — it proves a deployment, it never performs one.
+
 ## Do the suites need to run?
 
 Usually you do not have to care: `release-verify` decides and returns in ~2 seconds when they are not
@@ -69,12 +78,20 @@ the release area — the tool that moves `current` must not be the thing `curren
 checkout's binary by absolute path.** Read-only verbs (`release-status`, `-list`, `-history`) are exempt
 and may come from either.
 
+This refusal is already inside the verb layer (`_refuse_if_self_deployed`), not something a wrapper needs
+to re-check — running a deployed binary against itself is settled. The only remaining discipline is
+remembering which binary you called.
+
 **Trap 2 — the cut creates the tag; do not pre-create it.** `release-cut --help` says "the tag becomes
 `fleet/vX.Y.Z`", which reads like a precondition. It is not. Under its lock the cut writes the changelog
 section, rewrites `__version__`, commits `fleet vX.Y.Z`, then makes the **annotated** tag — and
 `annotated_tag` *refuses* if it already exists. Pre-creating it hard-blocks the release. Make only your
 ordinary content commits; touch neither `fleet/CHANGELOG.md` nor `__version__` (a dirty tree is refused
 too).
+
+Both refusals here are already inside `release-cut` itself — an existing tag (`_refuse_an_existing_release`)
+and a dirty tree, **including untracked files** (`Repo.dirty()`) — so neither needs a wrapper check written
+around it; the only open question when the cut refuses is which of the two you hit.
 
 **Trap 3 — be SILENT while the gate runs.** `pgrep -x claude` matches on `comm`, and a forked child
 carries its parent's `comm` until it execs — so **every tool call an agent session makes creates a process
@@ -86,9 +103,15 @@ safe, because its own forks are `comm=bash`.
 **Two things "in the background" does not say, and each cost a run on 2026-09-13 (0.5.9/0.5.10):**
 
 - **Never pipe the control.** `release-verify … | tail` reports *`tail`'s* exit status, not the verb's —
-  the hard rule `fleet/CLAUDE.md` states for every control, and it applies here. A run that died after
-  the hermetic half exited `0` through the pipe and read as a finished gate. The giveaway was the
-  evidence directory: `hermetic.log` and nothing else.
+  the hard rule `fleet/CLAUDE.md` states for every control, and it applies here. What this provably did
+  to the 0.5.9 run: a piped, backgrounded attempt reported exit `0` although it had written no
+  `VERDICT.tsv` and had stopped after the hermetic half — a pipeline's exit status is the last stage's,
+  so a dead run read as a finished gate. The giveaway was the evidence directory: `hermetic.log` and
+  nothing else. **What killed that run is a separate, still-open question — earlier notes here blamed the
+  pipe for the death itself, and that claim is withdrawn:** a later, unpiped attempt at the same version
+  died the identical way ("Forty-five minutes, no verdict, same two lines — so my pipe theory was wrong
+  and something else is stopping it"). Read this trap as "the pipe turns a dead run into a false success,"
+  not "the pipe kills runs."
 - **Launch it with `setsid`,** so the run does not sit in your session's process group. A background task
   that is stopped — by an interrupt, a teardown, or your own cleanup — takes the whole group with it,
   leaving a CANDIDATE with no `VERDICT.tsv` and no error anywhere. This happened twice before the cause
@@ -102,13 +125,27 @@ setsid nohup "$FLEET" release-verify --version X.Y.Z --releases "$FLEET_RELEASES
 Then wait on a **condition** — `VERDICT.tsv` appearing, or the pid exiting — never on a fixed sleep. One
 background shell doing that loop is safe: its own forks are `comm=bash`.
 
-**The run prints nothing between its header and its verdict,** and it took **~45 minutes** measured here
-(2026-09-13, 0.5.10, with one other root's worker live on the box) against the ~24 the table above quotes.
-An apparently idle gate is the normal shape; do not read it as a hang.
+**`scripts/release-gate.sh <version>` does all of the above for you — use it instead of typing the launch
+by hand.** `setsid`, no pipe, no `timeout`, and an unbounded wait on the same condition. It reports one of
+three outcomes: a verdict → exit 0 (`GREEN`/`EXEMPT`) or exit 1 (anything else), with the per-runner FAIL
+rows already printed; the pid gone with no verdict → **exit 3**, running Trap 8's checklist for you
+(`hermetic.log`'s size and mtime, then the log's tail); "still running" is unreachable by construction —
+the script does not return until one of the other two is true. It runs the gate **once**; re-running it is
+a separate, deliberate invocation you make, never something the script does for you.
+
+**The run prints nothing between its header and its verdict.** Two runs measured on this box
+(2026-09-13, 0.5.9/0.5.10) took 2080 s (~35 min) and 2800 s (~47 min, one other root's worker live on the
+box) — both well past the old `~24 min` figure the table above used to quote on its own. Neither
+measurement is 24 minutes; the table now reads `~24–45 min` to keep the old, unverified low estimate
+rather than discard it, against the ~45 minutes actually measured. This is also why `release-gate.sh`
+waits unbounded instead of guessing a timeout. An apparently idle gate is the normal shape; do not read it
+as a hang.
 
 **Trap 3b — AN IT RUN DIRTIES THE TREE, AND `release cut` REFUSES ON ANY DIRTY ROW.**
-`Repo.dirty()` counts **untracked** rows too, so a single `??` refuses the cut. Running any IT runner in
-the checkout rewrites tracked registers — `fleet/it/RESULTS.tsv` via the merge step, and historically the
+The refusal itself is already enforced — `Repo.dirty()` counts **untracked** rows too, so a single `??`
+refuses the cut, and nobody needs to write a pre-cut check for it. What is NOT enforced, and is the actual
+trap: running any IT runner in the checkout rewrites tracked registers — `fleet/it/RESULTS.tsv` via the
+merge step, and historically the
 SOURCE PIN scratch. **Before any cut, the register is either COMMITTED — when the run you just did is the
 run you are releasing — or REVERTED, when it was a scratch run.** Decide which; do not leave it.
 
@@ -142,6 +179,20 @@ scheduled contamination event: it exits mid-run, moving both the board and the c
 finished workers before cutting. Other people's live sessions are an uncontrollable residual risk — a gate
 run here is not reliably repeatable.
 
+**Run `scripts/release-preflight.sh` before cutting** — it reports exactly this, through the environment's
+own **derived** socket (`FLEET_TMUX_SOCKET`, set by `fleet-env.sh`; never a bare `-L fleet`, whose failure
+looks identical to a quiet box whether the box is quiet or the environment was simply never sourced): this
+root's live `dt-` sessions, every *other* root's socket (an uncontrollable residual, reported but never
+refused — this box has more than one root), any `board` subject still `COMPLETE` and holding a slot, the
+sync-cron window (Trap 7), and orphaned `.fleet-v*.tmp` verify worktrees left by a run that terminated
+abnormally (`--reap` removes them — restoring write access to a read-only §Q export first, and refusing to
+touch anything whose name does not match the orphan pattern exactly). Every finding is a `WARN:` at exit 0
+— advisory, because none of it is this root's business to refuse on — except one hard refusal at exit 2
+when `FLEET_TMUX_SOCKET` is unset or literally `fleet`: reporting confidently from a broken environment is
+worse than refusing, because the two read identically on screen. `release-cut` and `release-verify` also
+print a one-line note of their own when the box has live work, so the same fact surfaces even if
+preflight is skipped.
+
 **Trap 5 — a re-verify archives the previous attempt FOR you; read the archive, don't recreate it.**
 Since 0.3.8 both `release-verify` paths (the suites and `EXEMPT`) move everything already in
 `<release>/.release/evidence/` into `evidence/attempt-<n>-<verdict>/` before writing, so every attempt
@@ -166,20 +217,43 @@ PYTHONDONTWRITEBYTECODE=1 PYTHONPATH="$REPO/fleet/src" python3 -m unittest disco
 every commit the fork carries. The pipeline is tag-based for exactly this reason, but a run straddling it
 is asking for trouble. The job is real and checkable — `crontab -l` shows
 `30 3 * * * … .superpowers-sync/sync.sh`. Since the gate runs ~45 minutes (Trap 3), anything started after
-about 02:45 UTC straddles it; wait the window out rather than racing it.
+about 02:45 UTC straddles it; wait the window out rather than racing it. `scripts/release-preflight.sh`
+(Trap 4) checks this window against the real `crontab -l` line rather than a hardcoded time, so it stays
+right if the cron ever moves.
 
 **Trap 8 — an absent `VERDICT.tsv` is not a verdict.** The file is written at the end, so its absence
 means the run *did not finish* — killed, crashed, or piped into something that swallowed its status. That
 is not RED, and the exit status will not tell you which (Trap 3). Check in this order: the file, then the
 pid, then `hermetic.log`'s mtime to see how far it got. A directory holding only `hermetic.log` and an
-empty `live-subjects-before.tsv` never reached the IT suite at all.
+empty `live-subjects-before.tsv` never reached the IT suite at all. `scripts/release-gate.sh` runs exactly
+this order for you and reports it as **exit 3** — the pid gone, no `VERDICT.tsv`.
 
 **Trap 9 — fixing a RED does not fix the artifact you already cut.** The export and the tag are taken at
 cut time, so a commit landed to clear a RED is **not in them**, and `release-cut` has no `--force` and
 refuses an existing tag (Trap 2). Cut the next patch version from the fixed tree and let the failed one
 stand as a CANDIDATE that never shipped — that is exactly what the state means, and `release-list` is the
-honest record of it. Deleting a published tag to reuse its number is the destructive option and buys
-nothing but a tidier number. (`0.5.9` is the worked example: cut, RED, fixed, superseded by `0.5.10`.)
+honest record of it: its `verdict` column means a RED CANDIDATE and a version nothing has verified at all
+no longer print the same row. Deleting a published tag to reuse its number is the destructive option and
+buys nothing but a tidier number. (`0.5.9` is the worked example: cut, RED, fixed, superseded by `0.5.10`.)
+
+**Trap 10 — `EXEMPT` has never actually fired before, and now it can.** A stripper bug meant the version
+field in `.hermes-plugin/plugin.yaml` (a bare-YAML `version:` key) never matched the JSON-only pattern
+checking whether a cut's own stamp was the only thing that changed — so every cut's stamp looked like a
+real change, `requiring` was never empty, and no release from **0.5.2 to 0.5.11 could ever be `EXEMPT`**,
+no matter how docs-only the diff was. Now that the stripper matches the YAML key too, a docs- or
+non-`using-fleet`-skill-only release really can skip the suites, and when it does: **no suite ran at all**
+— the evidence is `evidence/EXEMPTION.tsv` (the anchor release, both tags, every changed path), never a
+test log, and there is no `hermetic.log` or `it-RESULTS-closeout-*.tsv` to go looking for (that absence
+means EXEMPT here, not Trap 8's "the run did not finish"). Before spending 45 minutes finding out, ask
+first — `release-verify --dry-run` answers in seconds:
+
+```bash
+$FLEET release-verify --version X.Y.Z --releases "$FLEET_RELEASES" --dry-run
+```
+
+It prints `would-exempt` and names the anchor release it diffed against when the release qualifies, or
+`would-run` plus a `requiring` row for every path that forced the suites when it does not — so you know
+which of the two you are about to get before you commit to the run.
 
 ## Reading the verdict
 
@@ -266,3 +340,5 @@ what the next person reads when they ask why `current` moved.
 | Treating `INCONCLUSIVE` as RED, or as "just retry" | Identify the mover, remove it, then re-run |
 | Widening the inert set to make a release exempt | The allowlist's narrowness IS the safety property |
 | Assuming a release only ships the CLI | It ships every skill; deploying changes what sessions load |
+| Running `fleet release-status` from a second root to confirm a deploy reached it | Root-relative and can mislead ("The chain" section's postflight note); `scripts/release-postflight.sh` answers box-relative and never calls `fleet` |
+| Spending 45 minutes to find out a docs-only release could have skipped the suites | `release-verify --dry-run` reports `would-exempt`/`would-run` in seconds (Trap 10) |
