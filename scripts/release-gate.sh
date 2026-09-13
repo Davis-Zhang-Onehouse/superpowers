@@ -22,15 +22,12 @@ set -uo pipefail
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]:-$0}")" && pwd)"
 REPO="$(cd "$HERE/.." && pwd)"
 
-# shellcheck source=scripts/fleet-env.sh
-. "$REPO/scripts/fleet-env.sh"
-
-# Test seam: a stub script the test points here instead of a real, ~45-minute `fleet release-verify`.
-# Narrow on purpose -- it is the ONLY variable this script consults instead of deriving the binary from
-# `$REPO`, so a test overriding it cannot accidentally also override the paths the launch-correctness
-# assertions (no pipe, `setsid` present, `$REPO/bin/fleet` by absolute path) are checking.
-FLEET="${FLEET_BIN:-$REPO/bin/fleet}"
-
+# Capture and clear OUR OWN positional args before sourcing fleet-env.sh, and for exactly the reason its
+# own header warns about: it takes an optional `$1` of its own (a directory, to set FLEET_INSTANTS), and
+# a rc may source it "from inside a function, where `$1` belongs to the function, not to the person
+# sourcing." A gate invocation IS such a function call — sourcing with `$1` still set to our <version>
+# made fleet-env.sh print `'1.0.1' is not a directory; FLEET_INSTANTS left as unset` on every single run,
+# a confusing, wrong-looking warning at the top of the one script this task exists to make trustworthy.
 V="${1:-}"
 if [ -z "$V" ]; then
   echo "usage: $(basename "$0") <version> [--full]" >&2
@@ -46,6 +43,22 @@ case "${2:-}" in
     exit 2
     ;;
 esac
+set --
+
+# shellcheck source=scripts/fleet-env.sh
+. "$REPO/scripts/fleet-env.sh"
+
+# Test seam: a stub script the test points here instead of a real, ~45-minute `fleet release-verify`.
+# Narrow on purpose -- it is the ONLY variable this script consults instead of deriving the binary from
+# `$REPO`, so a test overriding it cannot accidentally also override the paths the launch-correctness
+# assertions (no pipe, `setsid` present, `$REPO/bin/fleet` by absolute path) are checking.
+FLEET="${FLEET_BIN:-$REPO/bin/fleet}"
+
+# Test seam: the wait loop's poll interval. Production default stays 30s -- a real gate runs ~45 minutes,
+# so 30s costs nothing there -- but a test driving a near-instant stub would otherwise race the loop's
+# FIRST check against the backgrounded stub even being scheduled, and lose that race into a real 30s
+# sleep. The test overrides this to something small instead of shrinking the production default.
+SLEEP_S="${RELEASE_GATE_POLL:-30}"
 
 [ -x "$FLEET" ] || {
   echo "$(basename "$0"): '$FLEET' is not executable — build/checkout looks wrong" >&2
@@ -91,7 +104,7 @@ echo "$(basename "$0"): pid $pid — a detached run outlives this shell; find it
 # minutes on this box against the ~24 a stale skill used to quote, and a cap sized for the old number
 # reports "no verdict" over a run that is healthy and mid-flight.
 while [ ! -f "$EV/VERDICT.tsv" ] && kill -0 "$pid" 2>/dev/null; do
-  sleep 30
+  sleep "$SLEEP_S"
 done
 
 if [ -f "$EV/VERDICT.tsv" ]; then
