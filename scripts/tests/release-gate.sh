@@ -51,6 +51,9 @@ STUB="$TMP/fleet"
 cat >"$STUB" <<'STUB_EOF'
 #!/usr/bin/env bash
 set -uo pipefail
+# Recorded BEFORE parsing, because a passthrough is only proved by what the verb actually received --
+# asserting on the gate's own source would pass against a flag it accepts and then drops.
+[ -n "${STUB_ARGS_FILE:-}" ] && printf '%s\n' "$@" >"$STUB_ARGS_FILE"
 # Parse just enough to find --releases and --version; this stub only ever plays `release-verify`.
 releases="" version=""
 while [ $# -gt 0 ]; do
@@ -208,10 +211,56 @@ printf 'suite\tverdict\tevidence\tnote\nverdict\tGREEN\t-\tSTALE previous attemp
   >"$FLEET_RELEASES/fleet-v1.0.4/.release/evidence/VERDICT.tsv"
 out="$(STUB_MODE=archive-die STUB_ARCHIVE_DELAY=1 run_gate 1.0.4 2>&1)"; rc=$?
 check "a dead run over a previous attempt's VERDICT.tsv still exits 3" "3" "$rc"
+# The stub archived before dying, so that file is NOT in $EV any more -- it is under attempt-1-RED/.
+# A provenance message that is itself wrong about provenance is worse than none, so the location is
+# checked rather than asserted.
 case "$out" in
-  *"earlier attempt"*) note "ok   the surviving earlier attempt is named, and not read as a verdict" ;;
+  *"archived into"*) note "ok   the archived earlier attempt is reported as archived, not as still in \$EV" ;;
+  *"still in"*)
+    note "FAIL the dead-run path claimed the earlier attempt is still in \$EV after the stub archived it: $out"
+    fails=1
+    ;;
   *) note "FAIL the earlier attempt's file was not named on the dead-run path: $out"; fails=1 ;;
 esac
+
+# --- the same message, the other way: a run that died BEFORE archiving leaves the file where it was -----
+mkdir -p "$FLEET_RELEASES/fleet-v1.0.5/.release/evidence"
+printf 'suite\tverdict\tevidence\tnote\nverdict\tGREEN\t-\tSTALE previous attempt\n' \
+  >"$FLEET_RELEASES/fleet-v1.0.5/.release/evidence/VERDICT.tsv"
+out="$(STUB_MODE=die run_gate 1.0.5 2>&1)"; rc=$?
+check "a run that dies before archiving still exits 3" "3" "$rc"
+case "$out" in
+  *"still in"*) note "ok   an un-archived earlier attempt is reported as still in \$EV" ;;
+  *) note "FAIL the un-archived earlier attempt was not located correctly: $out"; fails=1 ;;
+esac
+
+# --- --repo is passed through to release-verify ---------------------------------------------------------
+# A release cut before MANIFEST.tsv carried `source_repo` (II-7) refuses INSIDE the detached process and
+# writes no VERDICT.tsv, which this script would otherwise classify as outcome 3, "the run died" -- a
+# wrong diagnosis produced by the launcher rather than by the gate.
+ARGS_FILE="$TMP/verify-args"
+STUB_ARGS_FILE="$ARGS_FILE" STUB_MODE=green run_gate 1.0.0 --repo "$TMP/some checkout" >/dev/null 2>&1
+if grep -qx -- "--repo" "$ARGS_FILE" 2>/dev/null && grep -qxF -- "$TMP/some checkout" "$ARGS_FILE" 2>/dev/null; then
+  note "ok   --repo and its path reach release-verify as two separate argv entries"
+else
+  note "FAIL --repo did not reach release-verify intact: $(tr '\n' ' ' <"$ARGS_FILE" 2>/dev/null)"
+  fails=1
+fi
+
+rm -f "$ARGS_FILE"
+STUB_ARGS_FILE="$ARGS_FILE" STUB_MODE=green run_gate 1.0.0 --full --repo "$TMP/co" >/dev/null 2>&1
+if grep -qx -- "--full" "$ARGS_FILE" 2>/dev/null && grep -qx -- "--repo" "$ARGS_FILE" 2>/dev/null; then
+  note "ok   --full and --repo can be given together"
+else
+  note "FAIL --full and --repo are not both passed: $(tr '\n' ' ' <"$ARGS_FILE" 2>/dev/null)"
+  fails=1
+fi
+
+run_gate 1.0.0 --repo >/dev/null 2>&1
+check "--repo without a path exits 2" "2" "$?"
+
+run_gate 1.0.0 --bogus >/dev/null 2>&1
+check "an unknown argument exits 2" "2" "$?"
 
 # --- fleet binary not executable: exit 2 -----------------------------------------------------------------
 FLEET_BIN="$TMP/no-such-fleet" bash "$GATE" 1.0.0 >/dev/null 2>&1
