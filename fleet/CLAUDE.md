@@ -296,7 +296,8 @@ still pass, because the argv builders are untouched and the prefix goes on at th
 consulting `fleet pane-guard`**, which is precisely the guard for that hazard (`0` safe / `10` queued-text /
 `11` mid-turn / `12` not-claude / `13` unknown / `14` indeterminate / `15` awaiting-operator). Gating the send
 would need a change inside the vendored `claude-auto-retry` monitor, not in this repo. `J8` proves `fleet
-close` refuses all three dangerous pane shapes; the monitor has no such gate. Note what the switch above did
+close` refuses two of those three shapes against real panes (busy, and unsubmitted text); the third,
+`15` awaiting-operator, is covered by the unit suite only. The monitor has no such gate. Note what the switch above did
 and did not buy: it fixed WHICH sessions get armed, not what a monitor does once armed.
 
 ## Known gaps
