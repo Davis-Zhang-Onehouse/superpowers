@@ -193,6 +193,68 @@ case "$out" in
 esac
 cp "$TMP/plugin.yaml.bak" "$R/fleet-v$VERSION/.hermes-plugin/plugin.yaml"
 
+# --- the YAML manifest's version is actually READ and compared, not defaulted to "fine" -------------------
+# This is the assertion the whole script exists to add (Task 1's blind spot: ten releases where nothing
+# checked this file). Confirm the OK line carries the file's OWN, freshly-read value, not a hardcoded pass.
+out="$(run 2>&1)"
+case "$out" in
+  *"OK: .hermes-plugin/plugin.yaml#version = 6.3.0+fleet.$VERSION (carries"*)
+    note "ok   the YAML manifest's version line is read and its actual value is reported"
+    ;;
+  *)
+    note "FAIL the YAML field's actual value was not reported: $out"
+    fails=1
+    ;;
+esac
+
+# --- a field that cannot be located in the YAML manifest is REFUSED, never silently treated as fine -------
+# A dotted field against a file that is not JSON cannot be resolved by a flat text scan -- matching
+# fleet/src/fleet/release_stamp.py's `_read_textual_field`, which refuses the identical case rather than
+# guessing which nested value was meant. "Could not read" must never look like "fine", which is the whole
+# reason this script exists, so this has to fail loudly and name the file, the field and the reason.
+cp "$R/fleet-v$VERSION/.version-bump.json" "$TMP/version-bump.json.bak"
+cat >"$R/fleet-v$VERSION/.version-bump.json" <<'JSON'
+{
+  "files": [
+    { "path": ".hermes-plugin/plugin.yaml", "field": "nested.version" }
+  ]
+}
+JSON
+out="$(run 2>&1)"
+rc=$?
+check "a dotted field against the YAML manifest is refused, not silently passed" "1" "$rc"
+case "$out" in
+  *"MISMATCH: .hermes-plugin/plugin.yaml#nested.version could not be read:"*"nested field"*)
+    note "ok   the refusal names the file, the field, and the reason (nested field, not JSON)"
+    ;;
+  *)
+    note "FAIL the refusal did not name the file/field/reason: $out"
+    fails=1
+    ;;
+esac
+
+# --- a field that is simply absent from the YAML manifest is ALSO refused, not silently skipped -----------
+cat >"$R/fleet-v$VERSION/.version-bump.json" <<'JSON'
+{
+  "files": [
+    { "path": ".hermes-plugin/plugin.yaml", "field": "no_such_field" }
+  ]
+}
+JSON
+out="$(run 2>&1)"
+rc=$?
+check "a field absent from the YAML manifest is refused, not silently passed" "1" "$rc"
+case "$out" in
+  *"MISMATCH: .hermes-plugin/plugin.yaml#no_such_field could not be read:"*)
+    note "ok   an absent YAML field is refused loudly rather than treated as fine"
+    ;;
+  *)
+    note "FAIL an absent YAML field was not refused: $out"
+    fails=1
+    ;;
+esac
+cp "$TMP/version-bump.json.bak" "$R/fleet-v$VERSION/.version-bump.json"
+
 # --- assertion 4b: the one entry with a NESTED dotted field (plugins.0.version) ---------------------------
 cp "$R/fleet-v$VERSION/.claude-plugin/marketplace.json" "$TMP/marketplace.json.bak"
 printf '{"plugins": [{"version": "6.3.0+fleet.%s"}]}\n' "$OLD_VERSION" \
