@@ -41,6 +41,32 @@ class TestParse(unittest.TestCase):
                 with self.assertRaises(InstantNameError):
                     InstantName.parse(bad)
 
+class TestAPathShapedFieldGetsANamedHint(unittest.TestCase):
+    """S4 / I-24b. `--base` (and `--optype`/`--name` via the same constructor) takes a bare 8-digit id,
+    never a path: a base is a stable KEY, but an instant's own folder is renamed at every state
+    transition, so a path stored as a base goes stale the moment that instant moves. The generic domain
+    error already named the rule; it did not help a caller who copy-pasted an `--instant`-shaped path
+    into `--base` find their way back — the message now names the likely intended id.
+    """
+
+    def test_a_slash_in_the_rejected_value_names_the_tail_as_the_likely_id(self):
+        with self.assertRaises(InstantNameError) as caught:
+            InstantName(base="/some/instants/00000000-07300312-inflight-append-fleetInfraRebuild",
+                       curr="07300312", state="inflight", optype="append", name="x")
+        message = str(caught.exception)
+        self.assertRegex(message, r"(?i)looks like a path",
+                         f"no hint at all for a path-shaped value: {message!r}")
+        self.assertIn("fleetInfraRebuild", message,
+                      f"the hint does not name the tail component as the likely id: {message!r}")
+
+    def test_a_value_with_no_slash_gets_no_path_hint(self):
+        # The hint fires on the SHAPE of the rejected value, not on every domain error — a four-digit
+        # base is not a path mistake and should not be told it looks like one.
+        with self.assertRaises(InstantNameError) as caught:
+            InstantName(base="0715", curr="07300312", state="inflight", optype="append", name="x")
+        self.assertNotRegex(str(caught.exception), r"(?i)looks like a path")
+
+
 class TestStableKey(unittest.TestCase):
     def test_state_is_omitted_so_a_rename_does_not_orphan_derived_state(self):
         a = InstantName.parse(GOOD)

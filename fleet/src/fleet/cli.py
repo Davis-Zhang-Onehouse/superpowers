@@ -2263,12 +2263,22 @@ def _do_milestone(ctx: Ctx, parsed: Parsed) -> int:
                                      ("reason", parsed.get("reason"))])
             return EXIT_OK
         retired = roadmap.retire(parsed.get("id"), parsed.get("reason"))
+        #: S3 / I-24a. Retiring frees the ROW, not the id: on a live effort `m8` could not be re-raised
+        #: and became `m9`, then `m12`->`m15`, `m13`->`m16`, `m14`->`m17`. That permanence is correct —
+        #: `OBS-14`, append-only registers, and a roadmap full of cross-references that depend on an id
+        #: meaning one thing forever — but the cost is drift between a retired id and whatever numbering
+        #: the coordinator had in mind, and that used to be discoverable only by trying to reuse the id
+        #: and finding `fleet milestone` silently raise it under a different one. Said here, once, in
+        #: the same call that spends the id.
         _emit(ctx, "milestone", [
             ("milestone", retired.id), ("status", retired.status),
             ("retired-reason", retired.retired_reason),
             ("dispatchable", "no — a retired milestone leaves the ready population, which is the point: "
                              "once its deps land a superseded one is derived READY forever and no report "
-                             "prints ready rows")])
+                             "prints ready rows"),
+            ("id-permanence", f"{retired.id!r} is retired PERMANENTLY, not freed for reuse — raising this "
+                              f"work again with `fleet milestone` takes a NEW id, because a register full "
+                              f"of cross-references needs {retired.id!r} to keep meaning this one thing")])
         return EXIT_OK
 
     #: `SI-51`. The repair door for a claim stranded BEFORE `abort` learned to release one. Fixing `abort`
@@ -4852,7 +4862,15 @@ VERBS = {spec.name: spec for spec in (
     _verb("dispatch", _do_dispatch, False, "evaluate every gate, then dispatch one worker", (
         Flag("--profile", True, True, "the profile directory; its kind is DECLARED in profile.json"),
         Flag("--title", True, True, "the worker's title; becomes the instantName"),
-        Flag("--base", True, False, "the dispatching base instant"),
+        #: S4 / I-24b. Deliberately asymmetric with --from/--profile/--instant below, which take paths:
+        #: a base is a stable KEY, but an instant's own folder is renamed at every state transition, so
+        #: a path stored as a base would go stale the moment the base instant finished (Task 2 of this
+        #: batch is what that going-stale looks like from the other side). `identity.InstantName`
+        #: already refuses a path here; the help text says why before the refusal has to.
+        Flag("--base", True, False,
+             "the dispatching base instant, as a bare 8-digit id — NOT a path, unlike --from/--profile/"
+             "--instant. A base is a stable key; the instant it names is renamed at every state "
+             "transition, so a path would go stale the moment that instant finished"),
         Flag("--optype", True, False, "append | compact; must agree with the profile's kind"),
         Flag("--from", True, False,
              "the DISPATCHING instant. Recorded in the child's .fleet/origin.json so the child's `propose` "
