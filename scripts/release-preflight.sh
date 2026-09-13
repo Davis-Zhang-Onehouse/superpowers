@@ -197,7 +197,13 @@ if [ "$REAP" = 1 ]; then
         reaped_any=1
       fi
     else
+      # Counted as a FAILURE, like every other thing this loop could not do. It is defence in depth --
+      # `orphans` is only populated with names that already passed this same test -- but "refused" is
+      # still "did not reap", and leaving it silent would let a `--reap` exit 0 having skipped a
+      # directory it was asked to remove, and let the prune below run. That is the shape of every other
+      # defect this file was written to close.
       echo "$(basename "$0"): refusing to reap '$d' -- name does not match the orphan pattern exactly" >&2
+      reap_failed=1
     fi
   done
   # Pruning only after removals, and only if at least one actually succeeded: a failed reap must not
