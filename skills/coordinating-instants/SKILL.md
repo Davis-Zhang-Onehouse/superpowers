@@ -103,15 +103,15 @@ Two verbs answer specific questions when the loop is not enough: `fleet status -
 full, and `fleet compaction-status` for what is holding dispatch.
 
 **Delivering an operator's answer into a worker's pane: keep the pane note a pointer, put the substance in
-a file.** No fleet verb sends a pane message — `Escalate`/`Receive` above still land through whatever the
-harness's own auto-mode classifier lets through, and that classifier has been measured keying on a
-message's *subject matter* rather than on what the command does. Three attempts to deliver one operator's
-answer were refused this way — including a plain `cp` of a local file — because the message discussed
-authorising a tag push (`S6` / `I-26`). No fleet change reaches a harness classifier, and paraphrasing a
-message until a refusal stops firing defeats the guard's own point: *the whole point of a guard is that you
-do not get to talk your way past it.* The workaround that passed: write the operator's answer into a file
-and send the worker's pane a bare pointer — *"read FILE-X, the operator answered"* — never the substance
-itself. A pointer carries no deploy-shaped vocabulary for the classifier to key on.
+a file.** No fleet verb sends a pane message at all — that send is always something the harness itself
+does on your behalf, gated by its own auto-mode classifier, and that classifier has been measured keying on
+a message's *subject matter* rather than on what the command does. Three attempts to deliver one operator's
+answer into a worker's pane were refused this way — including a plain `cp` of a local file — because the
+message discussed authorising a tag push (`S6` / `I-26`). No fleet change reaches a harness classifier, and
+paraphrasing a message until a refusal stops firing defeats the guard's own point: *the whole point of a
+guard is that you do not get to talk your way past it.* The workaround that passed: write the operator's
+answer into a file and send the worker's pane a bare pointer — *"read FILE-X, the operator answered"* —
+never the substance itself. A pointer carries no deploy-shaped vocabulary for the classifier to key on.
 
 ## When a phase has a routine
 
