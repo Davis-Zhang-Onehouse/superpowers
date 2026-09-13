@@ -361,10 +361,19 @@ state that already exists.
   ```
 
 - **`scripts/release-gate.sh <version> [--full]`** — the sanctioned way to launch and wait on
-  `release-verify`: `setsid`, no pipe, no `timeout`, unbounded wait on `VERDICT.tsv` or the pid. Three
-  outcomes: a verdict → exit 0 or 1 with FAIL rows from the per-runner files; the pid gone with no
-  verdict → **exit 3**, printing `hermetic.log`'s size/mtime and the launch log's tail; "still running" is
-  unreachable by construction. Runs the gate **once** — re-running is a separate invocation.
+  `release-verify`: `setsid`, no pipe, no `timeout`, unbounded wait on **this run's** `VERDICT.tsv` or the
+  pid. Three outcomes: a verdict → exit 0 or 1 with FAIL rows from the per-runner files; the pid gone with
+  no verdict from this run → **exit 3**, printing `hermetic.log`'s size/mtime and the launch log's tail;
+  "still running" is unreachable by construction. Runs the gate **once** — re-running is a separate
+  invocation.
+
+  "This run's" is the part a re-verify depends on. A version verified before still has the previous
+  attempt's `VERDICT.tsv` on disk, and `Verify.run()` does not move it aside (`archive_previous_attempt`)
+  until after fork, arg parsing, `_refuse_if_self_deployed` and the exemption diff — so a wait that tested
+  mere presence printed the OLD attempt's verdict and exited in under a second, leaving a real ~45-minute
+  run detached with nobody waiting. The script snapshots the file's `(inode, mtime)` before launching and
+  requires a file that is present **and** different; `archive_previous_attempt` renames rather than
+  deletes, so the replacement is always a fresh inode.
 
   ```bash
   bash scripts/tests/release-gate.sh   # ~0.3s, spends no claude — never a real ~45-minute release-verify
