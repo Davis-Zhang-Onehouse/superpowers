@@ -295,7 +295,22 @@ def _exemption_and_scope(releases: Releases, version: Version, repo, full: bool 
     for path, strip in stamped:
         if path not in scope.inert:
             continue
-        if strip(repo.file_at(anchor_tag, path)) != strip(repo.file_at(this_tag, path)):
+        anchor_code, anchor_text = repo.file_at(anchor_tag, path)
+        this_code, this_text = repo.file_at(this_tag, path)
+        #: A FAILED read is put back into `requiring`, and that is the direction chosen on purpose.
+        #: `file_at` cannot tell "the file is not at this ref" from "git failed": git reports both with a
+        #: non-zero exit, and it used to return `""` for both, so a `git show` that failed on BOTH refs
+        #: compared equal and the manifest stayed inert -- a release skipping its whole gate because a
+        #: git command quietly failed. Every other uncertainty on this path answers "run the suites"
+        #: (`changed_paths` raises rather than returning empty; a missing anchor tag is a `Refused`), and
+        #: this one answered "exempt". The safe direction costs a needless test run, which is exactly the
+        #: failure mode `release_scope`'s docstring sanctions; the unsafe one ships unverified code.
+        #: Note the path reached here at all only because `changed_paths` reported it as DIFFERING
+        #: between the two refs, so it cannot legitimately be absent at both -- two failing reads mean
+        #: git failed, not that nothing is there.
+        if anchor_code != 0 or this_code != 0:
+            put_back.append(path)
+        elif strip(anchor_text) != strip(this_text):
             put_back.append(path)
     if put_back:
         scope = Scope([p for p in scope.inert if p not in put_back],

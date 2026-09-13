@@ -102,15 +102,29 @@ class Repo:
             commits.append((sha[:7], subject.strip()))
         return commits
 
-    def file_at(self, ref: str, path: str) -> str:
-        """One file's contents at one ref, or `""` if it is not there.
+    def file_at(self, ref: str, path: str):
+        """`(code, contents)` for one file at one ref -- git's exit status ALONGSIDE what it printed.
 
         Absence is not an error here: the caller is comparing the same path at two refs to decide whether
         anything but a version stamp moved, and "added" or "deleted" are answers to that question rather
-        than failures of it.
+        than failures of it. But a read that FAILED is not an answer at all, and this used to return `""`
+        for both, which made them indistinguishable to the only caller. If `git show` failed for BOTH refs
+        on the same manifest, `"" == ""` held, the file stayed inert, and the release skipped its gate
+        because a git command quietly failed. Every other uncertainty on that path answers "run the
+        suites" -- `changed_paths` raises rather than returning empty, a missing anchor tag is a `Refused`
+        -- and this one answered "exempt". Low probability, wrong direction, highest-stakes code here.
+
+        The status is HANDED BACK rather than raised because git reports legitimate absence the same way
+        it reports a failure, with a non-zero exit, and this module cannot tell them apart. The CALLER can
+        choose a safe direction, and `_exemption_and_scope` does: any non-zero status puts the path back
+        into `requiring`. The cost of being wrong there is a needless test run, which is the failure mode
+        `release_scope`'s docstring already sanctions.
+
+        The return type changed from `str` deliberately rather than adding a second method: a caller that
+        missed the change gets a tuple where it expected text and fails loudly (`TypeError` out of the
+        `re.sub`), instead of silently comparing two truthy tuples.
         """
-        code, out = self.git(["show", f"{ref}:{path}"], self.path)
-        return out if code == 0 else ""
+        return self.git(["show", f"{ref}:{path}"], self.path)
 
     def changed_paths(self, from_ref: str, to_ref: str) -> list:
         """Every repo-relative path differing between two refs, as `git diff --name-only` reports it.

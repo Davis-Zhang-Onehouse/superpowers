@@ -153,14 +153,26 @@ class ExemptionCase(unittest.TestCase):
     # --- the cut's own footprint ----------------------------------------------------------------------
 
     class BlobRepo(FakeRepo):
-        """A repo that can also answer "what did this file look like at that ref"."""
+        """A repo that can also answer "what did this file look like at that ref".
 
-        def __init__(self, changed=(), tags=(), blobs=None):
+        Models `Repo.file_at`'s two-part answer, `(code, contents)`. A blob that is not declared comes
+        back as `(128, "")`, which is what `git show` does for a path that is not at that ref -- and the
+        point of carrying the code is that the caller can tell that apart from a read that FAILED, which
+        looks identical in the text alone.
+        """
+
+        def __init__(self, changed=(), tags=(), blobs=None, fail=()):
             super().__init__(changed, tags)
             self.blobs = dict(blobs or {})
+            #: `(ref, path)` pairs where `git show` FAILS, as distinct from the file being absent.
+            self.fail = set(fail)
 
         def file_at(self, ref, path):
-            return self.blobs.get((ref, path), "")
+            if (ref, path) in self.fail:
+                return (128, "")
+            if (ref, path) in self.blobs:
+                return (0, self.blobs[(ref, path)])
+            return (128, "")
 
     def _cut_shaped(self, blobs):
         """A realistic release diff: the author's file plus the two the cut writes itself."""
@@ -239,6 +251,42 @@ class ExemptionCase(unittest.TestCase):
                 '{\n  "name": "renamed",\n  "version": "6.2.0+fleet.0.1.1"\n}\n'})
         self.assertIsNone(exemption_for(self.rel, target, repo),
                           "a rename in plugin.json must not ride out on a version stamp")
+
+    def test_a_git_show_that_fails_on_BOTH_refs_must_not_read_as_unchanged(self):
+        """`file_at` used to return `""` for a failed read and for an absent file alike, so a `git show`
+        that failed on both refs of the same manifest compared `"" == ""`, the path stayed inert, and the
+        release skipped its entire gate because a git command quietly failed.
+
+        Every other uncertainty on this path answers "run the suites": `changed_paths` raises rather than
+        returning empty, and a missing anchor tag is a `Refused`. This one answered "exempt" -- low
+        probability, wrong direction, and the highest-stakes code in the package now that EXEMPT is
+        reachable. The path only reaches the content re-check because `changed_paths` said it DIFFERS
+        between the two refs, so it cannot legitimately be absent at both.
+        """
+        self._release("0.1.0", GREEN)
+        target = self._release("0.1.1")
+        repo = self._manifest_cut_shaped({
+            ("fleet/v0.1.0", "fleet/src/fleet/__init__.py"): '__version__ = "0.1.0"\n',
+            ("fleet/v0.1.1", "fleet/src/fleet/__init__.py"): '__version__ = "0.1.1"\n'})
+        repo.fail = {("fleet/v0.1.0", ".claude-plugin/plugin.json"),
+                     ("fleet/v0.1.1", ".claude-plugin/plugin.json")}
+        result = exemption_for(self.rel, target, repo)
+        self.assertIsNone(result, "a manifest whose blob could not be read at EITHER ref must put the "
+                                  "path back into `requiring`, never ride out as unchanged")
+
+    def test_a_git_show_that_fails_on_ONE_ref_also_requires_verification(self):
+        """The asymmetric half. One readable side and one unreadable side is still "I could not tell",
+        and it must answer the same way."""
+        self._release("0.1.0", GREEN)
+        target = self._release("0.1.1")
+        repo = self._manifest_cut_shaped({
+            ("fleet/v0.1.0", "fleet/src/fleet/__init__.py"): '__version__ = "0.1.0"\n',
+            ("fleet/v0.1.1", "fleet/src/fleet/__init__.py"): '__version__ = "0.1.1"\n',
+            ("fleet/v0.1.0", ".claude-plugin/plugin.json"):
+                '{\n  "name": "superpowers",\n  "version": "6.2.0+fleet.0.1.0"\n}\n'})
+        repo.fail = {("fleet/v0.1.1", ".claude-plugin/plugin.json")}
+        self.assertIsNone(exemption_for(self.rel, target, repo),
+                          "one unreadable side is still 'I could not tell', which must run the suites")
 
     def test_the_stamped_file_is_named_in_requiring_when_it_really_changed(self):
         """Not merely 'not exempt' — the path has to come back in `requiring`, because that list is what
