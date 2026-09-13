@@ -225,10 +225,20 @@ _STATUS_LINE_MARKERS = _BUSY_MARKERS + ("auto mode on", "? for shortcuts", "for 
 #: modal, and it is also a phrase this module's OWN comments now contain (this one included) — a
 #: single-fragment match against a multi-line window would risk exactly the false positive `SI-37` spent a
 #: production incident correcting, from the opposite direction: an agent's transcript merely discussing
-#: this dialog, or reviewing this change, contains the words "select", "navigate" and "cancel" too. No
-#: agent's own prose renders all three EXACT fragments concatenated onto one row — that shape is drawn only
-#: by the harness — so co-occurrence on one line is the anchor, the same role the counted-noun-on-the-
-#: status-line pairing plays for `_WATCHER_MARKER`.
+#: this dialog, or reviewing this change, contains the words "select", "navigate" and "cancel" too.
+#:
+#: **Correction, measured rather than assumed:** this module once claimed no agent's own prose renders all
+#: three EXACT fragments concatenated onto one row. That is false, and in-tree — `SessionLayer.asking()`
+#: run over this module's OWN source lines 215-222 returns `True`. Four one-row occurrences exist right
+#: here: the hint-line comment eight lines above this one (`session.py:219`), `DIALOG_PANE`'s own last
+#: line in both `tests/test_session.py:496` and `tests/test_cli.py:106`, and the design spec that recorded
+#: this finding. The three-fragment one-row shape is overwhelmingly the harness's, but not exclusively —
+#: so co-occurrence on one line is a near-certain anchor, not a guaranteed one, the same role the
+#: counted-noun-on-the-status-line pairing plays for `_WATCHER_MARKER`. The residual exposure is honest,
+#: not absent: text that quotes the banner verbatim, on one rendered row, inside this bounded tail window
+#: classifies as `15 PANE_AWAITING_OPERATOR`. That is fail-safe — a pane reads as blocked rather than
+#: idle, never the reverse — and `--force` clears it, so a false positive here costs one refusal, not a
+#: wrong send.
 _DIALOG_MARKERS = ("enter to select", "tab/arrow keys to navigate", "esc to cancel")
 
 

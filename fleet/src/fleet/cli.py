@@ -416,6 +416,12 @@ def _codes_block() -> str:
     return "\n".join(lines) + "\n"
 
 
+def _pane_guard_summary() -> str:
+    """One line, derived from `PANE_GUARD_CODES` so the verb table cannot say a different code set than
+    `_codes_block()` — the hand-maintained second copy this package refuses everywhere else."""
+    return " / ".join(f"{code} {PANE_GUARD_CODES[code]}" for code in sorted(PANE_GUARD_CODES))
+
+
 def usage(verb: str = None) -> str:
     """The whole surface, derived from `VERBS`. Never hand-written, for any verb."""
     if verb is not None:
@@ -2471,8 +2477,8 @@ def _live_session_warning(ctx: Ctx, proposal) -> str:
     visibly held text), which is a separate, later defect: this warning raises the floor by putting the
     answer in front of the coordinator instead of nowhere; it does not make the signal trustworthy, and
     it does not close that hole. Nor is this "the protection `close` already has" — `close` refuses only
-    on its two pane-guard codes (busy, queued-text); a live-but-idle pane closes without complaint there
-    too.
+    on its three pane-guard codes (busy, queued-text, awaiting-operator); a live-but-idle pane closes
+    without complaint there too.
 
     A warning, never a refusal: a legitimately finished worker may leave its pane open, and refusing
     would block a correct close-out. Silent (not merely absent-from-emit) when the status is not
@@ -2680,10 +2686,12 @@ def _refuse_a_session_on_another_server(ctx: Ctx, record) -> None:
 #: `F4`/`I-27`. How long `abort` waits, once, between `sessions.kill` and the retried `pool.release`, for
 #: the slot's cwd-holding pid to exit. Bounded and small on purpose, and a SINGLE retry rather than a poll
 #: loop: the pid that made the slot its cwd is very often the very session that was just killed, or a
-#: child of it, and it typically exits within a moment of that — so this converts the common case into a
-#: complete abort. A caller refused a SECOND time already has the re-runnable command this fix exists to
-#: make reachable, and a verb that spins instead of returning that message would be hiding the recovery
-#: behind a wait nobody asked for.
+#: child of it, and a 2.0s wait narrows the race for one that exits fast. It does not close the race in
+#: general — the incident that motivated this fix had its pid clear in about two MINUTES, not two
+#: seconds, so for that case the wait buys almost nothing. What actually carries the fix is the refusal
+#: this produces on a second failure: a caller refused again already has the re-runnable command that
+#: finishes the abort once the holder exits, and a verb that spun instead of returning that message would
+#: be hiding the recovery behind a wait nobody asked for.
 ABORT_RELEASE_WAIT_S = 2.0
 
 
@@ -2784,9 +2792,9 @@ def _do_abort(ctx: Ctx, parsed: Parsed) -> int:
         raise BadInput(f"{target} already exists; an instant may hold only one state (OBS-14)")
     record = _record_for(ctx, child)
     #: `SI-59`, and it belongs here — among the fallible steps, BEFORE the rename. Abort's own ordering
-    #: rule is that every step that can refuse happens before the irreversible one; a caller pointed at the
-    #: wrong tmux server would otherwise rename a running worker's folder to `-abort-` on the strength of a
-    #: session it could not see.
+    #: rule is that every step that can refuse happens before either irreversible step; a caller pointed at
+    #: the wrong tmux server would otherwise rename a running worker's folder to `-abort-` on the strength
+    #: of a session it could not see.
     if record is not None:
         _refuse_a_session_on_another_server(ctx, record)
     body = {"reason": reason, "at": ctx.now(), "from": child.name, "to": target.name,
@@ -2834,7 +2842,7 @@ def _do_abort(ctx: Ctx, parsed: Parsed) -> int:
         ctx.store.write(record)
 
     #: `SI-51`, and the LAST thing this transaction does — see the docstring on why this one fallible step
-    #: follows the irreversible one.
+    #: follows both irreversible steps.
     if coordinator is None:
         released = ("(nothing claimed)" if not origin_problem
                     else f"no — this instant's origin could not be read: {origin_problem}")
@@ -3991,8 +3999,8 @@ def _do_pane_guard(ctx: Ctx, parsed: Parsed) -> int:
 
     DA-2 enumerated **six** send paths today, so this sits at the choke point rather than being restated
     per path: a requirement phrased per-path would fix one and leave five. The codes are the interface —
-    `0` safe · `10` queued text · `11` mid-turn · `12` not-claude · `13` unknown pane — and a caller
-    branches on the number, never on the sentence.
+    `0` safe · `10` queued text · `11` mid-turn · `12` not-claude · `13` unknown pane · `14` indeterminate
+    · `15` awaiting-operator — and a caller branches on the number, never on the sentence.
     """
     pane, layer = _pane_subject(ctx, parsed)
     #: `I-21`/`I-26`. What `--capture` preserves, when given one: the SAME value the verdict below is
@@ -5071,8 +5079,7 @@ VERBS = {spec.name: spec for spec in (
         Flag("--id", True, False, "restrict to one todo id, or a unique substring of it"),
     )),
     _verb(PANE_GUARD, _do_pane_guard, True,
-          "the send-keys contract: 0 safe / 10 queued / 11 mid-turn / 12 not-claude / 13 unknown / "
-          "14 indeterminate (could not read; wait)", (
+          "the send-keys contract: " + _pane_guard_summary(), (
         #: `SI-54`. Neither is parser-required and exactly one is required by the handler: the parser can
         #: say "required" but not "exactly one of", and `--pane` staying mandatory would make `--id`
         #: unreachable. Both name the same subject, so accepting both is refused rather than resolved.

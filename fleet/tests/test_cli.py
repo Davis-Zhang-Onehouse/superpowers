@@ -2668,8 +2668,9 @@ class TestApplyWarnsWhileTheWorkersSessionIsStillLive(CliCase):
     (`session.alive`, which `pane-guard` also answers from) — not a fresh one, and not a more trustworthy
     one. That signal's own unreliability (an empty input box read three times running for a pane that
     visibly held text) is a separate, later defect; this warning raises the floor, it does not close the
-    hole. Note also `close` has no GENERAL liveness refusal to be symmetric with — only its two pane-guard
-    codes (busy, queued-text) — so this is not "the same protection `apply` was missing".
+    hole. Note also `close` has no GENERAL liveness refusal to be symmetric with — only its three
+    pane-guard codes (busy, queued-text, awaiting-operator) — so this is not "the same protection `apply`
+    was missing".
     """
 
     def _coordinator_with(self, fleet, milestone_id="m7"):
