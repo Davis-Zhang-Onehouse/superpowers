@@ -274,6 +274,12 @@ class Fleet:
 
         self.procs, self.panes, self.tmux_live, self.holders = [], {}, set(), {}
         self.started, self.killed = [], []
+        #: `I-27`. The clock seam `abort`'s bounded wait reads (`ctx.sleep`). A no-op recorder by default —
+        #: never a real sleep, so a case that never touches the wait costs nothing — and a case testing the
+        #: wait itself REPLACES this, typically to mutate `self.holders` as its side effect, so the retry
+        #: observes a holder that "exited" without any wall-clock time passing.
+        self.slept = []
+        self.sleep = lambda seconds: self.slept.append(seconds)
         #: `FI-7`. The PROBE FAILING is a distinct state from the probe finding nothing, and the real
         #: probes cannot tell them apart — `list_processes` returns `[]` when pgrep exits non-zero and
         #: `capture_pane` returns `""` when tmux does. This switch reproduces the first half; an empty
@@ -339,6 +345,15 @@ class Fleet:
         made = self.tmp / name
         made.mkdir(exist_ok=True)
         return made
+
+    def hold_slot_cwd(self, slot: str, pid: int) -> None:
+        """Model a live pid holding `slot`'s OWN path as its cwd (`OBS-48`) — the shape `pool.release`
+        refuses on. Keyed by `pool.slot_path(slot)`, the same path `Lease.path` carries and the same one
+        `cwd_probe` is called with, never the instant's own path: a dispatched worker's cwd IS its leased
+        slot (`fleet/CLAUDE.md`, "Known gaps"), so this is the fixture's model of a worker still sitting in
+        the directory after its tmux session has been killed."""
+        path = str(self.pool.slot_path(slot))
+        self.holders.setdefault(path, []).append(pid)
 
     def spare(self, name: str = "wsSpare") -> pathlib.Path:
         """A real workspace directory that is NOT enrolled. Enrolment is opt-in, so the un-enrolled
@@ -504,7 +519,10 @@ class Fleet:
                            #: `SI-59`. The fixture models a box with more than one tmux server, so the
                            #: context it builds has to know how to reach the others — otherwise a case
                            #: about following a record's address measures a context that cannot.
-                           layer_for=self.layer_for)
+                           layer_for=self.layer_for,
+                           #: `I-27`. `abort`'s bounded wait reads `ctx.sleep` rather than `time.sleep`
+                           #: directly, so this suite never actually sleeps for it.
+                           sleep=self.sleep)
 
         return build
 
@@ -1847,6 +1865,57 @@ class TestAbort(CliCase):
         code, board, err = fleet.run(["board", "--porcelain"])
         self.assertEqual(code, EXIT_OK, err)
         self.assertNotIn(todo, board, "an aborted worker is still on the board (FD-4)")
+
+    def test_abort_names_the_partial_state_when_the_slot_release_refuses(self):
+        """`I-27`. One verb, a partial outcome: the session was already killed when the release refused,
+        and the board then read UNREACHABLE + UNKNOWN-SESSION — which reads like corruption and invites
+        forcing the release, the one thing the refusal existed to prevent."""
+        fleet = self.loaded()
+        instant, todo = fleet.worker("zombie", slot="ws7"), fleet.ids["zombie"]
+        fleet.hold_slot_cwd("ws7", pid=89420)      # a live pid holding the slot as cwd (OBS-48)
+
+        code, out, err = fleet.run(["abort", "--instant", str(instant), "--reason", "superseded"])
+
+        self.assertEqual(code, EXIT_REFUSED, f"{out}{err}")
+        message = (out + err).lower()
+        for fact in ("session", "slot", "-inflight-", "re-run"):
+            self.assertIn(fact, message,
+                          f"the refusal does not state {fact!r}, so the partial state is unreadable: "
+                          f"{out + err!r}")
+        self.assertTrue(instant.exists(), "the folder was renamed on a refusing path; re-running is "
+                                          "the documented recovery and a renamed folder refuses it")
+        self.assertIn("dt-zombie", fleet.killed, "the session was NOT closed, so the refusal's claim "
+                                                 "that it was is false")
+        self.assertIsNotNone(fleet.pool.lease("ws7"), "the slot was released anyway, on a refusing path")
+        self.assertIsNone(fleet.store.read(todo).closed_at,
+                          "the record was stamped closed even though the transaction refused")
+        self.assertTrue(fleet.slept, "the bounded wait was never invoked before the refusal")
+
+    def test_abort_completes_after_one_retry_once_the_cwd_holder_clears(self):
+        """`I-27`'s other half — the common case the bounded wait exists for. A pid that exits between
+        `kill` and the retry lets `abort` complete exactly as it always has: folder renamed, slot
+        released, session closed. The wait is exercised through the injected clock seam (`fleet.sleep`),
+        never a real `time.sleep`, so this stays as fast as every other case in the suite."""
+        fleet = self.loaded()
+        instant, todo = fleet.worker("zombie2", slot="ws8"), fleet.ids["zombie2"]
+        fleet.hold_slot_cwd("ws8", pid=90001)
+        holder_path = str(fleet.pool.slot_path("ws8"))
+
+        def cleared_by_the_wait(seconds):
+            fleet.slept.append(seconds)
+            fleet.holders.pop(holder_path, None)      # the pid exits DURING the bounded wait
+
+        fleet.sleep = cleared_by_the_wait
+
+        code, out, err = fleet.run(["abort", "--instant", str(instant), "--reason", "superseded"])
+
+        self.assertEqual(code, EXIT_OK, f"{out}{err}")
+        self.assertTrue(fleet.slept, "the retry path was never exercised, so this test is vacuous")
+        self.assertIsNone(fleet.pool.lease("ws8"), "the slot stayed leased after the holder cleared")
+        target = instant.parent / instant.name.replace("-inflight-", "-abort-")
+        self.assertTrue(target.is_dir(), f"the folder was not renamed after the retry succeeded: "
+                                         f"{sorted(p.name for p in fleet.instants.iterdir())}")
+        self.assertIsNotNone(fleet.store.read(todo).closed_at, "the record was not stamped")
 
     def test_abort_refuses_an_instant_that_is_not_inflight(self):
         fleet = self.loaded()

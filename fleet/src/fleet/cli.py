@@ -463,6 +463,11 @@ class Ctx:
     #: on whichever one this shell happens to point at. `None` keeps the single-server behaviour, which is
     #: what a hand-built test context gets unless it says otherwise.
     layer_for: object = None
+    #: `I-27`. The one clock `abort`'s bounded wait reads (`_release_slot_or_name_the_partial_state`).
+    #: `None` means "use the real one" — `time.sleep` — so nothing changes for a caller who never named
+    #: one; a test injects a fake so the wait costs no wall-clock time (FD-6: every outside-world edge
+    #: arrives injected, and a sleep is as much an edge as a process or a tmux pane).
+    sleep: Callable = None
 
     def live_work_now(self) -> bool:
         if self.live_work is not None:
@@ -2601,6 +2606,53 @@ def _refuse_a_session_on_another_server(ctx: Ctx, record) -> None:
         f"· clears who: whoever is running this command")
 
 
+#: `F4`/`I-27`. How long `abort` waits, once, between `sessions.kill` and the retried `pool.release`, for
+#: the slot's cwd-holding pid to exit. Bounded and small on purpose, and a SINGLE retry rather than a poll
+#: loop: the pid that made the slot its cwd is very often the very session that was just killed, or a
+#: child of it, and it typically exits within a moment of that — so this converts the common case into a
+#: complete abort. A caller refused a SECOND time already has the re-runnable command this fix exists to
+#: make reachable, and a verb that spins instead of returning that message would be hiding the recovery
+#: behind a wait nobody asked for.
+ABORT_RELEASE_WAIT_S = 2.0
+
+
+def _release_slot_or_name_the_partial_state(ctx: Ctx, record, child: Path) -> None:
+    """Release `record.slot`, waiting out a live cwd-holder once before giving up.
+
+    `pool.release` refuses when a live pid still holds the slot as its cwd (`OBS-48`) — and by the time
+    `abort` calls it, `sessions.kill` has already run, so the session that pid belonged to is already
+    dead. The raw `Refused` from `pool.release` names only the slot and the pid(s); the one re-raised here
+    names the WHOLE partial state instead — session closed, slot still leased, folder still `-inflight-`,
+    milestone (if any) still claimed — and says that re-running this exact `abort` command is how it
+    finishes, because `sessions.kill` is a no-op on an already-closed session and every step this call has
+    not reached yet is still untouched. Never renames `child`: that is `_do_abort`'s job, and only on the
+    path where this function returns rather than raises.
+    """
+    import time
+
+    try:
+        ctx.pool.release(record.slot)
+        return
+    except Refused:
+        pass
+    sleep = ctx.sleep or time.sleep
+    sleep(ABORT_RELEASE_WAIT_S)
+    try:
+        ctx.pool.release(record.slot)
+    except Refused as exc:
+        raise Refused(
+            f"abort of {child.name} could not finish: the session was closed, but releasing slot "
+            f"{record.slot!r} was refused even after waiting {ABORT_RELEASE_WAIT_S}s for the holder to "
+            f"exit: {exc} The partial state is: session closed, slot {record.slot!r} still leased, folder "
+            f"still `-inflight-` at {child}, milestone (if any) still claimed — nothing was renamed. "
+            f"Re-run the identical `abort` command once the pid(s) named above exit: `sessions.kill` is a "
+            f"no-op against an already-closed session, so the re-run completes every step this call could "
+            f"not reach.",
+            clears_when=exc.clears_when,
+            clears_who=exc.clears_who,
+        ) from exc
+
+
 def _do_abort(ctx: Ctx, parsed: Parsed) -> int:
     """Abandon an inflight instant, WITH A RECORDED REASON, as one transaction.
 
@@ -2612,10 +2664,21 @@ def _do_abort(ctx: Ctx, parsed: Parsed) -> int:
     An empty `--reason` is refused with a message that does NOT ask for the flag that was just supplied:
     `F7` is the shape where the diagnostic tells the caller to do what they have already done.
 
-    **The order is: reason, session, lease, rename, stamp.** Every fallible step happens BEFORE the
-    irreversible one, which is FD-14's rule applied to the other end of the lifecycle: a `release` refused
-    because a live pid still sits in the slot (`OBS-48`) leaves an instant that is still `-inflight-` and a
-    command that can simply be re-run, instead of an `-abort-` folder whose slot is still leased.
+    **The order is: reason, session, lease, rename, stamp — and TWO of those steps are irreversible, not
+    one.** This used to name only `child.rename(target)` as "the irreversible one" and read as if every
+    fallible step preceded it, which is not self-contradictory but IS incomplete: `sessions.kill` is also
+    irreversible — a killed session does not come back — and it happens before the fallible `release`, not
+    after it. `F4`/`I-27` is that reasoning gap made concrete: `pool.release` refused because a live pid
+    still sat in the slot (`OBS-48`), and by then the session was already dead, leaving a folder that was
+    still `-inflight-` with its session gone and its slot still leased — a state that reads like corruption
+    on the board (`UNREACHABLE` plus a spurious `UNKNOWN-SESSION` row) even though nothing is actually lost.
+    What this verb guarantees is narrower, and correct: a `release` refusal is answered with a bounded wait
+    for the cwd-holding pid to exit and ONE retry, converting the common case into a complete abort; and
+    when it still refuses, the refusal states the partial state explicitly — session closed, slot still
+    leased, folder still `-inflight-`, milestone still claimed — and names re-running this identical command
+    as the completion, because `kill` is a no-op on an already-dead session and the re-run reaches every
+    step this call could not. The rename is never reached on that path, which is what keeps the re-run
+    possible: a folder already renamed `-abort-` would make the documented recovery refuse too.
 
     **`SI-51`: the milestone goes back too, and it goes back LAST.** `abort` released the session, the
     lease and the record and left the roadmap alone, so a milestone claimed by a dispatch that was later
@@ -2693,7 +2756,7 @@ def _do_abort(ctx: Ctx, parsed: Parsed) -> int:
     if record is not None and record.tmux:
         ctx.sessions_for(record).kill(record.tmux)
     if record is not None and record.slot:
-        ctx.pool.release(record.slot)
+        _release_slot_or_name_the_partial_state(ctx, record, child)
     child.rename(target)                       # THE state transition, and the last irreversible step
     if record is not None:
         record.closed_at = ctx.now()
