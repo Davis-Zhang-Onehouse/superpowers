@@ -4313,6 +4313,21 @@ def _refuse_an_existing_release(rel: Releases, version: Version) -> None:
             clears_who="whoever is cutting")
 
 
+def _note_live_work(ctx: Ctx) -> None:
+    """The live-fleet-work note, said identically at both places that ask `ctx.live_work_now()` about a
+    release: `release-cut` and `release-verify`. Factored into one place so the wording cannot drift
+    between the two call sites -- and it exists at BOTH, not just verify's, because the cut is the
+    earlier and more expensive decision: a cut you regret costs a version number and a tag that is never
+    moved, while a bad verify only costs a re-run. This is a NOTE and never a refusal -- other roots'
+    sessions on a shared box are an uncontrollable residual, and refusing on them would make releases
+    impossible here. The operator only needs to learn that an INCONCLUSIVE is on the table before
+    spending the time, not to be stopped."""
+    if ctx.live_work_now():
+        print("note: this box has live fleet work. The IT suite baselines the live session set, so a "
+              "failure may be contamination rather than a defect — that is what INCONCLUSIVE records.",
+              file=ctx.err)
+
+
 def _freeze_payload(export: Path) -> None:
     """Drop every write bit on the release — the PAYLOAD only, never `META_DIR`.
 
@@ -4443,6 +4458,8 @@ def _do_release_cut(ctx: Ctx, parsed: Parsed) -> int:
                     for path, old, new in stamp_plugin_version(repo.path, version, dry_run=True))
         _emit(ctx, "release-cut", rows)
         return EXIT_OK
+
+    _note_live_work(ctx)
 
     with rel.lock():
         _refuse_an_existing_release(rel, version)
@@ -4588,10 +4605,7 @@ def _do_release_verify(ctx: Ctx, parsed: Parsed) -> int:
         _emit(ctx, "release-verify", rows)
         return EXIT_OK
 
-    if ctx.live_work_now():
-        print("note: this box has live fleet work. The IT suite baselines the live session set, so a "
-              "failure may be contamination rather than a defect — that is what INCONCLUSIVE records.",
-              file=ctx.err)
+    _note_live_work(ctx)
 
     if exempted is not None:
         anchor, scope = exempted
