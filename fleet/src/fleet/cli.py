@@ -270,8 +270,10 @@ RELEASES_HELP = "the release area; overrides $FLEET_RELEASES"
 KV_COLUMNS = ("field", "value")
 ROW_COLUMNS = ("kind", "subject", "severity", "detail", "clears_when", "clears_who")
 #: `release-list`'s schema. Its own tuple rather than a reuse: the columns describe releases, and
-#: `OBS-44` is what borrowing a tuple because it happens to be the right length costs.
-RELEASE_COLUMNS = ("version", "state", "cut_at", "current")
+#: `OBS-44` is what borrowing a tuple because it happens to be the right length costs. `verdict` is
+#: APPENDED fifth, never inserted: an existing `cut -f1` .. `cut -f4` against this verb's porcelain output
+#: keeps meaning exactly what it meant before this column existed.
+RELEASE_COLUMNS = ("version", "state", "cut_at", "current", "verdict")
 
 
 @dataclass(frozen=True)
@@ -4810,9 +4812,14 @@ def _do_release_status(ctx: Ctx, parsed: Parsed) -> int:
 def _do_release_list(ctx: Ctx, parsed: Parsed) -> int:
     rel = _releases(ctx, parsed)
     current = rel.current_label()
+    #: `verdict` distinguishes four situations that used to collapse into the single word `CANDIDATE`:
+    #: cut and abandoned RED, cut and never verified, verified GREEN and awaiting promote, and a verify
+    #: killed mid-flight. `read_verdict` answers `{}` for a release with no `VERDICT.tsv` at all, so
+    #: `"-"` reads as "never verified" and is never confused with a real RED.
     _emit(ctx, "release-list", [
         (str(version), rel.state(version), rel.manifest(version).get("cut_at", "-"),
-         "*" if str(version) == current else "")
+         "*" if str(version) == current else "",
+         read_verdict(rel.dir_for(version) / META_DIR).get("result") or "-")
         for version in rel.versions()])
     return EXIT_OK
 
@@ -5190,7 +5197,8 @@ VERBS = {spec.name: spec for spec in (
           "what is deployed right now, since when, by whom and why", (
         Flag(RELEASES, True, False, RELEASES_HELP),
     )),
-    _verb("release-list", _do_release_list, True, "every release, its state and its cut time", (
+    _verb("release-list", _do_release_list, True,
+          "every release, its state, its cut time and its verdict", (
         Flag(RELEASES, True, False, RELEASES_HELP),
     )),
     _verb("release-history", _do_release_history, True, "the deploy/rollback register", (
