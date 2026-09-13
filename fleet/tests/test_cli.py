@@ -95,6 +95,17 @@ IDLE_PANE = "\n".join(["done", "", '❯ try "fix the failing test"', "  ? for sh
 #: A plain shell. Nothing here is claude, and sending keys to it is a different mistake.
 SHELL_PANE = "\n".join(["ubuntu@box:~$ ls", "src  tests", "ubuntu@box:~$ "])
 
+#: `I-16`, from the live pane: an `AskUserQuestion` dialog draws no input box — no caret, so `unsubmitted`
+#: finds nothing — and offers nothing to interrupt, so `busy` does not fire. It therefore read as `0 safe`,
+#: the same answer an idle worker gets, while the worker was blocked on an operator answer.
+DIALOG_PANE = "\n".join([
+    "Delete it on this lineage, or carry it?",
+    "  1. Delete it on this lineage",
+    "  2. Keep it and carry the note",
+    "",
+    "Enter to select · Tab/Arrow keys to navigate · Esc to cancel",
+])
+
 #: `FI-255`/`i39`. A busy claude pane with a `Monitor` armed. The status line is TRANSCRIBED FROM A LIVE
 #: CAPTURE (`i39` `evidence/02-red/pane-AFTER-monitor.txt`) and not composed here: a decoy invented at
 #: authoring time tests the author's imagination, and this one exists to keep matching what the harness
@@ -983,13 +994,18 @@ class TestExitCodes(CliCase):
         self.assertEqual(set(cli.EXIT_CODES_ALL) - set(EXIT_CODES),
                          set(cli.PANE_GUARD_CODES) - set(EXIT_CODES),
                          "cli extends the registry with something other than FD-10's contract")
-        self.assertEqual(set(cli.PANE_GUARD_CODES) - set(EXIT_CODES), {10, 11, 12, 13, 14},
+        self.assertEqual(set(cli.PANE_GUARD_CODES) - set(EXIT_CODES), {10, 11, 12, 13, 14, 15},
                          "the pane-guard extension is not the documented contract")
         #: `14` was added for `FI-7` and is pinned here BY NUMBER on purpose: it is the code that must
         #: stay OUTSIDE the set `coordinating-instants` treats as "the pane can go" (`0`, `12`, `13`).
         #: A future edit that renumbered it into that set would silently restore the defect — a
         #: transient probe failure authorising the teardown of a live mid-turn pane.
         self.assertNotIn(cli.PANE_INDETERMINATE, (cli.PANE_SAFE, cli.PANE_NOT_CLAUDE, cli.PANE_UNKNOWN))
+        #: `15` (`I-16`) is pinned the same way and for the same reason: a pane blocked at an unanswered
+        #: selection dialog is not a pane that can go — closing it would discard a decision in progress —
+        #: so a future renumbering into the can-go set would silently restore THIS defect instead.
+        self.assertNotIn(cli.PANE_AWAITING_OPERATOR,
+                         (cli.PANE_SAFE, cli.PANE_NOT_CLAUDE, cli.PANE_UNKNOWN))
 
         seen, verbs_hit = set(), set()
         for verb, argv in self.failure_matrix(fleet):
@@ -1614,6 +1630,8 @@ class TestPaneGuard(CliCase):
         fleet.worker("midTurn", pane=BUSY_PANE)
         fleet.tmux_live.add("dt-shell")
         fleet.panes["dt-shell"] = SHELL_PANE
+        fleet.tmux_live.add("dt-asking")
+        fleet.panes["dt-asking"] = DIALOG_PANE
 
         expected = {
             "dt-solo": cli.PANE_SAFE,
@@ -1621,8 +1639,9 @@ class TestPaneGuard(CliCase):
             "dt-midTurn": cli.PANE_MID_TURN,
             "dt-shell": cli.PANE_NOT_CLAUDE,
             "dt-nobody": cli.PANE_UNKNOWN,
+            "dt-asking": cli.PANE_AWAITING_OPERATOR,
         }
-        self.assertEqual(sorted(expected.values()), [0, 10, 11, 12, 13],
+        self.assertEqual(sorted(expected.values()), [0, 10, 11, 12, 13, 15],
                          "the documented code set is not the one being asserted")
         for pane, code in sorted(expected.items()):
             got, out, err = fleet.run(["pane-guard", "--porcelain", "--pane", pane])
@@ -1633,6 +1652,30 @@ class TestPaneGuard(CliCase):
             self.assertEqual(printed.get("verdict"), cli.PANE_GUARD_CODES[code],
                              f"pane-guard {pane} does not name its verdict: {out!r}")
         self.assertEqual(cli.PANE_GUARD_CODES[cli.PANE_SAFE], "safe")
+
+    def test_pane_guard_does_not_call_a_blocked_question_dialog_safe(self):
+        """`I-16`. "Idle between turns" and "blocked at a question" are opposites for a coordinator, and
+        pane-guard gave them the same answer — so a scheduled poll sees a healthy quiet pane forever
+        while the worker burns wall-clock waiting on an operator."""
+        fleet = self.loaded()
+        fleet.panes["dt-asking"] = DIALOG_PANE
+        fleet.tmux_live.add("dt-asking")
+
+        code, out, err = fleet.run(["pane-guard", "--porcelain", "--pane", "dt-asking"])
+
+        self.assertNotEqual(code, cli.PANE_SAFE,
+                            "a pane blocked at a selection dialog was reported safe to send into")
+        printed = dict(line.split("\t", 1) for line in out.splitlines())
+        self.assertEqual(printed["verdict"], cli.PANE_GUARD_CODES[code])
+        self.assertIn("code", printed)
+
+    def test_an_idle_pane_is_still_safe(self):
+        """The other direction. A guard that answers "blocked" for every quiet pane has replaced a
+        false-safe with a false-alarm, and the alarm is the one nobody can clear."""
+        fleet = self.loaded()
+        fleet.panes["dt-solo"] = IDLE_PANE
+        code, _, _ = fleet.run(["pane-guard", "--porcelain", "--pane", "dt-solo"])
+        self.assertEqual(code, cli.PANE_SAFE)
 
     # ---- `SI-54`: keyed the way every other verb is keyed ------------------------------------------
 
@@ -1769,6 +1812,16 @@ class TestPaneGuard(CliCase):
         self.assertNotIn(cli.PANE_INDETERMINATE, (cli.PANE_SAFE, cli.PANE_NOT_CLAUDE, cli.PANE_UNKNOWN))
         self.assertIn(cli.PANE_INDETERMINATE, cli.PANE_GUARD_CODES)
         self.assertIn(cli.PANE_INDETERMINATE, cli.registered_codes(cli.PANE_GUARD),
+                      "the code is not in the verb's registry, so §M1 will call it unregistered")
+
+    def test_the_awaiting_operator_code_is_not_one_that_authorises_teardown(self):
+        """`I-16`'s contract half. A pane blocked at an unanswered selection dialog is not a pane that can
+        go — closing it would discard a decision in progress — so the new code must sit outside the
+        can-go set the same way `14` does, or the fix relabels the defect instead of removing it."""
+        self.assertNotIn(cli.PANE_AWAITING_OPERATOR,
+                         (cli.PANE_SAFE, cli.PANE_NOT_CLAUDE, cli.PANE_UNKNOWN))
+        self.assertIn(cli.PANE_AWAITING_OPERATOR, cli.PANE_GUARD_CODES)
+        self.assertIn(cli.PANE_AWAITING_OPERATOR, cli.registered_codes(cli.PANE_GUARD),
                       "the code is not in the verb's registry, so §M1 will call it unregistered")
 
 

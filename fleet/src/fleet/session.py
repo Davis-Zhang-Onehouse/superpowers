@@ -179,6 +179,16 @@ _PLACEHOLDERS = (
 #: input position. With `busy` no longer firing, the guard reaches its queued-text branch and `_live_state`
 #: reaches BLOCKED — "the pane is waiting on a human", which is exactly what a trust modal is. It stays in
 #: `CLAUDE_MARKERS`: a modal is still a claude pane, it is just not a busy one.
+#:
+#: **Amendment, `I-16`: that claim is measured FALSE for the `AskUserQuestion` selection dialog.** It is
+#: true only for a modal whose selected row renders one of `_CARET`'s characters — the trust modal's
+#: `> 1. Yes, I trust this folder` does. `AskUserQuestion` draws its options as plain numbered rows with no
+#: caret glyph at all (see `DIALOG_PANE` / `test_pane_guard_does_not_call_a_blocked_question_dialog_safe`,
+#: `tests/test_cli.py`), so `unsubmitted` finds no caret, returns `None`, and the pane falls through both
+#: `busy` and `unsubmitted` to `0 safe` — the same code an idle worker gets, for a worker blocked on an
+#: unanswered question. "Detects the modal's selected line" was never a property of every modal; it was a
+#: property of every modal measured *so far*, and this is the modal that was not. `pane-guard`'s `15`
+#: (`cli.PANE_AWAITING_OPERATOR`) exists to answer for the shape this paragraph could not.
 _BUSY_MARKERS = (
     "esc to interrupt",
     "ctrl+c to stop",
@@ -204,6 +214,22 @@ _WATCHER_MARKER = re.compile(r"\b\d+\s+(?:monitor|shell)s?\b")
 #: indicator shares this row, so requiring both on one line is what separates "the harness is telling me a
 #: watcher is armed" from "the agent typed the word monitor".
 _STATUS_LINE_MARKERS = _BUSY_MARKERS + ("auto mode on", "? for shortcuts", "for agents")
+
+#: `I-16`. The `AskUserQuestion` selection dialog's own hint line, quoted VERBATIM from the register:
+#: "Enter to select · Tab/Arrow keys to navigate · Esc to cancel". Neither `_BUSY_MARKERS` nor `_CARET`
+#: fires for this dialog (see the `SI-37` amendment above), which is the whole defect — the pane fell
+#: through to `0 safe`.
+#:
+#: THREE fragments, not one, and required TOGETHER on a single row — `_WATCHER_MARKER`'s lesson applied
+#: here on purpose. `"esc to cancel"` alone is the exact phrase `SI-37` measured firing on an unrelated
+#: modal, and it is also a phrase this module's OWN comments now contain (this one included) — a
+#: single-fragment match against a multi-line window would risk exactly the false positive `SI-37` spent a
+#: production incident correcting, from the opposite direction: an agent's transcript merely discussing
+#: this dialog, or reviewing this change, contains the words "select", "navigate" and "cancel" too. No
+#: agent's own prose renders all three EXACT fragments concatenated onto one row — that shape is drawn only
+#: by the harness — so co-occurrence on one line is the anchor, the same role the counted-noun-on-the-
+#: status-line pairing plays for `_WATCHER_MARKER`.
+_DIALOG_MARKERS = ("enter to select", "tab/arrow keys to navigate", "esc to cancel")
 
 
 @dataclass
@@ -499,6 +525,28 @@ class SessionLayer:
         idle. Stripping first makes the match test what a human would read."""
         window = plain("\n".join(_tail(pane_text, BUSY_TAIL_LINES))).lower()
         return any(marker in window for marker in _BUSY_MARKERS)
+
+    def asking(self, pane_text: str) -> bool:
+        """Whether the pane is blocked at an `AskUserQuestion` selection dialog, waiting on an operator's
+        answer. `I-16`.
+
+        Callers check this AFTER `busy` and `unsubmitted` (`cli._do_pane_guard`), so a pane that is
+        genuinely mid-turn or genuinely holding typed text keeps its existing, stronger answer — this is
+        the last resort for the one shape neither of those already covers (the `SI-37` amendment above
+        records why neither one does).
+
+        Anchored to `PROMPT_TAIL_LINES` — the same bounded window `unsubmitted` scans for the input box —
+        rather than the wider `BUSY_TAIL_LINES` or the whole pane: the dialog's hint line renders where the
+        input box would, and bounding the search is what keeps a long turn's SCROLLED-PAST output (which
+        may well discuss this exact dialog) out of view by the time the turn ends and this predicate is
+        even reached. Matched on `plain` text for the same reason as `busy` — the TUI is free to colour
+        part of the hint, and a raw substring match stops finding it the moment it does.
+        """
+        for line in _tail(pane_text, PROMPT_TAIL_LINES):
+            row = plain(line).lower()
+            if all(marker in row for marker in _DIALOG_MARKERS):
+                return True
+        return False
 
     def watching(self, pane_text: str) -> bool:
         """Whether something is armed that will RE-INVOKE this session with no human in the loop.
