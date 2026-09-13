@@ -1367,6 +1367,32 @@ def _do_dispatch(ctx: Ctx, parsed: Parsed) -> int:
     verdicts = guards.evaluate_all(gctx, "dispatch")
 
     if ctx.dry_run:
+        # `F3`/`I-24c`. A charter or seed written with a plausible-but-undeclared placeholder (a
+        # coordinator's invented `{{LINEAGE_BASE_SHA}}`, say) used to be refused only at the REAL
+        # dispatch below (`profile.render`, `profiles.py:157-176`), by which point a lease was already
+        # claimed and a full rollback — plus verifying the rollback was complete — was the cost of a
+        # fact `--dry-run` exists to answer for free.
+        #
+        # `Profile.render` substitutes `context[name]` when the name is a context KEY and leaves the
+        # token otherwise, then raises on leftovers — so detection depends on the render context's KEY
+        # SET only, and never on its values. This calls the exact same `render`, with the same key set
+        # the real render below supplies, but marked placeholder values for the ones this path has not
+        # computed yet (`name`, `lease.slot`, `todo_id`, `child`): it validates honestly and discards the
+        # result. No `pool.claim`, no slot, no instant — `--dry-run`'s zero-delta contract is unchanged.
+        #
+        # `profiles.lint()` was considered and is the wrong vehicle: it checks profile-AUTHORING defects
+        # that hold for every dispatch of a profile (stray authoring stubs, a pinned sha, a missing
+        # required clause) and never sees a per-dispatch render context, so it cannot tell a declared
+        # placeholder from an invented one. `render` is the mechanism that already answers exactly this
+        # question; reusing it here avoids a second, parallel validator that could disagree with it.
+        profile.render({"TITLE": title, "INSTANT": "(dry-run)", "SLOT": "(dry-run)",
+                        "TODO_ID": "(dry-run)", "BASE": base, "PATH": "(dry-run)",
+                        "MILESTONE": milestone_id or "",
+                        "COORDINATOR": str(coordinator) if coordinator else "",
+                        "LINEAGE_BASE": parsed.get("lineage-base") or "",
+                        "LINEAGE_MODE": lineage_mode or "",
+                        "CHECKOUT": _checkout_instruction(lineage, lineage_mode)})
+
         rows = [("dry-run", "every gate evaluated; nothing was claimed, created or started")]
         rows += [("coordinator", str(coordinator) if coordinator else
                   "(none — the child will have no origin.json and `propose` will stay LOCAL)"),

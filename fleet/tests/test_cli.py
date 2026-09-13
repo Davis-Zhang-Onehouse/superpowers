@@ -357,6 +357,21 @@ class Fleet:
             "Read CHARTER.md. Run `fleet declare --instant \"$INSTANT\" --phase awaiting-ci`.\n")
         return path
 
+    def profile_with_charter(self, extra: str, kind: str = "worker") -> pathlib.Path:
+        """Like `profile()`, but the charter carries additional text — e.g. a plausible-but-undeclared
+        placeholder a coordinator invented by hand (`I-24c`). A directory of its own, never `kind` alone:
+        `profile()` keys its directory by `kind` and this must not rewrite the plain profile a test's
+        own call to `profile(kind)` still reads."""
+        path = self.profiles_dir / f"{kind}-with-charter"
+        path.mkdir(exist_ok=True)
+        (path / "profile.json").write_text(json.dumps({"kind": kind}))
+        (path / "charter.md").write_text(
+            "# {{TITLE}}\n\nRun `fleet declare --instant \"$INSTANT\" --phase awaiting-ci` when CI is "
+            f"queued.\n\n{extra}\n")
+        (path / "seed.txt").write_text(
+            "Read CHARTER.md. Run `fleet declare --instant \"$INSTANT\" --phase awaiting-ci`.\n")
+        return path
+
     def _layer_for(self, socket):
         """A `SessionLayer` speaking for one of the fixture's OTHER servers.
 
@@ -860,6 +875,35 @@ class TestDryRun(CliCase):
                                  "not interrogated")
                 self.assertEqual(fleet.started, [], f"{verb} --dry-run started a session")
                 self.assertEqual(fleet.killed, [], f"{verb} --dry-run killed a session")
+
+    def test_dry_run_refuses_an_undeclared_placeholder_before_anything_is_claimed(self):
+        """`F3`/`I-24c`. The refusal was correct and arrived only at the real dispatch — a full rollback
+        for a fact the dry run is supposed to answer for free. Placeholder detection depends on the
+        render context's KEY set, never its values (`Profile.render`), so a dry run can answer it
+        honestly without claiming a lease."""
+        fleet = self.loaded()
+        profile = fleet.profile_with_charter("{{LINEAGE_BASE_SHA}} is not a declared placeholder")
+        before_records, before_pool = fleet.record_state(), fleet.pool_state()
+
+        code, out, err = fleet.run(["dispatch", "--dry-run", "--profile", str(profile),
+                                    "--title", "probe", "--base", "00000000"])
+
+        self.assertEqual(code, EXIT_BAD_INPUT, f"dry-run did not refuse: {out}{err}")
+        self.assertIn("LINEAGE_BASE_SHA", out + err, "the refusal does not name the placeholder")
+        self.assertEqual(fleet.pool_state(), before_pool, "a dry run claimed a slot")
+        self.assertEqual(fleet.record_state(), before_records, "a dry run wrote a record")
+
+    def test_dry_run_with_only_declared_placeholders_still_dry_runs_clean(self):
+        """The other direction of `F3`: a validator that refuses everything passes the test above too.
+        A profile whose charter and seed carry only the placeholders the real dispatch supplies must
+        still dry-run clean and exit exactly as it did before this change."""
+        fleet = self.loaded()
+        profile = str(fleet.profile("worker"))
+
+        code, out, err = fleet.run(["dispatch", "--dry-run", "--profile", profile,
+                                    "--title", "probe", "--base", "00000000"])
+
+        self.assertEqual(code, EXIT_OK, f"a profile with only declared placeholders was refused: {out}{err}")
 
 
 class TestExitCodes(CliCase):
