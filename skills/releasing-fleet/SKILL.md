@@ -128,10 +128,20 @@ background shell doing that loop is safe: its own forks are `comm=bash`.
 **`scripts/release-gate.sh <version>` does all of the above for you — use it instead of typing the launch
 by hand.** `setsid`, no pipe, no `timeout`, and an unbounded wait on the same condition. It reports one of
 three outcomes: a verdict → exit 0 (`GREEN`/`EXEMPT`) or exit 1 (anything else), with the per-runner FAIL
-rows already printed; the pid gone with no verdict → **exit 3**, running Trap 8's checklist for you
-(`hermetic.log`'s size and mtime, then the log's tail); "still running" is unreachable by construction —
-the script does not return until one of the other two is true. It runs the gate **once**; re-running it is
-a separate, deliberate invocation you make, never something the script does for you.
+rows already printed; the pid gone with no verdict **from this run** → **exit 3**, running Trap 8's
+checklist for you (`hermetic.log`'s size and mtime, then the log's tail); "still running" is unreachable by
+construction — the script does not return until one of the other two is true. It runs the gate **once**;
+re-running it is a separate, deliberate invocation you make, never something the script does for you.
+
+**"From this run" is load-bearing, and it is what a re-verify depends on.** A version that has already been
+verified still has the previous attempt's `VERDICT.tsv` on disk — `fleet-v0.5.9` and `fleet-v0.5.6` are
+CANDIDATE with RED ones right now — and `Verify.run()` does not move it aside (`archive_previous_attempt`)
+until after fork, arg parsing, `_refuse_if_self_deployed` and the whole exemption diff. A wait that tested
+mere presence lost that race essentially always: measured against a stub of that shape, the gate printed
+the *previous* attempt's `verdict RED` and exited 1 in under a second, leaving a real ~45-minute run
+detached with nobody waiting on it. The script now snapshots the file's `(inode, mtime)` before launching
+and waits for a VERDICT.tsv that is present **and** is not that one, so re-verifying after an
+`INCONCLUSIVE` — the workflow this skill prescribes — reports the run you just started.
 
 **The run prints nothing between its header and its verdict.** Two runs measured on this box
 (2026-09-13, 0.5.9/0.5.10) took 2080 s (~35 min) and 2800 s (~47 min, one other root's worker live on the

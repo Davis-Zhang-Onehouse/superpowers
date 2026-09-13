@@ -88,6 +88,41 @@ mkdir -p "$GATEDIR"
 LOG="$GATEDIR/$V.log"
 PIDFILE="$GATEDIR/$V.pid"
 
+# The identity of any VERDICT.tsv a PREVIOUS attempt left behind, snapshotted BEFORE the launch.
+#
+# Presence alone is not a usable condition, and reading it as one reimplemented the very defect this
+# script exists to eliminate: a control reporting an outcome it did not measure, exactly like the piped
+# `| tail` reporting EXIT 0 over a dead run. `Verify.run()` calls `archive_previous_attempt` FIRST
+# (release_verify.py), but "first" is still after fork, arg parsing, `_refuse_if_self_deployed` and the
+# whole exemption diff (a `git diff` plus up to ten `git show` subprocesses) -- while the wait loop's
+# first check fires microseconds after the pidfile write, so a presence test wins that race essentially
+# always. Measured against a stub of that shape: the script printed the previous attempt's
+# `verdict RED … STALE previous attempt` and exited 1 in under a second, while the real run's GREEN
+# landed six seconds later -- leaving a detached ~45-minute run nobody was waiting on, and later an
+# orphan worktree. `fleet-v0.5.9` and `fleet-v0.5.6` are CANDIDATE with RED VERDICT.tsv files on this box
+# today, and re-verifying after an INCONCLUSIVE is the workflow the skill itself prescribes, so this was
+# not a corner case.
+#
+# Identity, not presence, because `archive_previous_attempt` moves the old file away with
+# `path.rename(destination / path.name)` -- a rename WITHIN the evidence directory, into
+# `attempt-<n>-<verdict>/`. The old file stays alive there, so its inode cannot be reused and this run's
+# VERDICT.tsv is always a fresh one. (inode, mtime) therefore changes exactly when this run writes it.
+#
+# And identity is not enough on its own, which is the second half of the same measurement: that rename
+# UNLINKS the path before this run writes anything, so between the archive and the verdict the identity
+# has already changed -- to "absent". A bare "has the identity changed" test therefore breaks out of the
+# wait into a file that is not there yet, and `awk` reports `No such file or directory` twice. Measured,
+# on the first attempt at this fix. Both halves are required: a verdict is THIS run's only when the path
+# exists AND is not the one the snapshot recorded.
+verdict_identity() { stat -c %i:%Y "$EV/VERDICT.tsv" 2>/dev/null || echo none; }
+STALE_VERDICT="$(verdict_identity)"
+
+this_runs_verdict() { # 0 when VERDICT.tsv is present and is not the one a previous attempt left behind
+  local now
+  now="$(verdict_identity)"
+  [ "$now" != "none" ] && [ "$now" != "$STALE_VERDICT" ]
+}
+
 echo "$(basename "$0"): launching release-verify for $V (log: $LOG)"
 
 # The launch line the four incidents are each a violation of: no pipe (Trap: `| tail` ate the exit
@@ -103,11 +138,13 @@ echo "$(basename "$0"): pid $pid — a detached run outlives this shell; find it
 # Wait on the disjunction, unbounded. No fixed iteration cap and no `timeout`: the gate has taken ~45
 # minutes on this box against the ~24 a stale skill used to quote, and a cap sized for the old number
 # reports "no verdict" over a run that is healthy and mid-flight.
-while [ ! -f "$EV/VERDICT.tsv" ] && kill -0 "$pid" 2>/dev/null; do
+while ! this_runs_verdict && kill -0 "$pid" 2>/dev/null; do
   sleep "$SLEEP_S"
 done
 
-if [ -f "$EV/VERDICT.tsv" ]; then
+# Re-read rather than trusting the loop's last look: the pid can exit in the same instant it writes the
+# verdict, which leaves the loop through the `kill -0` half with the file already in place.
+if this_runs_verdict; then
   # Outcome 1: the verdict is in. Print it, then every FAIL row — read from the PER-RUNNER files, never
   # the merged `it-RESULTS.tsv`, because only the per-runner files carry which runner a FAIL came from.
   awk -F'\t' '$1=="verdict"{print}' "$EV/VERDICT.tsv"
@@ -128,7 +165,12 @@ fi
 
 # Outcome 2: the pid is gone and no verdict was written — a dead run, not a finished one. Trap 8's
 # checklist, executed here rather than left for the operator to remember under time pressure.
-echo "$(basename "$0"): pid $pid is gone and $EV/VERDICT.tsv was never written — the run died" >&2
+echo "$(basename "$0"): pid $pid is gone and this run never wrote $EV/VERDICT.tsv — the run died" >&2
+if [ "$STALE_VERDICT" != "none" ]; then
+  # Named, never printed as a verdict: a file this run did not write is evidence of the attempt BEFORE
+  # it, and letting it stand in for this one is the defect the identity snapshot above exists to prevent.
+  echo "(a VERDICT.tsv from an earlier attempt is still in $EV — it is NOT this run's and was not read)" >&2
+fi
 if [ -f "$EV/hermetic.log" ]; then
   stat --format='hermetic.log: %s bytes, modified %y' "$EV/hermetic.log"
 else
