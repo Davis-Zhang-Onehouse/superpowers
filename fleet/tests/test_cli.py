@@ -1824,6 +1824,92 @@ class TestPaneGuard(CliCase):
         self.assertIn(cli.PANE_AWAITING_OPERATOR, cli.registered_codes(cli.PANE_GUARD),
                       "the code is not in the verb's registry, so §M1 will call it unregistered")
 
+    def test_pane_guard_can_preserve_the_capture_behind_its_verdict(self):
+        """`I-21`/`I-26`. Twice a `0 safe` verdict was wrong about a box that held text, and both times the
+        raw capture was gone by the time anyone asked why. A verdict you cannot re-examine is an anecdote."""
+        fleet = self.loaded()
+        fleet.panes["dt-solo"] = IDLE_PANE
+        target = fleet.tmp / "capture.txt"
+
+        code, out, _ = fleet.run(["pane-guard", "--porcelain", "--pane", "dt-solo",
+                                  "--capture", str(target)])
+
+        self.assertEqual(code, cli.PANE_SAFE, "preserving the capture must not change the verdict")
+        self.assertEqual(target.read_text(), IDLE_PANE,
+                         "the preserved capture is not what the verdict was computed from")
+
+    def test_capture_does_not_perturb_any_verdict(self):
+        """Step 4: the flag must be inert for EVERY code, not just `0` — a diagnostic that changes the
+        thing it observes is worse than none."""
+        fleet = self.loaded()
+        fleet.panes["dt-solo"] = IDLE_PANE
+        fleet.worker("queued", slot="ws4", pane=QUEUED_PANE)
+        fleet.worker("midTurn", pane=BUSY_PANE)
+        fleet.tmux_live.add("dt-shell")
+        fleet.panes["dt-shell"] = SHELL_PANE
+        fleet.tmux_live.add("dt-asking")
+        fleet.panes["dt-asking"] = DIALOG_PANE
+
+        expected = {
+            "dt-solo": cli.PANE_SAFE,
+            "dt-queued": cli.PANE_QUEUED_TEXT,
+            "dt-midTurn": cli.PANE_MID_TURN,
+            "dt-shell": cli.PANE_NOT_CLAUDE,
+            "dt-nobody": cli.PANE_UNKNOWN,
+            "dt-asking": cli.PANE_AWAITING_OPERATOR,
+        }
+        for pane, code in sorted(expected.items()):
+            without, out_without, _ = fleet.run(["pane-guard", "--porcelain", "--pane", pane])
+            target = fleet.tmp / f"capture-{pane}.txt"
+            with_capture, out_with, _ = fleet.run(["pane-guard", "--porcelain", "--pane", pane,
+                                                   "--capture", str(target)])
+            self.assertEqual(without, code, f"baseline verdict for {pane} is not {code}: {out_without}")
+            self.assertEqual(with_capture, without,
+                             f"--capture changed the verdict for {pane}: {without} -> {with_capture}")
+            self.assertEqual(out_with, out_without,
+                             f"--capture changed the printed row for {pane}: {out_with!r} vs {out_without!r}")
+
+    def test_a_failed_capture_stays_distinguishable_from_an_empty_one_in_the_file(self):
+        """`FI-7` extended to the artifact: `None` (capture failed / never attempted) must not collapse
+        into `""` (captured cleanly, genuinely empty) once it is written to a file."""
+        fleet = self.loaded()
+        pane = "dt-solo"
+        fleet.panes[pane] = IDLE_PANE
+        fleet.live_sessions_fail = True
+        fleet.capture_fails.add(pane)
+        failed_target = fleet.tmp / "capture-failed.txt"
+
+        code, out, err = fleet.run(["pane-guard", "--porcelain", "--pane", pane,
+                                    "--capture", str(failed_target)])
+
+        self.assertEqual(code, cli.PANE_INDETERMINATE, f"{out}{err}")
+        self.assertFalse(failed_target.exists(),
+                         "a failed capture wrote a file indistinguishable from a genuinely empty one")
+
+        empty_pane = "dt-emptyshell"
+        fleet.tmux_live.add(empty_pane)
+        fleet.panes[empty_pane] = ""
+        empty_target = fleet.tmp / "capture-empty.txt"
+
+        code, out, err = fleet.run(["pane-guard", "--porcelain", "--pane", empty_pane,
+                                    "--capture", str(empty_target)])
+
+        self.assertEqual(code, cli.PANE_NOT_CLAUDE, f"{out}{err}")
+        self.assertTrue(empty_target.exists(), "a genuinely empty capture must still write the file")
+        self.assertEqual(empty_target.read_text(), "")
+
+    def test_capture_is_not_written_for_a_pane_that_does_not_exist(self):
+        """`13 unknown` never even attempts a capture — nothing to preserve, and the file must say so by
+        not existing rather than by existing empty."""
+        fleet = self.loaded()
+        target = fleet.tmp / "capture-nobody.txt"
+
+        code, out, err = fleet.run(["pane-guard", "--porcelain", "--pane", "dt-nobody",
+                                    "--capture", str(target)])
+
+        self.assertEqual(code, cli.PANE_UNKNOWN, f"{out}{err}")
+        self.assertFalse(target.exists(), "an unknown pane wrote a capture file for text nobody read")
+
 
 class TestTheArgvTable(CliCase):
     """The table is the ONE thing in this file that is not derived from `VERBS`, because a valid
@@ -2004,6 +2090,31 @@ class TestClose(CliCase):
         code, out, err = fleet.run(["close", "--id", fleet.ids["midTurnWorker"], "--force"])
         self.assertEqual(code, EXIT_OK, err)
         self.assertIn("dt-midTurnWorker", fleet.killed,
+                      "the override named by the refusal does not work: the alarm cannot be cleared by "
+                      "doing what it asked")
+
+    def test_close_refuses_a_pane_awaiting_operator(self):
+        """The controller's ruling on Task 6's `15 PANE_AWAITING_OPERATOR`: nothing acted on it, so `fleet
+        close` would happily tear down a pane blocked at an unanswered `AskUserQuestion` dialog — the exact
+        harm the original incident describes, *"the one case teardown logic exists for is an unanswered
+        prompt."* Same shape as the busy/queued refusals: names `--force`, names `clears_when`/`clears_who`.
+        """
+        fleet = self.loaded()
+        fleet.worker("askingWorker", pane=DIALOG_PANE)
+
+        code, out, err = fleet.run(["close", "--id", fleet.ids["askingWorker"]])
+
+        self.assertEqual(code, EXIT_REFUSED,
+                         f"close did not refuse a pane awaiting an operator's answer (code {code}): "
+                         f"{out}{err}")
+        self.assertIn("--force", out + err, f"close's refusal names no override: {out}{err}")
+        self.assertIn("clears when", err, "the refusal names no clearing condition (§9)")
+        self.assertIn("clears who", err, "the refusal names no clearing actor (§9)")
+        self.assertEqual(fleet.killed, [], "close killed the pane it had just refused")
+
+        code, out, err = fleet.run(["close", "--id", fleet.ids["askingWorker"], "--force"])
+        self.assertEqual(code, EXIT_OK, err)
+        self.assertIn("dt-askingWorker", fleet.killed,
                       "the override named by the refusal does not work: the alarm cannot be cleared by "
                       "doing what it asked")
 
