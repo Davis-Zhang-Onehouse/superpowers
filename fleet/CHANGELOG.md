@@ -1,5 +1,14 @@
 # fleet — changelog
 
+## fleet/v0.5.11 — 2026-09-13T15:41:51Z
+Cut from de0ccd9 on `live` (upstream base snapshot/2026-08-17-221146). 1 commit(s) since fleet/v0.5.10.
+
+Every release ships the whole repository — all skills, `commands/`, `hooks/` and the plugin manifest, not only `fleet/`.
+Payload: skills (1 file).
+Skills changed: releasing-fleet.
+
+- de0ccd9 releasing-fleet: the four things that cost a gate run on 0.5.9/0.5.10
+
 ## fleet/v0.5.10 — 2026-09-13T06:22:50Z
 Cut from 65f2d4e on `live` (upstream base snapshot/2026-08-17-221146). 1 commit(s) since fleet/v0.5.9.
 
