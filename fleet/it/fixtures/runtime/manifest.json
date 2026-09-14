@@ -6,7 +6,7 @@
     "frame": "codex-idle.frame",
     "columns": 100,
     "rows": 35,
-    "evidence": "Captured from private test session: codex-driver-startup.frame"
+    "evidence": "../../../../docs/superpowers/specs/evidence/runtime-frames/codex-driver-startup.frame — a finished response: the CLI printed its footer and an empty › input"
   },
   {
     "runtime": "codex",
@@ -15,7 +15,7 @@
     "frame": "codex-queued.frame",
     "columns": 100,
     "rows": 35,
-    "evidence": "Captured from private test session: codex-queued-native.frame"
+    "evidence": "../../../../docs/superpowers/specs/evidence/runtime-frames/codex-queued-native.frame — literal text inserted without Enter"
   },
   {
     "runtime": "codex",
@@ -24,7 +24,7 @@
     "frame": "codex-busy.frame",
     "columns": 100,
     "rows": 35,
-    "evidence": "Captured from private test session: codex-busy-native.frame"
+    "evidence": "../../../../docs/superpowers/specs/evidence/runtime-frames/codex-busy-native.frame — a small coding request, captured while the spinner row was live"
   },
   {
     "runtime": "codex",
@@ -33,7 +33,7 @@
     "frame": "codex-dialog.frame",
     "columns": 100,
     "rows": 35,
-    "evidence": "Captured from private test session: codex-latest.frame"
+    "evidence": "../../../../docs/superpowers/specs/evidence/runtime-frames/codex-latest.frame — the sandbox-approval prompt raised during the bootstrap test"
   },
   {
     "runtime": "claude",
@@ -42,7 +42,7 @@
     "frame": "claude-idle.frame",
     "columns": 100,
     "rows": 35,
-    "evidence": "Captured from private test session: claude-idle-native.frame"
+    "evidence": "../../../../docs/superpowers/specs/evidence/runtime-frames/claude-idle-native.frame — a finished response: an empty ❯ box above the status line"
   },
   {
     "runtime": "claude",
@@ -51,7 +51,7 @@
     "frame": "claude-queued.frame",
     "columns": 100,
     "rows": 35,
-    "evidence": "Captured from private test session: claude-queued-native.frame"
+    "evidence": "../../../../docs/superpowers/specs/evidence/runtime-frames/claude-queued-native.frame — literal text inserted without Enter"
   },
   {
     "runtime": "claude",
@@ -60,7 +60,7 @@
     "frame": "claude-dialog.frame",
     "columns": 100,
     "rows": 35,
-    "evidence": "Captured from private test session: claude-driver-startup.frame"
+    "evidence": "../../../../docs/superpowers/specs/evidence/runtime-frames/claude-driver-startup.frame — the folder-trust screen shown on first start in the probe project"
   },
   {
     "runtime": "claude",
@@ -69,7 +69,7 @@
     "frame": "claude-busy.frame",
     "columns": 100,
     "rows": 35,
-    "evidence": "Captured while running sleep 8: claude-busy-usable.frame"
+    "evidence": "../../../../docs/superpowers/specs/evidence/runtime-frames/claude-busy-usable.frame — a request that ran `sleep 8`, captured mid-turn"
   },
   {
     "runtime": "claude",
@@ -78,7 +78,7 @@
     "frame": "claude-multiline.frame",
     "columns": 100,
     "rows": 35,
-    "evidence": "Captured literal multiline input in the isolated runtime test"
+    "evidence": "this frame is the retained capture — literal multiline text inserted without Enter in the isolated runtime test (`fleet/it/run-runtime.sh --live`)"
   },
   {
     "runtime": "codex",
@@ -87,6 +87,6 @@
     "frame": "codex-multiline.frame",
     "columns": 100,
     "rows": 35,
-    "evidence": "Captured literal multiline input in the isolated runtime test"
+    "evidence": "this frame is the retained capture — literal multiline text inserted without Enter in the isolated runtime test (`fleet/it/run-runtime.sh --live`)"
   }
 ]

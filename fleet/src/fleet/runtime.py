@@ -48,9 +48,7 @@ def observe(runtime: RuntimeName, frame: str) -> PaneObservation:
     if not rows:
         return PaneObservation("unknown")
     visible = [plain(row).strip() for row in rows]
-    tail = "\n".join(visible[-8:]).lower()
-    if ("enter to confirm" in tail or "press enter to continue" in tail
-            or "esc to cancel" in tail):
+    if _dialog_row(runtime, visible):
         return PaneObservation("dialog")
     if runtime == "claude":
         draft = _claude_draft(rows, frame)
@@ -64,6 +62,40 @@ def observe(runtime: RuntimeName, frame: str) -> PaneObservation:
                      for row in visible[-PROMPT_TAIL_LINES:])
         return PaneObservation("idle" if prompt and chrome else "unknown", watcher=watcher)
     return _observe_codex(rows, visible)
+
+
+#: The rows that POSITIVELY identify an operator dialog — a pane that will not move until a human answers
+#: it — per runtime. Each entry is a set of fragments that must ALL appear on ONE rendered row inside the
+#: input-box window (`PROMPT_TAIL_LINES`), never a single fragment over a joined tail: an agent working in
+#: this repository writes "esc to cancel" in its own prose constantly, and a one-fragment rule over eight
+#: joined rows classified an idle pane whose last answer merely quoted that hint as `dialog` — which
+#: `send` refuses, `close` refuses and `pane-guard` reports as blocked, none of which clears by waiting
+#: (the `SI-37` incident shape, from the opposite direction). Every row here is measured, not reasoned:
+#:  - Claude's folder-trust modal: "Enter to confirm · Esc to cancel" (`fixtures/runtime/claude-dialog.frame`).
+#:  - Claude's `AskUserQuestion` dialog: "Enter to select · Tab/Arrow keys to navigate · Esc to cancel",
+#:    three fragments on one row for the reason `I-16` records (`session.py`, the `SI-37` amendment).
+#:  - Codex's approval prompt: "Press enter to confirm or esc to cancel" (`fixtures/runtime/codex-dialog.frame`).
+CLAUDE_DIALOG_ROWS = (
+    ("enter to confirm", "esc to cancel"),
+    ("enter to select", "tab/arrow keys to navigate", "esc to cancel"),
+)
+CODEX_DIALOG_ROWS = (
+    ("press enter to confirm", "esc to cancel"),
+)
+
+
+def _dialog_row(runtime: RuntimeName, visible: list[str]) -> bool:
+    """A measured dialog row inside the input-box window: it BEGINS with its first fragment and carries
+    every other one. The row-start anchor is what separates the TUI's hint line from an agent's prose
+    that quotes the same words mid-sentence ("the hint reads Esc to cancel, and Enter to confirm…") —
+    every captured hint row starts with its verb, and prose almost never does."""
+    rows = CLAUDE_DIALOG_ROWS if runtime == "claude" else CODEX_DIALOG_ROWS
+    for row in visible[-PROMPT_TAIL_LINES:]:
+        lowered = row.lower()
+        for fragments in rows:
+            if lowered.startswith(fragments[0]) and all(fragment in lowered for fragment in fragments[1:]):
+                return True
+    return False
 
 
 def _claude_draft(rows, frame):
@@ -255,7 +287,7 @@ _PLACEHOLDERS = (
 #: unanswered question. "Detects the modal's selected line" was never a property of every modal; it was a
 #: property of every modal measured *so far*, and this is the modal that was not. `pane-guard`'s `15`
 #: (`cli.PANE_AWAITING_OPERATOR`) exists to answer for the shape this paragraph could not; the dialog's
-#: markers (`session._DIALOG_MARKERS`) stay beside `SessionLayer.asking`, the predicate that reads them.
+#: rows are `CLAUDE_DIALOG_ROWS` above, the one dialog predicate `SessionLayer.asking` delegates to.
 _BUSY_MARKERS = (
     "esc to interrupt",
     "ctrl+c to stop",

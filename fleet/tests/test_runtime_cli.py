@@ -51,6 +51,15 @@ class RuntimeCliTests(unittest.TestCase):
         code, _, err = self.f.run(['runtime', '--set', 'claude'])
         self.assertEqual(code, 4, err)
 
+    def test_an_unreadable_process_blocks_the_switch_but_not_the_read_verbs(self):
+        """A process whose `/proc` refused the read cannot be placed, so it is not proof of emptiness for
+        a switch — and it is not a reason for `board` to exit 1 either."""
+        self.f.procs.append(LiveSession(779, Path('/proc/779'), None, 'codex', unreadable=True))
+        code, _, err = self.f.run(['runtime', '--set', 'codex'])
+        self.assertEqual(code, 4, err)
+        self.assertIn('unreadable', err)
+        self.assertEqual(self.f.run(['board', '--porcelain'])[0], 0)
+
     def test_invalid_selection_is_not_overwritten(self):
         self.f.home.mkdir(exist_ok=True)
         path = self.f.home / 'runtime.json'

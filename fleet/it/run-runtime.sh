@@ -33,13 +33,15 @@ case "$mode" in
     bash "$IT_ROOT/bin/source-pin.sh" after "$EV" || exit 3
     exit "$IT_FAILED"
     ;;
-  *) echo 'usage: run-runtime.sh --stubs' >&2; exit 2 ;;
+  *) echo 'usage: run-runtime.sh --stubs | --live --runtime claude|codex' >&2; exit 2 ;;
 esac
 . "$IT_ROOT/lib.sh"
 IT_FAILED=0
 it_own_cases 'RT[0-9]+|ISOLATION-RT-(enter|leave)'
 it_section RT
-case "$FLEET_TMUX_SOCKET" in itfleet-*) ;; *) echo 'private socket required' >&2; exit 2 ;; esac
+# The private socket is `it_section`'s to set (`itfleet-RT`, one line up), so there is nothing to check
+# here; the refusals that actually decide are `it_tmux`'s own and the stand-in's (`bin/claude`), both of
+# which refuse any non-`itfleet-` server before touching tmux.
 mkdir -p "$EV/out"
 RT_ATTEMPT="$(mktemp -d "$EV/attempt-XXXXXX")"
 export FLEET_HOME="$RT_ATTEMPT/home" FLEET_INSTANTS="$RT_ATTEMPT/instants"

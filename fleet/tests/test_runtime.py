@@ -30,6 +30,27 @@ class RuntimeTests(unittest.TestCase):
             with self.subTest(value=value), self.assertRaises(BadInput):
                 validate_runtime(value)
 
+    def test_a_dialog_is_a_measured_row_not_a_quoted_hint(self):
+        """A single "esc to cancel" over a joined tail classified an idle pane whose last answer merely
+        quoted that hint as `dialog` — which `send`/`close` refuse and nothing clears by waiting. Every
+        dialog is several fragments on ONE row, per runtime, inside the input-box window."""
+        prose_then_idle = "\n".join([
+            "Done. The trust screen's hint reads Esc to cancel, and Enter to confirm accepts it.",
+            "",
+            "❯ ",
+            "? for shortcuts · auto mode on",
+        ])
+        self.assertEqual(observe('claude', prose_then_idle).state, 'idle')
+        root = Path(__file__).resolve().parents[1] / 'it/fixtures/runtime'
+        self.assertEqual(observe('claude', (root / 'claude-dialog.frame').read_text()).state, 'dialog')
+        self.assertEqual(observe('codex', (root / 'codex-dialog.frame').read_text()).state, 'dialog')
+        ask = "\n".join(["Delete it on this lineage, or carry it?", "  1. Delete it on this lineage",
+                         "  2. Keep it and carry the note", "",
+                         "Enter to select · Tab/Arrow keys to navigate · Esc to cancel"])
+        self.assertEqual(observe('claude', ask).state, 'dialog')
+        # Claude's rows are not Codex's and vice versa: a Codex pane quoting Claude's hint is not a dialog.
+        self.assertNotEqual(observe('codex', ask).state, 'dialog')
+
     def test_blank_or_prose_is_not_idle(self):
         for runtime in ('claude', 'codex'):
             for frame in ('', '$ echo codex\n', 'The agent is idle.\n', '›\n'):
