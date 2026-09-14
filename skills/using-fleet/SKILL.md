@@ -79,7 +79,7 @@ Read-only. Safe to run at any time; they change nothing.
 | `fleet base-check` | is this workspace positioned on the base its milestone builds on? |
 | `fleet reconcile` | the arm set an external monitor reads, from the one join |
 | `fleet compaction-status` | whether a compaction is holding every dispatch |
-| `fleet pane-guard` | the send-keys contract, as an exit code; keyed by `--id <todo>` or `--pane <session>` |
+| `fleet pane-guard` | the pane contract every send and close branches on, as an exit code; keyed by `--id <todo>` or `--pane <session>` |
 | `fleet seed-check` | is every live worker running the briefing that was rendered FOR it? |
 | `fleet lint` | the layout matrix, the watched-source registry, the near-miss rule |
 | `fleet verify` | EXECUTE every documented recipe in a sandbox |
@@ -108,7 +108,7 @@ Mutating. Each has `--dry-run`.
 | `fleet abort` | abandon an inflight instant, with a recorded reason; RELEASES the milestone it claimed |
 | `fleet harvest` | the close-out transaction, plus the observation tick |
 | `fleet close` | shut a pane this store owns and stamp the record |
-| `fleet seed-delivered` | record what was actually sent to a worker's pane — the positive channel for a send-keys delivery, which leaves nothing in argv |
+| `fleet seed-delivered` | record what was actually sent to a worker's pane — the positive channel for a briefing delivered by hand into a pane (a resumed or manually started worker), which leaves nothing in argv; `fleet dispatch` puts the seed in argv itself |
 | `fleet reap` | free every stale lease this base owns; name the ones it does not |
 | `fleet root-init` | make a directory a fleet root: its `.fleet-root` marker, store skeleton and release area. Refuses anything that is not a directory strictly under `$HOME`, and anything already inside a root — the walk stops at `$HOME` and at the nearest marker, so either would be a root no verb could find. `--share-releases <dir>` points it at an existing release area so both roots resolve one `current` |
 | `fleet enroll` / `fleet unenroll` | put an existing workspace into the pool, or take it out |
@@ -188,8 +188,10 @@ workers. A native messaging API is usable only when the current harness exposes 
 supplies its address; a tmux session name is not a native agent ID. FOREIGN or unaddressable peers are
 not message targets.
 
-A known agent with a modal or unfamiliar input returns `14 indeterminate`; `12 not-claude` retains its
-legacy label and means a positively identified non-agent pane. Treat every nonzero guard code as wait
+A known agent with an unfamiliar input returns `14 indeterminate`, and so does a trust or approval modal
+on either CLI; a Claude `AskUserQuestion` selection dialog is the one modal with its own code, `15
+awaiting-operator` (above). `12 not-claude` retains its legacy label and means a positively identified
+non-agent pane. Treat every nonzero guard code as wait
 before sending. Codex has no verified CI wake mechanism here: `awaiting-ci` is refused, even with a
 watcher attestation, and the worker continues to count against capacity.
 

@@ -415,7 +415,7 @@ def check_session(session: str, pid: int, rendered: str, probes: Probes,
     #: number about a population it could not see.
     if verdict.state == NOT_DELIVERED and not is_worker(found_pid or pid, probes):
         verdict.detail += (
-            f". No `{WORKER_COMM}` process was found at or below pid {found_pid or pid}, so nothing about "
+            f". No worker process of the selected runtime was found at or below pid {found_pid or pid}, so nothing about "
             f"this session's delivery was examined at all. A long argument on a non-worker descendant — a "
             f"CI waiter is exactly that shape — is deliberately not read as a briefing (`SI-52`)")
     return verdict

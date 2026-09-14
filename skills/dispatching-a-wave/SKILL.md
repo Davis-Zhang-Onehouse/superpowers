@@ -132,7 +132,10 @@ handoff or waiting shim. A missing or empty seed cannot start an unbriefed worke
 
 **Treat dispatch as the release signal.** Scope and acceptance criteria must be complete before it.
 Keep the profile's self-check that tells the worker to park when its charter scope remains a placeholder;
-never ask it to infer scope from a milestone title.
+never ask it to infer scope from a milestone title. Nothing on your side catches a placeholder scope: the
+`authoring-placeholder` lint does not run from any command a coordinator can type (`SI-45`) and would not
+match the HTML-comment placeholder convention anyway (`SI-46`), and with dispatch launching the worker
+immediately there is no window to fix it afterwards.
 
 ## Step 6 — verify what actually launched
 
