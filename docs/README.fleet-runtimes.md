@@ -10,7 +10,8 @@ release, so the next line selects this checkout's CLI for this shell.
 export PATH="$PWD/bin:$PATH"
 fleet runtime
 fleet runtime --set codex
-# Start a Codex coordinator in the fleet root, then dispatch normally:
+# Start a Codex coordinator in the fleet root, then dispatch normally (a worker on a milestone also takes
+# --from, --milestone and --lineage-base; the full form is in skills/dispatching-a-wave):
 fleet dispatch --profile "$PREPARED_PROFILE" --title "$TITLE" --seed-extra "$TASK_BRIEF"
 ```
 
@@ -50,7 +51,7 @@ remains supported. Executable, configuration directory and runtime are recorded 
 are never copied into fleet records or launchers.
 
 Install the repository as a native plugin in the selected CLI, following its existing setup guide
-([Codex](README.codex.md), [Claude Code](../README.md)). The Codex package includes
+([Codex CLI](../README.md#codex-cli), [Claude Code](../README.md)). The Codex package includes
 `hooks/hooks-codex.json` and `hooks/session-start-codex`. Enable native hooks in the CLI configuration,
 review and trust the plugin hook when prompted, then start a fresh session. Its SessionStart hook loads
 `using-superpowers` for startup, resume, clear and compact events. Merely putting skills on disk does

@@ -167,8 +167,9 @@ CADENCE_PREFIX = "cadence:"
 # --- exit codes -----------------------------------------------------------------------------------
 #
 # `fleet/__init__.EXIT_CODES` stays the ONE registry for the general codes. FD-10 documents four more for
-# `pane-guard` alone — `0` safe · `10` queued text · `11` mid-turn · `12` not-claude · `13` unknown pane —
-# because the external monitor branches on them before every send-keys and DA-2 enumerated SIX send paths.
+# `pane-guard` alone — `0` safe · `10` queued text · `11` mid-turn · `12` not-claude (legacy label: an
+# OBSERVED non-agent pane, whichever runtime is selected) · `13` unknown pane — because the external
+# monitor branches on them before every send and DA-2 enumerated SIX send paths.
 # They are declared here, next to the only verb allowed to return them, rather than folded into the base
 # registry: a code that means "the pane has text in its box" is not an answer to "did the verb succeed",
 # and `registered_codes()` is what every caller and the suite ask.
@@ -5364,7 +5365,7 @@ VERBS = {spec.name: spec for spec in (
         Flag("--id", True, False, "restrict to one todo id, or a unique substring of it"),
     )),
     _verb(PANE_GUARD, _do_pane_guard, True,
-          "the send-keys contract: " + _pane_guard_summary(), (
+          "the pane contract every send and close branches on (12 = an observed non-agent pane, legacy label not-claude): " + _pane_guard_summary(), (
         #: `SI-54`. Neither is parser-required and exactly one is required by the handler: the parser can
         #: say "required" but not "exactly one of", and `--pane` staying mandatory would make `--id`
         #: unreachable. Both name the same subject, so accepting both is refused rather than resolved.

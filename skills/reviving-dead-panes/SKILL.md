@@ -59,7 +59,7 @@ read this section to know what it is doing and why each value is where it is:
 
 ```bash
 bash scripts/fleet-revive.sh plan        <todo-id>   # every derived value, before anything is created
-bash scripts/fleet-revive.sh transcripts <todo-id>   # verified workspace candidates — see trap 2
+bash scripts/fleet-revive.sh transcripts <todo-id>   # verified workspace candidates — see trap 1
 bash scripts/fleet-revive.sh launcher    <todo-id> <transcript-id>
 bash scripts/fleet-revive.sh start       <todo-id>
 ```
@@ -77,7 +77,7 @@ configuration explicitly. Legacy records without executable/configuration metada
 owner resolver and say so visibly. A failed configuration or transcript check does not guess a fallback.
 The helper's generated launcher calls `fleet revive` at actual start, so the same locks and checks apply.
 
-### 2. Revive by transcript id, not `--continue`
+### 1. Revive by transcript id, not `--continue`
 
 A slot is re-leased across efforts, so the newest transcript in the slot's project directory is not
 reliably the worker you are reviving. One slot here held three, from three occupants weeks apart.
@@ -89,7 +89,10 @@ bash scripts/fleet-revive.sh transcripts <todo-id>    # runtime and workspace ca
 Inspect the candidate transcript and choose the UUID belonging to this worker; mtime alone is not identity. Pass it to `--session-id` explicitly. The script lists and
 refuses to choose, because that judgement is the only part of this step that is not mechanical.
 
-### 3. A resumed session opens a MENU, and `pane-guard` reads that menu as unsubmitted text
+### 2. A resumed session opens a MENU, and `pane-guard` reads that menu as unsubmitted text
+
+`fleet revive` always passes the explicit session id, so this menu is reached only by a hand-typed
+`--resume` with no id; it is kept because that is exactly what a rushed operator types.
 
 Past a size threshold the TUI asks how to resume — *Resume from summary / Resume full session as-is /
 Don't ask me again* — before it is ready for input. Measured on a 435k-token session: **twelve
@@ -102,7 +105,7 @@ showing that menu.
 - **Do not submit a menu as if it were a message draft.** `fleet send` requires an observed idle
   input before insertion and the exact message afterward. Inspect and resolve a real resume menu first.
 
-### 4. `capture-pane -t "=$SESSION"` fails on a session that EXISTS
+### 3. `capture-pane -t "=$SESSION"` fails on a session that EXISTS
 
 A pane target parses as `session:window.pane`, and `=name` alone is not a session part. Measured on tmux
 3.2a against one live session:
@@ -124,7 +127,7 @@ against a worker whose record named another server and got *"error connecting to
 the record's socket in front of it, every time; a bare `fleet_peek` is right only when the two happen to
 agree, which is exactly the assumption this skill exists to break.
 
-### 5. Revive on the server the RECORD names, or the board keeps looking at the old one
+### 4. Revive on the server the RECORD names, or the board keeps looking at the old one
 
 A record carries `tmux_socket`, and every verb resolves the session through it — so a pane revived on a
 *different* server than the record names is invisible to `board`, `status`, `close` and `abort`, however

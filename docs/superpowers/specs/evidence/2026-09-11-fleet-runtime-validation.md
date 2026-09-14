@@ -7,7 +7,7 @@ The feature has not been promoted or deployed; the remaining validation limits a
 
 ## Completed checks
 
-- Full fleet unit suite: 1,849 tests passed in 113.539 seconds, including denied-tmux preflight, executable pinning, terminal redraw, terminal-attribute and exited-process regressions.
+- Full fleet unit suite: 1,849 tests passed (the tracked runs are [`final-gate/exported-commit-unit.log`](final-gate/exported-commit-unit.log) and `final-gate/M13-suite-*.txt`; an earlier 113.539 s run was not retained), including denied-tmux preflight, executable pinning, terminal redraw, terminal-attribute and exited-process regressions.
 - New multiprocessing cases: dispatch versus switch, two senders versus close, lock release after
   process death, and independent roots/panes passed.
 - `run-runtime.sh --stubs`: Claude → Codex → Claude in one store, seed-byte attestation, early-switch
@@ -16,7 +16,7 @@ The feature has not been promoted or deployed; the remaining validation limits a
 - The default 17-runner batch completed with 250 passes, ten skips and one outdated E1 timeout
   expectation. The corrected E1 passed its targeted twenty-iteration retest; the original batch exit 1
   remains recorded. See [the batch and retest evidence](final-gate/INDEX.md).
-  Nested self-test timeouts were raised from 120 to 600 seconds after the full suite took 180.531
+  Nested self-test timeouts were raised from 120 to 600 seconds after the full suite took 180.531 (measured; that run's log was not retained)
   seconds under concurrent load; assertions remain unchanged. Earlier interrupted runs are not passes.
 - Hook JSON tests, Codex native-hook tests, marketplace/package tests, systematic-debugging's polluter
   test, fleet-view, fleet-env root derivation, and the Claude watchdog PID exclusion test passed.
@@ -53,7 +53,8 @@ Artifacts: [session and tool exchanges](codex-live-session-2026-09-11.json),
 
 The first real dispatches failed seed verification because resolving the executable symlink changed
 Claude's process name. Both launch forms were measured: the alias produced `comm=claude`, the versioned
-path produced `comm=2.1.268`, and both pointed at the same native executable. Fleet retained the lease
+path produced `comm=2.1.268`, and both pointed at the same native executable (raw captures were kept
+privately; the durable evidence is the regression test in `fleet/tests/test_runtime_launch.py`). Fleet retained the lease
 while cleanup could still observe a process holding its cwd. The test attempts were explicitly aborted,
 reviewed and harvested before retrying.
 
