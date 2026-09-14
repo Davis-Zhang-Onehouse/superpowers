@@ -6,7 +6,7 @@
 
 **Gate:** ALLOWED (`review-verdict`)
 
-round 2 (scope code) recorded READY-WITH-FIXES at 2026-09-14T21:10:43Z with 0 open blocking findings. population: 2 round(s) [code, code]; scopes covered: code; 32 finding(s), 0 open blocking; ledger /home/ubuntu/davis_root/superpowers/docs/instants/00000000-09141935-inflight-append-fleetRuntimeRelease/.fleet/review.json
+round 3 (scope all) recorded READY at 2026-09-14T22:06:25Z with 0 open blocking findings. population: 3 round(s) [code, code, all]; scopes covered: alignment, all, code, format; 40 finding(s), 0 open blocking; ledger /home/ubuntu/davis_root/superpowers/docs/instants/00000000-09141935-inflight-append-fleetRuntimeRelease/.fleet/review.json
 
 ## Round 1 — scope `code` — verdict `READY-WITH-FIXES` — 2026-09-14T20:50:20Z
 
@@ -49,4 +49,17 @@ round 2 (scope code) recorded READY-WITH-FIXES at 2026-09-14T21:10:43Z with 0 op
 | RV-30 | Minor | applied | fleet/src/fleet/cli.py _do_close docstring | said three refusals while _pane_refusal returns four | reworded |
 | RV-31 | Important | applied | fleet/it/run-J.sh J1 | pre-existing on live since 5dae469 — complete refuses a still-declared awaiting-ci phase and J1 never declared done; §J had not run since the 0.5.4 gate (evidence it-RESULTS-live-f15b585-J.tsv) | J1 declares done before completing; §J 11 PASS on the branch |
 | RV-32 | Important | applied | fleet/it/run-O.sh O4 | the branch admission lock is a stable inode every admitted verb opens, so a permission-refused resume created it and O4 read the store as changed | lock inode in O4 baseline as §K9 does; §O 13 PASS |
+
+## Round 3 — scope `all` — verdict `READY` — 2026-09-14T22:06:25Z
+
+| id | severity | status | location | finding | action |
+|---|---|---|---|---|---|
+| RV-33 | Important | applied | CHARTER AC-3 §P clause; fleet/it/run-P.sh | §P never ran although seven skills and run-P.sh itself changed; RV-10 fix had never executed | run once on the deployed tip (D-7) — P1-P4 PASS, operator config dir resolved (evidence/P-0.6.0, INDEX 11) |
+| RV-34 | Minor | applied | DECISIONS.md ISSUES.md ASSUMPTIONS.md evidence/INDEX.md headers | registers lacked the Updated/Status header; INDEX lacked the LIVE token | headers added |
+| RV-35 | Minor | applied | HANDOFF.md reviewer guide and PR table | reviewer-guide entries nested under Working set; branch entry lacked Built-by/Provenance; PR rows 2-3 not in the accepted cell forms | Working set moved below the guide; labels added; cells rewritten with dated conclusions and evidence pointers |
+| RV-36 | Minor | applied | ISSUES.md OI-3; evidence/INDEX.md 4; RUNBOOK.md rebase and IT paths | stale pending clause; unreachable squashed SHA without a note; a one-off rebase recipe and a removed worktree path | dated line appended; provenance note; rebase section marked HISTORICAL and path generalised |
+| RV-37 | Minor | applied | DECISIONS.md D-3 | partially superseded by D-4 with no status marker | status line amended (OI-10) |
+| RV-38 | Minor | applied | evidence/release-0.6.0 | §A and group5 registers only reachable via an absolute source path | copied in-folder; INDEX 9 amended |
+| RV-39 | Minor | open | ISSUES.md OI-8 OI-9 OI-11 OI-12 | review minors, the evidence-path lint, the historical worktree and the two never-re-evaluated limits had no register home | tracked as DEFERRED issues; nothing blocks completion |
+| RV-40 | Minor | applied | instant folder on live | AC-4 proof existed only in the working tree | committed with the completion rename |
 

@@ -1,0 +1,5 @@
+suite	verdict	evidence	note
+hermetic	GREEN	evidence/hermetic.log	exit 0
+it	GREEN	evidence/it-RESULTS.tsv	exit 0; 0 FAIL rows; live-subject set CHANGED during the run
+roster	full	-	the set of IT runners this verdict covers
+verdict	GREEN	-	the run's overall verdict, which the per-suite rows cannot express (an INCONCLUSIVE run leaves RED suite rows)
