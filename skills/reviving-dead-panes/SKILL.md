@@ -97,7 +97,8 @@ refuses to choose, because that judgement is the only part of this step that is 
 Past a size threshold the TUI asks how to resume — *Resume from summary / Resume full session as-is /
 Don't ask me again* — before it is ready for input. Measured on a 435k-token session: **twelve
 consecutive `pane-guard` polls, five seconds apart, all returned `10 queued-text`** while the pane was
-showing that menu.
+showing that menu. (Measured before the dialog rows landed; if the menu draws a hint row it may now read
+`15 awaiting-operator` instead — either way it is not a human's draft, and the advice below stands.)
 
 `10` there does **not** mean a human left something in the box. Two consequences:
 

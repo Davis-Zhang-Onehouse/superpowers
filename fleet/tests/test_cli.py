@@ -1719,6 +1719,28 @@ class TestPaneGuard(CliCase):
                              f"pane-guard {pane} does not name its verdict: {out!r}")
         self.assertEqual(cli.PANE_GUARD_CODES[cli.PANE_SAFE], "safe")
 
+    def test_pane_guard_orders_dialog_after_busy_and_before_queued_text_on_both_paths(self):
+        """Round-2 finding: the dialog check must not depend on whether a process is attributed to the
+        pane, and it sits after `busy` (a live turn wins) and before `unsubmitted` (the trust modal's
+        caret row is a dialog, not somebody's draft) — ONE ordering."""
+        trust = "\n".join([
+            "Quick safety check: Is this a project you created or one you trust?",
+            "❯ No, exit", "  Yes, I trust this folder", "Enter to confirm · Esc to cancel"])
+        busy_with_stale_hint = "\n".join([
+            "Enter to select · Tab/Arrow keys to navigate · Esc to cancel",
+            "* Actioning… (12s · esc to interrupt)", "", "❯ ", "? for shortcuts"])
+        fleet = self.loaded()
+        fleet.worker("attributedAsk", pane=DIALOG_PANE)
+        fleet.worker("attributedTrust", pane=trust)
+        fleet.worker("attributedBusy", pane=busy_with_stale_hint)
+        fleet.tmux_live.add("dt-glyphTrust"); fleet.panes["dt-glyphTrust"] = trust
+        for pane, code in (("dt-attributedAsk", cli.PANE_AWAITING_OPERATOR),
+                           ("dt-attributedTrust", cli.PANE_AWAITING_OPERATOR),
+                           ("dt-glyphTrust", cli.PANE_AWAITING_OPERATOR),
+                           ("dt-attributedBusy", cli.PANE_MID_TURN)):
+            got, out, err = fleet.run(["pane-guard", "--porcelain", "--pane", pane])
+            self.assertEqual(got, code, f"{pane}: {out}{err}")
+
     def test_pane_guard_does_not_call_a_blocked_question_dialog_safe(self):
         """`I-16`. "Idle between turns" and "blocked at a question" are opposites for a coordinator, and
         pane-guard gave them the same answer — so a scheduled poll sees a healthy quiet pane forever

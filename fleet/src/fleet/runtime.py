@@ -75,12 +75,17 @@ def observe(runtime: RuntimeName, frame: str) -> PaneObservation:
 #:  - Claude's `AskUserQuestion` dialog: "Enter to select · Tab/Arrow keys to navigate · Esc to cancel",
 #:    three fragments on one row for the reason `I-16` records (`session.py`, the `SI-37` amendment).
 #:  - Codex's approval prompt: "Press enter to confirm or esc to cancel" (`fixtures/runtime/codex-dialog.frame`).
+#:  - Codex's directory-trust screen: "Press enter to continue" (`fixtures/runtime/codex-trust.frame`, from
+#:    `coordinator-dispatch/commands.jsonl:22`, where the harness had to answer it with Enter). A worker
+#:    parked here is blocked on a human exactly like the others; the review round that introduced measured
+#:    rows dropped this one as unmeasured, and it was measured.
 CLAUDE_DIALOG_ROWS = (
     ("enter to confirm", "esc to cancel"),
     ("enter to select", "tab/arrow keys to navigate", "esc to cancel"),
 )
 CODEX_DIALOG_ROWS = (
     ("press enter to confirm", "esc to cancel"),
+    ("press enter to continue",),
 )
 
 

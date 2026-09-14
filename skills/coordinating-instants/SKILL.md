@@ -59,8 +59,8 @@ are long-lived and will restart mid-effort, and memory is not a source.
 `-complete-` may still be mid-turn, and `close` refuses one: *"still offering a way to interrupt, so closing it
 now ends a turn in progress and whatever that turn had not yet written down."* Poll the contract before you
 close — `fleet pane-guard --pane <session>`, where `10` (queued text), `11` (mid-turn) and `14`
-(indeterminate) mean wait, `15` (awaiting-operator) means STOP AND ANSWER IT — it is blocked on a selection
-dialog, not on a turn that will finish by itself, and no amount of waiting clears it — and `0`, `12` or
+(indeterminate) mean wait, `15` (awaiting-operator) means STOP AND ANSWER IT — it is blocked on an operator
+dialog (a selection question, a trust screen, an approval prompt), not on a turn that will finish by itself, and no amount of waiting clears it — and `0`, `12` or
 `13` mean the pane can go. Then `close`, then `harvest`. Finishing the work and finishing the turn are
 different moments; conflating them means either a refusal or a `--force` you did not need.
 

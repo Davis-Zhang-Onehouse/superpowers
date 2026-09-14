@@ -51,6 +51,13 @@ class RuntimeCliTests(unittest.TestCase):
         code, _, err = self.f.run(['runtime', '--set', 'claude'])
         self.assertEqual(code, 4, err)
 
+    def test_a_process_elsewhere_under_the_root_does_not_block(self):
+        """The store lives at <root>/.fleet; an interactive session in a sibling project under that root is
+        not this fleet's, and used to forbid every switch."""
+        other = Path(self.f.tmp) / 'other-project'; other.mkdir(exist_ok=True)
+        self.f.procs.append(LiveSession(780, other, None, 'claude'))
+        self.assertEqual(self.f.run(['runtime', '--set', 'codex'])[0], 0)
+
     def test_an_unreadable_process_blocks_the_switch_but_not_the_read_verbs(self):
         """A process whose `/proc` refused the read cannot be placed, so it is not proof of emptiness for
         a switch — and it is not a reason for `board` to exit 1 either."""

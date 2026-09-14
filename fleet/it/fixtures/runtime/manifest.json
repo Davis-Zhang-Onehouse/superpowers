@@ -88,5 +88,14 @@
     "columns": 100,
     "rows": 35,
     "evidence": "this frame is the retained capture — literal multiline text inserted without Enter in the isolated runtime test (`fleet/it/run-runtime.sh --live`)"
+  },
+  {
+    "runtime": "codex",
+    "cli_version": "0.154.0",
+    "state": "dialog",
+    "frame": "codex-trust.frame",
+    "columns": 100,
+    "rows": 35,
+    "evidence": "../../../../docs/superpowers/specs/evidence/coordinator-dispatch/commands.jsonl line 22 — the directory-trust screen a fresh Codex shows in an untrusted slot, captured on the coordinator-dispatch probe socket; the harness answered it with Enter on line 23"
   }
 ]
