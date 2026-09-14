@@ -1,0 +1,38 @@
+case	verdict	evidence	note
+ISOLATION-M-enter	PASS		live-INSTANTS baseline ESTABLISHED on this call (1 folder(s) across 1 live tree(s)), so the instants half is vacuous here and binds from the next call on. live stores byte-identical; live instants trees unchanged in 1 live tree(s); live tmux session set byte-identical (0 sessions, incl. 0 dt-); section work is on socket itfleet-M
+M1	PASS	it/M/M1-per-verb.txt	all 46 verbs ran and every exit code came from the registry (the plan says 20; FD-12 added seven, so the population is 46)
+M2	PASS	it/M/M2.stderr	no-args usage lists all 46 verbs (exit 2, on stderr — stdout stays data)
+M6	PASS	it/M/M6.stderr	unknown verb ⇒ exit 2 and the whole map (46 verbs) is printed
+M3	PASS	it/M/M3.out	OK M3: every declared flag of all 46 verbs appears in its own usage, with its value form and required marker
+M4	PASS	it/M/M4-per-verb.txt	an undeclared flag ⇒ exit 2 naming the token, for all 46 verbs
+M5	PASS	it/M/M5-per-flag.txt	every value-taking flag of every INVOKED verb (239 flag/verb pairs × 2 shapes) exited 2 with the 'needs a value' diagnostic inside timeout 5; NO flag hung (130 switch flags also checked for hang-freedom; selftest--porcelain exceeded 5s); 0 flag/verb pair(s) skipped for want of a recipe — see M5-coverage
+M5-coverage	PASS	it/M/M5-per-flag.txt	every verb in cli.VERBS has an argv recipe in m_args, so M5's verdict covers every flag of every verb
+M7	PASS	it/M/M7.out	OK M7: board/leases/roadmap/status parse at their declared column counts with stderr discarded, and each view's human form reports the same (identity, state) set as its porcelain form
+M8-base-check	PASS		zero delta (content+mtime)
+M8-board	PASS		zero delta (content+mtime)
+M8-brief	PASS		zero delta (content+mtime)
+M8-compaction-status	PASS		zero delta (content+mtime)
+M8-leases	PASS		zero delta (content+mtime)
+M8-lint	PASS		zero delta (content+mtime)
+M8-pane-guard	PASS		zero delta (content+mtime)
+M8-peers	PASS		zero delta (content+mtime)
+M8-reconcile	PASS		zero delta (content+mtime)
+M8-release-history	PASS		zero delta (content+mtime)
+M8-release-list	PASS		zero delta (content+mtime)
+M8-release-status	PASS		zero delta (content+mtime)
+M8-roadmap	PASS		zero delta (content+mtime)
+M8-seed-check	PASS		zero delta (content+mtime)
+M8-selftest	PASS		zero delta (content+mtime)
+M8-status	PASS		zero delta (content+mtime)
+M8-verify	PASS		zero delta (content+mtime)
+M8	PASS	/tmp/claude-1000/-home-ubuntu-davis-root-superpowers/53ee129f-4b4a-4005-bdb6-dfab263001b1/scratchpad/RESULTS-round1-M.tsv	each of the 17 read-only verbs left a zero delta over FLEET_HOME+slots, asserted per verb (content AND mtime)
+M9	PASS	it/M/M9.out	OK M9: across all 30 modules — no push/merge/publish/rm-rf shape anywhere; the only spawn sites are the 3 probe/runner factories (15 call sites), none reachable from a handler; every delete is one of 10 accounted-for sites, and each target is DERIVED (by following the assignments, not by matching 
+M10	PASS	it/M/M10-verdicts.txt	real panes: clean=0 queued=10 esc-to-interrupt=11 non-claude-shell=12 nonexistent=13
+M11	PASS	it/M/M11-caret-line.hex	the pane really renders e2 9d af c2 a0 (❯ + U+00A0) and pane-guard returns 10, quoting 'draft message'; hexdump in M11-caret-line.hex / M11-pane-tail.hex
+M11b	PASS	it/M/M11b-pane.txt	queued text is still seen with 31 blank line(s) of pane padding below the box
+M12	PASS	it/M/M12.stdout	1 recipe executed in the sandbox; 2 refused BEFORE execution (a redirect outside the sandbox and a delete) and each is also reported never-executed; the outside path was never created; exit 1
+M13	PASS	it/M/M13-inside.tsv	dirt outside the covered paths ⇒ exit 0 WITH a tree stamp; dirt inside tests/ ⇒ exit 1 with a dirty-inside-coverage violation, and the stamp is printed in BOTH runs
+M14	PASS	it/M/M14-per-verb.txt	--help exits 0 for all 46 verbs and prints no source code
+ISOLATION-M-leave	PASS		live stores byte-identical; live instants trees unchanged in 1 live tree(s); live tmux session set byte-identical (0 sessions, incl. 0 dt-); section work is on socket itfleet-M
+SOURCE-STABLE	PASS	it/SOURCE-PIN-group5-after.txt	src/fleet/*.py byte-identical for the whole run
+CLAUDE-COUNT	PASS		no claude process appeared (pids before: 7, after: 7). §L/§M/§N launch no claude: no verb here reaches sessions.start.

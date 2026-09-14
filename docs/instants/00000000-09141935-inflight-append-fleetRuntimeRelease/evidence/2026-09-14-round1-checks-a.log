@@ -1,0 +1,34 @@
+### hermetic 2026-09-14T19:58:45Z
+----------------------------------------------------------------------
+Ran 1901 tests in 124.674s
+
+FAILED (failures=1)
+### tests/hooks
+  [PASS] Copilot CLI emits top-level additionalContext only
+  [PASS] SessionStart omits obsolete legacy custom-skill warning
+STATUS: PASSED
+rc=0
+### tests/codex
+Codex marketplace manifest looks good
+  [PASS] dirty worktree reports changed files
+All Codex package archive tests passed
+
+OK
+### scripts/tests
+PASS: exact-session helper quotes paths and watchdog exclusions remain Claude-only
+rc=0
+  ok   no fleet binary prints nothing
+PASS: against a real store, a real tmux server and three live processes, the shim prints exactly the finished worker's pid — not the worker still working, and not the unmanaged session whose exclusion would switch auto-resume off for the whole box — and it degrades to printing nothing when the store is empty or fleet is absent
+rc=0
+### IT 2026-09-14T20:00:56Z
+run-runtime rc=0
+run-A rc=0
+run-group5 rc=1
+### FAIL rows
+M13	FAIL	it/M/M13-inside.tsv	outside: rc=1 (want 0) stamp_rows=1 inside_rows=0 suite=violation; inside: rc=1 stamp_rows=1 inside_rows=1
+### tallies
+SKIP 5
+PASS 90
+FAIL 1
+### git status
+### done 2026-09-14T20:22:06Z

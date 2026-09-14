@@ -1,0 +1,878 @@
+Process Process-26:
+Traceback (most recent call last):
+  File "/home/ubuntu/miniconda3/lib/python3.10/multiprocessing/process.py", line 314, in _bootstrap
+    self.run()
+  File "/home/ubuntu/miniconda3/lib/python3.10/multiprocessing/process.py", line 108, in run
+    self._target(*self._args, **self._kwargs)
+  File "/home/ubuntu/davis_root/superpowers/.worktrees/fleet-runtime-rebase/fleet/tests/test_runtime_concurrency.py", line 12, in run_cli
+    output.send(fleet.run(args))
+  File "/home/ubuntu/davis_root/superpowers/.worktrees/fleet-runtime-rebase/fleet/tests/test_cli.py", line 566, in run
+    code = cli.main(list(argv), stdout=out, stderr=err, context=self.context())
+  File "/home/ubuntu/davis_root/superpowers/.worktrees/fleet-runtime-rebase/fleet/src/fleet/cli.py", line 5616, in main
+    code = spec.handler(ctx, parsed)
+  File "/home/ubuntu/davis_root/superpowers/.worktrees/fleet-runtime-rebase/fleet/src/fleet/cli.py", line 1562, in _do_dispatch
+    if all(verdict.allowed for verdict in verdicts):
+UnboundLocalError: local variable 'verdicts' referenced before assignment
+Process Process-31:
+Traceback (most recent call last):
+  File "/home/ubuntu/miniconda3/lib/python3.10/multiprocessing/process.py", line 314, in _bootstrap
+    self.run()
+  File "/home/ubuntu/miniconda3/lib/python3.10/multiprocessing/process.py", line 108, in run
+    self._target(*self._args, **self._kwargs)
+  File "/home/ubuntu/davis_root/superpowers/.worktrees/fleet-runtime-rebase/fleet/tests/test_runtime_concurrency.py", line 12, in run_cli
+    output.send(fleet.run(args))
+  File "/home/ubuntu/davis_root/superpowers/.worktrees/fleet-runtime-rebase/fleet/tests/test_cli.py", line 566, in run
+    code = cli.main(list(argv), stdout=out, stderr=err, context=self.context())
+  File "/home/ubuntu/davis_root/superpowers/.worktrees/fleet-runtime-rebase/fleet/src/fleet/cli.py", line 5616, in main
+    code = spec.handler(ctx, parsed)
+  File "/home/ubuntu/davis_root/superpowers/.worktrees/fleet-runtime-rebase/fleet/src/fleet/cli.py", line 1562, in _do_dispatch
+    if all(verdict.allowed for verdict in verdicts):
+UnboundLocalError: local variable 'verdicts' referenced before assignment
+======================================================================
+ERROR: test_a_roadmap_write_that_fails_is_REPORTED_and_the_abort_still_completes (test_cli.TestAbortReleasesTheClaim)
+`dispatch`'s rollback already answers this shape: never mask the outcome that already happened,
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "/home/ubuntu/davis_root/superpowers/.worktrees/fleet-runtime-rebase/fleet/tests/test_cli.py", line 3516, in test_a_roadmap_write_that_fails_is_REPORTED_and_the_abort_still_completes
+    coordinator, child = self._dispatched_onto(fleet)
+  File "/home/ubuntu/davis_root/superpowers/.worktrees/fleet-runtime-rebase/fleet/tests/test_cli.py", line 3443, in _dispatched_onto
+    code, out, err = fleet.run(["dispatch", "--porcelain", "--profile", str(fleet.profile("worker")),
+  File "/home/ubuntu/davis_root/superpowers/.worktrees/fleet-runtime-rebase/fleet/tests/test_cli.py", line 566, in run
+    code = cli.main(list(argv), stdout=out, stderr=err, context=self.context())
+  File "/home/ubuntu/davis_root/superpowers/.worktrees/fleet-runtime-rebase/fleet/src/fleet/cli.py", line 5616, in main
+    code = spec.handler(ctx, parsed)
+  File "/home/ubuntu/davis_root/superpowers/.worktrees/fleet-runtime-rebase/fleet/src/fleet/cli.py", line 1562, in _do_dispatch
+    if all(verdict.allowed for verdict in verdicts):
+UnboundLocalError: local variable 'verdicts' referenced before assignment
+
+======================================================================
+ERROR: test_abort_leaves_a_milestone_claimed_by_a_DIFFERENT_instant_alone (test_cli.TestAbortReleasesTheClaim)
+The hazard of putting a roadmap write on `abort`. The origin says M9; the roadmap says M9 is
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "/home/ubuntu/davis_root/superpowers/.worktrees/fleet-runtime-rebase/fleet/tests/test_cli.py", line 3477, in test_abort_leaves_a_milestone_claimed_by_a_DIFFERENT_instant_alone
+    coordinator, child = self._dispatched_onto(fleet)
+  File "/home/ubuntu/davis_root/superpowers/.worktrees/fleet-runtime-rebase/fleet/tests/test_cli.py", line 3443, in _dispatched_onto
+    code, out, err = fleet.run(["dispatch", "--porcelain", "--profile", str(fleet.profile("worker")),
+  File "/home/ubuntu/davis_root/superpowers/.worktrees/fleet-runtime-rebase/fleet/tests/test_cli.py", line 566, in run
+    code = cli.main(list(argv), stdout=out, stderr=err, context=self.context())
+  File "/home/ubuntu/davis_root/superpowers/.worktrees/fleet-runtime-rebase/fleet/src/fleet/cli.py", line 5616, in main
+    code = spec.handler(ctx, parsed)
+  File "/home/ubuntu/davis_root/superpowers/.worktrees/fleet-runtime-rebase/fleet/src/fleet/cli.py", line 1562, in _do_dispatch
+    if all(verdict.allowed for verdict in verdicts):
+UnboundLocalError: local variable 'verdicts' referenced before assignment
+
+======================================================================
+ERROR: test_aborting_a_claimed_milestone_gives_the_claim_back (test_cli.TestAbortReleasesTheClaim)
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "/home/ubuntu/davis_root/superpowers/.worktrees/fleet-runtime-rebase/fleet/tests/test_cli.py", line 3454, in test_aborting_a_claimed_milestone_gives_the_claim_back
+    coordinator, child = self._dispatched_onto(fleet)
+  File "/home/ubuntu/davis_root/superpowers/.worktrees/fleet-runtime-rebase/fleet/tests/test_cli.py", line 3443, in _dispatched_onto
+    code, out, err = fleet.run(["dispatch", "--porcelain", "--profile", str(fleet.profile("worker")),
+  File "/home/ubuntu/davis_root/superpowers/.worktrees/fleet-runtime-rebase/fleet/tests/test_cli.py", line 566, in run
+    code = cli.main(list(argv), stdout=out, stderr=err, context=self.context())
+  File "/home/ubuntu/davis_root/superpowers/.worktrees/fleet-runtime-rebase/fleet/src/fleet/cli.py", line 5616, in main
+    code = spec.handler(ctx, parsed)
+  File "/home/ubuntu/davis_root/superpowers/.worktrees/fleet-runtime-rebase/fleet/src/fleet/cli.py", line 1562, in _do_dispatch
+    if all(verdict.allowed for verdict in verdicts):
+UnboundLocalError: local variable 'verdicts' referenced before assignment
+
+======================================================================
+ERROR: test_a_dispatch_with_no_override_records_an_empty_reason (test_cli.TestAnOverrideIsAudited)
+The field must not acquire a value nobody asked for: an unset override is empty, not a placeholder
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "/home/ubuntu/davis_root/superpowers/.worktrees/fleet-runtime-rebase/fleet/tests/test_cli.py", line 4305, in test_a_dispatch_with_no_override_records_an_empty_reason
+    code, out, err = fleet.run(["dispatch", "--porcelain", "--profile", str(fleet.profile("worker")),
+  File "/home/ubuntu/davis_root/superpowers/.worktrees/fleet-runtime-rebase/fleet/tests/test_cli.py", line 566, in run
+    code = cli.main(list(argv), stdout=out, stderr=err, context=self.context())
+  File "/home/ubuntu/davis_root/superpowers/.worktrees/fleet-runtime-rebase/fleet/src/fleet/cli.py", line 5616, in main
+    code = spec.handler(ctx, parsed)
+  File "/home/ubuntu/davis_root/superpowers/.worktrees/fleet-runtime-rebase/fleet/src/fleet/cli.py", line 1562, in _do_dispatch
+    if all(verdict.allowed for verdict in verdicts):
+UnboundLocalError: local variable 'verdicts' referenced before assignment
+
+======================================================================
+ERROR: test_the_override_reason_is_written_to_the_record (test_cli.TestAnOverrideIsAudited)
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "/home/ubuntu/davis_root/superpowers/.worktrees/fleet-runtime-rebase/fleet/tests/test_cli.py", line 4290, in test_the_override_reason_is_written_to_the_record
+    code, out, err = fleet.run(["dispatch", "--porcelain", "--profile", str(fleet.profile("worker")),
+  File "/home/ubuntu/davis_root/superpowers/.worktrees/fleet-runtime-rebase/fleet/tests/test_cli.py", line 566, in run
+    code = cli.main(list(argv), stdout=out, stderr=err, context=self.context())
+  File "/home/ubuntu/davis_root/superpowers/.worktrees/fleet-runtime-rebase/fleet/src/fleet/cli.py", line 5616, in main
+    code = spec.handler(ctx, parsed)
+  File "/home/ubuntu/davis_root/superpowers/.worktrees/fleet-runtime-rebase/fleet/src/fleet/cli.py", line 1562, in _do_dispatch
+    if all(verdict.allowed for verdict in verdicts):
+UnboundLocalError: local variable 'verdicts' referenced before assignment
+
+======================================================================
+ERROR: test_every_verb_evaluates_cadence_staleness_and_prints_it_to_stderr (test_cli.TestCadence)
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "/home/ubuntu/davis_root/superpowers/.worktrees/fleet-runtime-rebase/fleet/tests/test_cli.py", line 1499, in test_every_verb_evaluates_cadence_staleness_and_prints_it_to_stderr
+    code, out, err = fleet.run([verb, "--porcelain", *argv])
+  File "/home/ubuntu/davis_root/superpowers/.worktrees/fleet-runtime-rebase/fleet/tests/test_cli.py", line 566, in run
+    code = cli.main(list(argv), stdout=out, stderr=err, context=self.context())
+  File "/home/ubuntu/davis_root/superpowers/.worktrees/fleet-runtime-rebase/fleet/src/fleet/cli.py", line 5616, in main
+    code = spec.handler(ctx, parsed)
+  File "/home/ubuntu/davis_root/superpowers/.worktrees/fleet-runtime-rebase/fleet/src/fleet/cli.py", line 1562, in _do_dispatch
+    if all(verdict.allowed for verdict in verdicts):
+UnboundLocalError: local variable 'verdicts' referenced before assignment
+
+======================================================================
+ERROR: test_complete_allows_an_instant_relative_pointer (test_cli.TestCompleteRefusesBrokenPointers)
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "/home/ubuntu/davis_root/superpowers/.worktrees/fleet-runtime-rebase/fleet/tests/test_cli.py", line 3851, in test_complete_allows_an_instant_relative_pointer
+    env = self.ready_to_complete()
+  File "/home/ubuntu/davis_root/superpowers/.worktrees/fleet-runtime-rebase/fleet/tests/test_cli.py", line 3806, in ready_to_complete
+    code, out, err = fleet.run(["dispatch", "--porcelain", "--profile", str(fleet.profile("worker")),
+  File "/home/ubuntu/davis_root/superpowers/.worktrees/fleet-runtime-rebase/fleet/tests/test_cli.py", line 566, in run
+    code = cli.main(list(argv), stdout=out, stderr=err, context=self.context())
+  File "/home/ubuntu/davis_root/superpowers/.worktrees/fleet-runtime-rebase/fleet/src/fleet/cli.py", line 5616, in main
+    code = spec.handler(ctx, parsed)
+  File "/home/ubuntu/davis_root/superpowers/.worktrees/fleet-runtime-rebase/fleet/src/fleet/cli.py", line 1562, in _do_dispatch
+    if all(verdict.allowed for verdict in verdicts):
+UnboundLocalError: local variable 'verdicts' referenced before assignment
+
+======================================================================
+ERROR: test_complete_allows_the_mandated_session_log_row_with_a_bare_folder_name (test_cli.TestCompleteRefusesBrokenPointers)
+`maintain-workspace` SKILL.md:131 mandates a session-log row — `date | workspace | resume cmd |
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "/home/ubuntu/davis_root/superpowers/.worktrees/fleet-runtime-rebase/fleet/tests/test_cli.py", line 3863, in test_complete_allows_the_mandated_session_log_row_with_a_bare_folder_name
+    env = self.ready_to_complete()
+  File "/home/ubuntu/davis_root/superpowers/.worktrees/fleet-runtime-rebase/fleet/tests/test_cli.py", line 3806, in ready_to_complete
+    code, out, err = fleet.run(["dispatch", "--porcelain", "--profile", str(fleet.profile("worker")),
+  File "/home/ubuntu/davis_root/superpowers/.worktrees/fleet-runtime-rebase/fleet/tests/test_cli.py", line 566, in run
+    code = cli.main(list(argv), stdout=out, stderr=err, context=self.context())
+  File "/home/ubuntu/davis_root/superpowers/.worktrees/fleet-runtime-rebase/fleet/src/fleet/cli.py", line 5616, in main
+    code = spec.handler(ctx, parsed)
+  File "/home/ubuntu/davis_root/superpowers/.worktrees/fleet-runtime-rebase/fleet/src/fleet/cli.py", line 1562, in _do_dispatch
+    if all(verdict.allowed for verdict in verdicts):
+UnboundLocalError: local variable 'verdicts' referenced before assignment
+
+======================================================================
+ERROR: test_complete_refuses_a_broken_pointer_in_evidence_index (test_cli.TestCompleteRefusesBrokenPointers)
+`_pointer_gate` scans BOTH `_POINTER_DOCS` — `HANDOFF.md` and `evidence/INDEX.md` — but every
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "/home/ubuntu/davis_root/superpowers/.worktrees/fleet-runtime-rebase/fleet/tests/test_cli.py", line 3837, in test_complete_refuses_a_broken_pointer_in_evidence_index
+    env = self.ready_to_complete()
+  File "/home/ubuntu/davis_root/superpowers/.worktrees/fleet-runtime-rebase/fleet/tests/test_cli.py", line 3806, in ready_to_complete
+    code, out, err = fleet.run(["dispatch", "--porcelain", "--profile", str(fleet.profile("worker")),
+  File "/home/ubuntu/davis_root/superpowers/.worktrees/fleet-runtime-rebase/fleet/tests/test_cli.py", line 566, in run
+    code = cli.main(list(argv), stdout=out, stderr=err, context=self.context())
+  File "/home/ubuntu/davis_root/superpowers/.worktrees/fleet-runtime-rebase/fleet/src/fleet/cli.py", line 5616, in main
+    code = spec.handler(ctx, parsed)
+  File "/home/ubuntu/davis_root/superpowers/.worktrees/fleet-runtime-rebase/fleet/src/fleet/cli.py", line 1562, in _do_dispatch
+    if all(verdict.allowed for verdict in verdicts):
+UnboundLocalError: local variable 'verdicts' referenced before assignment
+
+======================================================================
+ERROR: test_complete_refuses_a_pointer_the_rename_will_break (test_cli.TestCompleteRefusesBrokenPointers)
+complete IS the rename, so at gate time every -inflight- path still resolves. Checking 'does
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "/home/ubuntu/davis_root/superpowers/.worktrees/fleet-runtime-rebase/fleet/tests/test_cli.py", line 3822, in test_complete_refuses_a_pointer_the_rename_will_break
+    env = self.ready_to_complete()
+  File "/home/ubuntu/davis_root/superpowers/.worktrees/fleet-runtime-rebase/fleet/tests/test_cli.py", line 3806, in ready_to_complete
+    code, out, err = fleet.run(["dispatch", "--porcelain", "--profile", str(fleet.profile("worker")),
+  File "/home/ubuntu/davis_root/superpowers/.worktrees/fleet-runtime-rebase/fleet/tests/test_cli.py", line 566, in run
+    code = cli.main(list(argv), stdout=out, stderr=err, context=self.context())
+  File "/home/ubuntu/davis_root/superpowers/.worktrees/fleet-runtime-rebase/fleet/src/fleet/cli.py", line 5616, in main
+    code = spec.handler(ctx, parsed)
+  File "/home/ubuntu/davis_root/superpowers/.worktrees/fleet-runtime-rebase/fleet/src/fleet/cli.py", line 1562, in _do_dispatch
+    if all(verdict.allowed for verdict in verdicts):
+UnboundLocalError: local variable 'verdicts' referenced before assignment
+
+======================================================================
+ERROR: test_complete_refuses_while_the_phase_is_still_awaiting_ci (test_cli.TestCompleteRefusesBrokenPointers)
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "/home/ubuntu/davis_root/superpowers/.worktrees/fleet-runtime-rebase/fleet/tests/test_cli.py", line 3877, in test_complete_refuses_while_the_phase_is_still_awaiting_ci
+    env = self.ready_to_complete()
+  File "/home/ubuntu/davis_root/superpowers/.worktrees/fleet-runtime-rebase/fleet/tests/test_cli.py", line 3806, in ready_to_complete
+    code, out, err = fleet.run(["dispatch", "--porcelain", "--profile", str(fleet.profile("worker")),
+  File "/home/ubuntu/davis_root/superpowers/.worktrees/fleet-runtime-rebase/fleet/tests/test_cli.py", line 566, in run
+    code = cli.main(list(argv), stdout=out, stderr=err, context=self.context())
+  File "/home/ubuntu/davis_root/superpowers/.worktrees/fleet-runtime-rebase/fleet/src/fleet/cli.py", line 5616, in main
+    code = spec.handler(ctx, parsed)
+  File "/home/ubuntu/davis_root/superpowers/.worktrees/fleet-runtime-rebase/fleet/src/fleet/cli.py", line 1562, in _do_dispatch
+    if all(verdict.allowed for verdict in verdicts):
+UnboundLocalError: local variable 'verdicts' referenced before assignment
+
+======================================================================
+ERROR: test_declare_awaiting_ci_emits_no_review_row_for_a_repo_the_round_could_not_read (test_cli.TestDeclareAwaitingCiReportsAnUnreviewedHead)
+Same shape as `TestProposeDoneRefusesAnUnreviewedHead`'s FI-417 case, on the advisory path: a
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "/home/ubuntu/davis_root/superpowers/.worktrees/fleet-runtime-rebase/fleet/tests/test_cli.py", line 4126, in test_declare_awaiting_ci_emits_no_review_row_for_a_repo_the_round_could_not_read
+    child = self._dispatched(fleet, "alpha=" + "a" * 40 + ",beta=" + "a" * 40)
+  File "/home/ubuntu/davis_root/superpowers/.worktrees/fleet-runtime-rebase/fleet/tests/test_cli.py", line 4055, in _dispatched
+    code, out, err = fleet.run(argv)
+  File "/home/ubuntu/davis_root/superpowers/.worktrees/fleet-runtime-rebase/fleet/tests/test_cli.py", line 566, in run
+    code = cli.main(list(argv), stdout=out, stderr=err, context=self.context())
+  File "/home/ubuntu/davis_root/superpowers/.worktrees/fleet-runtime-rebase/fleet/src/fleet/cli.py", line 5616, in main
+    code = spec.handler(ctx, parsed)
+  File "/home/ubuntu/davis_root/superpowers/.worktrees/fleet-runtime-rebase/fleet/src/fleet/cli.py", line 1562, in _do_dispatch
+    if all(verdict.allowed for verdict in verdicts):
+UnboundLocalError: local variable 'verdicts' referenced before assignment
+
+======================================================================
+ERROR: test_declare_awaiting_ci_is_silent_when_the_head_was_reviewed (test_cli.TestDeclareAwaitingCiReportsAnUnreviewedHead)
+The false-positive direction, which is what makes an advisory ignored: nothing previously
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "/home/ubuntu/davis_root/superpowers/.worktrees/fleet-runtime-rebase/fleet/tests/test_cli.py", line 4105, in test_declare_awaiting_ci_is_silent_when_the_head_was_reviewed
+    child = self._dispatched(fleet, "alpha=" + "a" * 40)
+  File "/home/ubuntu/davis_root/superpowers/.worktrees/fleet-runtime-rebase/fleet/tests/test_cli.py", line 4055, in _dispatched
+    code, out, err = fleet.run(argv)
+  File "/home/ubuntu/davis_root/superpowers/.worktrees/fleet-runtime-rebase/fleet/tests/test_cli.py", line 566, in run
+    code = cli.main(list(argv), stdout=out, stderr=err, context=self.context())
+  File "/home/ubuntu/davis_root/superpowers/.worktrees/fleet-runtime-rebase/fleet/src/fleet/cli.py", line 5616, in main
+    code = spec.handler(ctx, parsed)
+  File "/home/ubuntu/davis_root/superpowers/.worktrees/fleet-runtime-rebase/fleet/src/fleet/cli.py", line 1562, in _do_dispatch
+    if all(verdict.allowed for verdict in verdicts):
+UnboundLocalError: local variable 'verdicts' referenced before assignment
+
+======================================================================
+ERROR: test_declare_awaiting_ci_reports_a_legacy_round_as_undetermined_not_unreviewed (test_cli.TestDeclareAwaitingCiReportsAnUnreviewedHead)
+Fix round 1: a round exists but predates head tracking (`heads` absent, not `{}` differing from
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "/home/ubuntu/davis_root/superpowers/.worktrees/fleet-runtime-rebase/fleet/tests/test_cli.py", line 4084, in test_declare_awaiting_ci_reports_a_legacy_round_as_undetermined_not_unreviewed
+    child = self._dispatched(fleet, "alpha=" + "a" * 40)
+  File "/home/ubuntu/davis_root/superpowers/.worktrees/fleet-runtime-rebase/fleet/tests/test_cli.py", line 4055, in _dispatched
+    code, out, err = fleet.run(argv)
+  File "/home/ubuntu/davis_root/superpowers/.worktrees/fleet-runtime-rebase/fleet/tests/test_cli.py", line 566, in run
+    code = cli.main(list(argv), stdout=out, stderr=err, context=self.context())
+  File "/home/ubuntu/davis_root/superpowers/.worktrees/fleet-runtime-rebase/fleet/src/fleet/cli.py", line 5616, in main
+    code = spec.handler(ctx, parsed)
+  File "/home/ubuntu/davis_root/superpowers/.worktrees/fleet-runtime-rebase/fleet/src/fleet/cli.py", line 1562, in _do_dispatch
+    if all(verdict.allowed for verdict in verdicts):
+UnboundLocalError: local variable 'verdicts' referenced before assignment
+
+======================================================================
+ERROR: test_declare_awaiting_ci_reports_an_unreviewed_head (test_cli.TestDeclareAwaitingCiReportsAnUnreviewedHead)
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "/home/ubuntu/davis_root/superpowers/.worktrees/fleet-runtime-rebase/fleet/tests/test_cli.py", line 4063, in test_declare_awaiting_ci_reports_an_unreviewed_head
+    child = self._dispatched(fleet, "alpha=" + "a" * 40)
+  File "/home/ubuntu/davis_root/superpowers/.worktrees/fleet-runtime-rebase/fleet/tests/test_cli.py", line 4055, in _dispatched
+    code, out, err = fleet.run(argv)
+  File "/home/ubuntu/davis_root/superpowers/.worktrees/fleet-runtime-rebase/fleet/tests/test_cli.py", line 566, in run
+    code = cli.main(list(argv), stdout=out, stderr=err, context=self.context())
+  File "/home/ubuntu/davis_root/superpowers/.worktrees/fleet-runtime-rebase/fleet/src/fleet/cli.py", line 5616, in main
+    code = spec.handler(ctx, parsed)
+  File "/home/ubuntu/davis_root/superpowers/.worktrees/fleet-runtime-rebase/fleet/src/fleet/cli.py", line 1562, in _do_dispatch
+    if all(verdict.allowed for verdict in verdicts):
+UnboundLocalError: local variable 'verdicts' referenced before assignment
+
+======================================================================
+ERROR: test_a_path_shaped_base_is_refused_with_the_likely_id_named (test_cli.TestDispatchBaseIsAnIdNotAPath)
+The other half: the refusal itself, not just the help text. A caller who copy-pastes an
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "/home/ubuntu/davis_root/superpowers/.worktrees/fleet-runtime-rebase/fleet/tests/test_cli.py", line 942, in test_a_path_shaped_base_is_refused_with_the_likely_id_named
+    code, out, err = fleet.run(["dispatch", "--profile", str(fleet.profile("worker")),
+  File "/home/ubuntu/davis_root/superpowers/.worktrees/fleet-runtime-rebase/fleet/tests/test_cli.py", line 566, in run
+    code = cli.main(list(argv), stdout=out, stderr=err, context=self.context())
+  File "/home/ubuntu/davis_root/superpowers/.worktrees/fleet-runtime-rebase/fleet/src/fleet/cli.py", line 5616, in main
+    code = spec.handler(ctx, parsed)
+  File "/home/ubuntu/davis_root/superpowers/.worktrees/fleet-runtime-rebase/fleet/src/fleet/cli.py", line 1562, in _do_dispatch
+    if all(verdict.allowed for verdict in verdicts):
+UnboundLocalError: local variable 'verdicts' referenced before assignment
+
+======================================================================
+ERROR: test_dry_run_produces_a_zero_delta (test_cli.TestDryRun) (verb='dispatch')
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "/home/ubuntu/davis_root/superpowers/.worktrees/fleet-runtime-rebase/fleet/tests/test_cli.py", line 972, in test_dry_run_produces_a_zero_delta
+    code, out, err = fleet.run([verb, cli.DRY_RUN, *argv])
+  File "/home/ubuntu/davis_root/superpowers/.worktrees/fleet-runtime-rebase/fleet/tests/test_cli.py", line 566, in run
+    code = cli.main(list(argv), stdout=out, stderr=err, context=self.context())
+  File "/home/ubuntu/davis_root/superpowers/.worktrees/fleet-runtime-rebase/fleet/src/fleet/cli.py", line 5616, in main
+    code = spec.handler(ctx, parsed)
+  File "/home/ubuntu/davis_root/superpowers/.worktrees/fleet-runtime-rebase/fleet/src/fleet/cli.py", line 1562, in _do_dispatch
+    if all(verdict.allowed for verdict in verdicts):
+UnboundLocalError: local variable 'verdicts' referenced before assignment
+
+======================================================================
+ERROR: test_dry_run_refuses_an_undeclared_placeholder_before_anything_is_claimed (test_cli.TestDryRun)
+`F3`/`I-24c`. The refusal was correct and arrived only at the real dispatch — a full rollback
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "/home/ubuntu/davis_root/superpowers/.worktrees/fleet-runtime-rebase/fleet/tests/test_cli.py", line 1000, in test_dry_run_refuses_an_undeclared_placeholder_before_anything_is_claimed
+    code, out, err = fleet.run(["dispatch", "--dry-run", "--profile", str(profile),
+  File "/home/ubuntu/davis_root/superpowers/.worktrees/fleet-runtime-rebase/fleet/tests/test_cli.py", line 566, in run
+    code = cli.main(list(argv), stdout=out, stderr=err, context=self.context())
+  File "/home/ubuntu/davis_root/superpowers/.worktrees/fleet-runtime-rebase/fleet/src/fleet/cli.py", line 5616, in main
+    code = spec.handler(ctx, parsed)
+  File "/home/ubuntu/davis_root/superpowers/.worktrees/fleet-runtime-rebase/fleet/src/fleet/cli.py", line 1562, in _do_dispatch
+    if all(verdict.allowed for verdict in verdicts):
+UnboundLocalError: local variable 'verdicts' referenced before assignment
+
+======================================================================
+ERROR: test_dry_run_with_only_declared_placeholders_still_dry_runs_clean (test_cli.TestDryRun)
+The other direction of `F3`: a validator that refuses everything passes the test above too.
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "/home/ubuntu/davis_root/superpowers/.worktrees/fleet-runtime-rebase/fleet/tests/test_cli.py", line 1017, in test_dry_run_with_only_declared_placeholders_still_dry_runs_clean
+    code, out, err = fleet.run(["dispatch", "--dry-run", "--profile", profile,
+  File "/home/ubuntu/davis_root/superpowers/.worktrees/fleet-runtime-rebase/fleet/tests/test_cli.py", line 566, in run
+    code = cli.main(list(argv), stdout=out, stderr=err, context=self.context())
+  File "/home/ubuntu/davis_root/superpowers/.worktrees/fleet-runtime-rebase/fleet/src/fleet/cli.py", line 5616, in main
+    code = spec.handler(ctx, parsed)
+  File "/home/ubuntu/davis_root/superpowers/.worktrees/fleet-runtime-rebase/fleet/src/fleet/cli.py", line 1562, in _do_dispatch
+    if all(verdict.allowed for verdict in verdicts):
+UnboundLocalError: local variable 'verdicts' referenced before assignment
+
+======================================================================
+ERROR: test_every_exit_code_is_in_the_registry (test_cli.TestExitCodes)
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "/home/ubuntu/davis_root/superpowers/.worktrees/fleet-runtime-rebase/fleet/tests/test_cli.py", line 1071, in test_every_exit_code_is_in_the_registry
+    code, out, err = fleet.run(argv)
+  File "/home/ubuntu/davis_root/superpowers/.worktrees/fleet-runtime-rebase/fleet/tests/test_cli.py", line 566, in run
+    code = cli.main(list(argv), stdout=out, stderr=err, context=self.context())
+  File "/home/ubuntu/davis_root/superpowers/.worktrees/fleet-runtime-rebase/fleet/src/fleet/cli.py", line 5616, in main
+    code = spec.handler(ctx, parsed)
+  File "/home/ubuntu/davis_root/superpowers/.worktrees/fleet-runtime-rebase/fleet/src/fleet/cli.py", line 1562, in _do_dispatch
+    if all(verdict.allowed for verdict in verdicts):
+UnboundLocalError: local variable 'verdicts' referenced before assignment
+
+======================================================================
+ERROR: test_dispatch_rollback_only_kills_its_started_session (test_cli.TestOutwardState)
+Direct launch now owns delivery; any failed launch must retain ownership until exit.
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "/home/ubuntu/davis_root/superpowers/.worktrees/fleet-runtime-rebase/fleet/tests/test_cli.py", line 1470, in test_dispatch_rollback_only_kills_its_started_session
+    code, out, err = fleet.run(['dispatch', '--profile', str(fleet.profile()),
+  File "/home/ubuntu/davis_root/superpowers/.worktrees/fleet-runtime-rebase/fleet/tests/test_cli.py", line 566, in run
+    code = cli.main(list(argv), stdout=out, stderr=err, context=self.context())
+  File "/home/ubuntu/davis_root/superpowers/.worktrees/fleet-runtime-rebase/fleet/src/fleet/cli.py", line 5616, in main
+    code = spec.handler(ctx, parsed)
+  File "/home/ubuntu/davis_root/superpowers/.worktrees/fleet-runtime-rebase/fleet/src/fleet/cli.py", line 1562, in _do_dispatch
+    if all(verdict.allowed for verdict in verdicts):
+UnboundLocalError: local variable 'verdicts' referenced before assignment
+
+======================================================================
+ERROR: test_propose_done_admits_a_repo_the_review_round_could_not_read (test_cli.TestProposeDoneRefusesAnUnreviewedHead)
+`FI-417`. `beta` was unreadable at review time, so the round's `heads` carries only `alpha` —
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "/home/ubuntu/davis_root/superpowers/.worktrees/fleet-runtime-rebase/fleet/tests/test_cli.py", line 4005, in test_propose_done_admits_a_repo_the_review_round_could_not_read
+    child = self._dispatched(fleet, "gluten-internal=" + "a" * 40 + ",velox-internal=" + "a" * 40)
+  File "/home/ubuntu/davis_root/superpowers/.worktrees/fleet-runtime-rebase/fleet/tests/test_cli.py", line 3957, in _dispatched
+    code, out, err = fleet.run(argv)
+  File "/home/ubuntu/davis_root/superpowers/.worktrees/fleet-runtime-rebase/fleet/tests/test_cli.py", line 566, in run
+    code = cli.main(list(argv), stdout=out, stderr=err, context=self.context())
+  File "/home/ubuntu/davis_root/superpowers/.worktrees/fleet-runtime-rebase/fleet/src/fleet/cli.py", line 5616, in main
+    code = spec.handler(ctx, parsed)
+  File "/home/ubuntu/davis_root/superpowers/.worktrees/fleet-runtime-rebase/fleet/src/fleet/cli.py", line 1562, in _do_dispatch
+    if all(verdict.allowed for verdict in verdicts):
+UnboundLocalError: local variable 'verdicts' referenced before assignment
+
+======================================================================
+ERROR: test_propose_done_allows_a_head_the_newest_round_reviewed (test_cli.TestProposeDoneRefusesAnUnreviewedHead)
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "/home/ubuntu/davis_root/superpowers/.worktrees/fleet-runtime-rebase/fleet/tests/test_cli.py", line 3986, in test_propose_done_allows_a_head_the_newest_round_reviewed
+    child = self._dispatched(fleet, "gluten-internal=" + "a" * 40)
+  File "/home/ubuntu/davis_root/superpowers/.worktrees/fleet-runtime-rebase/fleet/tests/test_cli.py", line 3957, in _dispatched
+    code, out, err = fleet.run(argv)
+  File "/home/ubuntu/davis_root/superpowers/.worktrees/fleet-runtime-rebase/fleet/tests/test_cli.py", line 566, in run
+    code = cli.main(list(argv), stdout=out, stderr=err, context=self.context())
+  File "/home/ubuntu/davis_root/superpowers/.worktrees/fleet-runtime-rebase/fleet/src/fleet/cli.py", line 5616, in main
+    code = spec.handler(ctx, parsed)
+  File "/home/ubuntu/davis_root/superpowers/.worktrees/fleet-runtime-rebase/fleet/src/fleet/cli.py", line 1562, in _do_dispatch
+    if all(verdict.allowed for verdict in verdicts):
+UnboundLocalError: local variable 'verdicts' referenced before assignment
+
+======================================================================
+ERROR: test_propose_done_is_not_gated_when_no_round_carries_heads (test_cli.TestProposeDoneRefusesAnUnreviewedHead)
+Every ledger written before this field carries no `heads` key at all. Absence is NOT
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "/home/ubuntu/davis_root/superpowers/.worktrees/fleet-runtime-rebase/fleet/tests/test_cli.py", line 4026, in test_propose_done_is_not_gated_when_no_round_carries_heads
+    child = self._dispatched(fleet, "gluten-internal=" + "a" * 40)
+  File "/home/ubuntu/davis_root/superpowers/.worktrees/fleet-runtime-rebase/fleet/tests/test_cli.py", line 3957, in _dispatched
+    code, out, err = fleet.run(argv)
+  File "/home/ubuntu/davis_root/superpowers/.worktrees/fleet-runtime-rebase/fleet/tests/test_cli.py", line 566, in run
+    code = cli.main(list(argv), stdout=out, stderr=err, context=self.context())
+  File "/home/ubuntu/davis_root/superpowers/.worktrees/fleet-runtime-rebase/fleet/src/fleet/cli.py", line 5616, in main
+    code = spec.handler(ctx, parsed)
+  File "/home/ubuntu/davis_root/superpowers/.worktrees/fleet-runtime-rebase/fleet/src/fleet/cli.py", line 1562, in _do_dispatch
+    if all(verdict.allowed for verdict in verdicts):
+UnboundLocalError: local variable 'verdicts' referenced before assignment
+
+======================================================================
+ERROR: test_propose_done_refuses_a_head_the_newest_round_never_reviewed (test_cli.TestProposeDoneRefusesAnUnreviewedHead)
+trypmod, unaryminus and try-subtree each pushed, then reviewed, then pushed the fixes — a
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "/home/ubuntu/davis_root/superpowers/.worktrees/fleet-runtime-rebase/fleet/tests/test_cli.py", line 3968, in test_propose_done_refuses_a_head_the_newest_round_never_reviewed
+    child = self._dispatched(fleet, "gluten-internal=" + "a" * 40)
+  File "/home/ubuntu/davis_root/superpowers/.worktrees/fleet-runtime-rebase/fleet/tests/test_cli.py", line 3957, in _dispatched
+    code, out, err = fleet.run(argv)
+  File "/home/ubuntu/davis_root/superpowers/.worktrees/fleet-runtime-rebase/fleet/tests/test_cli.py", line 566, in run
+    code = cli.main(list(argv), stdout=out, stderr=err, context=self.context())
+  File "/home/ubuntu/davis_root/superpowers/.worktrees/fleet-runtime-rebase/fleet/src/fleet/cli.py", line 5616, in main
+    code = spec.handler(ctx, parsed)
+  File "/home/ubuntu/davis_root/superpowers/.worktrees/fleet-runtime-rebase/fleet/src/fleet/cli.py", line 1562, in _do_dispatch
+    if all(verdict.allowed for verdict in verdicts):
+UnboundLocalError: local variable 'verdicts' referenced before assignment
+
+======================================================================
+ERROR: test_review_records_the_slot_heads_for_the_lineage_repos (test_cli.TestReviewRecordsTheHeadsItReviewed)
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "/home/ubuntu/davis_root/superpowers/.worktrees/fleet-runtime-rebase/fleet/tests/test_cli.py", line 3914, in test_review_records_the_slot_heads_for_the_lineage_repos
+    child = self._dispatched(fleet, "alpha=" + "a" * 40)
+  File "/home/ubuntu/davis_root/superpowers/.worktrees/fleet-runtime-rebase/fleet/tests/test_cli.py", line 3906, in _dispatched
+    code, out, err = fleet.run(argv)
+  File "/home/ubuntu/davis_root/superpowers/.worktrees/fleet-runtime-rebase/fleet/tests/test_cli.py", line 566, in run
+    code = cli.main(list(argv), stdout=out, stderr=err, context=self.context())
+  File "/home/ubuntu/davis_root/superpowers/.worktrees/fleet-runtime-rebase/fleet/src/fleet/cli.py", line 5616, in main
+    code = spec.handler(ctx, parsed)
+  File "/home/ubuntu/davis_root/superpowers/.worktrees/fleet-runtime-rebase/fleet/src/fleet/cli.py", line 1562, in _do_dispatch
+    if all(verdict.allowed for verdict in verdicts):
+UnboundLocalError: local variable 'verdicts' referenced before assignment
+
+======================================================================
+ERROR: test_review_without_a_readable_slot_records_no_heads (test_cli.TestReviewRecordsTheHeadsItReviewed)
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "/home/ubuntu/davis_root/superpowers/.worktrees/fleet-runtime-rebase/fleet/tests/test_cli.py", line 3926, in test_review_without_a_readable_slot_records_no_heads
+    child = self._dispatched(fleet, "")
+  File "/home/ubuntu/davis_root/superpowers/.worktrees/fleet-runtime-rebase/fleet/tests/test_cli.py", line 3906, in _dispatched
+    code, out, err = fleet.run(argv)
+  File "/home/ubuntu/davis_root/superpowers/.worktrees/fleet-runtime-rebase/fleet/tests/test_cli.py", line 566, in run
+    code = cli.main(list(argv), stdout=out, stderr=err, context=self.context())
+  File "/home/ubuntu/davis_root/superpowers/.worktrees/fleet-runtime-rebase/fleet/src/fleet/cli.py", line 5616, in main
+    code = spec.handler(ctx, parsed)
+  File "/home/ubuntu/davis_root/superpowers/.worktrees/fleet-runtime-rebase/fleet/src/fleet/cli.py", line 1562, in _do_dispatch
+    if all(verdict.allowed for verdict in verdicts):
+UnboundLocalError: local variable 'verdicts' referenced before assignment
+
+======================================================================
+ERROR: test_dry_run_reports_the_addition_and_writes_nothing (test_cli.TestSeedExtra)
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "/home/ubuntu/davis_root/superpowers/.worktrees/fleet-runtime-rebase/fleet/tests/test_cli.py", line 3414, in test_dry_run_reports_the_addition_and_writes_nothing
+    code, out, err = self._dispatch(fleet, "--dry-run", "--seed-extra", str(extra))
+  File "/home/ubuntu/davis_root/superpowers/.worktrees/fleet-runtime-rebase/fleet/tests/test_cli.py", line 3309, in _dispatch
+    return fleet.run(["dispatch", "--porcelain", "--profile", str(fleet.profile("worker")),
+  File "/home/ubuntu/davis_root/superpowers/.worktrees/fleet-runtime-rebase/fleet/tests/test_cli.py", line 566, in run
+    code = cli.main(list(argv), stdout=out, stderr=err, context=self.context())
+  File "/home/ubuntu/davis_root/superpowers/.worktrees/fleet-runtime-rebase/fleet/src/fleet/cli.py", line 5616, in main
+    code = spec.handler(ctx, parsed)
+  File "/home/ubuntu/davis_root/superpowers/.worktrees/fleet-runtime-rebase/fleet/src/fleet/cli.py", line 1562, in _do_dispatch
+    if all(verdict.allowed for verdict in verdicts):
+UnboundLocalError: local variable 'verdicts' referenced before assignment
+
+======================================================================
+ERROR: test_the_addition_is_in_the_seed_the_worker_is_briefed_from (test_cli.TestSeedExtra)
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "/home/ubuntu/davis_root/superpowers/.worktrees/fleet-runtime-rebase/fleet/tests/test_cli.py", line 3321, in test_the_addition_is_in_the_seed_the_worker_is_briefed_from
+    code, out, err = self._dispatch(fleet, "--seed-extra", str(extra))
+  File "/home/ubuntu/davis_root/superpowers/.worktrees/fleet-runtime-rebase/fleet/tests/test_cli.py", line 3309, in _dispatch
+    return fleet.run(["dispatch", "--porcelain", "--profile", str(fleet.profile("worker")),
+  File "/home/ubuntu/davis_root/superpowers/.worktrees/fleet-runtime-rebase/fleet/tests/test_cli.py", line 566, in run
+    code = cli.main(list(argv), stdout=out, stderr=err, context=self.context())
+  File "/home/ubuntu/davis_root/superpowers/.worktrees/fleet-runtime-rebase/fleet/src/fleet/cli.py", line 5616, in main
+    code = spec.handler(ctx, parsed)
+  File "/home/ubuntu/davis_root/superpowers/.worktrees/fleet-runtime-rebase/fleet/src/fleet/cli.py", line 1562, in _do_dispatch
+    if all(verdict.allowed for verdict in verdicts):
+UnboundLocalError: local variable 'verdicts' referenced before assignment
+
+======================================================================
+ERROR: test_the_delivered_seed_check_compares_the_COMBINED_text (test_cli.TestSeedExtra)
+Otherwise `--seed-extra` would make every dispatch report NOT-DELIVERED against a seed that no
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "/home/ubuntu/davis_root/superpowers/.worktrees/fleet-runtime-rebase/fleet/tests/test_cli.py", line 3353, in test_the_delivered_seed_check_compares_the_COMBINED_text
+    code, out, err = self._dispatch(fleet, "--seed-extra", str(extra))
+  File "/home/ubuntu/davis_root/superpowers/.worktrees/fleet-runtime-rebase/fleet/tests/test_cli.py", line 3309, in _dispatch
+    return fleet.run(["dispatch", "--porcelain", "--profile", str(fleet.profile("worker")),
+  File "/home/ubuntu/davis_root/superpowers/.worktrees/fleet-runtime-rebase/fleet/tests/test_cli.py", line 566, in run
+    code = cli.main(list(argv), stdout=out, stderr=err, context=self.context())
+  File "/home/ubuntu/davis_root/superpowers/.worktrees/fleet-runtime-rebase/fleet/src/fleet/cli.py", line 5616, in main
+    code = spec.handler(ctx, parsed)
+  File "/home/ubuntu/davis_root/superpowers/.worktrees/fleet-runtime-rebase/fleet/src/fleet/cli.py", line 1562, in _do_dispatch
+    if all(verdict.allowed for verdict in verdicts):
+UnboundLocalError: local variable 'verdicts' referenced before assignment
+
+======================================================================
+ERROR: test_the_seed_says_where_the_addition_came_from (test_cli.TestSeedExtra)
+A worker reading two paragraphs that disagree needs to know which one is specific to it.
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "/home/ubuntu/davis_root/superpowers/.worktrees/fleet-runtime-rebase/fleet/tests/test_cli.py", line 3336, in test_the_seed_says_where_the_addition_came_from
+    code, out, err = self._dispatch(fleet, "--seed-extra", str(extra))
+  File "/home/ubuntu/davis_root/superpowers/.worktrees/fleet-runtime-rebase/fleet/tests/test_cli.py", line 3309, in _dispatch
+    return fleet.run(["dispatch", "--porcelain", "--profile", str(fleet.profile("worker")),
+  File "/home/ubuntu/davis_root/superpowers/.worktrees/fleet-runtime-rebase/fleet/tests/test_cli.py", line 566, in run
+    code = cli.main(list(argv), stdout=out, stderr=err, context=self.context())
+  File "/home/ubuntu/davis_root/superpowers/.worktrees/fleet-runtime-rebase/fleet/src/fleet/cli.py", line 5616, in main
+    code = spec.handler(ctx, parsed)
+  File "/home/ubuntu/davis_root/superpowers/.worktrees/fleet-runtime-rebase/fleet/src/fleet/cli.py", line 1562, in _do_dispatch
+    if all(verdict.allowed for verdict in verdicts):
+UnboundLocalError: local variable 'verdicts' referenced before assignment
+
+======================================================================
+ERROR: test_without_the_flag_profile_seed_is_unchanged_after_cli_header (test_cli.TestSeedExtra)
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "/home/ubuntu/davis_root/superpowers/.worktrees/fleet-runtime-rebase/fleet/tests/test_cli.py", line 3395, in test_without_the_flag_profile_seed_is_unchanged_after_cli_header
+    code, out, err = self._dispatch(fleet)
+  File "/home/ubuntu/davis_root/superpowers/.worktrees/fleet-runtime-rebase/fleet/tests/test_cli.py", line 3309, in _dispatch
+    return fleet.run(["dispatch", "--porcelain", "--profile", str(fleet.profile("worker")),
+  File "/home/ubuntu/davis_root/superpowers/.worktrees/fleet-runtime-rebase/fleet/tests/test_cli.py", line 566, in run
+    code = cli.main(list(argv), stdout=out, stderr=err, context=self.context())
+  File "/home/ubuntu/davis_root/superpowers/.worktrees/fleet-runtime-rebase/fleet/src/fleet/cli.py", line 5616, in main
+    code = spec.handler(ctx, parsed)
+  File "/home/ubuntu/davis_root/superpowers/.worktrees/fleet-runtime-rebase/fleet/src/fleet/cli.py", line 1562, in _do_dispatch
+    if all(verdict.allowed for verdict in verdicts):
+UnboundLocalError: local variable 'verdicts' referenced before assignment
+
+======================================================================
+ERROR: test_a_dispatched_worker_proposing_with_no_destination_reaches_its_coordinator (test_cli.TestTheDispatchMilestoneJoin)
+THE regression test. Measured before the fix: coordinator 0 pending, worker 1 pending.
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "/home/ubuntu/davis_root/superpowers/.worktrees/fleet-runtime-rebase/fleet/tests/test_cli.py", line 3054, in test_a_dispatched_worker_proposing_with_no_destination_reaches_its_coordinator
+    code, out, err = self._dispatch(fleet, coordinator, milestone="M9")
+  File "/home/ubuntu/davis_root/superpowers/.worktrees/fleet-runtime-rebase/fleet/tests/test_cli.py", line 2956, in _dispatch
+    return fleet.run(argv + list(kw.get("extra", [])))
+  File "/home/ubuntu/davis_root/superpowers/.worktrees/fleet-runtime-rebase/fleet/tests/test_cli.py", line 566, in run
+    code = cli.main(list(argv), stdout=out, stderr=err, context=self.context())
+  File "/home/ubuntu/davis_root/superpowers/.worktrees/fleet-runtime-rebase/fleet/src/fleet/cli.py", line 5616, in main
+    code = spec.handler(ctx, parsed)
+  File "/home/ubuntu/davis_root/superpowers/.worktrees/fleet-runtime-rebase/fleet/src/fleet/cli.py", line 1562, in _do_dispatch
+    if all(verdict.allowed for verdict in verdicts):
+UnboundLocalError: local variable 'verdicts' referenced before assignment
+
+======================================================================
+ERROR: test_board_names_the_milestone_as_a_column (test_cli.TestTheDispatchMilestoneJoin)
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "/home/ubuntu/davis_root/superpowers/.worktrees/fleet-runtime-rebase/fleet/tests/test_cli.py", line 2995, in test_board_names_the_milestone_as_a_column
+    self._dispatch(fleet, coordinator, milestone="M9")
+  File "/home/ubuntu/davis_root/superpowers/.worktrees/fleet-runtime-rebase/fleet/tests/test_cli.py", line 2956, in _dispatch
+    return fleet.run(argv + list(kw.get("extra", [])))
+  File "/home/ubuntu/davis_root/superpowers/.worktrees/fleet-runtime-rebase/fleet/tests/test_cli.py", line 566, in run
+    code = cli.main(list(argv), stdout=out, stderr=err, context=self.context())
+  File "/home/ubuntu/davis_root/superpowers/.worktrees/fleet-runtime-rebase/fleet/src/fleet/cli.py", line 5616, in main
+    code = spec.handler(ctx, parsed)
+  File "/home/ubuntu/davis_root/superpowers/.worktrees/fleet-runtime-rebase/fleet/src/fleet/cli.py", line 1562, in _do_dispatch
+    if all(verdict.allowed for verdict in verdicts):
+UnboundLocalError: local variable 'verdicts' referenced before assignment
+
+======================================================================
+ERROR: test_harvest_is_not_blocked_once_the_report_has_arrived (test_cli.TestTheDispatchMilestoneJoin)
+The guard must fire ONLY on the genuine loss. A pending proposal means the report arrived and is
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "/home/ubuntu/davis_root/superpowers/.worktrees/fleet-runtime-rebase/fleet/tests/test_cli.py", line 3111, in test_harvest_is_not_blocked_once_the_report_has_arrived
+    code, out, err = self._dispatch(fleet, coordinator, milestone="M9")
+  File "/home/ubuntu/davis_root/superpowers/.worktrees/fleet-runtime-rebase/fleet/tests/test_cli.py", line 2956, in _dispatch
+    return fleet.run(argv + list(kw.get("extra", [])))
+  File "/home/ubuntu/davis_root/superpowers/.worktrees/fleet-runtime-rebase/fleet/tests/test_cli.py", line 566, in run
+    code = cli.main(list(argv), stdout=out, stderr=err, context=self.context())
+  File "/home/ubuntu/davis_root/superpowers/.worktrees/fleet-runtime-rebase/fleet/src/fleet/cli.py", line 5616, in main
+    code = spec.handler(ctx, parsed)
+  File "/home/ubuntu/davis_root/superpowers/.worktrees/fleet-runtime-rebase/fleet/src/fleet/cli.py", line 1562, in _do_dispatch
+    if all(verdict.allowed for verdict in verdicts):
+UnboundLocalError: local variable 'verdicts' referenced before assignment
+
+======================================================================
+ERROR: test_harvest_refuses_to_close_a_worker_whose_report_never_reached_the_coordinator (test_cli.TestTheDispatchMilestoneJoin)
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "/home/ubuntu/davis_root/superpowers/.worktrees/fleet-runtime-rebase/fleet/tests/test_cli.py", line 3093, in test_harvest_refuses_to_close_a_worker_whose_report_never_reached_the_coordinator
+    code, out, err = self._dispatch(fleet, coordinator, milestone="M9")
+  File "/home/ubuntu/davis_root/superpowers/.worktrees/fleet-runtime-rebase/fleet/tests/test_cli.py", line 2956, in _dispatch
+    return fleet.run(argv + list(kw.get("extra", [])))
+  File "/home/ubuntu/davis_root/superpowers/.worktrees/fleet-runtime-rebase/fleet/tests/test_cli.py", line 566, in run
+    code = cli.main(list(argv), stdout=out, stderr=err, context=self.context())
+  File "/home/ubuntu/davis_root/superpowers/.worktrees/fleet-runtime-rebase/fleet/src/fleet/cli.py", line 5616, in main
+    code = spec.handler(ctx, parsed)
+  File "/home/ubuntu/davis_root/superpowers/.worktrees/fleet-runtime-rebase/fleet/src/fleet/cli.py", line 1562, in _do_dispatch
+    if all(verdict.allowed for verdict in verdicts):
+UnboundLocalError: local variable 'verdicts' referenced before assignment
+
+======================================================================
+ERROR: test_the_claim_sets_owner_and_leaves_status_alone (test_cli.TestTheDispatchMilestoneJoin)
+`apply` must remain the ONLY function that changes a status. Marking a dispatched milestone
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "/home/ubuntu/davis_root/superpowers/.worktrees/fleet-runtime-rebase/fleet/tests/test_cli.py", line 2986, in test_the_claim_sets_owner_and_leaves_status_alone
+    code, out, err = self._dispatch(fleet, coordinator, milestone="M9")
+  File "/home/ubuntu/davis_root/superpowers/.worktrees/fleet-runtime-rebase/fleet/tests/test_cli.py", line 2956, in _dispatch
+    return fleet.run(argv + list(kw.get("extra", [])))
+  File "/home/ubuntu/davis_root/superpowers/.worktrees/fleet-runtime-rebase/fleet/tests/test_cli.py", line 566, in run
+    code = cli.main(list(argv), stdout=out, stderr=err, context=self.context())
+  File "/home/ubuntu/davis_root/superpowers/.worktrees/fleet-runtime-rebase/fleet/src/fleet/cli.py", line 5616, in main
+    code = spec.handler(ctx, parsed)
+  File "/home/ubuntu/davis_root/superpowers/.worktrees/fleet-runtime-rebase/fleet/src/fleet/cli.py", line 1562, in _do_dispatch
+    if all(verdict.allowed for verdict in verdicts):
+UnboundLocalError: local variable 'verdicts' referenced before assignment
+
+======================================================================
+ERROR: test_the_record_the_origin_and_the_claim_all_name_the_same_milestone (test_cli.TestTheDispatchMilestoneJoin)
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "/home/ubuntu/davis_root/superpowers/.worktrees/fleet-runtime-rebase/fleet/tests/test_cli.py", line 2964, in test_the_record_the_origin_and_the_claim_all_name_the_same_milestone
+    code, out, err = self._dispatch(fleet, coordinator, milestone="M9")
+  File "/home/ubuntu/davis_root/superpowers/.worktrees/fleet-runtime-rebase/fleet/tests/test_cli.py", line 2956, in _dispatch
+    return fleet.run(argv + list(kw.get("extra", [])))
+  File "/home/ubuntu/davis_root/superpowers/.worktrees/fleet-runtime-rebase/fleet/tests/test_cli.py", line 566, in run
+    code = cli.main(list(argv), stdout=out, stderr=err, context=self.context())
+  File "/home/ubuntu/davis_root/superpowers/.worktrees/fleet-runtime-rebase/fleet/src/fleet/cli.py", line 5616, in main
+    code = spec.handler(ctx, parsed)
+  File "/home/ubuntu/davis_root/superpowers/.worktrees/fleet-runtime-rebase/fleet/src/fleet/cli.py", line 1562, in _do_dispatch
+    if all(verdict.allowed for verdict in verdicts):
+UnboundLocalError: local variable 'verdicts' referenced before assignment
+
+======================================================================
+ERROR: test_two_instants_cannot_take_one_milestone (test_cli.TestTheDispatchMilestoneJoin)
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "/home/ubuntu/davis_root/superpowers/.worktrees/fleet-runtime-rebase/fleet/tests/test_cli.py", line 3039, in test_two_instants_cannot_take_one_milestone
+    first, out, err = self._dispatch(fleet, coordinator, milestone="M9", title="firstOne")
+  File "/home/ubuntu/davis_root/superpowers/.worktrees/fleet-runtime-rebase/fleet/tests/test_cli.py", line 2956, in _dispatch
+    return fleet.run(argv + list(kw.get("extra", [])))
+  File "/home/ubuntu/davis_root/superpowers/.worktrees/fleet-runtime-rebase/fleet/tests/test_cli.py", line 566, in run
+    code = cli.main(list(argv), stdout=out, stderr=err, context=self.context())
+  File "/home/ubuntu/davis_root/superpowers/.worktrees/fleet-runtime-rebase/fleet/src/fleet/cli.py", line 5616, in main
+    code = spec.handler(ctx, parsed)
+  File "/home/ubuntu/davis_root/superpowers/.worktrees/fleet-runtime-rebase/fleet/src/fleet/cli.py", line 1562, in _do_dispatch
+    if all(verdict.allowed for verdict in verdicts):
+UnboundLocalError: local variable 'verdicts' referenced before assignment
+
+======================================================================
+ERROR: test_dispatch_records_the_socket_it_created_the_session_on (test_cli.TestTheRecordNamesItsServer)
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "/home/ubuntu/davis_root/superpowers/.worktrees/fleet-runtime-rebase/fleet/tests/test_cli.py", line 5031, in test_dispatch_records_the_socket_it_created_the_session_on
+    code, out, err = fleet.run(["dispatch", "--profile", str(fleet.profile()),
+  File "/home/ubuntu/davis_root/superpowers/.worktrees/fleet-runtime-rebase/fleet/tests/test_cli.py", line 566, in run
+    code = cli.main(list(argv), stdout=out, stderr=err, context=self.context())
+  File "/home/ubuntu/davis_root/superpowers/.worktrees/fleet-runtime-rebase/fleet/src/fleet/cli.py", line 5616, in main
+    code = spec.handler(ctx, parsed)
+  File "/home/ubuntu/davis_root/superpowers/.worktrees/fleet-runtime-rebase/fleet/src/fleet/cli.py", line 1562, in _do_dispatch
+    if all(verdict.allowed for verdict in verdicts):
+UnboundLocalError: local variable 'verdicts' referenced before assignment
+
+======================================================================
+ERROR: test_a_creating_verb_works_with_NO_fleet_variables_at_all (test_cli.TestTheSuiteDoesNotReadTheOPERATORsEnvironment)
+The other direction, and the one `release-verify` runs: nothing exported anywhere.
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "/home/ubuntu/davis_root/superpowers/.worktrees/fleet-runtime-rebase/fleet/tests/test_cli.py", line 746, in test_a_creating_verb_works_with_NO_fleet_variables_at_all
+    code, out, err = fleet.run(["dispatch", "--porcelain", "--profile",
+  File "/home/ubuntu/davis_root/superpowers/.worktrees/fleet-runtime-rebase/fleet/tests/test_cli.py", line 566, in run
+    code = cli.main(list(argv), stdout=out, stderr=err, context=self.context())
+  File "/home/ubuntu/davis_root/superpowers/.worktrees/fleet-runtime-rebase/fleet/src/fleet/cli.py", line 5616, in main
+    code = spec.handler(ctx, parsed)
+  File "/home/ubuntu/davis_root/superpowers/.worktrees/fleet-runtime-rebase/fleet/src/fleet/cli.py", line 1562, in _do_dispatch
+    if all(verdict.allowed for verdict in verdicts):
+UnboundLocalError: local variable 'verdicts' referenced before assignment
+
+======================================================================
+ERROR: test_a_creating_verb_works_with_a_HOSTILE_ambient_environment (test_cli.TestTheSuiteDoesNotReadTheOPERATORsEnvironment)
+Every `FLEET_*` set to somewhere that must never be written. If any of them reached the verb,
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "/home/ubuntu/davis_root/superpowers/.worktrees/fleet-runtime-rebase/fleet/tests/test_cli.py", line 729, in test_a_creating_verb_works_with_a_HOSTILE_ambient_environment
+    code, out, err = fleet.run(["dispatch", "--porcelain", "--profile",
+  File "/home/ubuntu/davis_root/superpowers/.worktrees/fleet-runtime-rebase/fleet/tests/test_cli.py", line 566, in run
+    code = cli.main(list(argv), stdout=out, stderr=err, context=self.context())
+  File "/home/ubuntu/davis_root/superpowers/.worktrees/fleet-runtime-rebase/fleet/src/fleet/cli.py", line 5616, in main
+    code = spec.handler(ctx, parsed)
+  File "/home/ubuntu/davis_root/superpowers/.worktrees/fleet-runtime-rebase/fleet/src/fleet/cli.py", line 1562, in _do_dispatch
+    if all(verdict.allowed for verdict in verdicts):
+UnboundLocalError: local variable 'verdicts' referenced before assignment
+
+======================================================================
+ERROR: test_a_dispatch_is_refused_by_a_claim_no_record_covers_yet (test_concurrency.TestDispatchVerifiesTheCapWhileHoldingTheClaim)
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "/home/ubuntu/davis_root/superpowers/.worktrees/fleet-runtime-rebase/fleet/tests/test_concurrency.py", line 147, in test_a_dispatch_is_refused_by_a_claim_no_record_covers_yet
+    code, out, err = fleet.dispatch("second at cap one", cap=1)
+  File "/home/ubuntu/davis_root/superpowers/.worktrees/fleet-runtime-rebase/fleet/tests/test_concurrency.py", line 93, in dispatch
+    return self.run(argv)
+  File "/home/ubuntu/davis_root/superpowers/.worktrees/fleet-runtime-rebase/fleet/tests/test_concurrency.py", line 85, in run
+    code = cli.main(list(argv), stdout=out, stderr=err, context=self.context())
+  File "/home/ubuntu/davis_root/superpowers/.worktrees/fleet-runtime-rebase/fleet/src/fleet/cli.py", line 5616, in main
+    code = spec.handler(ctx, parsed)
+  File "/home/ubuntu/davis_root/superpowers/.worktrees/fleet-runtime-rebase/fleet/src/fleet/cli.py", line 1562, in _do_dispatch
+    if all(verdict.allowed for verdict in verdicts):
+UnboundLocalError: local variable 'verdicts' referenced before assignment
+
+======================================================================
+ERROR: test_a_dispatch_under_the_cap_still_succeeds_with_claims_in_flight (test_concurrency.TestDispatchVerifiesTheCapWhileHoldingTheClaim)
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "/home/ubuntu/davis_root/superpowers/.worktrees/fleet-runtime-rebase/fleet/tests/test_concurrency.py", line 170, in test_a_dispatch_under_the_cap_still_succeeds_with_claims_in_flight
+    code, out, err = fleet.dispatch("room for two", cap=2)
+  File "/home/ubuntu/davis_root/superpowers/.worktrees/fleet-runtime-rebase/fleet/tests/test_concurrency.py", line 93, in dispatch
+    return self.run(argv)
+  File "/home/ubuntu/davis_root/superpowers/.worktrees/fleet-runtime-rebase/fleet/tests/test_concurrency.py", line 85, in run
+    code = cli.main(list(argv), stdout=out, stderr=err, context=self.context())
+  File "/home/ubuntu/davis_root/superpowers/.worktrees/fleet-runtime-rebase/fleet/src/fleet/cli.py", line 5616, in main
+    code = spec.handler(ctx, parsed)
+  File "/home/ubuntu/davis_root/superpowers/.worktrees/fleet-runtime-rebase/fleet/src/fleet/cli.py", line 1562, in _do_dispatch
+    if all(verdict.allowed for verdict in verdicts):
+UnboundLocalError: local variable 'verdicts' referenced before assignment
+
+======================================================================
+ERROR: test_another_efforts_in_flight_claim_does_not_refuse_this_one (test_concurrency.TestDispatchVerifiesTheCapWhileHoldingTheClaim)
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "/home/ubuntu/davis_root/superpowers/.worktrees/fleet-runtime-rebase/fleet/tests/test_concurrency.py", line 177, in test_another_efforts_in_flight_claim_does_not_refuse_this_one
+    code, out, err = fleet.dispatch("mine", cap=1)
+  File "/home/ubuntu/davis_root/superpowers/.worktrees/fleet-runtime-rebase/fleet/tests/test_concurrency.py", line 93, in dispatch
+    return self.run(argv)
+  File "/home/ubuntu/davis_root/superpowers/.worktrees/fleet-runtime-rebase/fleet/tests/test_concurrency.py", line 85, in run
+    code = cli.main(list(argv), stdout=out, stderr=err, context=self.context())
+  File "/home/ubuntu/davis_root/superpowers/.worktrees/fleet-runtime-rebase/fleet/src/fleet/cli.py", line 5616, in main
+    code = spec.handler(ctx, parsed)
+  File "/home/ubuntu/davis_root/superpowers/.worktrees/fleet-runtime-rebase/fleet/src/fleet/cli.py", line 1562, in _do_dispatch
+    if all(verdict.allowed for verdict in verdicts):
+UnboundLocalError: local variable 'verdicts' referenced before assignment
+
+======================================================================
+ERROR: test_dry_run_is_unchanged_by_the_second_gate (test_concurrency.TestDispatchVerifiesTheCapWhileHoldingTheClaim)
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "/home/ubuntu/davis_root/superpowers/.worktrees/fleet-runtime-rebase/fleet/tests/test_concurrency.py", line 188, in test_dry_run_is_unchanged_by_the_second_gate
+    code, out, err = fleet.run(["dispatch", "--profile", str(fleet.profile_dir), "--title", "probe",
+  File "/home/ubuntu/davis_root/superpowers/.worktrees/fleet-runtime-rebase/fleet/tests/test_concurrency.py", line 85, in run
+    code = cli.main(list(argv), stdout=out, stderr=err, context=self.context())
+  File "/home/ubuntu/davis_root/superpowers/.worktrees/fleet-runtime-rebase/fleet/src/fleet/cli.py", line 5616, in main
+    code = spec.handler(ctx, parsed)
+  File "/home/ubuntu/davis_root/superpowers/.worktrees/fleet-runtime-rebase/fleet/src/fleet/cli.py", line 1562, in _do_dispatch
+    if all(verdict.allowed for verdict in verdicts):
+UnboundLocalError: local variable 'verdicts' referenced before assignment
+
+======================================================================
+ERROR: test_the_refused_dispatch_gives_its_own_claim_straight_back (test_concurrency.TestDispatchVerifiesTheCapWhileHoldingTheClaim)
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "/home/ubuntu/davis_root/superpowers/.worktrees/fleet-runtime-rebase/fleet/tests/test_concurrency.py", line 159, in test_the_refused_dispatch_gives_its_own_claim_straight_back
+    code, _, _ = fleet.dispatch("refused", cap=1)
+  File "/home/ubuntu/davis_root/superpowers/.worktrees/fleet-runtime-rebase/fleet/tests/test_concurrency.py", line 93, in dispatch
+    return self.run(argv)
+  File "/home/ubuntu/davis_root/superpowers/.worktrees/fleet-runtime-rebase/fleet/tests/test_concurrency.py", line 85, in run
+    code = cli.main(list(argv), stdout=out, stderr=err, context=self.context())
+  File "/home/ubuntu/davis_root/superpowers/.worktrees/fleet-runtime-rebase/fleet/src/fleet/cli.py", line 5616, in main
+    code = spec.handler(ctx, parsed)
+  File "/home/ubuntu/davis_root/superpowers/.worktrees/fleet-runtime-rebase/fleet/src/fleet/cli.py", line 1562, in _do_dispatch
+    if all(verdict.allowed for verdict in verdicts):
+UnboundLocalError: local variable 'verdicts' referenced before assignment
+
+======================================================================
+ERROR: test_exit_codes_of_dispatch (test_contracts.TestEveryExitPathIsRegistered)
+TestEveryExitPathIsRegistered: test_exit_codes_of_dispatch
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "/home/ubuntu/davis_root/superpowers/.worktrees/fleet-runtime-rebase/fleet/tests/test_contracts.py", line 769, in method
+    self.check(*_args)
+  File "/home/ubuntu/davis_root/superpowers/.worktrees/fleet-runtime-rebase/fleet/tests/test_contracts.py", line 513, in check
+    code, out, err = fleet.run(cell)
+  File "/home/ubuntu/davis_root/superpowers/.worktrees/fleet-runtime-rebase/fleet/tests/test_contracts.py", line 230, in run
+    code = cli.main(list(argv), stdout=out, stderr=err, context=self.context())
+  File "/home/ubuntu/davis_root/superpowers/.worktrees/fleet-runtime-rebase/fleet/src/fleet/cli.py", line 5616, in main
+    code = spec.handler(ctx, parsed)
+  File "/home/ubuntu/davis_root/superpowers/.worktrees/fleet-runtime-rebase/fleet/src/fleet/cli.py", line 1562, in _do_dispatch
+    if all(verdict.allowed for verdict in verdicts):
+UnboundLocalError: local variable 'verdicts' referenced before assignment
+
+======================================================================
+ERROR: test_zero_delta_dispatch (test_contracts.TestEveryMutatingVerbDryRuns)
+TestEveryMutatingVerbDryRuns: test_zero_delta_dispatch
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "/home/ubuntu/davis_root/superpowers/.worktrees/fleet-runtime-rebase/fleet/tests/test_contracts.py", line 769, in method
+    self.check(*_args)
+  File "/home/ubuntu/davis_root/superpowers/.worktrees/fleet-runtime-rebase/fleet/tests/test_contracts.py", line 493, in check
+    fleet.run([verb, cli.DRY_RUN, *argv])
+  File "/home/ubuntu/davis_root/superpowers/.worktrees/fleet-runtime-rebase/fleet/tests/test_contracts.py", line 230, in run
+    code = cli.main(list(argv), stdout=out, stderr=err, context=self.context())
+  File "/home/ubuntu/davis_root/superpowers/.worktrees/fleet-runtime-rebase/fleet/src/fleet/cli.py", line 5616, in main
+    code = spec.handler(ctx, parsed)
+  File "/home/ubuntu/davis_root/superpowers/.worktrees/fleet-runtime-rebase/fleet/src/fleet/cli.py", line 1562, in _do_dispatch
+    if all(verdict.allowed for verdict in verdicts):
+UnboundLocalError: local variable 'verdicts' referenced before assignment
+
+======================================================================
+ERROR: test_codex_dispatch_records_direct_launch_settings (test_runtime_cli.RuntimeCliTests)
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "/home/ubuntu/davis_root/superpowers/.worktrees/fleet-runtime-rebase/fleet/tests/test_runtime_cli.py", line 64, in test_codex_dispatch_records_direct_launch_settings
+    code, out, err = self.f.run(['dispatch', '--profile', str(self.f.profile()), '--title', 'codex task'])
+  File "/home/ubuntu/davis_root/superpowers/.worktrees/fleet-runtime-rebase/fleet/tests/test_cli.py", line 566, in run
+    code = cli.main(list(argv), stdout=out, stderr=err, context=self.context())
+  File "/home/ubuntu/davis_root/superpowers/.worktrees/fleet-runtime-rebase/fleet/src/fleet/cli.py", line 5616, in main
+    code = spec.handler(ctx, parsed)
+  File "/home/ubuntu/davis_root/superpowers/.worktrees/fleet-runtime-rebase/fleet/src/fleet/cli.py", line 1562, in _do_dispatch
+    if all(verdict.allowed for verdict in verdicts):
+UnboundLocalError: local variable 'verdicts' referenced before assignment
+
+======================================================================
+ERROR: test_dry_dispatch_validates_runtime_configuration_without_claiming (test_runtime_cli.RuntimeCliTests)
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "/home/ubuntu/davis_root/superpowers/.worktrees/fleet-runtime-rebase/fleet/tests/test_runtime_cli.py", line 157, in test_dry_dispatch_validates_runtime_configuration_without_claiming
+    code, _, err = self.f.run(['dispatch', '--profile', str(profile), '--title', 'test', '--dry-run'])
+  File "/home/ubuntu/davis_root/superpowers/.worktrees/fleet-runtime-rebase/fleet/tests/test_cli.py", line 566, in run
+    code = cli.main(list(argv), stdout=out, stderr=err, context=self.context())
+  File "/home/ubuntu/davis_root/superpowers/.worktrees/fleet-runtime-rebase/fleet/src/fleet/cli.py", line 5616, in main
+    code = spec.handler(ctx, parsed)
+  File "/home/ubuntu/davis_root/superpowers/.worktrees/fleet-runtime-rebase/fleet/src/fleet/cli.py", line 1562, in _do_dispatch
+    if all(verdict.allowed for verdict in verdicts):
+UnboundLocalError: local variable 'verdicts' referenced before assignment
+
+======================================================================
+ERROR: test_tmux_permission_failure_does_not_create_pending_worker (test_runtime_cli.RuntimeCliTests)
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "/home/ubuntu/davis_root/superpowers/.worktrees/fleet-runtime-rebase/fleet/tests/test_runtime_cli.py", line 89, in test_tmux_permission_failure_does_not_create_pending_worker
+    code, _, err = self.f.run(['dispatch', '--profile', str(self.f.profile()), '--title', 'denied'])
+  File "/home/ubuntu/davis_root/superpowers/.worktrees/fleet-runtime-rebase/fleet/tests/test_cli.py", line 566, in run
+    code = cli.main(list(argv), stdout=out, stderr=err, context=self.context())
+  File "/home/ubuntu/davis_root/superpowers/.worktrees/fleet-runtime-rebase/fleet/src/fleet/cli.py", line 5616, in main
+    code = spec.handler(ctx, parsed)
+  File "/home/ubuntu/davis_root/superpowers/.worktrees/fleet-runtime-rebase/fleet/src/fleet/cli.py", line 1562, in _do_dispatch
+    if all(verdict.allowed for verdict in verdicts):
+UnboundLocalError: local variable 'verdicts' referenced before assignment
+
+======================================================================
+FAIL: test_dispatch_reads_the_selection_saved_by_another_process (test_runtime_concurrency.RuntimeConcurrencyTests)
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "/home/ubuntu/davis_root/superpowers/.worktrees/fleet-runtime-rebase/fleet/tests/test_runtime_concurrency.py", line 72, in test_dispatch_reads_the_selection_saved_by_another_process
+    self.assertEqual(self.answer(dispatch)[0], 0)
+  File "/home/ubuntu/davis_root/superpowers/.worktrees/fleet-runtime-rebase/fleet/tests/test_runtime_concurrency.py", line 38, in answer
+    self.assertTrue(pipe.poll(10), 'operation did not finish')
+AssertionError: False is not true : operation did not finish
+
+======================================================================
+FAIL: test_switch_waits_for_dispatch_and_then_refuses_its_open_record (test_runtime_concurrency.RuntimeConcurrencyTests)
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "/home/ubuntu/davis_root/superpowers/.worktrees/fleet-runtime-rebase/fleet/tests/test_runtime_concurrency.py", line 59, in test_switch_waits_for_dispatch_and_then_refuses_its_open_record
+    self.assertTrue(entered.wait(5))
+AssertionError: False is not true
+
+----------------------------------------------------------------------
+Ran 1896 tests in 128.571s
+
+FAILED (failures=2, errors=52)
+exit=1
