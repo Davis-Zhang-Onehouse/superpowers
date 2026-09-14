@@ -1,0 +1,15 @@
+1477:        self.assertFalse(record.gate_verdict, "a seed failure is not a guard verdict")
+Ran 8 tests in 2.896s
+
+OK
+9e0c03c fixup! review round 1: one measured dialog predicate, code 15 on either runtime, and the census/lock/messaging findings
+### hermetic 2026-09-14T20:25:02Z
+Ran 1901 tests in 123.120s
+
+OK
+### IT M 2026-09-14T20:27:05Z
+run-group5 M rc=0
+### FAIL rows
+PASS 37
+### git status
+### done 2026-09-14T20:46:54Z
