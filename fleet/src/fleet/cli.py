@@ -205,7 +205,21 @@ PANE_INDETERMINATE = 14
 #: exactly what `close`'s queued-text refusal already protects against for typed text — and it is not a
 #: "wait and re-poll" code either, the way `10`/`11`/`14` are: no amount of waiting clears an unanswered
 #: question. The pane needs an operator to read it and answer.
+#:
+#: Since runtime selection, EVERY positively identified operator dialog maps here on either runtime —
+#: Claude's folder-trust modal and `AskUserQuestion`, Codex's approval prompt (`runtime.CLAUDE_DIALOG_ROWS`
+#: / `CODEX_DIALOG_ROWS`, each a measured row) — because the advice is the same for all of them; an
+#: UNFAMILIAR layout on a known agent stays `14`, a failed observation.
 PANE_AWAITING_OPERATOR = 15
+
+#: How long an ADMITTED verb (`dispatch`, `resume`, `revive`) waits for the store's admission lock. A
+#: launch holds that lock until its ownership state is durable — through executable resolution, the tmux
+#: start and the bounded seed-delivery poll (`SEED_CHECK_DEFAULT_S`) — so a second coordinator dispatching
+#: at the same moment used to lose a 5 s race and exit 4 with a lock refusal that had nothing to do with
+#: capacity (the `E1` shape the integration suite had to learn to tolerate). Launches WAIT for each other;
+#: only `runtime --set` keeps the short bounded refusal (`runtime_config.admission_lock`'s default), because
+#: a switch refused by a slow holder is the spec's intended outcome and a dispatch refused by one is not.
+ADMISSION_WAIT_S = 60.0
 
 PANE_GUARD_CODES = {
     PANE_SAFE: "safe",
@@ -1321,19 +1335,29 @@ def _read_seed_extra(path) -> str:
 
 
 def runtime_blockers(ctx: Ctx) -> list[str]:
+    """What forbids changing the saved runtime right now, each named so the operator can clear it.
+
+    A live agent blocks the switch only when it is ATTRIBUTABLE to this fleet — its tmux session is one a
+    record names, or its cwd is inside an enrolled slot or this fleet's instants directory. The whole root
+    is deliberately NOT a blocking prefix: on a box whose store is `<root>/.fleet`, that prefix is every
+    project under the root, and an operator's own interactive session in an unrelated checkout would
+    forbid `runtime --set` forever (the spec's "foreign fleets never block", read one level closer).
+    """
     blockers = [f"unharvested record {record.todo_id}" for record in ctx.store.all()
                 if not record.harvested_at]
+    names = {record.tmux for record in ctx.store.all() if record.tmux and not record.harvested_at}
     paths = [Path(ctx.instants_dir).resolve()]
-    if ctx.home.name == '.fleet':
-        paths.append(ctx.home.parent.resolve())
     for slot in ctx.pool.slots():
         paths.append(ctx.pool.slot_path(slot).resolve())
         if ctx.pool.lease(slot) is not None:
             blockers.append(f"held lease {slot}")
     blockers.extend(f"interrupted claim {item}" for item in ctx.pool.interrupted_claims(min_age_s=0))
     for session in ctx.sessions.live():
+        if getattr(session, "unreadable", False):
+            blockers.append(f"unreadable {session.runtime} process {session.pid} (cannot be attributed)")
+            continue
         cwd = session.cwd.resolve()
-        if any(cwd == path or path in cwd.parents for path in paths):
+        if session.name in names or any(cwd == path or path in cwd.parents for path in paths):
             blockers.append(f"live {session.runtime} process {session.pid} at {cwd}")
     return blockers
 
@@ -1716,8 +1740,8 @@ def _do_dispatch(ctx: Ctx, parsed: Parsed) -> int:
         started = True
         seed_verdict = _verify_seed_delivery(ctx, tmux, rendered["seed"])
         if seed_verdict is None or not seed_verdict.ok:
-            record.gate_verdict = 'seed delivery needs attention'
-            ctx.store.write(record)
+            #: The record stays as `record_dispatch` wrote it (PENDING-LAUNCH); the rollback below names it
+            #: and the remedy. `gate_verdict` is a GUARD NAME `harvest` reads, never a free-text note.
             raise FleetError(f"Seed delivery to {tmux} is not verified: "
                              + (seed_verdict.detail if seed_verdict else 'pane process unobservable'))
         record.launched_at = ctx.now()
@@ -3074,12 +3098,22 @@ def _pane_refusal(ctx: Ctx, record: Record):
         return None
     captured = layer.capture(tmux)
     text = captured or ''
-    if any(item.name == tmux and item.runtime != record.runtime for item in layer.live()):
+    live = layer.live()   # one census for every question below (see `_do_pane_guard`)
+    if any(item.name == tmux and item.runtime != record.runtime for item in live):
         return ('indeterminate', f'{tmux} runtime differs from its record',
                 'resolve the runtime mismatch before closing', record.todo_id)
-    if captured is None or (layer.is_agent_process(tmux) and observe(layer.runtime, text).state in ('unknown', 'dialog')):
-        return ('indeterminate', f'{tmux} input state cannot be established',
+    agent = layer.is_agent_process(tmux, live)
+    state = observe(layer.runtime, text).state if (captured is not None and agent) else None
+    if captured is None or state == 'unknown':
+        return (PANE_GUARD_CODES[PANE_INDETERMINATE], f'{tmux} input state cannot be established',
                 'inspect the pane and wait for a recognizable idle input', record.todo_id)
+    if state == 'dialog':
+        return (PANE_GUARD_CODES[PANE_AWAITING_OPERATOR],
+                f"{tmux} is showing an operator dialog and is blocked on a human's answer: closing it "
+                f"now discards a decision in progress",
+                f"the dialog is answered, or `fleet close --id {record.todo_id} {FORCE}` is said out "
+                f"loud",
+                record.base_instant or record.todo_id)
     if layer.busy(text):
         return (PANE_GUARD_CODES[PANE_MID_TURN],
                 f"{tmux} is still offering a way to interrupt, so it is mid-turn: closing it now ends a "
@@ -4126,7 +4160,7 @@ CLAUDE_MARKERS = ("esc to interrupt", "esc to cancel", "? for shortcuts", "/ for
                   "shift+tab to cycle")
 
 
-def _is_claude(sessions, text: str, name: str = "") -> bool:
+def _is_claude(sessions, text: str, name: str = "", live=None) -> bool:
     """Is this pane a claude? PROCESS FIRST, then the screen.
 
     `SI-38`. The glyph test alone answers "does the visible tail contain UI chrome", which is a different
@@ -4135,7 +4169,7 @@ def _is_claude(sessions, text: str, name: str = "") -> bool:
     process probe cannot attribute (a claude the pane owns indirectly, or a pane on a server we can see
     but whose processes we cannot).
     """
-    if sessions.is_agent_process(name):
+    if sessions.is_agent_process(name, live):
         return True
     if sessions.runtime == 'codex':
         return False
@@ -4226,18 +4260,32 @@ def _do_pane_guard(ctx: Ctx, parsed: Parsed) -> int:
         #: None on failure and `""` for an empty pane, so this asks the question that was always meant.
         captured = layer.capture(pane)
         text = captured or ""
+        #: ONE census for every question this decision asks of the pane (runtime mismatch, attributed
+        #: agent, `_is_claude`'s process-first test): three inventories taken at three instants can
+        #: disagree with each other, and each one is a `pgrep` plus a `/proc` walk.
+        live = layer.live()
+        agent = layer.is_agent_process(pane, live)
+        state = observe(layer.runtime, text).state if (captured is not None and agent) else None
         if captured is None:
             code, detail = PANE_INDETERMINATE, (
-                f"{pane} is alive but nothing about it could be read: no live claude process is "
-                f"attributed to it and the pane capture FAILED — tmux did not answer. That is a failed "
-                f"observation, not an observation of a non-claude pane; an empty pane that captured "
-                f"cleanly is reported {PANE_NOT_CLAUDE}, not this. WAIT and re-poll; do not send, and "
-                f"do not close")
-        elif any(item.name == pane and item.runtime != layer.runtime for item in layer.live()):
+                f"{pane} is alive but nothing about it could be read: the pane capture FAILED — tmux "
+                f"did not answer — so whether a live agent process is attributed to it does not matter. "
+                f"That is a failed observation, not an observation of a non-agent pane; an empty pane "
+                f"that captured cleanly is reported {PANE_NOT_CLAUDE}, not this. WAIT and re-poll; do "
+                f"not send, and do not close")
+        elif any(item.name == pane and item.runtime != layer.runtime for item in live):
             code, detail = PANE_INDETERMINATE, f'{pane} runtime differs from the recorded or selected runtime'
-        elif layer.is_agent_process(pane) and observe(layer.runtime, text).state in ('unknown', 'dialog'):
-            code, detail = PANE_INDETERMINATE, f'{pane} is a {layer.runtime} worker with an unrecognized or modal input'
-        elif not _is_claude(layer, text, pane):
+        elif agent and state == 'dialog':
+            #: A POSITIVELY identified operator dialog on either runtime — Claude's trust modal or
+            #: `AskUserQuestion`, Codex's approval prompt (`runtime.CLAUDE_DIALOG_ROWS` /
+            #: `CODEX_DIALOG_ROWS`) — is `15`, live's `I-16` ruling, not `14`: `14` says "wait and
+            #: re-poll", and no amount of waiting answers a dialog.
+            code, detail = PANE_AWAITING_OPERATOR, (
+                f"{pane} is a {layer.runtime} worker showing an operator dialog (trust, approval or a "
+                f"selection question) and is blocked on a human's answer; waiting will not clear this")
+        elif agent and state == 'unknown':
+            code, detail = PANE_INDETERMINATE, f'{pane} is a {layer.runtime} worker with an unrecognized input layout'
+        elif not _is_claude(layer, text, pane, live):
             code, detail = PANE_NOT_CLAUDE, (f"{pane} is alive and nothing in its tail is claude; a send "
                                              "here goes to somebody else's shell")
         elif layer.busy(text):
@@ -5601,7 +5649,7 @@ def main(argv: list, *, stdout=None, stderr=None, context=None) -> int:
 
     try:
         admitted = verb in ('dispatch', 'resume', 'revive')
-        with admission_lock(ctx.home) if admitted and not ctx.dry_run else nullcontext():
+        with admission_lock(ctx.home, timeout_s=ADMISSION_WAIT_S) if admitted and not ctx.dry_run else nullcontext():
             if admitted:
                 runtime, _ = read_runtime(ctx.home)
                 if ctx.sessions.runtime != runtime:

@@ -1,0 +1,35 @@
+ ▐▛███▛█   Claude Code v2.1.268
+▝▜██████▀  Sonnet 5 · Claude Team
+  ▝▝ ▝▝    /tmp/fleet-runtime-probe-8x14rwii/claude/project
+
+▎ Auto mode is now Claude Code's default permission mode.
+▎ Auto mode lets Claude handle permission prompts automatically. Claude checks each tool call for
+▎ risky actions and prompt injection before executing, runs the ones it assesses as lower-risk, and
+▎ blocks the rest.
+▎ https://code.claude.com/docs/en/permission-modes
+  +1 more · /status
+
+❯ Reply with READY only.
+
+● READY
+
+✻ Cooked for 1s · done 6:05 PM
+
+❯ Run sleep 8 in the shell, then reply DONE. Do not create or modify files.
+
+  Bash(sleep 8)
+  ⎿  Running… (3s)
+     (ctrl+b ctrl+b (twice) to run in background)
+
+· Crunching… (5s · ↓ 74 tokens)
+  ⎿  Tip: Working on a plan or design doc? Ask Claude to publish it as an artifact — a polished web
+     page you can open in your browser.
+
+────────────────────────────────────────────────────────────────────────────────────────────────────
+❯ [7m [0m[39m[49m
+────────────────────────────────────────────────────────────────────────────────────────────────────
+  ⏵⏵ auto mode on (shift+tab to cycle) · esc to interrupt · ← for agents
+
+
+
+

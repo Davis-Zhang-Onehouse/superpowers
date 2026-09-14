@@ -24,6 +24,20 @@ class MessagingTests(unittest.TestCase):
             self.assertEqual(result,'submitted')
             self.assertEqual(events,[('literal','hello'),('submit',None)])
 
+    def test_a_soft_wrapped_draft_is_the_same_message(self):
+        """A line wider than the input box renders as two rows and `observe` joins them with a newline;
+        the words are what the operator sent, the wrap is the TUI's."""
+        with tempfile.TemporaryDirectory() as directory:
+            text = 'please re-run the failing suite and paste the first assertion that fails'
+            wrapped = 'please re-run the failing suite and paste the first\nassertion that fails'
+            layer, events = self.fixture([PaneObservation('idle'), PaneObservation('queued', wrapped),
+                                          PaneObservation('busy')])
+            self.assertEqual(send(Path(directory), layer, SimpleNamespace(tmux='worker'), text), 'submitted')
+            self.assertEqual(events, [('literal', text), ('submit', None)])
+            layer, events = self.fixture([PaneObservation('idle'), PaneObservation('queued', 'please re-run it')])
+            with self.assertRaises(FleetError):
+                send(Path(directory), layer, SimpleNamespace(tmux='worker'), text, timeout_s=0)
+
     def test_nonidle_never_types(self):
         for state in ('queued','busy','dialog','unknown'):
             with self.subTest(state=state), tempfile.TemporaryDirectory() as directory:

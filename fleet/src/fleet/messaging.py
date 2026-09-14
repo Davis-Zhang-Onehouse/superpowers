@@ -12,6 +12,14 @@ def validate_message(text):
         raise BadInput('Fleet messages cannot contain terminal control characters')
 
 
+def _squash(text) -> str:
+    """The draft as words: a line wider than the input box renders as two rows and `observe` joins them
+    with a newline, so a byte-exact comparison never matched a soft-wrapped message and every such send
+    ended as "uncertain" with the text left in the box. Whitespace is the only thing the TUI is free to
+    rearrange; the words are not."""
+    return " ".join(str(text or "").split())
+
+
 def send(home, sessions, record, text, *, timeout_s=10.0, clock=time.monotonic,
          sleep=time.sleep, validate=None):
     validate_message(text)
@@ -25,7 +33,7 @@ def send(home, sessions, record, text, *, timeout_s=10.0, clock=time.monotonic,
             deadline = clock() + timeout_s
             while True:
                 observation = sessions.observe(record.tmux)
-                if observation.state == 'queued' and observation.draft == text.strip():
+                if observation.state == 'queued' and _squash(observation.draft) == _squash(text):
                     break
                 # A TUI redraw can temporarily omit its prompt/footer. Observe
                 # through the existing deadline; never insert again or submit

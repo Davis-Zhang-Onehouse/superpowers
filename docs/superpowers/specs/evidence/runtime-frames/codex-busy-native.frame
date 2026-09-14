@@ -1,0 +1,35 @@
+[2m╰───────────────────────────────────────────╯[0m[39m[49m
+
+  [1mTip:[0m[39m[49m This is GPT-6, a new generation of intelligence. Astra is state-of-the-art in coding,
+  computer use, science, and professional work. Give it a hard problem, a half-formed idea, or
+  anything you've been meaning to build. See where it takes you.
+
+⚠ 1 startup issue · ctrl + t for details
+
+
+[1;2m› [0m[39m[49mLet's make a react todo list
+
+
+[2m• [0m[39m[49mI’ll use the brainstorming skill to shape the todo list, then build it in the workspace.
+
+• [1mRan[0m[39m[49m cat /tmp/fleet-runtime-probe-8x14rwii/codex/config/plugins/cache/superpowers-dev/
+[2m  │ [0m[39m[49msuperpowers/6.3.0+fleet.0.5.8/skills/using-superpowers/SKILL.md /tmp/
+[2m  │ [0m[39m[49mfleet-runtime-probe-8x14rwii/codex/config/plugins/cache/superpowers-dev/
+[2m  │ … +1 lines[0m[39m[49m
+[2m  └ ---[0m[39m[49m
+    [2mname: using-superpowers[0m[39m[49m
+[2m    … +312 lines (ctrl + t to view transcript)[0m[39m[49m
+    [2mIf they agree to the companion, read the detailed guide before proceeding:[0m[39m[49m
+    [2m`skills/brainstorming/visual-companion.md`[0m[39m[49m
+
+• [1mRan[0m[39m[49m pwd && rg --files -g '!node_modules' -g '!package-lock.json' -g '!*lock*' -g 'AGENTS.md' -g
+[2m  │ [0m[39m[49m'package.json' -g 'src/**' -g 'app/**' -g 'index.html' -g 'README*' -g 'vite.config.*' -g
+[2m  │ [0m[39m[49m'tsconfig*'
+[2m  └ /tmp/fleet-runtime-probe-8x14rwii/codex/project[0m[39m[49m
+
+[2m◦[0m[39m[49m [2mWorking[0m[39m[49m [2m(10s • esc to interrupt)[0m[39m[49m
+
+
+[1m›[0m[39m[49m [2mAsk Codex to do anything[0m[39m[49m
+
+  gpt-6-astra default fast · /tmp/fleet-runtime-probe-8x14rwii/codex/project[2m · [0m[39m[49mBuild a React todo l…

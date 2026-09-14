@@ -1,9 +1,14 @@
 #!/usr/bin/env python3
 """Test stand-in: attest to received seed bytes, then hold the real tmux pane."""
+import datetime
 import os
 from pathlib import Path
 import sys
-from fleet.seedcheck import Delivery, digest, write_delivery
+
+# The launcher exports store/instants/socket/config, not PYTHONPATH — and the spec forbids depending on what
+# the tmux server inherited — so the stand-in names its own package root.
+sys.path.insert(0, str(Path(__file__).resolve().parents[2] / 'src'))
+from fleet.seedcheck import Delivery, digest, write_delivery  # noqa: E402
 
 socket = os.environ.get('FLEET_TMUX_SOCKET', '')
 if not socket.startswith('itfleet-'):
@@ -13,7 +18,7 @@ seed = (instant / '.fleet/seed.txt').read_text()
 prompt = sys.argv[-1]
 if digest(prompt) != digest(seed):
     raise SystemExit('Test worker received different seed bytes')
-write_delivery(instant, Delivery(at='2026-09-11T00:00:00Z', by='fleet IT stand-in (not a model)',
+write_delivery(instant, Delivery(at=datetime.datetime.now(datetime.timezone.utc).strftime('%Y-%m-%dT%H:%M:%SZ'), by='fleet IT stand-in (not a model)',
     channel='test-process-argv', delivered_chars=len(prompt), delivered_md5=digest(prompt),
     rendered_md5=digest(seed)))
 print('IT stand-in: received seed; no model was launched', flush=True)

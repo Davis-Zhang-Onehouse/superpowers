@@ -61,6 +61,9 @@ if not hooks_config.exists():
 assert_equal(
     manifest.get("hooks"),
     "./hooks/hooks-codex.json",
+    # (Codex auto-registers hooks/hooks.json — the Claude hook, whose command is Claude-specific — whenever
+    # the manifest has NO hooks field; naming the Codex file is what both loads the Codex bootstrap and
+    # keeps the Claude file out. Do not "simplify" this back to {} or absent.)
     "Codex manifest selects its native bootstrap configuration",
 )
 

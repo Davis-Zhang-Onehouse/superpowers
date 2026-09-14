@@ -107,15 +107,19 @@ TASK
 mkdir -p "$OUT/bin"
 # Dispatch owns the complete seed and launches the real CLI directly.
 export FLEET_CLAUDE_BIN="$REAL_CLAUDE"
-if [ -n "${P_CLAUDE_OWNERS_MAP:-}" ]; then
-  export CLAUDE_OWNERS_MAP="$P_CLAUDE_OWNERS_MAP"
-fi
+# `it_section` maps every section's `$EV` to an EMPTY `integration-test` config so a stub can never borrow
+# an account. §P is the one section that launches the REAL binary, and an empty config dir is a login
+# screen, not a worker — so it resolves through the resolver's own default map (the operator's), or the
+# map `P_CLAUDE_OWNERS_MAP` names. The resolved directory is recorded beside the dispatch (P-config-dir.txt).
+export CLAUDE_OWNERS_MAP="${P_CLAUDE_OWNERS_MAP:-/home/ubuntu/.claude-owners.tsv}"
 fleet dispatch --profile "$PROFILE" --title "pRealWorker" --base 00000000 --optype append \
       --from "$COORD" --milestone p1 --lineage-base "alpha=$L" --lineage-mode code \
       --porcelain > "$OUT/P-dispatch.out" 2>&1
 P_RC=$?
 W="$(awk -F'\t' '$1=="instant"{print $2}' "$OUT/P-dispatch.out")"
 TODO="$(awk -F'\t' '$1=="todo_id"{print $2}' "$OUT/P-dispatch.out")"
+[ -n "$TODO" ] && fleet status --id "$TODO" --porcelain 2>/dev/null \
+  | awk -F'\t' '$1=="evidence.runtime_config_dir"||$1=="evidence.runtime_executable"' > "$OUT/P-config-dir.txt" || true
 TMUXN="$(awk -F'\t' '$1=="tmux"{print $2}' "$OUT/P-dispatch.out")"
 
 if [ "$P_RC" != 0 ] || [ -z "$W" ] || [ ! -d "$W" ]; then

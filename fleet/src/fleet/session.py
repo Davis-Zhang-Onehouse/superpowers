@@ -49,31 +49,6 @@ from fleet.runtime import (
     claude_watchers, observe, validate_runtime, PaneObservation, recognizes_process,
 )
 
-#: `I-16`. The `AskUserQuestion` selection dialog's own hint line, quoted VERBATIM from the register:
-#: "Enter to select · Tab/Arrow keys to navigate · Esc to cancel". Neither `_BUSY_MARKERS` nor `_CARET`
-#: fires for this dialog (see the `SI-37` amendment above), which is the whole defect — the pane fell
-#: through to `0 safe`.
-#:
-#: THREE fragments, not one, and required TOGETHER on a single row — `_WATCHER_MARKER`'s lesson applied
-#: here on purpose. `"esc to cancel"` alone is the exact phrase `SI-37` measured firing on an unrelated
-#: modal, and it is also a phrase this module's OWN comments now contain (this one included) — a
-#: single-fragment match against a multi-line window would risk exactly the false positive `SI-37` spent a
-#: production incident correcting, from the opposite direction: an agent's transcript merely discussing
-#: this dialog, or reviewing this change, contains the words "select", "navigate" and "cancel" too.
-#:
-#: **Correction, measured rather than assumed:** this module once claimed no agent's own prose renders all
-#: three EXACT fragments concatenated onto one row. That is false, and in-tree — `SessionLayer.asking()`
-#: run over this module's OWN source lines 215-222 returns `True`. Four one-row occurrences exist right
-#: here: the hint-line comment eight lines above this one (`session.py:219`), `DIALOG_PANE`'s own last
-#: line in both `tests/test_session.py:496` and `tests/test_cli.py:106`, and the design spec that recorded
-#: this finding. The three-fragment one-row shape is overwhelmingly the harness's, but not exclusively —
-#: so co-occurrence on one line is a near-certain anchor, not a guaranteed one, the same role the
-#: counted-noun-on-the-status-line pairing plays for `_WATCHER_MARKER`. The residual exposure is honest,
-#: not absent: text that quotes the banner verbatim, on one rendered row, inside this bounded tail window
-#: classifies as `15 PANE_AWAITING_OPERATOR`. That is fail-safe — a pane reads as blocked rather than
-#: idle, never the reverse — and `--force` clears it, so a false positive here costs one refusal, not a
-#: wrong send.
-_DIALOG_MARKERS = ("enter to select", "tab/arrow keys to navigate", "esc to cancel")
 
 
 @dataclass
@@ -84,6 +59,11 @@ class LiveSession:
     cwd: Path
     name: Optional[str]
     runtime: str = "claude"
+    #: `/proc/<pid>/exe` or `cwd` refused the read (another user's process, or a non-dumpable one). The row
+    #: is kept, unattributed: `runtime --set` treats it as a blocker — an agent that cannot be placed is not
+    #: proof of emptiness — while `board`, `status` and `close` see an unmanaged session, which is what it
+    #: is to them. Raising instead blinded every read verb for as long as that process lived.
+    unreadable: bool = False
 
 
 @dataclass
@@ -241,9 +221,15 @@ class SessionLayer:
         frame = self.capture(name)
         return PaneObservation("unknown") if frame is None else observe(self.runtime, frame)
 
-    def is_agent_process(self, name: str) -> bool:
-        return bool(name) and any(item.name == name and item.runtime == self.runtime
-                                  for item in self.live())
+    def is_agent_process(self, name: str, live: Optional[list] = None) -> bool:
+        """Whether a live process of THIS layer's runtime is attributed to `name`.
+
+        `live` is an optional census snapshot: a guard decision that asks three questions of one pane
+        must ask them of ONE inventory, not three taken at different instants (and not pay three
+        `pgrep` + `/proc` walks for one answer).
+        """
+        items = self.live() if live is None else live
+        return bool(name) and any(item.name == name and item.runtime == self.runtime for item in items)
 
     def send_literal(self, name: str, text: str):
         if self.probes.send_literal is None:
@@ -260,7 +246,7 @@ class SessionLayer:
             return claude_unsubmitted(pane_text)
         return observe(self.runtime, pane_text).draft
 
-    def is_claude_process(self, name: str) -> bool:
+    def is_claude_process(self, name: str, live: Optional[list] = None) -> bool:
         """Whether a live CLAUDE PROCESS is attributed to this session.
 
         `SI-38`. Process evidence, not screen scraping. `live()` comes from `pgrep -x claude` joined to
@@ -276,7 +262,8 @@ class SessionLayer:
         """
         if not name:
             return False
-        return any(session.name == name and session.runtime == "claude" for session in self.live())
+        items = self.live() if live is None else live
+        return any(session.name == name and session.runtime == "claude" for session in items)
 
     def busy(self, pane_text: str):
         if self.runtime == "claude":
@@ -284,26 +271,17 @@ class SessionLayer:
         return observe(self.runtime, pane_text).state == "busy"
 
     def asking(self, pane_text: str) -> bool:
-        """Whether the pane is blocked at an `AskUserQuestion` selection dialog, waiting on an operator's
-        answer. `I-16`.
+        """Whether the pane is blocked at an operator dialog — `AskUserQuestion`, the folder-trust modal,
+        Codex's approval prompt — waiting on a human's answer. `I-16`.
 
         Callers check this AFTER `busy` and `unsubmitted` (`cli._do_pane_guard`), so a pane that is
-        genuinely mid-turn or genuinely holding typed text keeps its existing, stronger answer — this is
-        the last resort for the one shape neither of those already covers (the `SI-37` amendment above
-        records why neither one does).
-
-        Anchored to `PROMPT_TAIL_LINES` — the same bounded window `unsubmitted` scans for the input box —
-        rather than the wider `BUSY_TAIL_LINES` or the whole pane: the dialog's hint line renders where the
-        input box would, and bounding the search is what keeps a long turn's SCROLLED-PAST output (which
-        may well discuss this exact dialog) out of view by the time the turn ends and this predicate is
-        even reached. Matched on `plain` text for the same reason as `busy` — the TUI is free to colour
-        part of the hint, and a raw substring match stops finding it the moment it does.
+        genuinely mid-turn or genuinely holding typed text keeps its existing, stronger answer. ONE dialog
+        predicate: this delegates to `runtime.observe`, whose per-runtime rows (`CLAUDE_DIALOG_ROWS`,
+        `CODEX_DIALOG_ROWS`) are measured captures matched as several fragments on one row inside the
+        input-box window — the `_WATCHER_MARKER` lesson, and the reason a single "esc to cancel" over a
+        joined tail is not a dialog test (an agent's own prose quotes that hint constantly).
         """
-        for line in _tail(pane_text, PROMPT_TAIL_LINES):
-            row = plain(line).lower()
-            if all(marker in row for marker in _DIALOG_MARKERS):
-                return True
-        return False
+        return observe(self.runtime, pane_text).state == "dialog"
 
     def watching(self, pane_text: str) -> bool:
         """Whether something is armed that will RE-INVOKE this session with no human in the loop.
@@ -449,6 +427,10 @@ def default_probes(process_name: str = "claude", tmux_socket=_FROM_ENV, *,
                     if state in ("Z", "X") or not proc.exists():
                         continue  # Exited while inventory was sampled.
                     raise FleetError(f"Cannot inspect live {runtime} process {pid}")
+                except PermissionError:
+                    out.append(LiveSession(pid=pid, cwd=Path(f"/proc/{pid}"), name=None, runtime=runtime,
+                                           unreadable=True))
+                    continue
                 except (OSError, UnicodeError) as exc:
                     raise FleetError(f"Cannot inspect {runtime} process {pid}: {exc}") from exc
                 if not recognizes_process(runtime, comm, executable, argv):
