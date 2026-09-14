@@ -1,0 +1,277 @@
+{
+  "schema_version": 1,
+  "rounds": [
+    {
+      "number": 1,
+      "scope": "code",
+      "verdict": "READY-WITH-FIXES",
+      "at": "2026-09-14T20:50:20Z",
+      "findings": [
+        {
+          "id": "RV-1",
+          "severity": "Critical",
+          "status": "applied",
+          "location": "fleet/src/fleet/runtime.py observe",
+          "finding": "dialog detection was a single esc-to-cancel fragment over eight joined rows and fired on ordinary agent prose; send/close/pane-guard then refuse and nothing clears by waiting",
+          "action": "per-runtime measured dialog rows anchored to row start inside the input-box window (26aa9ae); regression test test_a_dialog_is_a_measured_row_not_a_quoted_hint"
+        },
+        {
+          "id": "RV-2",
+          "severity": "Critical",
+          "status": "applied",
+          "location": "fleet/src/fleet/cli.py _do_pane_guard and _pane_refusal",
+          "finding": "after the rebase the branch dialog→14 branch shadowed live I-16 code 15; the suite could not see it",
+          "action": "dialog→15 awaiting-operator on either runtime, unknown→14; SessionLayer.asking delegates to observe; session._DIALOG_MARKERS folded into runtime.CLAUDE_DIALOG_ROWS (26aa9ae, D-4)"
+        },
+        {
+          "id": "RV-3",
+          "severity": "Critical",
+          "status": "applied",
+          "location": "skills/coordinating-instants/SKILL.md ~110",
+          "finding": "after the rebase the skill said both use fleet send and no fleet verb sends a pane message",
+          "action": "paragraph rewritten — fleet send is the verb; the harness-classifier lesson kept as the reason the substance stays in the file (8c421c1)"
+        },
+        {
+          "id": "RV-4",
+          "severity": "Important",
+          "status": "applied",
+          "location": "fleet/src/fleet/cli.py runtime_blockers",
+          "finding": "any live agent anywhere under the root blocked runtime --set, including an unrelated interactive session",
+          "action": "blocks only attributable sessions — a record tmux name, an enrolled slot, the instants dir — plus unreadable rows (26aa9ae, D-5)"
+        },
+        {
+          "id": "RV-5",
+          "severity": "Important",
+          "status": "applied",
+          "location": "fleet/src/fleet/session.py list_processes",
+          "finding": "a PermissionError on /proc/pid/exe raised FleetError for every verb until that process exited",
+          "action": "LiveSession.unreadable row, unattributed; blocks a switch, does not blind board/status/close; test_an_unreadable_process_blocks_the_switch_but_not_the_read_verbs"
+        },
+        {
+          "id": "RV-6",
+          "severity": "Important",
+          "status": "applied",
+          "location": "fleet/src/fleet/cli.py main admission lock",
+          "finding": "dispatch held the admission lock through the seed poll with a 5 s contender timeout so concurrent dispatches refused each other",
+          "action": "ADMISSION_WAIT_S=60 for admitted verbs; runtime --set keeps the 5 s bounded refusal (D-5)"
+        },
+        {
+          "id": "RV-7",
+          "severity": "Important",
+          "status": "applied",
+          "location": "fleet/src/fleet/cli.py _do_dispatch seed failure",
+          "finding": "free text written into record.gate_verdict, a guard name harvest reads",
+          "action": "write removed; rollback message already names the stranded PENDING-LAUNCH record and the abort remedy; asserted in the rollback test"
+        },
+        {
+          "id": "RV-8",
+          "severity": "Important",
+          "status": "applied",
+          "location": "fleet/src/fleet/messaging.py send",
+          "finding": "byte-exact draft compare never matched a soft-wrapped line so every such send ended uncertain",
+          "action": "_squash whitespace-normalised compare; test_a_soft_wrapped_draft_is_the_same_message"
+        },
+        {
+          "id": "RV-9",
+          "severity": "Important",
+          "status": "applied",
+          "location": "fleet/src/fleet/cli.py _do_pane_guard and _pane_refusal",
+          "finding": "three to four process censuses per guard decision, read at different instants",
+          "action": "one live() snapshot passed to is_agent_process and _is_claude"
+        },
+        {
+          "id": "RV-10",
+          "severity": "Important",
+          "status": "applied",
+          "location": "fleet/it/run-P.sh",
+          "finding": "it_section maps every section to an empty test-ownership config; the one section launching the real CLI resolved to a login screen unless P_CLAUDE_OWNERS_MAP was set",
+          "action": "defaults to the resolver map; resolved config dir recorded in P-config-dir.txt"
+        },
+        {
+          "id": "RV-11",
+          "severity": "Important",
+          "status": "applied",
+          "location": "fleet/it/fixtures/runtime/manifest.json",
+          "finding": "every evidence citation pointed at gitignored .private-journal captures and 8 of 10 entries omitted the producing action",
+          "action": "source captures tracked under docs/superpowers/specs/evidence/runtime-frames; action per entry"
+        },
+        {
+          "id": "RV-12",
+          "severity": "Important",
+          "status": "applied",
+          "location": "fleet/tests/test_cli.py rollback test",
+          "finding": "asserted only the kill and launched_at; no lease state, no failing-kill path",
+          "action": "asserts lease released once the process is gone; new test retains the lease while the process is still observable"
+        },
+        {
+          "id": "RV-13",
+          "severity": "Important",
+          "status": "wont-fix",
+          "location": "fleet/it/run-group5.sh m_timeout",
+          "finding": "600 s nested-selftest timeout means a real hang costs ten minutes per verb",
+          "action": "sanctioned (D-3) — a false timeout costs a whole 45-minute gate run, which is what 65f2d4e paid; the suite is 1,901 tests at 120-180 s"
+        },
+        {
+          "id": "RV-14",
+          "severity": "Important",
+          "status": "applied",
+          "location": "docs/README.fleet-runtimes.md 53",
+          "finding": "dead link README.codex.md",
+          "action": "links README.md#codex-cli"
+        },
+        {
+          "id": "RV-15",
+          "severity": "Important",
+          "status": "applied",
+          "location": "fleet/src/fleet/cli.py pane-guard help and code registry comment; seedcheck.py 418",
+          "finding": "code 12 still documented as not-claude and the not-found message named claude for a Codex record",
+          "action": "help and comment say observed non-agent pane (legacy label); Probes.process_name"
+        },
+        {
+          "id": "RV-16",
+          "severity": "Important",
+          "status": "applied",
+          "location": "docs/superpowers/specs/evidence/2026-09-11-fleet-runtime-validation.md 10,19,54",
+          "finding": "three measurements cited with no retained artifact",
+          "action": "reworded to say the log was not retained and point at the tracked artifact or regression test"
+        },
+        {
+          "id": "RV-17",
+          "severity": "Important",
+          "status": "applied",
+          "location": "skills/dispatching-a-wave/SKILL.md step 5",
+          "finding": "a still-true fact (nothing lints a placeholder scope, SI-45/SI-46) was deleted with the old mechanism",
+          "action": "sentence restored"
+        },
+        {
+          "id": "RV-18",
+          "severity": "Minor",
+          "status": "applied",
+          "location": "fleet/it/run-runtime.sh; fleet/it/bin/claude; scripts/fleet-revive.sh; tests/codex/test-marketplace-manifest.sh; file modes",
+          "finding": "dead socket check; inherited PYTHONPATH and a fixed timestamp in the stand-in; ambient FLEET_ROOT; deleted rationale comment; two files 644",
+          "action": "all applied in 26aa9ae; fork start method pinned in test_runtime_concurrency"
+        },
+        {
+          "id": "RV-19",
+          "severity": "Minor",
+          "status": "applied",
+          "location": "skills/reviving-dead-panes/SKILL.md; skills/using-fleet/SKILL.md 82,111; docs/README.fleet-runtimes.md 14",
+          "finding": "trap numbering started at 2; legacy send-keys vocabulary; dispatch example omitted the worker flags",
+          "action": "renumbered 1-4 with the resume-menu trap scoped to a hand --resume; vocabulary updated; example points at dispatching-a-wave"
+        },
+        {
+          "id": "RV-20",
+          "severity": "Minor",
+          "status": "open",
+          "location": "fleet/src/fleet/cli.py _do_runtime dry-run; session.py unused import re; reconcile.py 321 second capture; _watcher_for_claim double _record_for; messaging.validate_message rejects tabs; _do_peers int(pid) before provenance; store.py runtime validated before schema_version",
+          "finding": "core reviewer minors not taken this round",
+          "action": "carried as follow-ups; none changes behaviour a coordinator depends on"
+        },
+        {
+          "id": "RV-21",
+          "severity": "Minor",
+          "status": "open",
+          "location": "scripts/fleet-revive.sh transcripts; fleet/it/runtime-checks.py 519; test_runtime_concurrency negative poll windows",
+          "finding": "mtime hint dropped from transcripts output; per-call timeout uncaught; a negative window passes vacuously if the contender is slow to start",
+          "action": "carried as follow-ups"
+        },
+        {
+          "id": "RV-22",
+          "severity": "Nit",
+          "status": "wont-fix",
+          "location": "branch commit organisation; evidence paths; coordinating-instants 61",
+          "finding": "skill edits spread over four commits; ~945 absolute worktree paths in evidence; one sentence of history says claude process",
+          "action": "history is left as delivered; paths are not secrets; harmless"
+        }
+      ]
+    },
+    {
+      "number": 2,
+      "scope": "code",
+      "verdict": "READY-WITH-FIXES",
+      "at": "2026-09-14T21:10:43Z",
+      "findings": [
+        {
+          "id": "RV-23",
+          "severity": "Important",
+          "status": "applied",
+          "location": "fleet/src/fleet/runtime.py CODEX_DIALOG_ROWS",
+          "finding": "the Codex directory-trust screen (Press enter to continue) is captured in-tree (coordinator-dispatch/commands.jsonl 22) and the round-1 rows dropped it; a worker parked there read 14 wait instead of 15",
+          "action": "row added; capture promoted to fixtures/runtime/codex-trust.frame with a manifest entry; asserted in test_runtime (b871a41)"
+        },
+        {
+          "id": "RV-24",
+          "severity": "Important",
+          "status": "applied",
+          "location": "fleet/src/fleet/cli.py _do_pane_guard and _pane_refusal",
+          "finding": "the dialog check ran first on the attributed path and last on the glyph path — two orderings for one predicate, and the fixed path was untested",
+          "action": "one ordering on both paths, after busy and before unsubmitted; test covers attributed AskUserQuestion, attributed and unattributed trust modal (15) and a busy pane with a stale hint row (11)"
+        },
+        {
+          "id": "RV-25",
+          "severity": "Minor",
+          "status": "applied",
+          "location": "fleet/src/fleet/cli.py dispatch rollback retained-lease path",
+          "finding": "re-raised before the stranded PENDING-LAUNCH sentence, so that operator was told nothing about the record",
+          "action": "stranded note computed once and printed on both paths"
+        },
+        {
+          "id": "RV-26",
+          "severity": "Minor",
+          "status": "applied",
+          "location": "fleet/tests/test_runtime_cli.py",
+          "finding": "no regression test for the root-prefix case that motivated the blocker change",
+          "action": "test_a_process_elsewhere_under_the_root_does_not_block"
+        },
+        {
+          "id": "RV-27",
+          "severity": "Minor",
+          "status": "open",
+          "location": "fleet/src/fleet/reconcile.py 454-462",
+          "finding": "an unreadable row lands on the board as UNKNOWN-SESSION with cwd /proc/pid, a placeholder printed as evidence; the unreadable flag also turns live_work_now on",
+          "action": "follow-up; fail-safe direction"
+        },
+        {
+          "id": "RV-28",
+          "severity": "Minor",
+          "status": "applied",
+          "location": "fleet/it/run-P.sh 114",
+          "finding": "duplicated the resolver default map path",
+          "action": "unsets CLAUDE_OWNERS_MAP when P_CLAUDE_OWNERS_MAP is empty"
+        },
+        {
+          "id": "RV-29",
+          "severity": "Minor",
+          "status": "applied",
+          "location": "skills/coordinating-instants/SKILL.md 61-63; skills/reviving-dead-panes/SKILL.md 96-100",
+          "finding": "15 described narrower than the code; the resume-menu measurement predates the dialog rows",
+          "action": "wording widened; measurement dated"
+        },
+        {
+          "id": "RV-30",
+          "severity": "Minor",
+          "status": "applied",
+          "location": "fleet/src/fleet/cli.py _do_close docstring",
+          "finding": "said three refusals while _pane_refusal returns four",
+          "action": "reworded"
+        },
+        {
+          "id": "RV-31",
+          "severity": "Important",
+          "status": "applied",
+          "location": "fleet/it/run-J.sh J1",
+          "finding": "pre-existing on live since 5dae469 — complete refuses a still-declared awaiting-ci phase and J1 never declared done; §J had not run since the 0.5.4 gate (evidence it-RESULTS-live-f15b585-J.tsv)",
+          "action": "J1 declares done before completing; §J 11 PASS on the branch"
+        },
+        {
+          "id": "RV-32",
+          "severity": "Important",
+          "status": "applied",
+          "location": "fleet/it/run-O.sh O4",
+          "finding": "the branch admission lock is a stable inode every admitted verb opens, so a permission-refused resume created it and O4 read the store as changed",
+          "action": "lock inode in O4 baseline as §K9 does; §O 13 PASS"
+        }
+      ]
+    }
+  ]
+}

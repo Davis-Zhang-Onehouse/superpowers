@@ -1,0 +1,30 @@
+b871a41 review round 2: the Codex directory-trust screen is a measured dialog, and one dialog ordering on both guard paths
+### hermetic 2026-09-14T21:01:10Z
+Ran 1903 tests in 122.324s
+
+OK
+### IT 2026-09-14T21:03:13Z
+--- run-group5.sh N 21:03:13
+run-group5.sh N rc=127
+--- run-F.sh 21:03:13
+run-F.sh rc=0
+--- run-G.sh 21:03:38
+run-G.sh rc=0
+--- run-H.sh 21:03:44
+run-H.sh rc=0
+--- run-I.sh 21:03:47
+run-I.sh rc=0
+--- run-J.sh 21:03:51
+run-J.sh rc=1
+--- run-O.sh 21:04:16
+run-O.sh rc=1
+--- run-lineage.sh 21:04:19
+run-lineage.sh rc=0
+### FAIL rows
+J1	FAIL	fleet/it/J/out/j1/rc	failed_steps=2 declaration_read_back=1 folder_renamed=0
+O4	FAIL	fleet/it/O/out/O4.out	no_traceback=1 names_permission=1 store_unchanged=0 (exit 1)
+### tallies
+PASS 77
+FAIL 2
+### git status
+### done 2026-09-14T21:04:22Z

@@ -1,0 +1,15 @@
+case	verdict	evidence	note
+ISOLATION-N-enter	PASS		live-INSTANTS baseline ESTABLISHED on this call (1 folder(s) across 1 live tree(s)), so the instants half is vacuous here and binds from the next call on. live stores byte-identical; live instants trees unchanged in 1 live tree(s); live tmux session set byte-identical (0 sessions, incl. 0 dt-); section work is on socket itfleet-N
+N1	PASS	it/N/N1.stdout	real session itfleet-N-w1 is live: status state=RUNNING, evidence.liveness=session, SessionLayer.alive=True
+N2	PASS	it/N/N2.out	OK N2: the captured text round-trips — probe == tmux, busy=False, unsubmitted=None, and pane-guard agrees (rc=12: a bash pane carries no claude marker)
+N3	PASS	it/N/N3-caret-line.hex	typed-not-submitted in a REAL bash pane rendering ❯+U+00A0 (e2 9d af c2 a0): pane-guard=10 and status reports 'draft message' verbatim (state=BLOCKED)
+N4	PASS	it/N/N4-pane.txt	after submitting, pane-guard=0 (no longer queued-text) and status state=RUNNING
+N4b	PASS	it/N/N4b-pane.txt	the same pane clears (pane-guard=0) once the submitted line is more than PROMPT_TAIL_LINES=8 rows above the box — which locates N4's failure exactly
+N5	PASS	it/N/N5-close.stderr	esc-to-interrupt in a real pane ⇒ pane-guard=11; close refused with exit 4 naming its override, and the session is still alive
+N6	PASS	it/N/N6-status.stdout	an external kill-session ⇒ status DEAD on the next poll; reap --base 00000000 (exit 0) took ns1 from held to free; a reap from a foreign base refused first (exit 4) and named the owner (2 hit)
+N7	PASS	it/N/N7.out	OK N7: the prefix name is not alive and does not capture the longer session's pane
+N8	PASS	it/N/N8-pane.txt	100 history lines in scrollback and the old ❯+U+00A0 prompt IS in the captured screen (1 hit), yet the empty box now ⇒ pane-guard=0, no queued text
+N9	PASS	it/N/N9-sessions-after.txt	close ended only the session its record names (itfleet-N-own gone); the bystander and the history session are untouched, close never names them; on the LIVE server (N9-live-sessions-after.txt) 0 dt- session(s) are still present — REPORTED, not asserted: the binding live-server check is ISOLATION-N-leave
+ISOLATION-N-leave	PASS		live stores byte-identical; live instants trees unchanged in 1 live tree(s); live tmux session set byte-identical (0 sessions, incl. 0 dt-); section work is on socket itfleet-N
+SOURCE-STABLE	PASS	it/SOURCE-PIN-group5-after.txt	src/fleet/*.py byte-identical for the whole run
+CLAUDE-COUNT	PASS		no claude process appeared (pids before: 7, after: 7). §L/§M/§N launch no claude: no verb here reaches sessions.start.
