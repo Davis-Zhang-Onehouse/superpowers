@@ -1,5 +1,27 @@
 # fleet — changelog
 
+## fleet/v0.6.0 — 2026-09-14T21:11:51Z
+Cut from e753110 on `live` (upstream base snapshot/2026-08-17-221146). 14 commit(s) since fleet/v0.5.12.
+
+Every release ships the whole repository — all skills, `commands/`, `hooks/` and the plugin manifest, not only `fleet/`.
+Payload: fleet (52 files), skills (7 files), hooks (2 files), scripts (8 files), tests (3 files), docs (237 files).
+Skills changed: coordinating-instants, dispatching-a-wave, harvesting-an-instant, reviving-dead-panes, using-fleet, working-as-a-dispatched-instant.
+
+- 9056c70 fix: release-gate.sh passes --repo through, and locates the earlier attempt honestly
+- f15b585 fix: --reap's name-pattern refusal counts as a reap failure
+- 9f55aa1 feat: bootstrap fleet skills in Codex sessions
+- 4de441c feat: select Claude or Codex for fleet runs
+- 6cbeaf0 fix: preserve worker terminal attributes for fleet guards
+- af38887 test: verify native fleet lifecycles and handle exited workers
+- c185b72 fix: pin fleet commands and observe terminal redraws
+- eb7bfa4 fix: refuse inaccessible tmux before leasing a worker
+- ef0ef84 test: verify bounded fleet admission and record runtime evidence
+- 8c421c1 review round 1: reconcile the skills with live's pane-guard 15, and fix the docs findings
+- 26aa9ae review round 1: one measured dialog predicate, code 15 on either runtime, and the census/lock/messaging findings
+- b871a41 review round 2: the Codex directory-trust screen is a measured dialog, and one dialog ordering on both guard paths
+- 384bb32 it: J1 declares done before completing; O4's baseline includes the admission-lock inode
+- e753110 docs: instant 00000000-09141935 — review, rebase and release of fleet runtime selection
+
 ## fleet/v0.5.12 — 2026-09-13T18:34:17Z
 Cut from 0eac6da on `live` (upstream base snapshot/2026-08-17-221146). 22 commit(s) since fleet/v0.5.11.
 
