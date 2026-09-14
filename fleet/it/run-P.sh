@@ -111,7 +111,7 @@ export FLEET_CLAUDE_BIN="$REAL_CLAUDE"
 # an account. §P is the one section that launches the REAL binary, and an empty config dir is a login
 # screen, not a worker — so it resolves through the resolver's own default map (the operator's), or the
 # map `P_CLAUDE_OWNERS_MAP` names. The resolved directory is recorded beside the dispatch (P-config-dir.txt).
-export CLAUDE_OWNERS_MAP="${P_CLAUDE_OWNERS_MAP:-/home/ubuntu/.claude-owners.tsv}"
+if [ -n "${P_CLAUDE_OWNERS_MAP:-}" ]; then export CLAUDE_OWNERS_MAP="$P_CLAUDE_OWNERS_MAP"; else unset CLAUDE_OWNERS_MAP; fi
 fleet dispatch --profile "$PROFILE" --title "pRealWorker" --base 00000000 --optype append \
       --from "$COORD" --milestone p1 --lineage-base "alpha=$L" --lineage-mode code \
       --porcelain > "$OUT/P-dispatch.out" 2>&1
