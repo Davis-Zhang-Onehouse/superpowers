@@ -282,6 +282,10 @@ trap 'o4_restore; it_cleanup_tmux; tmux -L "$IT_TMUX_SOCKET" kill-server 2>/dev/
 chmod 755 "$O4D/home/records"
 O4I="$( export FLEET_HOME="$O4D/home" FLEET_INSTANTS="$O4D/instants"
         fleet init --base 00000000 --name o4probe --porcelain | awk -F'\t' '$1=="path"{print $2}' )"
+# The admission lock is a STABLE inode every admitted verb opens (`runtime_config.admission_lock`), so the
+# first `resume` against a fresh store creates it — infrastructure, not a partial write. It goes into the
+# baseline for the same reason §K9 puts it there; otherwise a byte-identical store reads as changed.
+: > "$O4D/home/.runtime-admission.lock"
 before_manifest="$(it_manifest "$O4D/home" 2>/dev/null | sha256sum | cut -d" " -f1)"
 chmod 000 "$O4D/home/records"
 ( export FLEET_HOME="$O4D/home" FLEET_INSTANTS="$O4D/instants"

@@ -430,11 +430,16 @@ else
                       --evidence evidence/INDEX.md
   j1_step review    fleet review --instant "$J1W" --scope all --verdict READY \
                       --finding "J1-1:Minor:applied:evidence/INDEX.md:the lifecycle ran:none" --porcelain
+  # `complete` refuses while the declared phase is still awaiting-ci (`GUARD_COMPLETE_PHASE`, landed with
+  # the 0.5.6 K7 fix): a stale claim must not outlive the watcher that justified it. The lifecycle a real
+  # worker follows therefore declares `done` before completing, and so does this one. Until this step
+  # existed the case had been RED on every tree since 5dae469 — §J had not run since the 0.5.4 gate.
+  j1_step declaredone fleet declare --instant "$J1W" --phase DONE --porcelain
   j1_step complete  fleet complete --instant "$J1W" --porcelain
   J1W_DONE="$(find "$FLEET_INSTANTS" -maxdepth 1 -name '*-complete-append-j1lifecycle' | head -1)"
   j1_step harvest   fleet harvest --id "$J1TODO" --porcelain
   j1_bad=0
-  for step in milestone declare propose review complete; do
+  for step in milestone declare propose review declaredone complete; do
     rc="$(awk -F'=' -v k="$step" '$1==k{print $2}' "$J1_OUT/rc")"
     [ "$rc" = 0 ] || { printf '  J1 step %s exited %s\n' "$step" "$rc"; j1_bad=$((j1_bad+1)); }
   done
