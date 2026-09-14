@@ -1,4 +1,5 @@
 # ISSUES   (durable; append-only; one sub-section per issue)
+Updated: 2026-09-14 by session 53ee129f-4b4a-4005-bdb6-dfab263001b1 | Status: DURABLE
 
 ## OI-1 Rebase conflicts expected in 5 files
 ### Symptom
@@ -36,6 +37,7 @@ Branch built on `31f2c2b`, before live's I-16 (pane-guard 15) and the 0.5.8 batc
 Commits `8c421c1` (skills/docs) and `26aa9ae` (code + tests). Each finding's disposition is in REVIEW.md (round R1). Sanctioned rather than changed: the 600 s nested-selftest timeout (D-3) and the plan's guards.py/render.py listing (never modified — a plan inaccuracy, noted in HANDOFF).
 ### Status
 FIXED — pending round-2 re-review of the delta
+2026-09-14 21:10 UTC: round 2 done — REVIEW.md R2 (two Importants applied in b871a41).
 
 ## OI-4 `fleet review` refuses the maintain-workspace skill's `main-` base spelling
 ### Symptom
@@ -66,3 +68,63 @@ The branch's admission lock is a stable inode every admitted verb opens; the fir
 O4's baseline manifest includes `.runtime-admission.lock` (commit `384bb32`); §O 13 PASS.
 ### Status
 FIXED
+
+## OI-7 §P not exercised on the branch despite skill and run-P.sh changes
+### Symptom
+Workspace review R3: the gate's roster skips §P (`FLEET_IT_ALLOW_CLAUDE`), and the only P rows anywhere dated 2026-08-17; RV-10 changed `run-P.sh`'s config resolution and it had never run.
+### Root cause
+§P spends a real claude, so no automated roster includes it; AC-3's clause was not tracked as a step.
+### Action taken
+Run once on the deployed tip (D-7): P1-P4 PASS, config dir resolved to the operator's (evidence/P-0.6.0/).
+### Status
+FIXED
+
+## OI-8 Review Minors carried out of the release (RV-20, RV-21, RV-27)
+### Symptom
+Three Minor findings left `open` in REVIEW.md: reconcile's `/proc/<pid>` cwd for an unreadable row; `_do_runtime` dry-run `would_set` on a no-op; an unused import; tab rejection in `validate_message`; `_do_peers` int(pid) before provenance; `transcripts` mtime hint; a vacuous negative poll window.
+### Root cause
+None changes behaviour a coordinator depends on; deferred to keep the release scoped.
+### Action taken
+Listed in HANDOFF Next action.
+### Status
+DEFERRED — REVIEW.md RV-20 / RV-21 / RV-27
+
+## OI-9 Evidence-path lint nonpassing on 7 historical result tables
+### Symptom
+`fleet/it/bin/lint-evidence-paths.sh` fails on tracked historical/generated result tables carrying absolute paths (inherited from the original validation report; pre-dates this instant).
+### Root cause
+Older tracked `RESULTS.tsv` rows and the branch's `final-gate/` evidence contain absolute paths.
+### Action taken
+None here.
+### Status
+DEFERRED
+
+## OI-10 D-3 partially superseded by D-4 without a status marker
+### Symptom
+R3 register cross-check: D-3 kept `_DIALOG_MARKERS` in session.py; D-4/RV-2 folded them into runtime.py, but D-3 still read ACTIVE.
+### Root cause
+D-4 was appended without amending D-3's status line.
+### Action taken
+D-3's status now reads SUPERSEDED in part by D-4 (the 600 s half stays ACTIVE).
+### Status
+FIXED
+
+## OI-11 Historical Codex worktree and branch still present
+### Symptom
+`.worktrees/fleet-runtime` (71c69a2) and branch `feat/fleet-runtime-selection` remain after landing.
+### Root cause
+Left for the partner: deleting a branch is their call.
+### Action taken
+Named in HANDOFF (PR table row 2, Next action 3).
+### Status
+DEFERRED
+
+## OI-12 Not re-evaluated: Claude watcher-positive `awaiting-ci`; Quorum skill evals
+### Symptom
+The original validation report states both limits; nothing in this instant re-ran them.
+### Root cause
+Out of scope (CHARTER Scope OUT); Quorum unavailable on this box.
+### Action taken
+None.
+### Status
+DEFERRED

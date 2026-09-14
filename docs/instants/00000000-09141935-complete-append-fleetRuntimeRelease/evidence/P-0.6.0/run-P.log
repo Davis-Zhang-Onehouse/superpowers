@@ -1,0 +1,13 @@
+--- P 22:02:17 on e99d7d4
+P rc=0
+ISOLATION-P-enter	PASS	live-INSTANTS baseline ESTABLISHED on this call (1 folder(s) across 1 live tree(s)), so the instants half is vacuous here and binds from the
+P1	PASS	a REAL dispatch produced a live session dt-prealworker (pane pid 717615), and `pane-guard` classifies it as 11 — one of 0/10/11/15, all of w
+P2	PASS	pane-guard classified a REAL claude pane as 11 (0 safe / 10 queued / 11 mid-turn / 15 awaiting-operator) rather than 12 not-claude or 13 unk
+P3	PASS	a real claude followed the whole worker contract from the seed alone: it wrote its report, recorded a review round, proposed p1=done into th
+P4	PASS	the coordinator closed the loop on real work: `apply` moved p1 to done carrying the worker's own evidence; `pane-guard` was polled until the
+ISOLATION-P-leave	PASS	operator activity, not this section: appeared=[] vanished=[claude_mor_chinmay fleetCloseOut meta-opt-wave2]. Neither carries a harness prefi
+--- config dir recorded:
+evidence.runtime_config_dir	/home/ubuntu/davis_root/.claude
+evidence.runtime_executable	/home/ubuntu/.local/bin/claude
+--- git status
+done 22:04:57

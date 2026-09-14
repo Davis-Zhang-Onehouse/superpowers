@@ -1,0 +1,8 @@
+root /home/ubuntu/davis_root ($FLEET_HOME)
+current  0.6.0
+state    RELEASED
+payload  fleet (52), skills (7), hooks (2), scripts (8), tests (3), docs (237)
+skills   coordinating-instants, dispatching-a-wave, harvesting-an-instant, reviving-dead-panes, using-fleet, working-as-a-dispatched-instant
+since    2026-09-14T21:54:57Z
+by       davis@onehouse.ai
+reason   fleet runtime selection: Claude Code or Codex CLI per fleet (fleet runtime --set), direct seed launch, guarded fleet send, exact-session fleet revive, pane-guard 15 for every measured operator dialog; full-roster gate GREEN

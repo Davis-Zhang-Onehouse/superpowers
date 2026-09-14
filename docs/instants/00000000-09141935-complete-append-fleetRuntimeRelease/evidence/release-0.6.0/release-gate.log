@@ -1,0 +1,3 @@
+release-gate.sh: launching release-verify for 0.6.0 (log: /home/ubuntu/davis_root/fleet-releases/.release-gate/0.6.0.log)
+release-gate.sh: pid 387172 — a detached run outlives this shell; find it by this pid or this log
+verdict	GREEN	-	the run's overall verdict, which the per-suite rows cannot express (an INCONCLUSIVE run leaves RED suite rows)

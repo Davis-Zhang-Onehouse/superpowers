@@ -1,0 +1,2 @@
+evidence.runtime_config_dir	/home/ubuntu/davis_root/.claude
+evidence.runtime_executable	/home/ubuntu/.local/bin/claude

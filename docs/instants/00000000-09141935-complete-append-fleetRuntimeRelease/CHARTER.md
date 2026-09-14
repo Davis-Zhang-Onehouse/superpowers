@@ -1,5 +1,5 @@
 # Fleet runtime selection — review, rebase, release — CHARTER   (durable; edit deliberately)
-Instant: 00000000-09141935-inflight-append-fleetRuntimeRelease
+Instant: 00000000-09141935-complete-append-fleetRuntimeRelease
 Updated: 2026-09-14 by session 53ee129f-4b4a-4005-bdb6-dfab263001b1 | Status: DURABLE
 
 ## Goal (e2e)
@@ -38,32 +38,32 @@ cut → verify → promote → deploy a fleet release that carries it.
 ## Acceptance criteria (NL → executable proof → self-review)
 
 ### AC-1 Branch reviewed and findings closed
-- [ ] Statement: the branch diff has had at least one code-review round; every Critical/High finding is
+- [x] Statement: the branch diff has had at least one code-review round; every Critical/High finding is
   fixed or explicitly sanctioned; the review ledger records each finding's disposition.
-- Proof: `REVIEW.md` rounds with all findings FIXED/SANCTIONED; fix commits named in the PR table.
-- Self-review: —
+- Proof: `REVIEW.md` rounds with every Critical/Important finding applied or sanctioned (Minors may be carried, named in ISSUES); fix commits named in the PR table.
+- Self-review: MET — R1 (22 findings) + R2 (10 findings), 0 open blocking; 3 Minor follow-ups open (RV-20, RV-21, RV-27); fixes in 8c421c1, 26aa9ae, b871a41, 384bb32.
 
 ### AC-2 Rebased onto latest live, hermetic suite green
-- [ ] Statement: `feat/fleet-runtime-selection` is rebased onto `live`'s tip with conflicts resolved and
+- [x] Statement: `feat/fleet-runtime-selection` is rebased onto `live`'s tip with conflicts resolved and
   the full hermetic suite passes from the rebased tip.
 - Proof: `git merge-base live <tip>` == `live` tip; `evidence/hermetic-<sha>.log` ending `OK` (count ≥ 1,849 pre-rebase baseline reconciled with live's additions).
-- Self-review: —
+- Self-review: MET — live fast-forwarded to 384bb32 (then e753110 docs, e99d7d4 cut); 1,903 tests OK on the tip (evidence #6) and again from the tag export in the gate (`release-0.6.0/hermetic-tail.txt`).
 
 ### AC-3 Relevant integration sections pass on the rebased tip
-- [ ] Statement: the runtime IT runner (`run-runtime.sh --stubs`) and the sections touching changed
+- [x] Statement: the runtime IT runner (`run-runtime.sh --stubs`) and the sections touching changed
   files (§A, group5 §L/§M/§N, §P if a skill/verb a skill names changed) pass on the rebased tip, using scratch `IT_RESULTS`.
 - Proof: `evidence/it-*-<sha>.tsv` with 0 FAIL rows.
-- Self-review: —
+- Self-review: MET — runtime stubs, §A, group5, §F/G/H/I/J/O/LB all PASS on the tip (evidence #4-#8), then the whole full roster again in the gate: 0 FAIL rows (`release-0.6.0/it-fail-rows.txt`); §P run once on the deployed tip per D-7: P1-P4 PASS (`P-0.6.0/`).
 
 ### AC-4 Landed on live and released
-- [ ] Statement: the rebased branch is on `live`; a fleet release vX.Y.Z is cut from it, verified GREEN
+- [x] Statement: the rebased branch is on `live`; a fleet release vX.Y.Z is cut from it, verified GREEN
   (or the gate outcome is recorded honestly), promoted, deployed, and postflight proves every root is on it.
 - Proof: `fleet-releases/fleet-vX.Y.Z/.release/evidence/VERDICT.tsv` `verdict GREEN`; `release-postflight.sh X.Y.Z` exit 0; copies in `evidence/`.
-- Self-review: —
+- Self-review: MET — fleet 0.6.0 cut (e99d7d4, tag fleet/v0.6.0), gate GREEN on the FULL roster in 42 min, promoted, deployed (`current` → fleet-v0.6.0), postflight all OK (`evidence/release-0.6.0/`).
 
 ## Setup to end up with (the handoff)
-- Deliverables: `live` containing the runtime-selection commits; release tag `fleet/vX.Y.Z`; deployed
-  `fleet-releases/current` → that release; REVIEW.md ledger; evidence/ with suite logs, IT registers, VERDICT copy.
+- Deliverables: `live` @ e99d7d4 containing the runtime-selection commits; release tag `fleet/v0.6.0`; deployed
+  `fleet-releases/current` → fleet-v0.6.0; REVIEW.md ledger (2 rounds); evidence/ with suite logs, IT registers, VERDICT copy.
 - Reproducible stack: RUNBOOK.md (suite + IT + release chain commands); evidence/INDEX.md.
 
 ## Standing constraints / rules

@@ -1,0 +1,6 @@
+FAIL rows across every per-runner register of this run:
+(end)
+
+tallies:
+SKIP 11
+PASS 329

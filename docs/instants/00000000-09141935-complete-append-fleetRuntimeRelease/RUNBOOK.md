@@ -7,6 +7,13 @@ cd <checkout>/fleet
 PYTHONDONTWRITEBYTECODE=1 PYTHONPATH=src python3 -m unittest discover -s tests -q
 ```
 
+## §P — the real dispatch (spends one real claude; ~3 min here)
+```bash
+cd <checkout>/fleet/it
+R="$PWD/RESULTS-P-scratch.tsv"; printf 'case\tverdict\tevidence\tnote\n' > "$R"
+IT_RESULTS="$R" bash run-P.sh; awk -F'\t' '$2=="FAIL"' "$R"; cat P/out/P-config-dir.txt
+```
+
 ## Integration sections without dirtying RESULTS.tsv
 ```bash
 cd <checkout>/fleet/it
@@ -17,10 +24,9 @@ IT_RESULTS="$R" bash run-group5.sh          # §L §M §N
 awk -F'\t' '$2=="FAIL"' "$R"; rm "$R"; git status --short
 ```
 
-## Rebase
+## Rebase (HISTORICAL — done once on 2026-09-14; the scratch worktree was removed after landing)
 ```bash
-cd /home/ubuntu/davis_root/superpowers/.worktrees/fleet-runtime
-git rebase live        # resolve; then re-run the hermetic suite
+# git worktree add -b <branch>-rebased .worktrees/<name> <tip>; git -C .worktrees/<name> rebase live
 ```
 
 ## Release notes (the `--notes` string for 0.6.0)
@@ -33,7 +39,7 @@ runtime selection: one fleet runs under Claude Code or Codex CLI, chosen between
 cd /home/ubuntu/davis_root/superpowers && . scripts/fleet-env.sh
 REPO=/home/ubuntu/davis_root/superpowers; FLEET=$REPO/bin/fleet
 bash scripts/release-preflight.sh
-# de-risk the --full roster first (D-6): IT_RESULTS=<scratch> bash fleet/it/run-{F,G,H,I,J,O,lineage}.sh from .worktrees/fleet-runtime-rebase/fleet/it
+# de-risk the --full roster first (D-6): IT_RESULTS=<scratch> bash fleet/it/run-{F,G,H,I,J,O,lineage}.sh from <checkout>/fleet/it
 $FLEET release-cut --version X.Y.Z --repo "$REPO" --releases "$FLEET_RELEASES" --notes "…" --dry-run
 $FLEET release-cut --version X.Y.Z --repo "$REPO" --releases "$FLEET_RELEASES" --notes "…"
 setsid nohup bash scripts/release-gate.sh X.Y.Z --full > <scratch>/gate-X.Y.Z.log 2>&1 < /dev/null &   # --full for a minor bump (D-6); ~1 h; ZERO tool calls while it runs

@@ -1,0 +1,6 @@
+root /home/ubuntu/davis_root ($FLEET_HOME)
+note: this box has live fleet work. The IT suite baselines the live session set, so a failure may be contamination rather than a defect — that is what INCONCLUSIVE records.
+version   0.6.0
+verdict   GREEN
+roster    full
+evidence  /home/ubuntu/davis_root/fleet-releases/fleet-v0.6.0/.release/evidence

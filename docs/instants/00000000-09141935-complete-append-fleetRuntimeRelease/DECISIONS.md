@@ -1,4 +1,5 @@
 # DECISIONS   (durable; append-only register; the authoritative decision timeline / tie-breaker)
+Updated: 2026-09-14 by session 53ee129f-4b4a-4005-bdb6-dfab263001b1 | Status: DURABLE
 
 ## D-1 — Land by rebasing the feature branch onto `live`, then fast-forward `live`; no upstream PR   (2026-09-14, ACTIVE)
 ### Context
@@ -20,7 +21,7 @@ Docs-only paths never force the suites, and the alternative (gitignoring the par
 ### Consequences
 The release payload ships `docs/instants/`. Harmless; it is documentation.
 
-## D-3 — Rebase resolutions: dialog markers stay in session.py; selftest timeout 600 s   (2026-09-14, ACTIVE)
+## D-3 — Rebase resolutions: dialog markers stay in session.py; selftest timeout 600 s   (2026-09-14, SUPERSEDED in part by D-4 2026-09-14 — the dialog-marker half; the 600 s half stays ACTIVE)
 ### Context
 Live added `_DIALOG_MARKERS`/`asking()`/pane-guard code 15 (I-16) in `session.py`; the branch moved Claude's busy/watcher/status-line markers into `runtime.py`. Live's `run-group5.sh` introduced a per-verb `m_timeout` (selftest 300 s); the branch had raised the flat timeout to 600 s after measuring 180 s under load with 1,849 tests.
 ### Decision
@@ -59,3 +60,13 @@ Cut `0.6.0` from `live` after fast-forwarding it to the rebased tip; run `script
 A record-schema compatibility break is not "ordinary"; the wider roster is what a change touching dispatch, close, harvest, peers, reconcile and seedcheck deserves, and the version number tells the operator of the second root that the fleet binary must be updated in step.
 ### Consequences
 Gate time above the ~45-minute default (budget ~1 h+). If the gate comes back RED for a reason unrelated to this change, the fallback is Trap 9: fix, cut `0.6.1`, never re-verify the same tag.
+
+## D-7 — Run §P once on the deployed tip rather than sanction its skip   (2026-09-14, ACTIVE)
+### Context
+AC-3 requires §P when a skill or a verb a skill names changes (`fleet/CLAUDE.md`'s rule); seven skill files and `run-P.sh` itself changed (RV-10, RV-28), and the release gate skips §P by design (`FLEET_IT_ALLOW_CLAUDE`). Scope OUT excluded paid live-model runs "unless a review finding demands it"; the workspace review (R3) demanded it.
+### Decision
+Run `run-P.sh` once on the deployed tip with scratch `IT_RESULTS`; file its register, log, config-dir record and the worker's own report under `evidence/P-0.6.0/`.
+### Rationale
+A `run-P.sh` fix that has never executed is not a fix; one real dispatch costs minutes and answers it. The release was already deployed, so this validates, it does not gate.
+### Consequences
+P1-P4 PASS at 22:04 UTC; the real CLI resolved `/home/ubuntu/davis_root/.claude` (INDEX #11). The worker report's "what was wrong" section is the actual deliverable of §P and is filed for the next skill round; it was not acted on in this instant.
