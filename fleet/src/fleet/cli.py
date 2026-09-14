@@ -1753,11 +1753,15 @@ def _do_dispatch(ctx: Ctx, parsed: Parsed) -> int:
             Roadmap(coordinator).claim(milestone_id, str(child))
             claimed_milestone = milestone_id
     except Exception as launch_error:
+        stranded = any(r.todo_id == todo_id for r in ctx.store.all())
+        stranded_note = (f" A RECORD for todo {todo_id!r} was already written and is left in place: it reads "
+                         f"PENDING-LAUNCH and counts against the WIP cap until it is resolved. Clear it with "
+                         f"`fleet abort --instant {child} --reason <why>`." if stranded else "")
         if started:
             ctx.sessions.kill(tmux)
             if ctx.sessions.alive(tmux):
-                print(f"dispatch needs attention: {tmux} is still observable; lease {lease.slot} retained",
-                      file=ctx.err)
+                print(f"dispatch needs attention: {tmux} is still observable; lease {lease.slot} retained."
+                      + stranded_note, file=ctx.err)
                 raise
         try:
             ctx.pool.release(lease.slot, force=False)
@@ -1786,14 +1790,9 @@ def _do_dispatch(ctx: Ctx, parsed: Parsed) -> int:
         # The record is still not DELETED here — "no verb deletes outward state" holds, and a dispatch that
         # tidied away its own record would also erase the only evidence that the attempt happened. It is
         # named, and so is the verb that resolves it.
-        stranded = any(r.todo_id == todo_id for r in ctx.store.all())
         print(f"dispatch rolled back: the lease on {lease.slot!r} was given back. Anything already "
               f"written under {child} is left in place and named here rather than removed — no verb "
-              f"deletes outward state."
-              + (f" A RECORD for todo {todo_id!r} was already written and is left in place: it reads "
-                 f"PENDING-LAUNCH and counts against the WIP cap until it is resolved. Clear it with "
-                 f"`fleet abort --instant {child} --reason <why>`." if stranded else ""),
-              file=ctx.err)
+              f"deletes outward state." + stranded_note, file=ctx.err)
         raise
     _emit(ctx, "dispatch", [("todo_id", todo_id), ("instant", str(child)), ("slot", lease.slot),
                             ("tmux", tmux), ("watched_source", source.base),
@@ -3107,18 +3106,19 @@ def _pane_refusal(ctx: Ctx, record: Record):
     if captured is None or state == 'unknown':
         return (PANE_GUARD_CODES[PANE_INDETERMINATE], f'{tmux} input state cannot be established',
                 'inspect the pane and wait for a recognizable idle input', record.todo_id)
-    if state == 'dialog':
-        return (PANE_GUARD_CODES[PANE_AWAITING_OPERATOR],
-                f"{tmux} is showing an operator dialog and is blocked on a human's answer: closing it "
-                f"now discards a decision in progress",
-                f"the dialog is answered, or `fleet close --id {record.todo_id} {FORCE}` is said out "
-                f"loud",
-                record.base_instant or record.todo_id)
     if layer.busy(text):
         return (PANE_GUARD_CODES[PANE_MID_TURN],
                 f"{tmux} is still offering a way to interrupt, so it is mid-turn: closing it now ends a "
                 f"turn in progress and whatever that turn had not yet written down",
                 f"the turn finishes, or `fleet close --id {record.todo_id} {FORCE}` is said out loud",
+                record.base_instant or record.todo_id)
+    if layer.asking(text):
+        #: After `busy`, before `unsubmitted` — the one ordering `_do_pane_guard` uses (see there).
+        return (PANE_GUARD_CODES[PANE_AWAITING_OPERATOR],
+                f"{tmux} is showing an operator dialog and is blocked on a human's answer: closing it "
+                f"now discards a decision in progress",
+                f"the dialog is answered, or `fleet close --id {record.todo_id} {FORCE}` is said out "
+                f"loud",
                 record.base_instant or record.todo_id)
     queued = layer.unsubmitted(text)
     if queued is not None:
@@ -3127,19 +3127,6 @@ def _pane_refusal(ctx: Ctx, record: Record):
                 f"message somebody typed and never sent",
                 f"the text is submitted or cleared, or `fleet close --id {record.todo_id} {FORCE}` is "
                 f"said out loud",
-                record.base_instant or record.todo_id)
-    if layer.asking(text):
-        #: Task 6 shipped `15 PANE_AWAITING_OPERATOR` for exactly this pane shape and nothing consulted
-        #: it here — so `close` would tear down a pane blocked at an unanswered `AskUserQuestion` dialog,
-        #: which is *"the one case teardown logic exists for is an unanswered prompt"*, the harm the
-        #: original incident describes. Checked LAST, after `busy` and `unsubmitted`, for the same reason
-        #: `pane-guard` itself orders them that way (`I-16`): a pane that is genuinely mid-turn or
-        #: genuinely holding typed text keeps that stronger, more specific refusal.
-        return (PANE_GUARD_CODES[PANE_AWAITING_OPERATOR],
-                f"{tmux} is showing a selection dialog and is blocked on an operator's answer: closing it "
-                f"now discards a decision in progress",
-                f"the dialog is answered, or `fleet close --id {record.todo_id} {FORCE}` is said out "
-                f"loud",
                 record.base_instant or record.todo_id)
     return None
 
@@ -3153,7 +3140,7 @@ def _do_close(ctx: Ctx, parsed: Parsed) -> int:
     NAMED, by slot — FD-14's rule, that a transaction which stops short says what it left rather than
     leaving it to be discovered.
 
-    The three refusals are `pane-guard`'s own non-safe answers for a live pane that are judgements about
+    The refusals are `pane-guard`'s own non-safe answers for a live pane that are judgements about
     work in progress — a busy pane, a queued pane, a pane awaiting an operator's answer — and **each names
     its override**: a refusal a human cannot act on is a refusal that gets forced blindly (`OBS-48`), while
     a guard with no override is an alarm that blocks the fix (FD-9).
@@ -4275,14 +4262,6 @@ def _do_pane_guard(ctx: Ctx, parsed: Parsed) -> int:
                 f"not send, and do not close")
         elif any(item.name == pane and item.runtime != layer.runtime for item in live):
             code, detail = PANE_INDETERMINATE, f'{pane} runtime differs from the recorded or selected runtime'
-        elif agent and state == 'dialog':
-            #: A POSITIVELY identified operator dialog on either runtime — Claude's trust modal or
-            #: `AskUserQuestion`, Codex's approval prompt (`runtime.CLAUDE_DIALOG_ROWS` /
-            #: `CODEX_DIALOG_ROWS`) — is `15`, live's `I-16` ruling, not `14`: `14` says "wait and
-            #: re-poll", and no amount of waiting answers a dialog.
-            code, detail = PANE_AWAITING_OPERATOR, (
-                f"{pane} is a {layer.runtime} worker showing an operator dialog (trust, approval or a "
-                f"selection question) and is blocked on a human's answer; waiting will not clear this")
         elif agent and state == 'unknown':
             code, detail = PANE_INDETERMINATE, f'{pane} is a {layer.runtime} worker with an unrecognized input layout'
         elif not _is_claude(layer, text, pane, live):
@@ -4291,17 +4270,22 @@ def _do_pane_guard(ctx: Ctx, parsed: Parsed) -> int:
         elif layer.busy(text):
             code, detail = PANE_MID_TURN, (f"{pane} is still offering a way to interrupt, so it is "
                                            "mid-turn; a send now is queued behind the current turn")
+        elif layer.asking(text):
+            #: A POSITIVELY identified operator dialog on either runtime — Claude's trust modal or
+            #: `AskUserQuestion`, Codex's approval prompt or directory-trust screen (`runtime.CLAUDE_DIALOG_ROWS`
+            #: / `CODEX_DIALOG_ROWS`) — is `15`, live's `I-16` ruling, not `14`: `14` says "wait and re-poll",
+            #: and no amount of waiting answers a dialog. Checked AFTER `busy` (a live turn keeps its stronger
+            #: answer; a stale hint row in the tail must not outrank it) and BEFORE `unsubmitted`, because the
+            #: trust modal's selected row carries a caret and would otherwise read as somebody's typed text
+            #: — ONE ordering, whether or not a process is attributed to the pane.
+            code, detail = PANE_AWAITING_OPERATOR, (
+                f"{pane} is showing an operator dialog (a selection question, a trust screen or an approval "
+                f"prompt) and is blocked on a human's answer; nothing will happen here until somebody answers "
+                f"it — waiting will not clear this")
         elif layer.unsubmitted(text) is not None:
             queued = layer.unsubmitted(text)
             code, detail = PANE_QUEUED_TEXT, (f"{pane} holds unsubmitted text in its input box "
                                               f"({queued!r}); a send would concatenate onto it")
-        elif layer.asking(text):
-            #: `I-16`. Checked LAST, after `busy` and `unsubmitted`, so a pane that is genuinely mid-turn
-            #: or genuinely holding typed text keeps that stronger, more specific answer — this is the
-            #: shape neither of those two covers.
-            code, detail = PANE_AWAITING_OPERATOR, (
-                f"{pane} is showing a selection dialog and is blocked on an operator's answer; nothing "
-                "will happen here until somebody answers it — waiting will not clear this")
         else:
             code, detail = PANE_SAFE, f"{pane} is a quiet claude pane with an empty input box"
     #: `queued_text` is a FIELD, not a sentence to be parsed back out of `detail`.

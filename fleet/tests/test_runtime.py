@@ -48,6 +48,8 @@ class RuntimeTests(unittest.TestCase):
                          "  2. Keep it and carry the note", "",
                          "Enter to select · Tab/Arrow keys to navigate · Esc to cancel"])
         self.assertEqual(observe('claude', ask).state, 'dialog')
+        self.assertEqual(observe('codex', (root / 'codex-trust.frame').read_text()).state, 'dialog',
+                         'the directory-trust screen was measured in-tree and must stay a dialog')
         # Claude's rows are not Codex's and vice versa: a Codex pane quoting Claude's hint is not a dialog.
         self.assertNotEqual(observe('codex', ask).state, 'dialog')
 
