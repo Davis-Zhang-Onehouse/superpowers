@@ -148,7 +148,8 @@ Branch on the code before any send.
 Treat it as wait, never as permission: before a send everything but `0` waits anyway, but before a CLOSE the
 difference is a live pane mid-turn being torn down (`FI-7`).
 
-`15` means the pane is showing an `AskUserQuestion` selection dialog — blocked on YOU, not on a turn that
+`15` means the pane is showing an operator dialog — `AskUserQuestion`, the folder-trust screen, or Codex's
+approval prompt — blocked on YOU, not on a turn that
 will finish by itself (`I-16`). It reads nothing like `10`/`11`/`14`: those clear with time, this one does
 not, so a coordinator that sees `15` should stop polling and go answer the pane, not wait on it. Before
 this code existed a dialog fell through to `0 safe`, the same answer an idle worker gets — a scheduled
@@ -188,9 +189,9 @@ workers. A native messaging API is usable only when the current harness exposes 
 supplies its address; a tmux session name is not a native agent ID. FOREIGN or unaddressable peers are
 not message targets.
 
-A known agent with an unfamiliar input returns `14 indeterminate`, and so does a trust or approval modal
-on either CLI; a Claude `AskUserQuestion` selection dialog is the one modal with its own code, `15
-awaiting-operator` (above). `12 not-claude` retains its legacy label and means a positively identified
+A known agent with an unfamiliar input returns `14 indeterminate`. Every positively identified operator
+dialog — Claude's folder-trust screen or `AskUserQuestion`, Codex's approval prompt — returns `15
+awaiting-operator` (above), on either CLI: the advice is the same for all of them, go answer the pane. `12 not-claude` retains its legacy label and means a positively identified
 non-agent pane. Treat every nonzero guard code as wait
 before sending. Codex has no verified CI wake mechanism here: `awaiting-ci` is refused, even with a
 watcher attestation, and the worker continues to count against capacity.

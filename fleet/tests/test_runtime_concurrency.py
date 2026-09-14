@@ -27,7 +27,8 @@ class RuntimeConcurrencyTests(unittest.TestCase):
 
     def start(self, args):
         receive, output = mp.Pipe(False)
-        process = mp.Process(target=run_cli, args=(self.f, args, output))
+        # `fork`, explicitly: the fixture carries lambdas, and Linux's default start method changes in 3.14.
+        process = mp.get_context('fork').Process(target=run_cli, args=(self.f, args, output))
         self.processes.append(process)
         process.start()
         self.addCleanup(receive.close)

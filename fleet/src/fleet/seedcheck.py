@@ -304,6 +304,8 @@ class Probes:
     comm_of: Callable[[int], Optional[str]] = None
     children_of: Callable[[int], list] = field(default=lambda pid: [])
     worker_identity: Callable[[int], bool] | None = None
+    #: The runtime's process name, for the diagnostic that says which worker was looked for.
+    process_name: str = WORKER_COMM
 
     def __post_init__(self):
         if self.comm_of is None:
@@ -361,7 +363,7 @@ def default_probes(process_name: str = WORKER_COMM) -> Probes:
             return False
 
     return Probes(read_cmdline=read_cmdline, comm_of=comm_of, children_of=children_of,
-                  worker_identity=worker_identity)
+                  worker_identity=worker_identity, process_name=process_name)
 
 
 def delivered_argv(pid: int, probes: Probes, depth: int = 2) -> tuple:
@@ -415,7 +417,7 @@ def check_session(session: str, pid: int, rendered: str, probes: Probes,
     #: number about a population it could not see.
     if verdict.state == NOT_DELIVERED and not is_worker(found_pid or pid, probes):
         verdict.detail += (
-            f". No worker process of the selected runtime was found at or below pid {found_pid or pid}, so nothing about "
+            f". No `{probes.process_name}` process was found at or below pid {found_pid or pid}, so nothing about "
             f"this session's delivery was examined at all. A long argument on a non-worker descendant — a "
             f"CI waiter is exactly that shape — is deliberately not read as a briefing (`SI-52`)")
     return verdict

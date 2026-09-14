@@ -1472,7 +1472,39 @@ class TestOutwardState(CliCase):
         self.assertEqual(code, EXIT_ATTENTION, err)
         self.assertEqual(len(fleet.started), 1)
         self.assertEqual(fleet.killed, [fleet.started[0][0]])
-        self.assertIsNone(fleet.store.all()[0].launched_at)
+        record = fleet.store.all()[0]
+        self.assertIsNone(record.launched_at)
+        self.assertFalse(record.gate_verdict, "a seed failure is not a guard verdict")
+        #: The kill really ended the session here (`_kill`), so the lease went back — and the record that
+        #: was already durable is named as stranded with its remedy, not silently left to count.
+        self.assertIsNone(fleet.pool.lease("ws1"), "rollback must release the slot once the process is gone")
+        self.assertIn("PENDING-LAUNCH", err)
+        self.assertIn("fleet abort", err)
+
+    def test_dispatch_rollback_retains_the_lease_while_its_process_is_still_observable(self):
+        """Plan Task 6: rollback keeps the lease until the launched process has EXITED, and says so."""
+        fleet = Fleet()
+        self.addCleanup(shutil.rmtree, fleet.tmp)
+        original_context = fleet.context
+        def context():
+            build = original_context()
+            def candidate(parsed, out, err):
+                ctx = build(parsed, out, err)
+                ctx.seed_delivery = lambda name, text: seedcheck.Verdict(seedcheck.NOT_DELIVERED)
+                return ctx
+            return candidate
+        fleet.context = context
+        #: A kill that is issued but does not end the session: `alive` keeps answering from the tmux probe.
+        fleet.sessions.probes.kill_session = lambda name: (fleet.killed.append(name), fleet.tmux_live.add(name))
+        original_start = fleet.sessions.probes.start_session
+        fleet.sessions.probes.start_session = lambda name, cwd, cmd: (original_start(name, cwd, cmd),
+                                                                       fleet.tmux_live.add(name))
+        code, out, err = fleet.run(['dispatch', '--profile', str(fleet.profile()),
+                                    '--title', 'stuck kill'])
+        self.assertEqual(code, EXIT_ATTENTION, err)
+        self.assertEqual(fleet.killed, [fleet.started[0][0]])
+        self.assertIsNotNone(fleet.pool.lease("ws1"), "the slot must stay leased while a process may hold it")
+        self.assertIn("retained", err)
 
 
 

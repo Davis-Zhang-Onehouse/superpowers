@@ -34,7 +34,7 @@ field() {                 # field <status-tsv> <name> -> value ("" when absent)
   awk -F'\t' -v k="$2" '$1==k{print $2; exit}' "$1"
 }
 
-derive() {                # derive <todo-id> -> sets SESSION SOCKET INSTANT SLOT ROOT CONFIG_DIR
+derive() {                # derive <todo-id> -> sets SESSION SOCKET INSTANT SLOT CONFIG_DIR RUNTIME
   local id="$1" status leases
   status="$(mktemp)"; leases="$(mktemp)"
   # shellcheck disable=SC2064  # the paths are expanded now on purpose
@@ -68,7 +68,6 @@ derive() {                # derive <todo-id> -> sets SESSION SOCKET INSTANT SLOT
 
   RUNTIME="$(field "$status" evidence.runtime)"
   RUNTIME="${RUNTIME:-claude}"
-  ROOT="${FLEET_ROOT:-}"
   CONFIG_DIR="$(field "$status" evidence.runtime_config_dir)"
   if [ -z "$CONFIG_DIR" ]; then
     [ "$RUNTIME" = claude ] || die "record has no Codex configuration; use fleet revive for explicit resolution"
@@ -87,7 +86,6 @@ cmd_plan() {
   note "server"     "$SOCKET   (from $SOCKET_SOURCE)"
   note "slot"       "$SLOT"
   note "instant"    "$INSTANT"
-  note "root"       "$ROOT"
   note "config dir" "$CONFIG_DIR"
   note "runtime"    "$RUNTIME"
   local alive="no"

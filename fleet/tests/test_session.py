@@ -469,6 +469,15 @@ class TestTrustModalIsNotBusy(unittest.TestCase):
                          "'Esc to cancel' is a modal affordance; treating it as work makes an unanswered "
                          "prompt read as a turn in flight, and the wait never ends")
 
+    def test_the_trust_modal_IS_asking(self):
+        """Runtime selection folded every measured operator dialog into one predicate: the trust modal is
+        `asking` too (its `Enter to confirm · Esc to cancel` row), so `pane-guard` answers `15` for it
+        rather than `10` — "blocked on a human" said out loud instead of "somebody typed something"."""
+        self.assertTrue(self.sessions.asking(self.TRUST_MODAL))
+        self.assertFalse(self.sessions.asking(
+            "I finished. The screen said Enter to confirm, then Esc to cancel; both done.\n❯ \n? for shortcuts"),
+            "prose quoting the hint across a sentence is not the dialog's row")
+
     def test_the_trust_modal_IS_unsubmitted_text(self):
         self.assertIsNotNone(self.sessions.unsubmitted(self.TRUST_MODAL),
                              "the selected line sits in the input position, which is what makes this "

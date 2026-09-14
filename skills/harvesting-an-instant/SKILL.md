@@ -63,11 +63,12 @@ observation, and this one is known to lie.
 
 Distrust "not-claude" and "unknown-pane" outright while the board still calls the worker live. And note
 that `pane-guard`'s "indeterminate" is a **failed observation**, not an observation of emptiness.
-The same checks apply to Claude and Codex; an unfamiliar input, or a trust/approval modal on either CLI,
-is also indeterminate — except the one dialog shape that has its own code, next.
+The same checks apply to Claude and Codex; an unfamiliar input layout on a known agent is also indeterminate.
+A recognised dialog is not — it has its own code, next.
 
 `pane-guard`'s "awaiting-operator" (`15`) is neither of those close-out shapes: it means the worker is
-sitting at an `AskUserQuestion` selection dialog, blocked on a human, not on a turn that will finish or a
+sitting at an operator dialog — `AskUserQuestion`, the folder-trust screen, Codex's approval prompt —
+blocked on a human, not on a turn that will finish or a
 pane you can safely retry (`I-16`). Sampling it three more times will not change it — go answer the pane,
 or park the worker, before doing anything else with it.
 
