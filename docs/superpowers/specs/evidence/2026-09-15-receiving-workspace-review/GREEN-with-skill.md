@@ -111,7 +111,7 @@ cites are kept beside this file:
 
 | path | what it is |
 |---|---|
-| `green-fixture/control-RV-8.txt` | the RV-8 negative control, the artifact whose absence was RED v2's failure |
+| `green-fixture/control-RV-8.txt` | the RV-8 negative control, the artifact whose absence was RED v2's failure. It names tip `fd6a27f`, captured before the commit carrying its gate (`c9dea81`); under the rule added in `206a3f9` it would be NOT-CLOSED and re-run after the commit. Kept as the run's record, and the file carries the same caption. |
 | `green-fixture/withdrawals-pass1.txt` | the pass-1 withdrawals list, four sites plus the "closed by reading" block |
 | `green-fixture/REVIEW-NARRATIVE.md` | the triage table, the order deviation, `Noticed along the way`, the routed amendments |
 | `green-fixture/git-log.txt` | `git log --oneline` — the three one-id commits |

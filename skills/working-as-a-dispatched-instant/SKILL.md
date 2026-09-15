@@ -192,8 +192,9 @@ Those three rounds are the **hunt** — three read-only reviewers at a frozen sh
 lens's own `--scope`, and the gate reads the coverage as their union (`superpowers:reviewing-workspace`).
 Their findings go through `superpowers:receiving-workspace-review` (code → proofs → docs, one finding per
 commit, `applied` from the tree), then a closure round over the fix delta. The verb prints `RECEIVE` when a
-round records blocking findings and `OSCILLATING` when three consecutive head-moving rounds each raised new
-ones — the second is your cue to park, not to run another round.
+round records blocking findings and `OSCILLATING` when three consecutive head-moving epochs (rounds grouped
+by the slot head they were recorded at) each raised new ones — the second is your cue to park, not to run
+another round.
 
 `--finding` is six colon-separated fields — `id:severity:status:location:finding:action` — and every one is
 required, because a finding with no location is a feeling and a finding with no action asks the reader to

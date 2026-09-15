@@ -132,7 +132,7 @@ read-only; every fix, mechanical or not, goes through receive.**
 an em dash. Zero of the 373 real findings carry a colon; the skill keeps it that way.
 
 **`applied` names what closed it.** The four statuses stay. An `applied` finding's `action` names a
-commit sha (repo change), an artifact path (evidence change) or `sweep: N sites` (claim fix). The
+commit sha (repo change), an artifact path (evidence change) or `sweep — N sites` (claim fix). The
 closure reviewer records an `applied` whose action names nothing it can check as `NOT-CLOSED`;
 prcompliance RV-17 was exactly this. (Not a tool refusal — see Non-goals.)
 
@@ -254,7 +254,7 @@ For each `claim` finding, before editing:
 
 ### Step 4 — record
 
-`fleet review --finding` per finding: `applied` with the commit / artifact / `sweep: N sites` in
+`fleet review --finding` per finding: `applied` with the commit / artifact / `sweep — N sites` in
 `action`; `routed` with the owner; `wont-fix` with the reason. **Nothing is recorded `applied`
 before it exists on disk** — the record is written after the pass, from the triage table, against
 the tree (prcompliance RV-17).
