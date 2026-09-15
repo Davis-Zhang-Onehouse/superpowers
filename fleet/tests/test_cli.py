@@ -3975,6 +3975,19 @@ class TestReviewRecordsTheHeadsItReviewed(CliCase):
         ledger = json.loads((child / ".fleet" / "review.json").read_text())
         self.assertEqual({"alpha": "b" * 40}, ledger["rounds"][0]["heads"])
 
+    def test_review_prints_the_receive_nudge_for_a_blocking_round(self):
+        """The round just recorded carries blocking work, so the verb names the skill that applies it.
+        Advisory: the gate row and the exit code are untouched by this."""
+        fleet = self.loaded()
+        child = fleet.worker("receiveNudge")
+
+        rc, out, err = fleet.run(["review", "--instant", str(child), "--scope", "all",
+                                  "--verdict", "READY-WITH-FIXES",
+                                  "--finding", "RV-1:Important:applied:HANDOFF.md:no PR table:added"])
+
+        self.assertEqual(EXIT_OK, rc, err)
+        self.assertIn("RECEIVE — 1 blocking finding(s)", out)
+
     def test_review_without_a_readable_slot_records_no_heads(self):
         fleet = self.loaded()
         child = self._dispatched(fleet, "")
