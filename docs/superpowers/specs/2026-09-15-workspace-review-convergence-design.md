@@ -334,8 +334,8 @@ Changed:
 
 ## §4 — `fleet review`: two advisories
 
-Both are `Review.advisories()` rows: non-vetoing by construction, printed on every `fleet review`
-and `fleet brief`, computed from the ledger alone.
+Both are `Review.advisories()` rows: non-vetoing by construction, printed by every `fleet review`
+call, computed from the ledger alone.
 
 **A. `OSCILLATING`.** Group consecutive rounds into *head epochs*: a round joins the current epoch
 when its `heads` equal the previous round's and opens a new one when they differ; empty `heads`
