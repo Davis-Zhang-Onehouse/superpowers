@@ -103,6 +103,7 @@ Plus three register/reconciliation rules:
   ASSUMPTIONS.md  ← DURABLE. unverified beliefs: OPEN/VERIFIED/REFUTED/SANCTIONED/DEFERRED
   COMPACTED.md    ← compact instants ONLY. included instants · one stacked PR chain · merged acceptance (all MET) · evidence disposition (regen | carried+why) · lingering-issue reconciliation (open|addressed|transformed) · compacted Setup-to-end-up-with (see compaction.md)
   REVIEW.md       ← generated VIEW of .fleet/review.json (written by fleet review, rewritten in full); reasoning in REVIEW-NARRATIVE.md. Bootstrapped on first review.
+  REVIEW-NARRATIVE.md ← LIVE. Reasoning behind each review round (kind, T0, receive triage tables, stop-rule outcome); template in reviewing-workspace/templates/. Nothing regenerates it.
   investigations/ ← one subfolder per deep dive: <topic>/{analysis,validation,callstack}.md
   evidence/       ← captured proof (NOT /tmp). evidence/INDEX.md maps criterion→artifact→source→regenerate
   plans/ specs/   ← superpowers plan & spec docs (existing convention)
