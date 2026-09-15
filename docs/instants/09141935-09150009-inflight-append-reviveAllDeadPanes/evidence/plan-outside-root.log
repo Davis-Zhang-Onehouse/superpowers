@@ -1,0 +1,1 @@
+fleet-revive: /home/ubuntu is not inside a fleet root: no .fleet-root marker between here and $HOME. cd into the fleet's root directory (the one holding .fleet-root, e.g. /home/ubuntu/davis_root) and run again
