@@ -1,0 +1,25 @@
+# Negative control for the RV-8 exit-status coverage gate
+# captured 2026-09-15 at tip fd6a27f (RV-5 applied, RV-8 gate in the working tree)
+
+## 1. Injection (python, not sed: a sed replacement containing '/' fails silently and the
+##    resulting 'passing' run would prove nothing)
+injected line: [ "$num" != "999" ] || { echo "POLICY RULE-9 reserved"; exit 3; }
+
+## 2. Injection verified present in the file (not a silent no-op)
+11:[ "$num" != "999" ] || { echo "POLICY RULE-9 reserved"; exit 3; }
+
+## 3. Command:  FAST=1 bash .github/tests/cases.sh
+COVERAGE GAP: no case expects exit status 3
+26 passed, 0 failed; exit statuses produced=[0 1 3] covered=[0 1]
+## 4. Exit status: 1
+
+## 5. Restore
+restored; diff against git HEAD (empty = byte-identical):
+(restore verified: no difference)
+grep for the injection after restore:
+0
+0 occurrences (clean)
+
+## 6. Gate green again on the restored checker
+26 passed, 0 failed; exit statuses produced=[0 1] covered=[0 1]
+## 7. Exit status: 0
