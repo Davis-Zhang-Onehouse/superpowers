@@ -94,12 +94,15 @@ round:
 
 - `--finding` is six colon-separated fields: `id:severity:status:location:finding:action`. Repeatable.
 - `severity` ∈ `Critical | Important | Minor | Nit`
-- `status` ∈ `open | applied | wont-fix` — **not** `ADDRESSED`, **not** `FIXED`. Those belong to your
-  issue register's vocabulary and the verbs do not share a domain.
+- `status` ∈ `open | applied | wont-fix | routed` — **not** `ADDRESSED`, **not** `FIXED`. Those belong to
+  your issue register's vocabulary and the verbs do not share a domain. `routed` is for a file the worker
+  does not own; its action names the owner.
 - `--verdict` ∈ `READY | READY-WITH-FIXES | NOT-READY`
 - **There is no `--note`.** Everything you want on the record goes into a finding, which means your
   verification narrative becomes one finding per thing you actually checked.
 - `--dry-run` evaluates the gate and writes nothing. Use it.
+- An `OSCILLATING` advisory on the worker's ledger means its review loop did not converge; read
+  `REVIEW-NARRATIVE.md` for the stop-rule outcome before applying its proposal.
 
 **Write findings about what you re-derived yourself**, not what the worker claimed. The gate is the one
 place a successor sees your independent reading of the work.

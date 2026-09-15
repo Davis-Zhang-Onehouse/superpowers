@@ -102,7 +102,7 @@ Plus three register/reconciliation rules:
   ISSUES.md       ← DURABLE. append-only register; ONE SUB-SECTION PER ISSUE (Symptom/Root cause/Action taken/Status) — not a table
   ASSUMPTIONS.md  ← DURABLE. unverified beliefs: OPEN/VERIFIED/REFUTED/SANCTIONED/DEFERRED
   COMPACTED.md    ← compact instants ONLY. included instants · one stacked PR chain · merged acceptance (all MET) · evidence disposition (regen | carried+why) · lingering-issue reconciliation (open|addressed|transformed) · compacted Setup-to-end-up-with (see compaction.md)
-  REVIEW.md       ← append-only review ledger, written by superpowers:reviewing-workspace (not hand-maintained). One round per review; per finding (RV-<n>): Stage/Severity/Status/Location/Finding/Why/Action-taken/Verified-by; round summary + overall verdict READY|READY-WITH-FIXES|NOT-READY. Bootstrapped on first review.
+  REVIEW.md       ← generated VIEW of .fleet/review.json (written by fleet review, rewritten in full); reasoning in REVIEW-NARRATIVE.md. Bootstrapped on first review.
   investigations/ ← one subfolder per deep dive: <topic>/{analysis,validation,callstack}.md
   evidence/       ← captured proof (NOT /tmp). evidence/INDEX.md maps criterion→artifact→source→regenerate
   plans/ specs/   ← superpowers plan & spec docs (existing convention)
@@ -129,7 +129,9 @@ The charter is the anti-re-paste card. It is organized as the instant's lifecycl
 ## Maintenance Discipline
 
 - **End every session by updating `HANDOFF.md`** — treat it like a commit, the last action before stopping: refresh the one-paragraph "where we are", the next action, the live snapshot, the "Resume here" header, AND **append a row to the session log** (`date | workspace | resume cmd | did what`). A single "Resume:" line loses every session but the latest; the log keeps each one re-attachable.
-- **Transition state by renaming the instant.** When acceptance is met, `mv …-inflight-… …-complete-…` (or `…-abort-…` if dropped). Do it as part of the end-of-session update. The rename is the state transition — don't leave a finished instant labeled `inflight`. **Before the `mv` to `…-complete-…`, you SHOULD run `/review-workspace` (superpowers:reviewing-workspace) as an advisory gate;** completing with an OPEN Critical finding is allowed but must be recorded in `REVIEW.md` as an explicit override.
+- **Transition state by renaming the instant.** When acceptance is met, `mv …-inflight-… …-complete-…` (or `…-abort-…` if dropped). Do it as part of the end-of-session update. The rename is the state transition — don't leave a finished instant labeled `inflight`. **Before the `mv`, run `/review-workspace` (superpowers:reviewing-workspace): one hunt at a frozen tip, findings received through superpowers:receiving-workspace-review, closure rounds by its stop rule. `fleet complete` refuses on NOT-READY or an open blocking finding.**
+  <!-- v2-cite: complete-refuses-not-ready I3 -->
+  <!-- v2-cite: open-blocking-finding-refuses-ready I2 -->
 - **Record both the workspace folder AND the session uuid.** `claude --resume <uuid>` attaches the conversation but does **not** restore the working directory — without the `cd`, a resumed session operates on the wrong tree. (The uuid is the transcript filename under `~/.claude/projects/…`.)
 - **Write the fact to its home, then link.** New PR → a row in the PR/branch-stack table (REQUIRED, even for one PR) in `HANDOFF.md`'s current-state part. Never paste the table twice. **Record every external reference as a full-URL markdown link, never a bare id** — PRs (`[#360](…/pull/360)`), issues, tickets, commits. **Record a CI run *through its PR*:** the CI cell is the PR's checks page `[#N checks](…/pull/N/checks)` (optionally plus the specific `[run <id>](…/actions/runs/<id>)`), so every run is reachable from its PR — not a standalone run URL alone, and never a bare run-id. The stack spans multiple repos, so a bare number is ambiguous *and* not clickable on resume.
 - **A surprise → a sub-section in `ISSUES.md` (or a row in `ASSUMPTIONS.md`) the moment it's spotted**, with a status — even "OPEN, unchecked". Issues are prose, one sub-section each: Symptom / Root cause (link an RCA doc if deep) / Action taken / Status.
@@ -184,7 +186,7 @@ If a reviewer can't answer *delivered / how-built / how-proven / how-to-rerun* f
 
 ## Workspace Review (companion skill)
 
-The companion skill **`superpowers:reviewing-workspace`** (command `/review-workspace`) reviews an instant across format/invariants, charter goal-alignment, and code review of newly-delivered PRs, recording findings + status + action-taken in an append-only `REVIEW.md`. Run it **mid-effort** to catch deviation early, or as an **advisory gate before completing** an instant. It is advisory — it never blocks a completion and never renames the instant.
+The companion skill **`superpowers:reviewing-workspace`** (command `/review-workspace`) reviews an instant across format/invariants, charter goal-alignment, and code review of newly-delivered PRs, recording findings through `fleet review`; findings are received through **`superpowers:receiving-workspace-review`**. Run it as the pre-complete gate (a hunt, then closure rounds), or mid-effort as a separate review.
 
 ## Common Mistakes
 
@@ -216,5 +218,5 @@ The companion skill **`superpowers:reviewing-workspace`** (command `/review-work
 | `evidence/` is an unlabeled pile of logs | `evidence/INDEX.md`: criterion → artifact → source → regenerate. |
 | Spinning up `CAPABILITIES.md`/`MODES.md`/`STATUS.md`/`STATE.md` | Fold into RUNBOOK / `evidence/INDEX.md` / HANDOFF's current-state part. One fact, one home. |
 | How-the-deliverable-was-built narrative written in RUNBOOK (or scattered across INDEX/HANDOFF) | Narrative → **HANDOFF's current-state part** (noted as you dev, distilled into a reviewer guide); RUNBOOK = commands only; the handoff section + `evidence/INDEX.md` link to it. See the Reviewer Contract. |
-| Instant renamed `…-complete-…` with no review round | Run `/review-workspace` (superpowers:reviewing-workspace) as an advisory gate before the rename; record the round in `REVIEW.md`. |
-| Review findings tracked in the session transcript, not `REVIEW.md` | Findings + status + action-taken live in `REVIEW.md` (append-only), so the audit trail survives the session. |
+| Instant renamed `…-complete-…` with no review round | Run `/review-workspace` before the rename; the ledger is `.fleet/review.json`. |
+| Review findings tracked in the session transcript, not the ledger | Every finding goes through `fleet review --finding` into `.fleet/review.json`, so the audit trail survives the session. |
