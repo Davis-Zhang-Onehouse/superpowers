@@ -33,6 +33,8 @@ CHECKLIST
 1. Per finding. Read every finding in [INSTANT_PATH]/.fleet/review.json; an id restated in a later
    round carries only its latest row. A row whose latest status is `routed` or `wont-fix` is not
    yours to close: list it with verdict `NOT MINE — <owner or reason>` and check nothing further.
+   A row whose latest status was recorded by an earlier closure round (its action begins `CLOSED — `)
+   is already closed: list it CLOSED citing that round.
    For every `applied` or `open` row: open its location and read what is there now, then check what
    its action names, yourself, in the tree —
      - a commit sha — `git cat-file -t <sha>` in the repo must print `commit`, and `git show <sha>`
@@ -43,9 +45,11 @@ CHECKLIST
    Then read the same id's row in the `Receive pass [PASS_NUMBER]` triage table in
    [INSTANT_PATH]/REVIEW-NARRATIVE.md. A `closed by` cell that still reads `TBD` is NOT-CLOSED —
    TBD is an unrecorded finding whatever the ledger says; so is a finding with no row at all.
-   An action that names nothing you can check is NOT-CLOSED. A sha that does not resolve is
-   NOT-CLOSED, and your verdict says the id and the sha. Verdict per finding: CLOSED — <what you
-   checked> | NOT-CLOSED — <what is still wrong> | REGRESSED — <see item 2 id> | NOT MINE — <owner>.
+   An action that names nothing you can check is NOT-CLOSED. The triage-table check applies only to
+   findings this receive pass acted on — the ids in the `Receive pass [PASS_NUMBER]` table. A sha
+   that does not resolve is NOT-CLOSED, and your verdict says the id and the sha. Verdict per
+   finding: CLOSED — <what you checked> | NOT-CLOSED — <what is still wrong> |
+   REGRESSED — <see item 2 id> | NOT MINE — <owner>.
 2. The fix delta. `git diff [T_PREV]..[T_NOW]` in each repo. Review ONLY this delta, assuming the
    next member of the defect family named above is in it: a matcher narrowed for one input (what
    else does it now refuse?), a new exit path with no case, a stub kinder than the real tool, a gate

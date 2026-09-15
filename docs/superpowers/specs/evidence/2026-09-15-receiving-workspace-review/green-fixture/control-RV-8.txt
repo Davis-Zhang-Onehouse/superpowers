@@ -1,3 +1,4 @@
+CAPTION — this control names tip fd6a27f, captured before the commit carrying its gate (c9dea81); under the rule added in 206a3f9 it would be NOT-CLOSED and re-run after the commit. Kept as the run's record.
 # Negative control for the RV-8 exit-status coverage gate
 # captured 2026-09-15 at tip fd6a27f (RV-5 applied, RV-8 gate in the working tree)
 

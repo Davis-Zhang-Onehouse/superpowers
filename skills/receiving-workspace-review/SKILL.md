@@ -20,7 +20,8 @@ document survived in three, a proof refreshed in the documents but not in the ar
 (read everything first, verify each finding against the tree, push back with technical reasoning, no
 performative agreement). Two of its rules are replaced here: its implementation order becomes the
 batch order below (blocking-first applies *within* the deliverable class), and a finding you decide
-against is recorded `wont-fix` with its reason through `fleet review --finding`, not argued in chat.
+against is recorded `wont-fix` with its reason through `fleet review --finding`, not argued in chat —
+unless it is not yours to close, then `routed` plus the parked question; see Step 4.
 
 ## Step 0 — triage before touching anything
 
