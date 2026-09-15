@@ -73,6 +73,10 @@ reproducible; RED found RV-12's shape too, independently.
 - **One dispatch, two pass numbers.** The pass-2 verdict came from an extra instruction in the same
   dispatch, not from a second run at `[PASS_NUMBER]`=2. It exercises the reviewer's reading of the
   rule, not a fresh run under it.
+- **Item 2's clause names the planted shape.** `[DEFECT_FAMILY]` and item 2's prompt list both carry
+  "a cardinal re-asserted in prose the sweep had just made derived", which is RV-11's shape exactly.
+  That catch is therefore partly given, not earned; RV-12 and RV-13 are the ones the reviewer found
+  from the delta without a matching clause in front of it.
 - **The fixture's lie is loud.** `0000000` is the easiest possible phantom sha. A closure round facing
   a plausible-looking wrong sha (a real commit that touches a different file) is not tested here;
   item 1's "`git show <sha>` must touch the location" clause is the part that would carry it, and it
