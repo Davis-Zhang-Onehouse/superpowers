@@ -64,20 +64,26 @@ cap), each with `[REVIEW_TIP]` = `T0`:
 - `skills/requesting-code-review/code-reviewer.md` per in-scope PR, filled per `reviewers/README.md`:
   base = merge-base, head = `T0`, description carrying the **defect family**.
 
-Record every finding through `fleet review --scope all` — one call per reviewer at `T0` is fine and
-safer than one 30-finding call, because a session that dies mid-wave then loses one reviewer's
-findings rather than three. Each call carries a `--verdict`: that is what writes the round, and
-`--finding` values handed over without one are recorded nowhere. A finding against a file this
-instant does not own is `routed` with the owner in its action; that is the only use of `routed`.
-Open review questions go to your human partner, recorded as findings, never silently resolved.
+Record every finding through `fleet review`, one call per reviewer at `T0`, each carrying that
+lens's own `--scope` (`format`, `alignment`, `code`) — safer than one 30-finding call, because a
+session that dies mid-wave loses one reviewer's findings rather than three, and the gate reads scope
+coverage as the union across rounds, so the three calls together cover `all` while a one-lens hunt
+stays honestly partial. Each call carries a `--verdict`: that is what writes the round, and
+`--finding` values handed over without one are recorded nowhere. **The verdict is read off that
+round's own findings** — an `open` Critical or Important in it makes it `NOT-READY`; only Minor/Nit
+open makes it `READY-WITH-FIXES`; none open makes it `READY`. A finding against a file this instant
+does not own is `routed` with the owner in its action; that is the only use of `routed`. Open review
+questions go to your human partner, recorded as findings, never silently resolved. The alignment
+lens's register deviations and new issues to track are recorded as findings too, and reach
+`ISSUES.md` through the receive pass's `Noticed along the way` route — nothing is fixed here.
 
-**Stage 2 — receive.** `superpowers:receiving-workspace-review`, pass 1. Its triage table goes in
-the narrative under `Receive pass 1`, one row per finding, and every row's `closed by` cell names a
-sha, a path, `sweep — N sites`, an owner or a reason — a cell still reading `TBD` is an unrecorded
-finding. Its `Noticed along the way` list is written before anything is recorded, and each line of
-it lands in `ISSUES.md` or as a `routed` finding. Claim fixes leave
-`evidence/review/withdrawals-pass<n>.txt` behind for the closure reviewer to grep. The pass ends
-with `fleet review --finding` per finding, written from the tree.
+**Stage 2 — receive.** `superpowers:receiving-workspace-review`, pass *n* (pass 1 receives the hunt;
+a `REOPEN` re-enters as pass 2). Its triage table goes in the narrative under `Receive pass <n>`, one
+row per finding, and every row's `closed by` cell names a sha, a path, `sweep — N sites`, an owner
+or a reason — a cell still reading `TBD` is an unrecorded finding. Its `Noticed along the way` list
+is written before anything is recorded, and each line of it lands in `ISSUES.md` or as a `routed`
+finding. Claim fixes leave `evidence/review/withdrawals-pass<n>.txt` behind for the closure reviewer
+to grep. The pass ends with `fleet review --finding` per finding, written from the tree.
 
 **Stage 3 — closure.** Dispatch `reviewers/closure-reviewer.md` with `[INSTANT_PATH]`,
 `[REPO_PATHS]`, `[T_PREV]` (the tip the findings were raised against), `[T_NOW]`, `[PASS_NUMBER]`,
@@ -94,6 +100,10 @@ table, anything it noticed outside the delta, and one `CLOSURE:` line. Record it
   gave it. `open`, not `routed`: a defect found during closure blocks the gate like any other, and
   the stop rule decides what happens to it. Prefix fix-introduced text with `fix-introduced — ` (an
   em dash; a colon in a finding's text is split by the verb).
+
+The closure round is one `fleet review --scope all` call carrying every restatement and every new
+finding, and its `--verdict` is read off the ledger by the same rule as a hunt's — `NOT-READY` while
+an `open` Critical/Important stands, `READY-WITH-FIXES` with only Minor/Nit open, `READY` with none.
 
 **Stop rule** (counted in receive passes, which you perform and number):
 1. `CLOSURE: CLEAN` → verdict `READY` (`READY-WITH-FIXES` if only Minor/Nit remain). Stage 4.
@@ -112,12 +122,16 @@ The instant is not renamed here.
 
 `fleet complete` runs the review gate: a newest round `NOT-READY`, or any `open` Critical/Important,
 refuses the rename. <!-- v2-cite: open-blocking-finding-refuses-ready I2 -->
+It also refuses until `format`, `alignment` and `code` have all been covered across the ledger's
+rounds, so a hunt that ran one lens cannot complete until the other two have run — and the harvest
+that waits on the rename inherits that. <!-- v2-cite: scope-coverage-is-the-union I4 -->
 `fleet propose --status done` refuses a head no round has seen. `routed`,
 `wont-fix`, Minor and Nit never block. `fleet review` prints advisories, which block nothing; two of
 them are about this loop. `OSCILLATING` — three or more consecutive head-moving epochs (a round joins
-the current epoch while the heads do not move) each raising new Critical/Important findings; the slot
-HEAD is a proxy for the reviewed tip, so read the narrative before acting. `RECEIVE` — a round that
-records blocking findings names the receive skill.
+the current epoch while the heads do not move) each raising a Critical/Important finding first seen
+in that epoch, `CV-` coordinator ids excluded; the slot HEAD is a proxy for the reviewed tip, so read
+the narrative before acting. `RECEIVE` — a round that records blocking findings names the receive
+skill.
 
 ## Ledger discipline
 
@@ -131,7 +145,7 @@ records it `NOT-CLOSED`. No colon inside a finding's text: locations are written
 
 | stage | dispatch | returns | you record |
 |---|---|---|---|
-| 1 hunt | format · alignment · code, one wave at `T0` | findings; per-AC verdicts; per-PR verdicts | every finding, `--scope all`, one call per reviewer |
+| 1 hunt | format · alignment · code, one wave at `T0` | findings; per-AC verdicts; per-PR verdicts | every finding, one call per reviewer under that lens's `--scope` |
 | 2 receive | `superpowers:receiving-workspace-review` | triage table, commits, refreshed proofs, withdrawals | `applied`/`routed`/`wont-fix` from the tree |
 | 3 closure | `reviewers/closure-reviewer.md` | per-finding verdicts, fix-introduced, withdrawal hits, proof shas, `CLOSURE:` line | restatements; new items `open`; the stop rule |
 | 4 close | — | — | verdict, narrative, HANDOFF row |

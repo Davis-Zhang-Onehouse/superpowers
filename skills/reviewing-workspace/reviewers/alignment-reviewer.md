@@ -1,6 +1,6 @@
 # Alignment Reviewer — the hunt's alignment lens
 
-Purpose: **read-only** goal-alignment & evidence-chain verification of a maintain-workspace effort instant, dispatched in one wave with the format and code lenses at the frozen review tip (Stage 1 of `reviewing-workspace`). This reviewer is **analytic-primary** — it reads the charter and the evidence and reasons about whether the chain holds; it does **not** run heavy builds or long test suites. Its output is **advisory**: the orchestrator records the reported gaps as findings through `fleet review --finding`.
+Purpose: **read-only** goal-alignment & evidence-chain verification of a maintain-workspace effort instant, dispatched in one wave with the format and code lenses at the frozen review tip (Stage 1 of `reviewing-workspace`). This reviewer is **analytic-primary** — it reads the charter and the evidence and reasons about whether the chain holds; it does **not** run heavy builds or long test suites. Its output is **reported, never applied by the reviewer** — the orchestrator records the gaps as findings through `fleet review --finding` and the receive pass acts on them.
 
 ## Placeholders
 
@@ -144,8 +144,8 @@ Open review questions (ASK the partner — do not guess):
 New issues to track (each = a proposed ISSUES.md entry; the orchestrator adds it and
 records its disposition):
 - OI-<n> <title> · Symptom: <what/where> · Root cause: <if known, else "unknown">
-  · Suggested action: <…> · Disposition: FIX (close in this review) | DEFER (track,
-  out of scope now) — <one-line why>. Write "none" if the pass surfaced no new issue.
+  · Suggested action: <…> · Disposition: FIX (in the receive pass) | DEFER (track in
+  ISSUES.md) — <one-line why>. Write "none" if the pass surfaced no new issue.
 
 READ-ONLY RULE
 
