@@ -432,5 +432,64 @@ class TestLedger(ReviewCase):
                                           "at": TICKS[0], "findings": []}).heads, {})
 
 
+# --- head epochs and the oscillation streak ---------------------------------------------------------
+
+
+FIXTURES = pathlib.Path(__file__).parent / "fixtures" / "review-ledgers"
+
+
+class LedgerCase(ReviewCase):
+    """A Review over a fixture ledger copied into a fresh instant folder."""
+
+    def from_fixture(self, name: str) -> Review:
+        target = self.other_instant()
+        (target / ".fleet").mkdir()
+        (target / ".fleet" / "review.json").write_text((FIXTURES / f"{name}.json").read_text())
+        return self.review(target)
+
+
+class TestOscillationStreak(LedgerCase):
+    """Head epochs and the trailing streak of epochs that raised a new Critical/Important finding.
+    Calibrated on six real ledgers; the numbers are measurements, not targets."""
+
+    def test_calibration_table(self):
+        expected = {"githubci": (5, 5), "prcompliance": (5, 5), "readerdeps": (1, 1),
+                    "trow": (4, 4), "prstack": (2, 2), "ossstacksplit": (1, 1)}
+        for name, (epochs, streak) in expected.items():
+            rev = self.from_fixture(name)
+            self.assertEqual(len(rev.epochs()), epochs, name)
+            self.assertEqual(rev.oscillation_streak(), streak, name)
+
+    def test_empty_heads_join_the_current_epoch(self):
+        rev = self.review()
+        rev.add_round("all", "NOT-READY", [finding("F1", "Critical")], heads={"r": "aaa"})
+        rev.add_round("all", "NOT-READY", [finding("F2", "Critical")], heads={})
+        rev.add_round("all", "NOT-READY", [finding("F3", "Critical")], heads={"r": "aaa"})
+        self.assertEqual(len(rev.epochs()), 1)
+        self.assertEqual(rev.oscillation_streak(), 1)
+
+    def test_a_coordinator_finding_at_a_new_head_does_not_raise(self):
+        rev = self.review()
+        rev.add_round("all", "NOT-READY", [finding("RV-1", "Critical")], heads={"r": "aaa"})
+        rev.add_round("all", "READY", [finding("CV-1", "Critical", "applied")], heads={"r": "bbb"})
+        self.assertEqual(len(rev.epochs()), 2)
+        self.assertEqual(rev.oscillation_streak(), 0)   # the trailing epoch did not raise
+
+    def test_restated_ids_and_minor_findings_do_not_raise(self):
+        rev = self.review()
+        rev.add_round("all", "NOT-READY", [finding("RV-1", "Important")], heads={"r": "aaa"})
+        rev.add_round("all", "READY", [finding("RV-1", "Important", "applied"),
+                                       finding("RV-2", "Minor")], heads={"r": "bbb"})
+        self.assertEqual(rev.oscillation_streak(), 0)
+
+    def test_streak_counts_only_the_trailing_run(self):
+        rev = self.review()
+        rev.add_round("all", "NOT-READY", [finding("RV-1", "Critical")], heads={"r": "a"})
+        rev.add_round("all", "READY", [finding("RV-1", "Critical", "applied")], heads={"r": "b"})
+        rev.add_round("all", "NOT-READY", [finding("RV-2", "Critical")], heads={"r": "c"})
+        rev.add_round("all", "NOT-READY", [finding("RV-3", "Critical")], heads={"r": "d"})
+        self.assertEqual(rev.oscillation_streak(), 2)
+
+
 if __name__ == "__main__":
     unittest.main()
