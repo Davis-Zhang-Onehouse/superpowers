@@ -1,5 +1,6 @@
 #!/usr/bin/env bash
-# Real record/config paths, including spaces; no model or worker is started.
+# Real record/config paths, including spaces; no model or worker is started. The revive helper is
+# covered by scripts/tests/fleet-revive.sh.
 set -euo pipefail
 REPO="$(cd "$(dirname "$0")/../.." && pwd)"
 export PYTHONPATH="$REPO/fleet/src"
@@ -31,19 +32,7 @@ with tempfile.TemporaryDirectory(prefix='fleet helper ') as directory:
     pool.claim(todo_id=record.todo_id,tmux=record.tmux,base_instant='00000000',child_instant=str(instant),slot='slot')
     Store(home).write(record);write_runtime(home,'codex')
     env=dict(os.environ,FLEET_BIN=str(repo/'bin/fleet'),FLEET_HOME=str(home),FLEET_INSTANTS=str(instant.parent),FLEET_TMUX_SOCKET=record.tmux_socket)
-    helper=['bash',str(repo/'scripts/fleet-revive.sh')]
-    for command in ('plan','transcripts'):
-        result=subprocess.run(helper+[command,record.todo_id],env=env,capture_output=True,text=True)
-        assert result.returncode==0,result.stderr
-        assert ('codex' if command=='plan' else uuid) in result.stdout,result.stdout
-    assert not (instant/'.fleet/revive-launcher.sh').exists()
-    result=subprocess.run(helper+['launcher',record.todo_id,uuid],env=env,capture_output=True,text=True)
-    assert result.returncode==0,result.stderr
-    launcher=(instant/'.fleet/revive-launcher.sh').read_text()
-    argv=shlex.split(launcher.splitlines()[-1])[1:]
-    assert argv[:2]==[str(repo/'bin/fleet'),'revive'],argv
-    assert argv[argv.index('--home')+1]==str(home),argv
-    assert '--last' not in argv
+    # `scripts/fleet-revive.sh` has its own test: scripts/tests/fleet-revive.sh (root-scoped, board-driven).
     result=subprocess.run(['bash',str(repo/'scripts/fleet-dispatch-launcher.sh')],env=env,capture_output=True,text=True)
     assert result.returncode==2
     assert 'dispatch' in result.stderr
@@ -53,5 +42,5 @@ with tempfile.TemporaryDirectory(prefix='fleet helper ') as directory:
     for runtime,expected in [('claude','123'),('codex','')]:
         result=subprocess.run(['bash',str(repo/'scripts/fleet-finished-pids.sh'),'--finished-pids'],env=dict(env,FLEET_BIN=str(fake),TEST_RUNTIME=runtime),capture_output=True,text=True)
         assert result.returncode==0 and result.stdout.strip()==expected,(runtime,result.stdout,result.stderr)
-print('PASS: exact-session helper quotes paths and watchdog exclusions remain Claude-only')
+print('PASS: the dispatch launcher refuses outside a dispatch and watchdog exclusions remain Claude-only')
 PY

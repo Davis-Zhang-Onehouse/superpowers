@@ -1,6 +1,6 @@
 ---
 name: reviving-dead-panes
-description: Use when a dispatched worker's tmux session is gone but its instant is not finished — after a machine reboot, an OOM kill, or a tmux server exit. Triggers include "the board says DEAD", "the board says UNREACHABLE", "all my sessions died after the reboot", "revive the worker", "resume x2 in the right tmux session", "no session is alive", "error connecting to /tmp/tmux-1000".
+description: Use when a dispatched worker's tmux session is gone but its instant is not finished — after a machine reboot, an OOM kill, or a tmux server exit — on a Claude or a Codex fleet. Triggers include "the board says DEAD", "the board says UNREACHABLE", "all my sessions died after the reboot", "revive the worker", "revive every dead pane", "resume x2 in the right tmux session", "no session is alive", "error connecting to /tmp/tmux-1000".
 ---
 
 # Reviving Dead Panes
@@ -22,15 +22,34 @@ pane is out of reach, so there is nothing to revive. Revive `DEAD`. For `UNREACH
 the note; `fleet` follows the record on its own, and the remaining reason to care is that raw `tmux -L`
 commands do not.
 
-Use `fleet revive --id <todo-id> --session-id <uuid>`. It retains the instant and lease, verifies the
-exact transcript's workspace, and starts the recorded runtime with its recorded configuration.
-`fleet resume` only adopts an existing instant; `fleet dispatch` creates a new one. Neither substitutes
-for revival. A failed resume retains the lease and never silently starts a fresh session.
+**Everything mechanical is one script, and it takes no arguments.** `scripts/fleet-revive.sh` reads the
+board of the fleet you are standing in, finds every `DEAD` record, derives every value from the records
+(server, slot, configuration directory, transcript), refuses the whole run on any problem, and calls
+`fleet revive` for each record. You do not name a pane, a server or a transcript. Your job is to stand in
+the right root, decide revive-versus-abort for each record the plan lists, run `plan`, run `revive`, and
+read the panes afterwards.
 
-**Announce at start:** "I'm using the reviving-dead-panes skill to bring the worker's session back."
+**Announce at start:** "I'm using the reviving-dead-panes skill to bring every dead worker's session back."
 
 **REQUIRED BACKGROUND:** superpowers:using-fleet owns the verb surface, the `pane-guard` contract and the
 guarded messaging rule this skill builds on.
+
+## Where you stand decides which fleet
+
+Run the script from **inside the fleet's root directory** — the one holding `.fleet-root`, or any
+directory under it. It walks up to the marker exactly as `fleet` does and refuses (rc 2) when it finds
+none:
+
+> *fleet-revive: /home/ubuntu is not inside a fleet root: no .fleet-root marker between here and $HOME.
+> cd into the fleet's root directory …*
+
+Each root has its own store and its own tmux server (`fleet-<name>`), and a record carries the server it
+was dispatched on; `fleet revive` follows the record, so a fleet whose older records still name another
+server (`fleet`, on this box) revives correctly with no export. Exported `FLEET_HOME`, `FLEET_ROOT`,
+`FLEET_TMUX_SOCKET`, `FLEET_RELEASES` and `FLEET_INSTANTS` are **dropped and reported**, not honoured —
+`fleet` ranks `$FLEET_HOME` above `--root`, so a shell that sourced `fleet-env.sh` in another root would
+otherwise silently revive the wrong fleet. Measured from `/home/ubuntu/davis2_root` with `davis`'s exports
+still set: three `ignoring exported …` lines, then `davis2`'s board.
 
 ## Decide first: revive, or abandon?
 
@@ -38,155 +57,125 @@ guarded messaging rule this skill builds on.
 digraph revive {
     "Board says DEAD" [shape=diamond];
     "Is the milestone still wanted?" [shape=diamond];
-    "Revive the pane" [shape=box];
-    "fleet abort --reason" [shape=box];
+    "fleet-revive.sh revive (all of them)" [shape=box];
+    "fleet abort --reason (that one)" [shape=box];
 
     "Board says DEAD" -> "Is the milestone still wanted?";
-    "Is the milestone still wanted?" -> "Revive the pane" [label="yes"];
-    "Is the milestone still wanted?" -> "fleet abort --reason" [label="no"];
+    "Is the milestone still wanted?" -> "fleet-revive.sh revive (all of them)" [label="yes"];
+    "Is the milestone still wanted?" -> "fleet abort --reason (that one)" [label="no"];
 }
 ```
 
-Read the instant's `HANDOFF.md` and its `.fleet/` before choosing. A worker that already recorded an
-`abort.json` whose rename never completed is **not** a revival candidate — finish the abort instead;
-re-running `fleet abort` over an already-recorded reason completes the rename, the pane close and the
-lease release in one call.
+`plan` lists every `DEAD` record. Read each instant's `HANDOFF.md` and `.fleet/` before reviving. A
+worker that already recorded an `abort.json` whose rename never completed is **not** a revival candidate
+and the script refuses it — finish the abort instead; re-running `fleet abort` over an already-recorded
+reason completes the rename, the pane close and the lease release in one call. Abort what you do not
+want *first*, then revive: the script revives all or nothing.
 
 ## The procedure
 
-`scripts/fleet-revive.sh` derives every value below from the record and writes the launcher. Use it, and
-read this section to know what it is doing and why each value is where it is:
-
 ```bash
-bash scripts/fleet-revive.sh plan        <todo-id>   # every derived value, before anything is created
-bash scripts/fleet-revive.sh transcripts <todo-id>   # verified workspace candidates — see trap 1
-bash scripts/fleet-revive.sh launcher    <todo-id> <transcript-id>
-bash scripts/fleet-revive.sh start       <todo-id>
+cd /home/ubuntu/<name>_root                                       # or any directory inside it
+bash "$FLEET_RELEASES/current/scripts/fleet-revive.sh" plan       # read-only: every value, every refusal
+bash "$FLEET_RELEASES/current/scripts/fleet-revive.sh" revive     # the same pre-flight, then every start
 ```
 
-The direct form is:
+(`$FLEET_RELEASES` is set by `scripts/fleet-env.sh`; the checkout's `scripts/fleet-revive.sh` is the same
+script.) `plan` prints, per record: runtime against the fleet selection, session and server, instant, slot,
+configuration directory and where it came from, and the transcript UUID with its start time. Then either
+`plan only: N record(s) would be revived` or `refusing: N problem(s), nothing started` with each problem
+named. `revive` runs the identical pre-flight plus `fleet revive --dry-run` for every record, and only then
+starts them, one after another, printing `pane-guard` for each and the board at the end.
 
-```bash
-fleet revive --id "$ID" --session-id "$SESSION_ID" --dry-run
-fleet revive --id "$ID" --session-id "$SESSION_ID"
-```
+| Refusal | What it means | What to do |
+|---|---|---|
+| *the record ran on codex and the fleet is set to claude* (or the reverse) | The fleet selection changed under open work; `fleet revive` refuses this too | `fleet runtime` shows the selection. Set it back with `fleet runtime --set <recorded>`, or harvest the record. Never revive across runtimes |
+| *an abort is recorded in …/.fleet/abort.json* | The worker chose to stop and the rename never completed | `fleet abort --id <id> --reason …` finishes it; then re-run |
+| *no transcript under … has cwd … and this record's seed as its first message* | The seed never reached a session, or the configuration directory is not the one the worker ran under | Inspect the slot's project directory yourself; `fleet revive --id <id> --session-id <uuid>` is the hand path |
+| *no lease in this store is held by <id>* | The lease was released; the work is not revivable in place | Dispatch again, or resume the instant with `fleet resume` |
+| *fleet revive --dry-run refused: …* | The verb's own check: pane occupied, a live agent in the workspace, executable unavailable | Read the reason; inspect the pane or workspace it names before retrying |
 
-The runtime must match the fleet selection. The original lease must still be held, and both the pane
-and workspace must be unoccupied. The launcher exports the record's socket, instant, store and resolved
-configuration explicitly. Legacy records without executable/configuration metadata use the workspace
-owner resolver and say so visibly. A failed configuration or transcript check does not guess a fallback.
-The helper's generated launcher calls `fleet revive` at actual start, so the same locks and checks apply.
+Both runtimes are handled the same way: a Claude record resumes with `claude --resume <uuid>`, a Codex
+record with `codex resume <uuid>`, each under its recorded executable and configuration directory. A
+legacy Claude record (no recorded configuration) resolves the slot's owner through
+`scripts/claude-config-dir.sh` and says so.
 
-### 1. Revive by transcript id, not `--continue`
+### How the transcript is chosen, so you can check it
 
-A slot is re-leased across efforts, so the newest transcript in the slot's project directory is not
-reliably the worker you are reviving. One slot here held three, from three occupants weeks apart.
+A record carries no session UUID, and a slot is re-leased across efforts, so the newest transcript in the
+slot's project directory is **not** reliably the worker you are reviving — one slot here held three, from
+three occupants weeks apart. What is identity: the worker's **first user message is the record's
+`.fleet/seed.txt` verbatim**, and the seed embeds the instant path with its dispatch timestamp. The script
+takes the transcript under the recorded configuration whose metadata cwd is the lease path and whose first
+user message carries that seed; a `subagents/` file is never a candidate. When several transcripts carry
+one seed (a resume that forked, a re-brief), it chooses the **latest-started** and prints all of them —
+read that list. Measured on the live fleet: for the worker in `ws1` the rule returns exactly the transcript
+that started one second after its dispatch, and nothing from the two earlier occupants of the slot.
 
-```bash
-bash scripts/fleet-revive.sh transcripts <todo-id>    # runtime and workspace candidates, derived
-```
+### Traps that survive the automation
 
-Inspect the candidate transcript and choose the UUID belonging to this worker; mtime alone is not identity. Pass it to `--session-id` explicitly. The script lists and
-refuses to choose, because that judgement is the only part of this step that is not mechanical.
+**1. A resumed session may open a MENU, and `pane-guard` reads that menu as unsubmitted text.** Past a
+size threshold the TUI asks how to resume — *Resume from summary / Resume full session as-is / Don't ask
+me again* — before it is ready for input. Measured on a 435k-token session: **twelve consecutive
+`pane-guard` polls, five seconds apart, all returned `10 queued-text`** while the pane was showing that
+menu (with the dialog rows now measured it may read `15 awaiting-operator` instead). `10` there does
+**not** mean a human left something in the box. **Read the pane before you believe the code**, and **do
+not submit a menu as if it were a message draft** — `fleet send` requires an observed idle input before
+insertion and the exact message afterward.
 
-### 2. A resumed session opens a MENU, and `pane-guard` reads that menu as unsubmitted text
+**2. `capture-pane -t "=$SESSION"` fails on a session that EXISTS.** A pane target parses as
+`session:window.pane`, and `=name` alone is not a session part (measured on tmux 3.2a: `=dt-x` → *can't
+find pane*; `=dt-x:` → rc 0). Use `FLEET_TMUX_SOCKET="$SOCKET" fleet_peek "$SESSION"` with the **record's**
+socket in front of it — `fleet_peek` reads the socket from the environment, which is the shell's server and
+not necessarily the record's. `plan` prints the record's server on its `session` line.
 
-`fleet revive` always passes the explicit session id, so this menu is reached only by a hand-typed
-`--resume` with no id; it is kept because that is exactly what a rushed operator types.
+**3. Check with `--id`, not `--pane`.** A bare session name carries no address, so `pane-guard --pane`
+asks whichever server the shell points at and answers `13 unknown-pane` about a pane that is alive on
+another one. `--id` has the record and follows it.
 
-Past a size threshold the TUI asks how to resume — *Resume from summary / Resume full session as-is /
-Don't ask me again* — before it is ready for input. Measured on a 435k-token session: **twelve
-consecutive `pane-guard` polls, five seconds apart, all returned `10 queued-text`** while the pane was
-showing that menu. (Measured before the dialog rows landed; if the menu draws a hint row it may now read
-`15 awaiting-operator` instead — either way it is not a human's draft, and the advice below stands.)
-
-`10` there does **not** mean a human left something in the box. Two consequences:
-
-- **Read the pane before you believe the code.** `10` is not evidence of a boot that finished.
-- **Do not submit a menu as if it were a message draft.** `fleet send` requires an observed idle
-  input before insertion and the exact message afterward. Inspect and resolve a real resume menu first.
-
-### 3. `capture-pane -t "=$SESSION"` fails on a session that EXISTS
-
-A pane target parses as `session:window.pane`, and `=name` alone is not a session part. Measured on tmux
-3.2a against one live session:
-
-| target | result |
-|---|---|
-| `dt-x2ansilinearstack` | rc 0 |
-| `=dt-x2ansilinearstack` | rc 1 — **can't find pane** |
-| `=dt-x2ansilinearstack:` | rc 0 |
-
-`session.exact_pane_target` appends the colon for exactly this reason and guarded messaging inherits
-it. An operator typing `capture-pane` by hand reaches for `=name`, gets *can't find pane*, and concludes
-the revival failed when it did not.
-
-**Use `FLEET_TMUX_SOCKET="$SOCKET" fleet_peek "$SESSION"`** — the helper in `scripts/fleet-env.sh` gets
-the target right, but it reads the socket from the ENVIRONMENT, which is the shell's server and not
-necessarily the record's. Measured: a shell carrying `FLEET_TMUX_SOCKET=fleet-davis` ran `fleet_peek`
-against a worker whose record named another server and got *"error connecting to …/fleet-davis"*. Pass
-the record's socket in front of it, every time; a bare `fleet_peek` is right only when the two happen to
-agree, which is exactly the assumption this skill exists to break.
-
-### 4. Revive on the server the RECORD names, or the board keeps looking at the old one
-
-A record carries `tmux_socket`, and every verb resolves the session through it — so a pane revived on a
-*different* server than the record names is invisible to `board`, `status`, `close` and `abort`, however
-healthy it is. This is the one trap that did not exist before per-root isolation, and it is created by the
-thing that fixed the others.
-
-`fleet revive` uses the recorded server automatically. Do not manually start a second pane on another
-server or re-point the record to hide a failed revival. Inspect `fleet status --id "$ID" --porcelain`.
-
-## Never send a navigation key on spec
-
-Capture the pane and confirm the menu is actually on screen before sending `Down`, `Up` or `Enter`. A
-`Down` sent after the menu had already resolved landed in the input box instead and opened the
-slash-command completer on **`/compact`** — one `Enter` away from compacting the very session being
-revived. `Escape` clears it.
-
-The general rule: a keystroke aimed at a widget that is not there does not vanish, it hits whatever is.
+**4. Never send a navigation key on spec.** Capture the pane and confirm the menu is actually on screen
+before sending `Down`, `Up` or `Enter`. A `Down` sent after the menu had already resolved landed in the
+input box instead and opened the slash-command completer on **`/compact`** — one `Enter` away from
+compacting the very session being revived. `Escape` clears it. A keystroke aimed at a widget that is not
+there does not vanish, it hits whatever is.
 
 ## Verify, and write nothing
 
-Liveness is **derived**, so the board corrects itself once the process is up — no verb is needed and none
-should be run:
+Liveness is **derived**, so the board corrects itself once each process is up — no verb is needed and none
+should be run. The script already prints `pane-guard --id` per record and the board; re-check later with:
 
 ```bash
 fleet pane-guard --id "$ID"           # 0 = safe; --id resolves the pane on the record's OWN server
 fleet board                           # DEAD → the declared phase, by itself
 ```
 
-**Check with `--id`, not `--pane`.** A bare session name carries no address, so `--pane` asks whichever
-server the shell points at and answers `13 unknown-pane` — *this pane does not exist* — about a pane that
-is alive on another one. `--id` has the record and follows it.
-
 Measured: a worker went `DEAD` → `AWAITING-CI` with no fleet command run against it. If you find yourself
 reaching for `fleet resume` to "re-register" a revived pane, stop — the record never stopped being
-correct. Check the board first.
+correct. A start that fails leaves the lease held and the record `DEAD`; the script exits 1 naming it, and
+re-running `revive` after you have inspected the pane picks up exactly what is still `DEAD`.
 
 ## Common mistakes
 
 | Mistake | Reality |
 |---|---|
-| `fleet resume` to bring a pane back | It adopts a record and starts no process. Use `fleet revive` to start the recorded session. |
-| `fleet dispatch` to "re-run" the worker | Mints a NEW instant and lease; abandons the transcript. That is replacement. |
-| Reading `DEAD` as "the work failed" | It means no session is alive. The folder, `.fleet/` and transcript are intact. |
-| Bare `claude` in `new-session` | `sh -c` misses the shell function, so `CLAUDE_CONFIG_DIR` is wrong and `--resume` finds nothing. |
-| `claude --continue` | Picks the newest transcript in the cwd, which may belong to a previous occupant of the slot. |
-| Trusting `pane-guard 10` during boot | The resume menu reads as queued text. Capture the pane. |
-| `capture-pane -t "=$SESSION"` | Not a pane target. Use `=$SESSION:`, or `fleet_peek`. |
-| `SOCKET=fleet`, or any literal server | Every root has its own (`fleet-<name>`). Read `evidence.tmux_socket` from the record. |
-| Taking the server from `fleet leases` | It has no socket column — `slot, lease, todo_id, owner, tmux, claimed_at, path`. Only `status --porcelain` carries it. |
-| Reviving on a server the record does not name | Every verb resolves through the record. The pane runs and the board cannot see it. |
-| `pane-guard --pane` to check a revived pane | Asks the ambient server and answers `13` about a live pane elsewhere. Use `--id`. |
-| `FLEET_HOME=$HOME/.fleet` in the launcher | The pre-isolation path. Export `FLEET_ROOT` and let the marker supply the rest. |
-| Sending `Down`/`Enter` blind | Lands in the input box if the menu is gone; `/compact` is one Enter away. |
+| Running the script from `~` or from another root's directory | It refuses: the root is the working directory's. `cd` into the fleet's root first |
+| Exporting `FLEET_HOME` or `FLEET_TMUX_SOCKET` to point it at a fleet | Dropped and reported. The directory is the only way to choose a fleet |
+| Passing a todo-id, a session or a transcript to the script | It takes none: `plan` or `revive`, and every value is derived |
+| Reviving after `fleet runtime --set` moved the fleet to the other runtime | Refused for the whole run. Set the runtime back to what the records ran on |
+| `fleet resume` to bring a pane back | It adopts a record and starts no process. `fleet revive` (which the script calls) starts the recorded session |
+| `fleet dispatch` to "re-run" the worker | Mints a NEW instant and lease; abandons the transcript. That is replacement |
+| Reading `DEAD` as "the work failed" | It means no session is alive. The folder, `.fleet/` and transcript are intact |
+| `claude --continue` by hand | Picks the newest transcript in the cwd, which may belong to a previous occupant of the slot |
+| Trusting `pane-guard 10` during boot | The resume menu reads as queued text. Capture the pane |
+| `capture-pane -t "=$SESSION"` | Not a pane target. Use `=$SESSION:`, or `fleet_peek` with the record's socket |
+| `pane-guard --pane` to check a revived pane | Asks the ambient server and answers `13` about a live pane elsewhere. Use `--id` |
+| Sending `Down`/`Enter` blind | Lands in the input box if the menu is gone; `/compact` is one Enter away |
 
 ## Related tools
 
-- `scripts/fleet-revive.sh` — `plan` / `transcripts` / `launcher` / `start`. Every value derived from the
-  record; it creates only the launcher and the session, and it never sends a key.
+- `scripts/fleet-revive.sh` — `plan` / `revive`, from inside a fleet root. Every value derived from the
+  board and the records; it starts nothing on a problem and never sends a key. Its test is
+  `scripts/tests/fleet-revive.sh`.
 - `fleet_peek`, `fleet_attach` in `scripts/fleet-env.sh` — the pane target and the `-L` flag, correct.
 
 ## Related skills
