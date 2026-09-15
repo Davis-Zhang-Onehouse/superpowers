@@ -1,0 +1,16 @@
+OK: /home/ubuntu/davis_root/fleet-releases/current -> /home/ubuntu/davis_root/fleet-releases/fleet-v0.6.1 (ends in fleet-v0.6.1)
+OK: 2 root(s) under /home/ubuntu share this release area: /home/ubuntu/davis2_root /home/ubuntu/davis_root
+OK: /home/ubuntu/davis2_root/fleet-releases/current -> /home/ubuntu/davis_root/fleet-releases/fleet-v0.6.1 matches /home/ubuntu/davis_root/fleet-releases/fleet-v0.6.1
+OK: /home/ubuntu/davis2_root/.claude/settings.json marketplace path /home/ubuntu/davis_root/fleet-releases/current -> /home/ubuntu/davis_root/fleet-releases/fleet-v0.6.1 matches /home/ubuntu/davis_root/fleet-releases/fleet-v0.6.1
+OK: /home/ubuntu/davis_root/fleet-releases/current -> /home/ubuntu/davis_root/fleet-releases/fleet-v0.6.1 matches /home/ubuntu/davis_root/fleet-releases/fleet-v0.6.1
+OK: /home/ubuntu/davis_root/.claude/settings.json marketplace path /home/ubuntu/davis_root/fleet-releases/current -> /home/ubuntu/davis_root/fleet-releases/fleet-v0.6.1 matches /home/ubuntu/davis_root/fleet-releases/fleet-v0.6.1
+OK: package.json#version = 6.3.0+fleet.0.6.1 (carries +fleet.0.6.1)
+OK: .hermes-plugin/plugin.yaml#version = 6.3.0+fleet.0.6.1 (carries +fleet.0.6.1)
+OK: .claude-plugin/plugin.json#version = 6.3.0+fleet.0.6.1 (carries +fleet.0.6.1)
+OK: .cursor-plugin/plugin.json#version = 6.3.0+fleet.0.6.1 (carries +fleet.0.6.1)
+OK: .codex-plugin/plugin.json#version = 6.3.0+fleet.0.6.1 (carries +fleet.0.6.1)
+OK: .devin-plugin/plugin.json#version = 6.3.0+fleet.0.6.1 (carries +fleet.0.6.1)
+OK: .kimi-plugin/plugin.json#version = 6.3.0+fleet.0.6.1 (carries +fleet.0.6.1)
+OK: .claude-plugin/marketplace.json#plugins.0.version = 6.3.0+fleet.0.6.1 (carries +fleet.0.6.1)
+OK: gemini-extension.json#version = 6.3.0+fleet.0.6.1 (carries +fleet.0.6.1)
+OK: /home/ubuntu/davis_root/fleet-releases/current/.release/evidence/VERDICT.tsv verdict is GREEN

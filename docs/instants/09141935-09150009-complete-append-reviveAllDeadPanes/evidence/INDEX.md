@@ -12,6 +12,10 @@ Updated: 2026-09-15
 | 7 | AC-4 | `test-fleet-runtime-helpers.log` | the sibling helper test still passes after dropping the removed subcommands | `bash scripts/tests/fleet-runtime-helpers.sh` |
 
 | 8 | AC-1..3 | `../REVIEW.md` | review round 1: 2 Critical + 5 Important + 7 Minor, all applied or dispositioned; fixes in 96a29bb. Round 2 (verification): all seven round-1 findings confirmed fixed; 1 Important residual + 5 minor applied in c88cf04, 1 routed | reviewer subagents, 2026-09-15 |
+| 9 | AC-4 | `release-0.6.1/VERDICT.tsv`, `gate.log` | standard-roster gate GREEN for 0.6.1: hermetic exit 0, IT exit 0, 0 FAIL rows | `scripts/release-gate.sh 0.6.1` @ f85dee3, 00:48–01:27 UTC |
+| 10 | AC-4 | `release-0.6.1/hermetic-tail.txt`, `it-tallies.txt`, `it-fail-rows.txt` | 1,903 tests OK; PASS 335 / SKIP 11 / 0 FAIL | same run |
+| 11 | AC-4 | `release-0.6.1/postflight.log`, `release-status.tsv` | both roots on fleet-v0.6.1, every manifest carries +fleet.0.6.1, deployed evidence GREEN | `scripts/release-postflight.sh 0.6.1`; `fleet release-status --porcelain` |
+| 12 | AC-4 | `release-0.6.1/deployed-plan-davis_root.log` | the deployed script, from the live root, resolves the deployed binary and reports nothing DEAD | `cd /home/ubuntu/davis_root && bash fleet-releases/current/scripts/fleet-revive.sh plan` |
 
 ## How to regenerate each artifact
 - `test-*.log`: the commands in RUNBOOK § Test.

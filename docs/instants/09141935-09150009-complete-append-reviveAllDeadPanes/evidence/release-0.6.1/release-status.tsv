@@ -1,0 +1,7 @@
+current	0.6.1
+state	RELEASED
+payload	skills (1), scripts (3), docs (80)
+skills	reviving-dead-panes
+since	2026-09-15T01:27:51Z
+by	davis@onehouse.ai
+reason	reviving-dead-panes: root-scoped, board-driven scripts/fleet-revive.sh plan|revive revives every DEAD record on either runtime with the transcript derived from the seed; two review rounds; standard gate GREEN (1903 hermetic, 335 IT PASS, 0 FAIL)

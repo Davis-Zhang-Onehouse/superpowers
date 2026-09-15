@@ -17,7 +17,7 @@ bash "$FLEET_RELEASES/current/scripts/fleet-revive.sh" revive   # revive every D
 reviving-dead-panes: scripts/fleet-revive.sh plan|revive runs from inside a fleet root, reads that root's board, and revives every DEAD record on either runtime — server, slot, configuration and transcript derived from the records (the transcript is the one carrying the record's seed), the whole run refused when a record's runtime differs from the fleet selection, when an abort is recorded, or when no transcript matches; the skill follows the script.
 ```
 
-## Release chain (patch; standard gate, no --full — the partner exempted a revive-only change)
+## Release chain (patch; standard gate, no --full — the partner exempted a revive-only change) — run 2026-09-15 as written; cut f85dee3, gate 00:48–01:27 UTC GREEN, deployed ~01:30 UTC
 ```bash
 cd /home/ubuntu/davis_root/superpowers && . scripts/fleet-env.sh
 REPO=/home/ubuntu/davis_root/superpowers; FLEET=$REPO/bin/fleet
