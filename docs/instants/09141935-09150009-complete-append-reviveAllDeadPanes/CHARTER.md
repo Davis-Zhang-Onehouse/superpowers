@@ -1,5 +1,5 @@
 # Revive all dead panes, on either runtime, from the fleet root — CHARTER   (durable; edit deliberately)
-Instant: 09141935-09150009-inflight-append-reviveAllDeadPanes
+Instant: 09141935-09150009-complete-append-reviveAllDeadPanes
 Updated: 2026-09-15 by session 53ee129f-4b4a-4005-bdb6-dfab263001b1 | Status: DURABLE
 
 ## Goal (e2e)
@@ -47,12 +47,12 @@ runtime differs from a record's runtime, and revives them all — then a release
 - Self-review: MET — #5: ws1 → `d0db599f`, ws3 → `3ffd9dc2` (one match each among 83 main transcripts); Codex: rollouts `01a0916d` (prompt behind `<recommended_plugins>`) and `01a0917b` (behind an AGENTS.md preamble) matched by their real prompts, a control prompt matched nothing. Round 1 found and fixed the first rule's Codex blind spot (OI-1) and its prefix cliff (OI-2).
 
 ### AC-4 Skill and docs match the script; released
-- [ ] Statement: `skills/reviving-dead-panes/SKILL.md` tells the operator to run the script from the root and to read its output, keeps the measured traps that still apply, and names no removed subcommand; `docs/README.fleet-runtimes.md` agrees; a patch release is cut, verified by the standard gate, promoted, deployed, postflight OK.
+- [x] Statement: `skills/reviving-dead-panes/SKILL.md` tells the operator to run the script from the root and to read its output, keeps the measured traps that still apply, and names no removed subcommand; `docs/README.fleet-runtimes.md` agrees; a patch release is cut, verified by the standard gate, promoted, deployed, postflight OK.
 - Proof: `grep` of removed names returns nothing outside history; `fleet-releases/current` → the new version; `evidence/release-<v>/`.
-- Self-review: —
+- Self-review: MET — fleet 0.6.1 cut (f85dee3, tag fleet/v0.6.1), standard-roster gate GREEN in 39 min (1,903 hermetic OK; IT 335 PASS / 11 SKIP / 0 FAIL, no FAIL row in any per-runner closeout), promoted, deployed 2026-09-15 (`current → fleet-v0.6.1`), postflight OK on both roots; the deployed script run from `/home/ubuntu/davis_root` resolves the deployed binary (evidence #9-#12). The removed subcommand names survive only in the historical plan/spec/backlog prose.
 
 ## Setup to end up with (the handoff)
-- Deliverables: commits on `live`; fleet vX.Y.Z deployed; the instant renamed complete.
+- Deliverables: `live` commits 6609648, 96a29bb, c88cf04, ce7a866, f85dee3 (fleet v0.6.1); `fleet-releases/current → fleet-v0.6.1`; this instant renamed complete.
 - Reproducible stack: RUNBOOK.md (test, lint, manual plan, release chain).
 
 ## Standing constraints / rules
