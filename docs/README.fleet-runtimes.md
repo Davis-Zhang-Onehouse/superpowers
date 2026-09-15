@@ -76,8 +76,10 @@ is supported for the captured layouts; large or unfamiliar editor layouts can be
 `revive` requires the original lease and an unoccupied pane/workspace. It validates the explicit UUID
 against a transcript in the recorded configuration and the original workspace. It never selects the
 newest transcript or starts fresh as a fallback. Revival verifies the exact native resume argument;
-`seed-check` may still be unverifiable for a resumed session. `scripts/fleet-revive.sh` retains its `plan`,
-`transcripts`, `launcher`, and `start` entry points. `fleet resume` still means adoption.
+`seed-check` may still be unverifiable for a resumed session. `scripts/fleet-revive.sh plan|revive`, run from
+inside a fleet root, finds every `DEAD` record on that root's board, derives the transcript from the record's
+seed, refuses the whole run when a record's runtime differs from the fleet selection, and calls `fleet revive`
+for each (see `skills/reviving-dead-panes`). `fleet resume` still means adoption.
 
 Codex has no verified background CI wake mechanism in this integration. `awaiting-ci` is refused even
 with a watcher attestation, and that worker continues to consume capacity. Claude's watcher contract
