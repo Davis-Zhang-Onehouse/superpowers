@@ -7,8 +7,8 @@
 #
 # `superpowers:reviving-dead-panes` owns the JUDGEMENT — revive or abort, whether a resume menu is really on
 # screen, whether to send a key at all. This owns everything that is derivation: which root, which server,
-# which slot, which configuration directory, which transcript. Nothing is typed by an operator and nothing is
-# read from the environment.
+# which slot, which configuration directory, which transcript. Nothing is typed by an operator, and the only
+# environment value read is `FLEET_BIN` (which binary acts; printed on the first line).
 #
 # THE ROOT IS THE WORKING DIRECTORY'S. The marker walk is the same one `fleet` and `fleet-env.sh` perform,
 # and it stops below $HOME for the same reason. A directory outside every root is refused: there is no fleet
@@ -20,8 +20,10 @@
 # project directory holds every past occupant's transcripts, so mtime is not identity (three occupants of
 # one slot were measured weeks apart). What IS identity: the worker's first user message is the record's
 # `.fleet/seed.txt` verbatim, and the seed embeds the instant path with its dispatch timestamp. The transcript
-# whose metadata cwd is the lease path and whose first user message carries the seed is the worker's; a
-# `subagents/` file is never a candidate; several matches choose the latest-started and print all of them.
+# whose metadata cwd is the lease path and whose first user messages (the first five, because both CLIs inject
+# user-role blocks — a caveat row, `<recommended_plugins>`, an AGENTS.md preamble — ahead of the prompt) carry
+# the WHOLE seed is the worker's; a `subagents/` file is never a candidate; several matches choose the one
+# last written to and print all of them; two records resolving to one transcript refuse the run.
 #
 # ANY PRE-FLIGHT PROBLEM REFUSES THE WHOLE RUN (rc 2, nothing started): a record on the other runtime, a
 # recorded abort, a seed no transcript received, or a `fleet revive --dry-run` refusal. `fleet revive` is the
@@ -51,6 +53,7 @@ resolve_root() {
   local d home
   d="$(pwd -P)"
   home="$(cd "${HOME:-/nonexistent}" 2>/dev/null && pwd -P)" || home=/nonexistent
+  case "$d/" in "$home"/*) ;; *) die "$d is not under \$HOME ($home), so no fleet root can hold it: fleet's marker walk only looks under \$HOME" ;; esac
   while [ -n "$d" ] && [ "$d" != "/" ] && [ "$d" != "$home" ]; do
     if [ -f "$d/.fleet-root" ]; then ROOT="$d"; break; fi
     d="$(dirname "$d")"
@@ -133,22 +136,27 @@ derive() {
   SEED="$INSTANT/.fleet/seed.txt"
   [ -s "$SEED" ] || { problem "$id" "no seed at $SEED, so no transcript can be matched; revive by hand with \`fleet revive --id $id --session-id <uuid>\`"; return; }
 
-  if ! MATCHES="$(python3 - "$RT" "$CONFIG_DIR" "$SLOT" "$SEED" <<'PY_MATCH'
+  local merr rc
+  merr="$(mktemp)"
+  MATCHES="$(python3 - "$RT" "$CONFIG_DIR" "$SLOT" "$SEED" 2>"$merr" <<'PY_MATCH'
+import datetime
 import json
 import sys
 from pathlib import Path
 
 runtime, config, slot, seed_path = sys.argv[1:]
-slot = Path(slot).resolve()
+
+#: How many user-role blocks are inspected before a transcript is ruled out. Both CLIs put user-role
+#: blocks ahead of the prompt: Claude a `<local-command-caveat>` meta row, Codex `<environment_context>`,
+#: `<recommended_plugins>` and an `# AGENTS.md instructions` preamble (measured: 4 of 6 rollouts on this
+#: box open with one of those). Five covers every measured shape with room to spare.
+USER_BLOCKS = 5
+#: Rows read before a file is given up on; the first user blocks sit within the first few dozen rows.
+ROW_CAP = 4000
 
 
 def squash(text):
     return " ".join(str(text or "").split())
-
-
-seed = squash(Path(seed_path).read_text(errors="replace"))[:200]
-if not seed:
-    sys.exit(1)
 
 
 def text_of(content):
@@ -163,7 +171,7 @@ def text_of(content):
 def rows(path):
     with path.open(errors="replace") as handle:
         for index, line in enumerate(handle):
-            if index > 4000:
+            if index > ROW_CAP:
                 return
             try:
                 row = json.loads(line)
@@ -174,81 +182,101 @@ def rows(path):
 
 
 def claude_meta(path):
-    sid = cwd = first = started = None
+    sid = cwd = None
+    users = []
     for row in rows(path):
         sid = sid or row.get("sessionId")
         cwd = cwd or row.get("cwd")
-        started = started or row.get("timestamp")
         if row.get("type") == "user":
-            first = text_of((row.get("message") or {}).get("content"))
-            break
-    return sid, cwd, started, first
+            users.append(text_of((row.get("message") or {}).get("content")))
+            if len(users) >= USER_BLOCKS:
+                break
+    return sid, cwd, users
 
 
 def codex_meta(path):
-    sid = cwd = first = started = None
+    sid = cwd = None
+    users = []
     for row in rows(path):
         payload = row.get("payload") or {}
         kind = row.get("type")
         if kind == "session_meta":
             sid, cwd = payload.get("id"), payload.get("cwd")
-            started = payload.get("timestamp") or row.get("timestamp")
         elif kind == "event_msg" and payload.get("type") == "user_message":
-            first = payload.get("message", "")
-            break
+            users.append(str(payload.get("message", "")))
         elif kind == "response_item" and payload.get("type") == "message" and payload.get("role") == "user":
-            text = text_of(payload.get("content"))
-            if squash(text).startswith("<environment_context>"):
-                continue
-            first = text
+            users.append(text_of(payload.get("content")))
+        if len(users) >= USER_BLOCKS:
             break
-    return sid, cwd, started, first
+    return sid, cwd, users
 
 
-if runtime == "codex":
-    files = Path(config, "sessions").rglob("rollout-*.jsonl")
-    meta = codex_meta
-else:
-    files = (p for p in Path(config, "projects").rglob("*.jsonl") if "subagents" not in p.parts)
-    meta = claude_meta
-
-matches = []
-for path in files:
-    try:
-        sid, cwd, started, first = meta(path)
-    except OSError:
-        continue
-    if not sid or not cwd or first is None:
-        continue
-    try:
-        if Path(cwd).resolve() != slot:
+try:
+    slot = Path(slot).resolve()
+    #: The WHOLE seed. A prefix stops being an identity the moment the instant path (with its dispatch
+    #: timestamp) falls outside it — measured at 28 characters of margin on one profile — after which
+    #: every worker of an effort dispatched into this slot compares equal.
+    seed = squash(Path(seed_path).read_text(errors="replace"))
+    if not seed:
+        print("empty seed", file=sys.stderr)
+        sys.exit(3)
+    if runtime == "codex":
+        files = list(Path(config, "sessions").rglob("rollout-*.jsonl"))
+        meta = codex_meta
+    else:
+        files = [p for p in Path(config, "projects").rglob("*.jsonl") if "subagents" not in p.parts]
+        meta = claude_meta
+    matches = []
+    for path in files:
+        try:
+            sid, cwd, users = meta(path)
+            written = path.stat().st_mtime
+        except OSError as exc:
+            print(f"cannot read {path}: {exc}", file=sys.stderr)
+            sys.exit(3)
+        if not sid or not cwd or not users:
             continue
-    except OSError:
-        continue
-    if seed in squash(first):
-        matches.append((started or "", sid, str(path)))
-for started, sid, path in sorted(matches):
-    print(started, sid, path, sep="\t")
+        try:
+            if Path(cwd).resolve() != slot:
+                continue
+        except OSError:
+            continue
+        if any(seed in squash(text) for text in users):
+            stamp = datetime.datetime.fromtimestamp(written, datetime.timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+            matches.append((written, stamp, sid, str(path)))
+except OSError as exc:
+    print(f"cannot inspect {config}: {exc}", file=sys.stderr)
+    sys.exit(3)
+for _, stamp, sid, path in sorted(matches):
+    print(stamp, sid, path, sep="\t")
 sys.exit(0 if matches else 1)
 PY_MATCH
-  )"; then
-    problem "$id" "no transcript under $CONFIG_DIR has cwd $SLOT and this record's seed as its first message; the seed may never have been delivered. Revive by hand with \`fleet revive --id $id --session-id <uuid>\` if you know the session"
+  )"
+  rc=$?
+  if [ "$rc" -eq 1 ]; then
+    rm -f "$merr"
+    problem "$id" "no transcript under $CONFIG_DIR has cwd $SLOT and this record's seed among its first user messages; the seed may never have been delivered. Revive by hand with \`fleet revive --id $id --session-id <uuid>\` if you know the session"
     return
+  elif [ "$rc" -ne 0 ]; then
+    problem "$id" "the transcript search failed (rc $rc): $(tail -1 "$merr")"
+    rm -f "$merr"; return
   fi
+  rm -f "$merr"
   local count
   count="$(printf '%s\n' "$MATCHES" | wc -l)"
   SESSION_ID="$(printf '%s\n' "$MATCHES" | tail -1 | cut -f2)"
   if [ "$count" -gt 1 ]; then
-    note "candidates" "$count transcripts carry this seed; the latest-started is chosen:"
-    printf '%s\n' "$MATCHES" | awk -F'\t' '{printf "               %s  %s  %s\n", $2, $1, $3}'
+    note "candidates" "$count transcripts carry this seed; the one last written to is chosen:"
+    printf '%s\n' "$MATCHES" | awk -F'\t' '{printf "               %s  last written %s  %s\n", $2, $1, $3}'
   fi
-  note "transcript" "$SESSION_ID   (started $(printf '%s\n' "$MATCHES" | tail -1 | cut -f1))"
+  note "transcript" "$SESSION_ID   (last written $(printf '%s\n' "$MATCHES" | tail -1 | cut -f1))"
 }
 
 # --- the run ----------------------------------------------------------------------------------------------
 
 resolve_root
 echo "fleet root $ROOT   (name $NAME, server $SOCKET, store $ROOT/.fleet)"
+echo "fleet binary $FLEET"
 
 SELECTION="$(F runtime --porcelain 2>/dev/null | awk -F'\t' '$1=="runtime"{print $2; exit}')"
 [ -n "$SELECTION" ] || die "\`fleet runtime\` reports no selection for $ROOT; is the store readable?"
@@ -256,7 +284,7 @@ SELECTION="$(F runtime --porcelain 2>/dev/null | awk -F'\t' '$1=="runtime"{print
 BOARD="$(mktemp)"; trap 'rm -f "$BOARD"' EXIT
 F board --porcelain > "$BOARD" || die "\`fleet board\` failed for $ROOT"
 mapfile -t DEAD < <(awk -F'\t' '$2=="worker" && $3=="DEAD"{print $1}' "$BOARD")
-UNREACHABLE="$(awk -F'\t' '$3=="UNREACHABLE"{n++} END{print n+0}' "$BOARD")"
+UNREACHABLE="$(awk -F'\t' '$2=="worker" && $3=="UNREACHABLE"{n++} END{print n+0}' "$BOARD")"
 
 if [ "${#DEAD[@]}" -eq 0 ]; then
   echo "nothing to revive: no DEAD record on the board of $ROOT"
@@ -270,6 +298,18 @@ declare -A PLAN_SESSION PLAN_INSTANT
 for id in "${DEAD[@]}"; do
   derive "$id"
   PLAN_SESSION[$id]="$SESSION_ID"; PLAN_INSTANT[$id]="$INSTANT"
+done
+
+# Two records resolving to ONE transcript is a wrong revival waiting to happen: the verb only checks that
+# the transcript's cwd is the lease path, which both would satisfy.
+for id in "${DEAD[@]}"; do
+  [ -n "${PLAN_SESSION[$id]}" ] || continue
+  for other in "${DEAD[@]}"; do
+    if [ "$other" != "$id" ] && [ "${PLAN_SESSION[$other]}" = "${PLAN_SESSION[$id]}" ]; then
+      problem "$id" "resolves to the same transcript ${PLAN_SESSION[$id]} as $other; one of the two seeds is not this record's identity"
+      break
+    fi
+  done
 done
 
 # `fleet revive --dry-run` applies the verb's own checks to every record before anything starts.
@@ -302,7 +342,7 @@ for id in "${DEAD[@]}"; do
   echo "reviving $id ..."
   if F revive --id "$id" --session-id "${PLAN_SESSION[$id]}" --instants-dir "$(dirname "${PLAN_INSTANT[$id]}")"; then
     guard="$(F pane-guard --id "$id" --porcelain 2>/dev/null | awk -F'\t' '$1=="code"||$1=="verdict"{printf "%s ", $2}')"
-    note "pane-guard" "${guard:-"(no answer)"}"
+    note "pane-guard" "${guard:-"(no answer)"}   (first poll; a resume menu reads 10 or 15 — read the pane)"
   else
     rc=$?
     FAILED+=("$id")
