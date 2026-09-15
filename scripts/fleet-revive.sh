@@ -7,8 +7,10 @@
 #
 # `superpowers:reviving-dead-panes` owns the JUDGEMENT — revive or abort, whether a resume menu is really on
 # screen, whether to send a key at all. This owns everything that is derivation: which root, which server,
-# which slot, which configuration directory, which transcript. Nothing is typed by an operator, and the only
-# environment value read is `FLEET_BIN` (which binary acts; printed on the first line).
+# which slot, which configuration directory, which transcript. Nothing is typed by an operator. Three environment
+# values are read: `$HOME` (the marker walk stops below it, as `fleet`'s does), `FLEET_BIN` (which binary acts;
+# printed on the second line) and, for a legacy Claude record only, `CLAUDE_OWNERS_MAP` through
+# `claude-config-dir.sh`.
 #
 # THE ROOT IS THE WORKING DIRECTORY'S. The marker walk is the same one `fleet` and `fleet-env.sh` perform,
 # and it stops below $HOME for the same reason. A directory outside every root is refused: there is no fleet
@@ -149,7 +151,10 @@ runtime, config, slot, seed_path = sys.argv[1:]
 #: How many user-role blocks are inspected before a transcript is ruled out. Both CLIs put user-role
 #: blocks ahead of the prompt: Claude a `<local-command-caveat>` meta row, Codex `<environment_context>`,
 #: `<recommended_plugins>` and an `# AGENTS.md instructions` preamble (measured: 4 of 6 rollouts on this
-#: box open with one of those). Five covers every measured shape with room to spare.
+#: box open with one of those). Five covers every measured shape with room to spare: on the dispatch path the
+#: seed is argv and lands as user block 1 (Claude) or 2 (Codex). A launch path that ran slash commands before
+#: the seed would push it further (each writes three user rows here); the rule then degrades to a refusal,
+#: never to a wrong choice.
 USER_BLOCKS = 5
 #: Rows read before a file is given up on; the first user blocks sit within the first few dozen rows.
 ROW_CAP = 4000
@@ -231,6 +236,8 @@ try:
         try:
             sid, cwd, users = meta(path)
             written = path.stat().st_mtime
+        except (FileNotFoundError, PermissionError):
+            continue        # rotated away or not ours between the listing and the read: not a candidate
         except OSError as exc:
             print(f"cannot read {path}: {exc}", file=sys.stderr)
             sys.exit(3)
@@ -239,7 +246,7 @@ try:
         try:
             if Path(cwd).resolve() != slot:
                 continue
-        except OSError:
+        except (OSError, TypeError, ValueError):
             continue
         if any(seed in squash(text) for text in users):
             stamp = datetime.datetime.fromtimestamp(written, datetime.timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
@@ -247,21 +254,32 @@ try:
 except OSError as exc:
     print(f"cannot inspect {config}: {exc}", file=sys.stderr)
     sys.exit(3)
-for _, stamp, sid, path in sorted(matches):
+matches.sort()
+#: Exit codes the shell branches on. 4 is "no match" and 5 is "a tie" precisely because 1 is what an uncaught
+#: exception exits with, and a traceback must never be read as "the seed was never delivered".
+if len(matches) > 1 and matches[-1][0] == matches[-2][0]:
+    for _, stamp, sid, path in matches:
+        print(stamp, sid, path, sep="\t")
+    print("two transcripts carry this seed with identical write times; nothing tells them apart", file=sys.stderr)
+    sys.exit(5)
+for _, stamp, sid, path in matches:
     print(stamp, sid, path, sep="\t")
-sys.exit(0 if matches else 1)
+sys.exit(0 if matches else 4)
 PY_MATCH
   )"
   rc=$?
-  if [ "$rc" -eq 1 ]; then
-    rm -f "$merr"
-    problem "$id" "no transcript under $CONFIG_DIR has cwd $SLOT and this record's seed among its first user messages; the seed may never have been delivered. Revive by hand with \`fleet revive --id $id --session-id <uuid>\` if you know the session"
-    return
-  elif [ "$rc" -ne 0 ]; then
-    problem "$id" "the transcript search failed (rc $rc): $(tail -1 "$merr")"
-    rm -f "$merr"; return
-  fi
-  rm -f "$merr"
+  case "$rc" in
+    0) rm -f "$merr" ;;
+    4) rm -f "$merr"
+       problem "$id" "no transcript under $CONFIG_DIR has cwd $SLOT and this record's seed among its first user messages; the seed may never have been delivered. Revive by hand with \`fleet revive --id $id --session-id <uuid>\` if you know the session"
+       return ;;
+    5) rm -f "$merr"
+       printf '%s\n' "$MATCHES" | awk -F'\t' '{printf "               %s  last written %s  %s\n", $2, $1, $3}'
+       problem "$id" "two transcripts carry this seed with identical write times, so nothing says which is the live thread; revive by hand with \`fleet revive --id $id --session-id <uuid>\` after reading both"
+       return ;;
+    *) problem "$id" "the transcript search failed (rc $rc): $(tail -1 "$merr")"
+       rm -f "$merr"; return ;;
+  esac
   local count
   count="$(printf '%s\n' "$MATCHES" | wc -l)"
   SESSION_ID="$(printf '%s\n' "$MATCHES" | tail -1 | cut -f2)"
@@ -305,9 +323,8 @@ done
 for id in "${DEAD[@]}"; do
   [ -n "${PLAN_SESSION[$id]}" ] || continue
   for other in "${DEAD[@]}"; do
-    if [ "$other" != "$id" ] && [ "${PLAN_SESSION[$other]}" = "${PLAN_SESSION[$id]}" ]; then
-      problem "$id" "resolves to the same transcript ${PLAN_SESSION[$id]} as $other; one of the two seeds is not this record's identity"
-      break
+    if [[ "$other" > "$id" ]] && [ "${PLAN_SESSION[$other]}" = "${PLAN_SESSION[$id]}" ]; then
+      problem "$id" "$id and $other resolve to the same transcript ${PLAN_SESSION[$id]}; one of the two seeds is not its record's identity"
     fi
   done
 done
