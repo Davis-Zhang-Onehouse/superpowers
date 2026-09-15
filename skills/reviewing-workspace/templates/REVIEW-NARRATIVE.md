@@ -9,16 +9,16 @@ Wave: format · alignment · code (one call to `fleet review` per reviewer, all 
 Defect family handed to the code lens: <list>.
 <what each lens found that mattered, and why>
 
-## Receive pass 1
+## Receive pass <n>
 | id | class | sites / commit | order | closed by |
 |---|---|---|---|---|
-Withdrawals: evidence/review/withdrawals-pass1.txt
+Withdrawals: evidence/review/withdrawals-pass<n>.txt
 
 ### Noticed along the way
 <one line per defect, oddity or doubt this pass met that no finding named — each already carried
 into ISSUES.md with an owner or raised as a `routed` finding — or the single word `none`>
 
-## Closure 1 — T_prev <sha> → T_now <sha>
+## Closure <n> — T_prev <sha> → T_now <sha>
 CLOSURE: <CLEAN | REOPEN | ESCALATE>. <what came back NOT-CLOSED, REGRESSED or fix-introduced, if
 anything>
 
