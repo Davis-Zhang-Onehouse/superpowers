@@ -1,0 +1,6 @@
+dd2744d readme: add a quickstart section
+7900304 readme: derive the case count instead of asserting a stale one (RV-9)
+c9dea81 tests: gate that every checker exit status has a case (RV-8)
+fd6a27f check-link: anchor the PR number at a non-alphanumeric boundary (RV-5)
+ec57e66 docs: readme
+f0626d1 gate: companion link check, 22 cases
