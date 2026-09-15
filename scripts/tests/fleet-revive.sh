@@ -23,6 +23,8 @@
 #   codex-seed-match  a DEAD Codex record whose rollout has the real shape (developer messages, a
 #                     `<recommended_plugins>` user block, an AGENTS.md preamble AHEAD of the prompt) → matched
 #   dry-run-refused   the verb's own refusal (executable unavailable) → rc 2, no start
+#   write-time-tie    two candidates with identical write times → rc 2 (nothing says which is live)
+#   search-error      a transcript path that cannot be opened → rc 2 as a failed search, never as an undelivered seed
 #   duplicate-session two records resolving to one transcript → rc 2, no start
 #   nothing-dead      an empty board → rc 0
 set -euo pipefail
@@ -213,6 +215,24 @@ try:
           and 'last written' in r.stdout, r.stdout)
     check('plan: nothing started', 'plan only' in r.stdout and not calls(), r.stdout)
 
+    # equal-write-time tie: nothing says which is the live thread → refusal, both printed
+    os.utime(pa, (now - 60, now - 60))
+    r = run(A, 'plan')
+    check('write-time-tie: rc 2 naming both, nothing started', r.returncode == 2 and 'identical write times' in r.stdout
+          and U3a in r.stdout and U3b in r.stdout and not calls(), r.stderr + r.stdout)
+    os.utime(pa, (now - 7200, now - 7200))
+
+    # a search error is an error, not "no transcript": a transcript path that cannot be opened (a directory
+    # wearing the .jsonl name; an unreadable directory is silently skipped by the glob and is not an error)
+    bogus = cfgA / 'projects' / 'bogus' / 'not-a-file.jsonl'
+    bogus.mkdir(parents=True)
+    try:
+        r = run(A, 'plan')
+    finally:
+        bogus.rmdir()
+    check('search-error: rc 2 reported as a failed search, not as an undelivered seed',
+          r.returncode == 2 and 'transcript search failed' in r.stdout and 'never have been delivered' not in r.stdout, r.stderr + r.stdout)
+
     # legacy-config: no recorded configuration → the slot's owner, through claude-config-dir.sh
     owners = home / 'owners.tsv'
     owners.write_text(str(A) + '\tsomeone@example.com\n')
@@ -298,12 +318,14 @@ try:
     rb, ib, sb, _ = dead_record(E, 'dupb', 'ws2', 'claude', cfgE, '0007', socket)
     (ia / '.fleet/seed.txt').write_text('One seed text handed to two records by mistake.\n')
     (ib / '.fleet/seed.txt').write_text('One seed text handed to two records by mistake.\n')
-    claude_transcript(cfgE, sa, U1, 'One seed text handed to two records by mistake.', '2026-09-15T00:06:10Z')
-    claude_transcript(cfgE, sb, DECOY, 'One seed text handed to two records by mistake.', '2026-09-15T00:07:10Z')
+    pea = claude_transcript(cfgE, sa, U1, 'One seed text handed to two records by mistake.', '2026-09-15T00:06:10Z')
+    peb = claude_transcript(cfgE, sb, DECOY, 'One seed text handed to two records by mistake.', '2026-09-15T00:07:10Z')
+    os.utime(pea, (now - 600, now - 600)); os.utime(peb, (now - 30, now - 30))     # distinct write times, so both resolve to DECOY
     (E / 'ws2').rmdir(); os.symlink(E / 'ws1', E / 'ws2')          # two leases over one directory, resolved alike
     r = run(E, 'revive', fleet=shim)
     check('duplicate-session: rc 2, names both records, nothing started',
-          r.returncode == 2 and 'resolves to the same transcript' in r.stdout and not calls(), r.stderr + r.stdout)
+          r.returncode == 2 and 'resolve to the same transcript' in r.stdout and r.stdout.count('resolve to the same transcript') == 1
+          and not calls(), r.stderr + r.stdout)
 
     # ---- root C: nothing dead ------------------------------------------------------------------------
     C = make_root('revivec')
