@@ -1,5 +1,18 @@
 # fleet — changelog
 
+## fleet/v0.6.1 — 2026-09-15T00:48:06Z
+Cut from ce7a866 on `live` (upstream base snapshot/2026-08-17-221146). 5 commit(s) since fleet/v0.6.0.
+
+Every release ships the whole repository — all skills, `commands/`, `hooks/` and the plugin manifest, not only `fleet/`.
+Payload: skills (1 file), scripts (3 files), docs (80 files).
+Skills changed: reviving-dead-panes.
+
+- 350a661 docs: instant 00000000-09141935 complete — fleet 0.6.0 released (runtime selection)
+- 6609648 reviving-dead-panes: one root-scoped script revives every DEAD record on either runtime
+- 96a29bb review round 1: the whole seed among the first five user blocks, last-written tiebreak, one transcript per record
+- c88cf04 review round 2: a matcher traceback is never read as an undelivered seed; a write-time tie refuses
+- ce7a866 docs: instant 09141935-09150009 — revive-all dead panes: design, two review rounds, evidence
+
 ## fleet/v0.6.0 — 2026-09-14T21:11:51Z
 Cut from e753110 on `live` (upstream base snapshot/2026-08-17-221146). 14 commit(s) since fleet/v0.5.12.
 
