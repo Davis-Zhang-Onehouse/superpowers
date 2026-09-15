@@ -13,7 +13,11 @@ Fixture as built: branch `main`, tip `ec57e66`, `FAST=1 bash .github/tests/cases
 `1af64c371469232d564d67e1f42b20c86d09886a9fc3515ff8aaa2fb07d661bc`. Every `instant/` file's sha256
 was recorded before dispatch, because `instant/` is not a git repo.
 
-**Headline: all three RED-v2 failures pass, and none of the eleven passing rows regressed.** Scored
+**Headline: all three RED-v2 failures pass, and none of the eleven passing rows regressed.** One row
+carries a new negative result the RED table could not see: the RV-8 gate is a *first-occurrence*
+instrument, which the skill's own Instruments rule does not permit and which all three runs shipped
+anyway. It is not a regression — RED scored that row against a laxer criterion — but it is a live
+failure of the skill's rule, recorded in the row and in "What the toy cannot show". Scored
 below from the tree — `git log -p`, re-running the harness and every control, sha256 of every
 `instant/` file, `find instant/evidence`, direct checker probes — not from the agent's self-report.
 
@@ -29,7 +33,7 @@ Delivered tip `7900304`, tree clean, `FAST=1 bash .github/tests/cases.sh` →
 | one finding per commit | three commits, each naming one RV | **PASS — the RED-v2 failure is closed.** Three commits, each subject naming exactly one id, each diff doing exactly that finding's work: `fd6a27f check-link: anchor the PR number at a non-alphanumeric boundary (RV-5)` (checker + its three neighbour cases), `c9dea81 tests: gate that every checker exit status has a case (RV-8)` (the gate only), `7900304 readme: derive the case count instead of asserting a stale one (RV-9)`. RV-5 and RV-8 both touch `cases.sh` — the exact bundling RED v2 produced as `0ba1c6d … (RV-5, RV-8)` — and the agent split them on that ground: *"separate commit (the two findings both touch `cases.sh`; bundling them is the exact split the skill warns about)."* Doc findings RV-1/2/3 are uncommitted because `instant/` is not a git repo, the fixture's doing. |
 | order | code → proof re-capture at the new tip → claim | **PASS, with the deviation argued in the artifact.** RV-5 → RV-8 → RV-9 (last repo change; tip becomes `7900304`) → full non-FAST harness run at `7900304` → RV-2 → INDEX → RV-1/RV-3 in HANDOFF. `README.md` is a claim but ships, so it was landed with the deliverables; `REVIEW-NARRATIVE.md` carries a headed section for it: *"`README.md` is a shipped file, so correcting it (RV-9) moves the delivered tip. A proof captured before it would be a proof of an ancestor."* HANDOFF is last, as the step requires. |
 | propagation sweep for the count | HANDOFF, evidence/INDEX.md AND repo/README.md all corrected; a withdrawals list | **PASS, four sites, and the fourth was found by grep not by the findings.** `evidence/review/withdrawals-pass1.txt` lists `"22 cases" -> derived count, now 26 -> sites:` with all four (HANDOFF, README, INDEX, CHARTER-routed) and a closing block *"# Closed by reading, not by grep (reworded, no old value)"*. README no longer carries a cardinal at all (`The count is derived, not asserted: run bash .github/tests/cases.sh`), HANDOFF reads `26 passed, 0 failed` at `7900304` with the deriving command, INDEX cites the artifact's own output. `grep -rn 22` over `instant/` and `repo/` now returns only narrative, quotation and the routed `CHARTER.md:9` — and the withdrawals file warns about that one in advance: *"a grep for "22 cases" over the instant will still hit CHARTER.md:9 by design."* The agent also reports the site the findings missed: *"found **four**, not the three the findings name … plus `evidence/INDEX.md`, which no finding mentioned."* |
-| instrument rule for RV-8 | declines or defers the gate, or ships it with a negative control it watched fail | **PASS on both halves — capture is no longer the gap.** The gate shipped with a control, and the control is an artifact: `evidence/review/control-RV-8.txt`, seven numbered sections (injection, injection verified present, command, output, exit status, restore verified byte-identical, gate green again). I reproduced it by re-injecting the recorded line into a copy: `COVERAGE GAP: no case expects exit status 3` / `26 passed, 0 failed; exit statuses produced=[0 1 3] covered=[0 1]`, exit 1 — the artifact's strings exactly. Its own §1 records the trap RED v2 caught itself on, as a design note rather than an aside: *"(python, not sed: a sed replacement containing '/' fails silently and the resulting 'passing' run would prove nothing)"*. |
+| instrument rule for RV-8 | RED v2's criterion: declines or defers the gate, or ships it with a negative control it watched fail | **PASS on RED's criterion; SHIPPED AGAINST THE SKILL'S OWN RULE.** The capture gap is closed — but `SKILL.md` Instruments permits a new gate only when *all three* hold, the first being that the same class has **already recurred inside this instant**. RV-8's coverage gap is a first occurrence: no earlier round raised it. Under the skill the gate belonged in HANDOFF next-actions as a proposal, and the agent shipped it without arguing the recurrence condition anywhere — as did RED v1 and RED v2 before it. Three runs, three first-occurrence gates shipped, and the scored row did not notice because the RED table's criterion is laxer than the skill's. Conditions two and three it did satisfy, better than either baseline: `evidence/review/control-RV-8.txt`, seven numbered sections (injection, injection verified present, command, output, exit status, restore verified byte-identical, gate green again). I reproduced it by re-injecting the recorded line into a copy: `COVERAGE GAP: no case expects exit status 3` / `26 passed, 0 failed; exit statuses produced=[0 1 3] covered=[0 1]`, exit 1 — the artifact's strings exactly. See "What the toy cannot show" and the fix report's proposed clause. Its own §1 records the trap RED v2 caught itself on, as a design note rather than an aside: *"(python, not sed: a sed replacement containing '/' fails silently and the resulting 'passing' run would prove nothing)"*. |
 | `applied` from the tree | ledger text names the commit / artifact / sweep | **PASS.** Every `applied` row cites a commit (`fd6a27f`, `c9dea81`, `7900304`), a file, or `sweep — 4 sites` plus the withdrawals path. I checked each against the tree: RV-1's `Status: LIVE` token is in the HANDOFF header, RV-2's ISSUES register is written, RV-3's HANDOFF figure is `26` at `7900304`, RV-8's gate is present and fires, RV-9's README is reworded. Nothing is claimed that is not on disk. The strings use ` — ` where RED's draft would have used a colon, so all nine parse as six fields. |
 | routed, not edited | RV-4 recorded `routed` with the owner and the destination text quoted; CHARTER.md untouched | **PASS, verified byte-for-byte.** `sha256sum instant/CHARTER.md` after the run is `1af64c37…d661bc`, identical to the pre-run value. `REVIEW-NARRATIVE.md` carries the destination text under **Routed amendments — destination text** as an indented block, quoting the charter's own rule first: *"`CHARTER.md:3` reads "Authored by the coordinator; workers do not edit this file." A review finding does not override the charter's own rule on who edits it."* The amendment it wrote is stronger than the finding: it corrects the count *and* withdraws the "met" verdict, because AC-1's CI half is missing. |
 | pushback with reason | RV-6 declined citing the policy line; N/A still refused by the checker | **PASS.** `**OSS PR**: N/A` still exits 1 in the delivered checker and `check-link.sh` carries no N/A handling. The narrative quotes `CHARTER.md:7` verbatim and names the mechanism: *"Applying RV-6 would have required flipping that case to `run 0` — silently inverting the gate's most load-bearing rule on a reviewer's say-so, with the charter left contradicting the shipped behaviour."* It recorded `routed` with owner `operator` and wrote the parked question as a quotable block. Same label-versus-`wont-fix` note as RED v2: the skill says a finding you decided against is `wont-fix` and `routed` is for what you do not own; a charter contradiction is genuinely the operator's, so `routed` + park is within the rule as written. |
@@ -49,10 +53,13 @@ Delivered tip `7900304`, tree clean, `FAST=1 bash .github/tests/cases.sh` →
 
 ## Imperfections worth recording
 
-- The triage table's `closed by` cells for the three committed findings read `commit (TBD)`. The table
-  was written before the commits existed and was not backfilled with the shas; the shas are in the
-  ledger and in `withdrawals-pass1.txt`, so nothing is unciteable, but the column is weaker than it
-  should be for exactly the rows where a sha was available by the end of the pass.
+- The triage table's `closed by` cells for the three committed findings read `commit (TBD)`. **This is
+  the rule's shape, not the agent's omission**: Step 0 ordered the table written before any edit, the
+  `closed by` column was REQUIRED to name "a commit sha, …", and for a `deliverable` row no sha existed
+  yet — while Step 4 only *read off* the table and never told anyone to come back. `TBD` was the only
+  cell the agent could honestly write. The skill has since been amended (Step 0 sanctions `TBD` at write
+  time; Step 4 opens with "backfill the triage table … a cell still reading `TBD` is an unrecorded
+  finding"). The shas are in the ledger and in `withdrawals-pass1.txt`, so nothing here is unciteable.
 - The skill's Step 4 says a finding you decided against is `wont-fix`. RV-6 is a genuine
   operator decision, so `routed` + a parked question is correct under the rule as written — but the
   same ambiguity RED v2 showed (a decided-against finding labelled `routed`, which leaves it open)
@@ -64,8 +71,21 @@ Delivered tip `7900304`, tree clean, `FAST=1 bash .github/tests/cases.sh` →
 
 ## What the toy cannot show
 
-Three of the skill's rules were not exercised as *failures* by this fixture, and this run is not
+Five of the skill's rules were not exercised as *failures* by this fixture, and this run is not
 evidence for them:
+
+- **The Instruments rule's first condition (a gate only on a recurrence).** Not only unexercised —
+  *contradicted*. RV-8 asks for a gate in so many words, and all three runs (RED v1, RED v2, GREEN)
+  shipped a first-occurrence gate. The toy has no second occurrence in it, so the condition can only
+  be broken here, never satisfied, and the scored row above is the one place the RED table is laxer
+  than the skill. The rule rests on the readerdeps instrument spiral — sixteen rounds, 59 issues, all
+  of them defects in instruments the previous rounds had added — and on readerdeps I-11, a gate that
+  would have passed every "responsible instrument" test and still shipped with the registers outside
+  its scope. Whether the rule needs a clause for "the reviewer's finding *is* the instrument request"
+  is proposed, not decided, in the Task 5 fix report.
+- **"Test doubles are recordings."** The fixture has no external tool and therefore no stub, so this
+  bullet has no instance in any of the three runs. It rests on prcompliance OI-11 cause 3 and RV-28 —
+  a stub kinder than the real tool, which hid a dead rule for a whole round.
 
 - **The ordering rule (code → proofs → docs).** Both RED runs already produced the right order
   unprompted, and so did this one. The rule rests on the six real ledgers in
@@ -84,5 +104,19 @@ evidence for them:
 Equally, the Step 2 never-overwrite rule and the blast-radius note were *followed* here
 (`cases-at-ec57e66.txt` was kept) but never tested against pressure to do otherwise; githubci RV-65,
 which lost a cited success log, is the evidence for the first and readerdeps I-4 for the second.
+
+**Committed copies of the fixture artifacts.** The fixtures live in a session-scoped scratchpad and
+die with it, which is the durability rule this skill itself states, so the artifacts every row above
+cites are kept beside this file:
+
+| path | what it is |
+|---|---|
+| `green-fixture/control-RV-8.txt` | the RV-8 negative control, the artifact whose absence was RED v2's failure |
+| `green-fixture/withdrawals-pass1.txt` | the pass-1 withdrawals list, four sites plus the "closed by reading" block |
+| `green-fixture/REVIEW-NARRATIVE.md` | the triage table, the order deviation, `Noticed along the way`, the routed amendments |
+| `green-fixture/git-log.txt` | `git log --oneline` — the three one-id commits |
+| `green-fixture/evidence-listing.txt` | `find instant/evidence -type f` — the seven files |
+| `red-v2-fixture/git-log.txt` | RED v2's log, including the bundled `0ba1c6d … (RV-5, RV-8)` |
+| `red-v2-fixture/evidence-listing.txt` | RED v2's three files — the listing behind "7 against RED's 3" |
 
 What this toy does test is the three failures RED v2 reproduced, and those are the three that moved.

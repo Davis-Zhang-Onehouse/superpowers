@@ -31,7 +31,8 @@ a pass missing either is not a pass.
 | id | class | sites / commit | order | closed by |
 |---|---|---|---|---|
 
-`class` is exactly one of:
+`class` is exactly one of (a finding whose halves have different owners splits into `<id>a` /
+`<id>b`, one row and one class each):
 
 | class | changes | moves the tip? |
 |---|---|---|
@@ -41,9 +42,10 @@ a pass missing either is not a pass.
 | `routed` · `wont-fix` | nothing here — owner or reason goes in the action | no |
 
 **`closed by` is REQUIRED on every row** and names something a reader can open: a commit sha, a file
-path, `sweep — N sites`, an owner, or a reason. **For any finding closed by a gate, a script, or a
-control run, `closed by` names an artifact path under `evidence/`** — the run's own captured output,
-never a description of it.
+path, `sweep — N sites`, an owner, or a reason. At Step 0 a `deliverable` row's sha does not exist
+yet; write `TBD` there and backfill it in Step 4, which is where the cell becomes binding. **For any
+finding closed by a gate, a script, or a control run, `closed by` names an artifact path under
+`evidence/`** — the run's own captured output, never a description of it.
 
 ### Noticed along the way
 
@@ -116,6 +118,9 @@ For each `claim` finding, before editing:
 
 ## Step 4 — record, from the tree
 
+First, backfill the triage table: every `closed by` cell carries the sha, path, or owner the pass
+actually produced. **A cell still reading `TBD` is an unrecorded finding.**
+
 `fleet review --finding` per finding, after the pass, read off the triage table. The value is
 `id:severity:status:location:finding:action` — six colon-separated fields, so no field may contain a
 colon; write a prefix with ` — `. `applied` carries the commit sha, artifact path, or
@@ -124,8 +129,9 @@ colon; write a prefix with ` — `. `applied` carries the commit sha, artifact p
 and the next round found it.
 
 A finding you decided against is `wont-fix` with the reason. `routed` means a file or a decision this
-instant does not own, and it leaves the finding open on someone's desk. When the decision belongs to
-the operator — a finding that contradicts the charter — route it and `fleet park` with the question.
+instant does not own, and it leaves the finding open on someone's desk. Where both apply `routed`
+wins: **a finding you decided against but are not entitled to close is `routed` plus the parked
+question, never `wont-fix`** — a charter contradiction is the operator's, so `fleet park` the question.
 
 ## Step 5 — hand to the closure round
 
