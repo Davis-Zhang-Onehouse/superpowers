@@ -84,7 +84,7 @@ from fleet.release_stamp import stamp_plugin_version
 from fleet.release_verify import (EXEMPT, EXEMPT_ROSTER, FULL_ROSTER, GATE_ROSTER, GREEN, PROMOTABLE,
                                   Verify, _exemption_and_scope, archive_previous_attempt, read_verdict,
                                   write_exemption, write_verdict)
-from fleet.review import Finding, Review, exit_code_for
+from fleet.review import Finding, Review, exit_code_for, receive_advisory
 from fleet import origin as origin_mod
 from fleet.origin import Origin
 from fleet.roadmap import ATTENTION, COORDINATOR, TERMINAL, Milestone, Roadmap
@@ -2760,6 +2760,11 @@ def _do_review(ctx: Ctx, parsed: Parsed) -> int:
         rows.append(Row(kind="round", subject=str(made.number), severity=INFO,
                         detail=f"scope {made.scope}, verdict {made.verdict}, "
                                f"{len(made.findings)} finding(s) at {made.at}"))
+        #: Advisory only: it names the skill that applies what was just recorded. The gate row below and
+        #: this verb's exit code are untouched by it.
+        nudge = receive_advisory(made.findings)
+        if nudge:
+            rows.append(Row(kind="advisory", subject=str(child), severity=INFO, detail=nudge))
     elif verdict_asked:
         rows.append(Row(kind="round", subject="dry-run", severity=INFO,
                         detail=f"would record scope {parsed.get('scope', 'all')}, verdict "
