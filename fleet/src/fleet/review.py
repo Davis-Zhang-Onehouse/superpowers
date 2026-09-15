@@ -51,6 +51,18 @@ SCOPES = ATOMIC_SCOPES + (ALL,)
 SEVERITIES = ("Critical", "Important", "Minor", "Nit")
 BLOCKING_SEVERITIES = ("Critical", "Important")
 
+#: A finding id the coordinator writes at harvest. Its verification rounds land in the worker's ledger
+#: at the same head and often carry Critical severity ("MY CHARTER WAS WRONG") — they are not the
+#: worker's fixes seeding the next round, so they never count as an epoch raising.
+COORDINATOR_PREFIX = "CV-"
+
+#: The trailing streak of head epochs that each raised a new blocking finding at which `advisories()`
+#: says OSCILLATING. Calibrated on six real ledgers (tests/fixtures/review-ledgers): the two the operator
+#: named as oscillating reach 5, the operator-ruled one reaches 4, the converged ones stay at 1–2. The
+#: skill allows exactly one raising closure round (streak 2); three is the first value that is never a
+#: happy path.
+OSCILLATION_ADVISORY_AT = 3
+
 #: A finding's disposition. `wont-fix` is a recorded decision and not a loophole, because `action` is
 #: required to be non-empty on every finding — declining a Critical therefore costs a written reason.
 #: `routed` is the same bargain for a finding this instant does not OWN: its `action` names who does.
@@ -254,6 +266,40 @@ class Review:
             for item in a_round.findings:
                 latest[item.id] = item
         return list(latest.values())
+
+    def epochs(self) -> list:
+        """Consecutive rounds grouped by the slot heads they were recorded at.
+
+        A round with empty heads (NOT MEASURED) joins the current epoch — it never opens one, because an
+        unreadable slot is not evidence that the tree moved. An epoch RAISES when one of its rounds
+        carries a Critical/Important finding whose id is first seen in that epoch and is not a
+        coordinator's `CV-` id. The heads are the slot HEAD at record time, a proxy for the reviewed
+        tip; that is why what reads them is an advisory and never a gate.
+        """
+        out = []
+        seen = set()
+        for a_round in self.rounds():
+            if not out or (a_round.heads and a_round.heads != out[-1]["heads"]):
+                out.append({"heads": dict(a_round.heads) if a_round.heads else
+                            (dict(out[-1]["heads"]) if out else {}),
+                            "rounds": [], "raises": False})
+            epoch = out[-1]
+            epoch["rounds"].append(a_round.number)
+            for item in a_round.findings:
+                new = item.id not in seen
+                seen.add(item.id)
+                if new and item.blocking() and not item.id.startswith(COORDINATOR_PREFIX):
+                    epoch["raises"] = True
+        return out
+
+    def oscillation_streak(self) -> int:
+        """How many trailing consecutive epochs each raised a new blocking finding."""
+        streak = 0
+        for epoch in reversed(self.epochs()):
+            if not epoch["raises"]:
+                break
+            streak += 1
+        return streak
 
     def open_blocking(self) -> list:
         return [f for f in self.latest_findings() if f.status == OPEN and f.blocking()]
