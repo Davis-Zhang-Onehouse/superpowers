@@ -1,6 +1,6 @@
 # Format Reviewer — Stage 1 Workspace Format & Hygiene Auditor
 
-Stage 1 of the 3-stage workspace review pipeline. This is a **read-only** format & hygiene audit of a single maintain-workspace effort instant. The auditor **only reports** findings; the orchestrator is the one that applies fixes. The auditor never touches a file.
+The format lens of a `reviewing-workspace` hunt (Stage 1), dispatched in one wave with the alignment and code lenses at the frozen review tip. This is a **read-only** format & hygiene audit of a single maintain-workspace effort instant. The auditor **only reports** findings; the orchestrator receives them. The auditor never touches a file.
 
 The checklist below is **derived from the maintain-workspace invariants**, which the orchestrator pastes into `[MAINTAIN_WORKSPACE_INVARIANTS]` at dispatch time. Those pasted invariants are the **single source of truth** — do not maintain a second, reworded copy of them here. The checklist references them and turns them into concrete, mechanical checks.
 
@@ -8,9 +8,12 @@ The checklist below is **derived from the maintain-workspace invariants**, which
 
 - `[INSTANT_PATH]` — absolute path to the maintain-workspace instant folder to audit.
 - `[MAINTAIN_WORKSPACE_INVARIANTS]` — the authoritative invariant text; the orchestrator pastes it in at dispatch.
+- `[REVIEW_TIP]` — the frozen sha the hunt reviews.
 
 ```
 You are a workspace format & hygiene auditor. Read-only.
+
+Instant: [INSTANT_PATH]    Review tip: [REVIEW_TIP]
 
 Audit the maintain-workspace instant at [INSTANT_PATH] against these invariants:
 [MAINTAIN_WORKSPACE_INVARIANTS]
@@ -20,7 +23,7 @@ CHECKLIST (report every actual violation; each line names the invariant it enfor
 - [Invariant 1: one entry point] HANDOFF has a **Session log** table (one row per session: Date / Workspace / Resume-cmd / Did-what) — flag if absent (a single "Resume:" line loses all but the latest session).
 - [Resume contract] HANDOFF's Resume/pickup section records BOTH the **workspace folder** AND the **resume uuid** (`claude --resume <uuid>`) — flag a resume entry that has the folder but no uuid, or the uuid but not which workspace folder it checks out (uuid alone resumes onto the wrong tree).
 - [Invariant 3: one fact one home] The PR/branch-stack table is present in HANDOFF current-state (it is REQUIRED).
-- [Canonical layout — reviewer guide] IF the effort produced a build artifact (a built image / jar / native lib / binary / published package — anything beyond docs/analysis), HANDOFF's current-state part has a **"How each artifact was built & tested"** reviewer-guide section, with a per-artifact entry carrying **Built-by** / **Provenance** (run or commit) / **Tested-by** (the milestone that used this exact version) / **Caveats**. Flag if the effort shipped a build artifact but this section is absent, or an artifact entry lacks Built-by or Provenance. (This is a PRESENCE/STRUCTURE check only — whether the narrative is accurate/complete vs the real artifacts is the Stage-2 alignment reviewer's job. Exposure/analysis-only efforts with no built artifact: N/A, do not flag.)
+- [Canonical layout — reviewer guide] IF the effort produced a build artifact (a built image / jar / native lib / binary / published package — anything beyond docs/analysis), HANDOFF's current-state part has a **"How each artifact was built & tested"** reviewer-guide section, with a per-artifact entry carrying **Built-by** / **Provenance** (run or commit) / **Tested-by** (the milestone that used this exact version) / **Caveats**. Flag if the effort shipped a build artifact but this section is absent, or an artifact entry lacks Built-by or Provenance. (This is a PRESENCE/STRUCTURE check only — whether the narrative is accurate/complete vs the real artifacts is the alignment lens's job. Exposure/analysis-only efforts with no built artifact: N/A, do not flag.)
 - [Invariant 3: one fact one home] Every PR cell is a full-URL link like [#123](.../pull/123) — flag any bare `#123`.
 - [Invariant 3: one fact one home] Every CI cell is a checks-page link like [#123 checks](.../pull/123/checks) **plus a dated pass/fail conclusion** — flag any bare run-id like `run 4711`, or a CI cell with no dated conclusion.
 - [Invariant 3: one fact one home — single home for the stack] The PR/branch-stack (PR URLs and CI run links) appears ONLY in HANDOFF's current-state table. Flag any PR URL (`…/pull/N`) or CI run-id restated in DECISIONS.md / ISSUES.md / ASSUMPTIONS.md / evidence/INDEX.md — those must POINT to HANDOFF's table, not carry their own copy (copies drift). (Run-ids used purely as parameters of a runnable command in RUNBOOK are operational content, not a stack copy — not a violation.)
@@ -34,8 +37,8 @@ CHECKLIST (report every actual violation; each line names the invariant it enfor
 - [Invariant 2: durable vs live never mixed] No volatile state (CI run-ids, "in flight") appears in CHARTER.md / DECISIONS.md / ISSUES.md / ASSUMPTIONS.md — volatile state lives only in HANDOFF.
 - [Invariant 4: evidence captured] Evidence lives under evidence/ and NOT in /tmp (flag any /tmp path referenced as an artifact).
 - [Invariant 4: evidence captured] evidence/INDEX.md exists and has criterion→artifact→source→regenerate rows.
-- [Header rule] Every doc has an `Updated: <date> ... | Status: DURABLE|LIVE` header.
-- [Header rule — durable vs live must match the file's class] The Status token matches the doc: **LIVE** for HANDOFF.md / RUNBOOK.md / evidence/INDEX.md / REVIEW.md; **DURABLE** for CHARTER.md / DECISIONS.md / ISSUES.md / ASSUMPTIONS.md. Flag a durable register marked LIVE, HANDOFF marked DURABLE, or a non-vocabulary token (e.g. `Status: COMPLETE`).
+- [Header rule] Every doc has an `Updated: <date> ... | Status: DURABLE|LIVE` header. REVIEW.md is exempt: `fleet review` renders it in full from the ledger and it carries its own GENERATED banner instead.
+- [Header rule — durable vs live must match the file's class] The Status token matches the doc: **LIVE** for HANDOFF.md / RUNBOOK.md / evidence/INDEX.md / REVIEW-NARRATIVE.md; **DURABLE** for CHARTER.md / DECISIONS.md / ISSUES.md / ASSUMPTIONS.md. Flag a durable register marked LIVE, HANDOFF marked DURABLE, or a non-vocabulary token (e.g. `Status: COMPLETE`).
 - [Naming rule] The instant is not still named `…-inflight-…` if acceptance is met.
 - [Naming grammar] The instant folder name matches `<base_instant>-<curr_instant>-<state>-<opType>-<name>` with state ∈ {inflight | complete | abort} — flag ad-hoc names (`v2`, `retry`, `final`) or a missing/garbled segment.
 - [Compaction] If the instant is a compact (name contains `-compact-`), COMPACTED.md exists and records all four: (1) included instants, (2) ONE stacked PR chain, (3) merged acceptance criteria (all MET on the stack), (4) evidence disposition (regenerated | carried-over-with-justification) + lingering-issue reconciliation (open | addressed | transformed). Flag a compact instant missing COMPACTED.md or any of the four parts.
@@ -46,11 +49,15 @@ CLASSIFICATION — tag every finding with one of:
 
 OUTPUT FORMAT — return a flat list. Each finding on one line:
 - [class] SEVERITY · LOCATION(file:line) · INVARIANT · FINDING · WHY · FIX(concrete, only if mechanical)
-SEVERITY ∈ {Critical, Important, Minor, Auto-fix}.
+SEVERITY ∈ {Critical, Important, Minor, Nit} — the ledger's own domain, so the orchestrator can record what you return without re-grading it.
 
 RULES:
-- Read-only: do NOT edit, move, rename, or delete any file. Only report. The orchestrator applies mechanical fixes.
+- Review the tree at [REVIEW_TIP]; a runtime proof whose recorded sha is not [REVIEW_TIP] is stale (report it, do not regenerate it).
+- You are read-only: report every finding, fix nothing — the orchestrator receives findings through superpowers:receiving-workspace-review.
+- Do NOT edit, move, rename, or delete any file. Only report.
 - Be exhaustive but do not invent problems: report ONLY actual violations you found in the files. If a check passes, say nothing about it.
 ```
 
-The orchestrator auto-applies every `mechanical` finding's FIX and records it through `fleet review --finding` with status `applied` (noting the auto-fix in its action); `judgment` findings are recorded `open`.
+The `mechanical | judgment` tag is not a disposition. It feeds the triage in
+`superpowers:receiving-workspace-review`, which is where each finding is classed, ordered, fixed and
+recorded; nothing this reviewer reports is applied in line.

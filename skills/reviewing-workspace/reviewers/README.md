@@ -1,18 +1,18 @@
-# Stage 3 Reviewers — PR Code Review
+# The hunt's code lens — PR code review
 
-Stage 3 of `reviewing-workspace` runs PR code review by **reusing** the
-`superpowers:requesting-code-review` reviewer, one subagent per in-scope PR,
-diffing only what changed since the last review round.
+The code lens of a hunt (Stage 1 of `reviewing-workspace`) runs PR code review by **reusing** the
+`superpowers:requesting-code-review` reviewer, one subagent per in-scope PR, at the frozen review
+tip `T0`.
 
 ## Reuse (do not fork the template)
 
-Stage 3 dispatches the existing "Senior Code Reviewer" template at
+The lens dispatches the existing "Senior Code Reviewer" template at
 `skills/requesting-code-review/code-reviewer.md` **verbatim**. Do NOT copy,
 fork, re-word, or maintain a second reviewer prompt here. Fill its four
 placeholders and dispatch it — nothing else changes.
 
 - One reviewer subagent per in-scope PR.
-- The template is read-only on the checkout (see below); Stage 3 inherits that.
+- The template is read-only on the checkout (see below); the lens inherits that.
 
 ## PR selection (what is in-scope)
 
@@ -27,38 +27,41 @@ placeholders and dispatch it — nothing else changes.
    naming why it was excluded — considered and deliberately declined, so it
    survives the render.
 
-## Incremental / delta review
+## The hunt reviews the whole authored delta, with the family named
 
-Reviews run repeatedly (mid-flight and pre-complete), so each round reviews
-only the commits added since the previous round.
+Every hunt's code lens reviews `[BASE_SHA]` = the PR's merge-base with its target branch through
+`[HEAD_SHA]` = the frozen review tip `T0`. Never "since the last round": a defect that predates the
+delta cannot be found by a delta, and a stack of delta reviews reads like coverage while leaving the
+original surface unexamined — one bypass survived four such rounds.
 
-For each in-scope PR:
+Scope alone did not find it either; framing did. Append to `[DESCRIPTION]`:
 
-- The prev-reviewed head for a repo is that repo's entry in the **previous
-  round's `heads`** in `.fleet/review.json`, which `fleet review` recorded
-  when that round was written.
-- **`[BASE_SHA]`** = that prev-reviewed head, so only new commits are reviewed.
-  - **First-ever review** of a PR: use the PR's **merge-base with its target
-    branch** as `[BASE_SHA]`.
-- **`[HEAD_SHA]`** = the PR's current tip (the table's **Tip githash**).
+> Defect family for this effort: <the charter's traps, verbatim> ; <the classes in this instant's and
+> its parent's ISSUES.md, one line each>. Assume the next member of this family is present in the
+> code under review and look for it.
+
+The previous round's `heads` in `.fleet/review.json` are read only by the closure reviewer, as
+`[T_PREV]`.
 
 ## Placeholder mapping into `code-reviewer.md`
 
 | Placeholder | Value |
 |---|---|
-| `[DESCRIPTION]` | HANDOFF **"Where we are"** one-paragraph + the PR's **Contents** cell. |
+| `[DESCRIPTION]` | HANDOFF **"Where we are"** one-paragraph + the PR's **Contents** cell + the **defect family** paragraph above. |
 | `[PLAN_OR_REQUIREMENTS]` | The **CHARTER** acceptance criteria (what the work must satisfy). |
-| `[BASE_SHA]` | Per the delta rule above (the previous round's `heads` entry for that repo, or the PR's merge-base on first review). |
-| `[HEAD_SHA]` | The PR's current tip. |
+| `[BASE_SHA]` | The PR's merge-base with its target branch — every hunt, not only the first. |
+| `[HEAD_SHA]` | `T0`, the frozen review tip (a sha, never a branch name). |
 
 ## Read-only
 
 `code-reviewer.md` already forbids mutating the working tree, index, HEAD, or
 branch state, and directs the reviewer to use `git show` / `git diff` /
-`git log` (or a throwaway `git worktree`) for inspection. Stage 3 inherits
-this — reviewers never move HEAD on the checkout.
+`git log` (or a throwaway `git worktree`) for inspection. The lens inherits
+this — reviewers never move HEAD on the checkout. Findings are received by the
+orchestrator through `superpowers:receiving-workspace-review`; nothing a
+reviewer reports is applied in line.
 
 ## No PRs authored here
 
-If no PRs were authored on this instant, Stage 3 is recorded as **N/A** in
-`REVIEW.md` and the round's verdict rests on Stages 1–2.
+If no PRs were authored on this instant, the code lens is recorded as **N/A** in the round and the
+verdict rests on the format and alignment lenses.
