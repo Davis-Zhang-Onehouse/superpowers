@@ -435,7 +435,7 @@ run 0 '**OSS PR**: https://github.com/apache/hudi-rs/pull/760'
 run 0 '**OSS PR**: #760'
 run 1 'no line at all'
 run 1 '**OSS PR**: N/A'
-for i in $(seq 1 18); do run 0 "**OSS PR**: #$((700+i))"; done
+for i in $(seq 1 19); do run 0 "**OSS PR**: #$((700+i))"; done
 echo "$pass passed, $fail failed"; [ "$fail" = 0 ]
 EOS
 chmod +x repo/.github/tests/cases.sh
