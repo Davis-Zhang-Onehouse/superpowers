@@ -288,11 +288,11 @@ kept in one home so the recipe and its slots never drift.
 
 ---
 
-## `REVIEW.md` — the review ledger (append-only; written by the reviewer, not by hand)
+## `REVIEW.md` — the generated view of the review ledger (never written by hand)
 
-Bootstrapped on the first review round and appended to thereafter by
-**`superpowers:reviewing-workspace`** (command `/review-workspace`). It is the audit
-trail of every review round — findings, their status, and the action taken. The full
-template lives in **`../reviewing-workspace/templates/REVIEW.md`** (one home, so the
-ledger format and the reviewer that writes it never drift). Copy it from there. Never
-rewrite a past finding — supersede its `Status` in place with a dated note.
+`REVIEW.md` has no template, because nobody writes it: `fleet review` generates it from
+`.fleet/review.json` — the ledger every finding is recorded into — and rewrites it in
+full on every round, so anything hand-edited into it is gone at the next round. What a
+worker bootstraps is the reasoning beside the ledger, `REVIEW-NARRATIVE.md`, whose
+template lives in **`../reviewing-workspace/templates/REVIEW-NARRATIVE.md`** (one home,
+so the narrative and the reviewer that reads it never drift). Copy it from there.
