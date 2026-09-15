@@ -1,0 +1,189 @@
+{
+  "schema_version": 1,
+  "rounds": [
+    {
+      "number": 1,
+      "scope": "code",
+      "verdict": "READY-WITH-FIXES",
+      "at": "2026-09-15T00:36:49Z",
+      "findings": [
+        {
+          "id": "C1",
+          "severity": "Critical",
+          "status": "applied",
+          "location": "scripts/fleet-revive.sh matcher codex_meta",
+          "finding": "Codex rollouts inject user-role blocks (recommended_plugins, AGENTS.md preamble) ahead of the prompt, 4 of 6 rollouts on this box; the matcher stopped at the first user block so no transcript matched and the whole run was refused",
+          "action": "inspect the first five user blocks on either runtime (96a29bb); measured against two real rollouts"
+        },
+        {
+          "id": "C2",
+          "severity": "Critical",
+          "status": "applied",
+          "location": "scripts/fleet-revive.sh matcher seed comparison",
+          "finding": "only the first 200 squashed characters of the seed were compared; 28 characters of margin before the instant path fell outside the window, after which every worker of an effort in a slot compared equal (silent wrong revival)",
+          "action": "compare the whole squashed seed and refuse when two records resolve to one transcript (96a29bb)"
+        },
+        {
+          "id": "I3",
+          "severity": "Important",
+          "status": "applied",
+          "location": "scripts/fleet-revive.sh matcher tiebreak",
+          "finding": "the tiebreak keyed on the first row timestamp, which a replayed fork keeps, so a fork and its origin tied",
+          "action": "choose the transcript last written to (mtime) and print all candidates with their write times (96a29bb)"
+        },
+        {
+          "id": "I4",
+          "severity": "Important",
+          "status": "applied",
+          "location": "scripts/fleet-revive.sh header and banner",
+          "finding": "FLEET_BIN is read from the environment while the header said nothing is; the binary acting was never printed",
+          "action": "header corrected; the banner prints fleet binary (96a29bb)"
+        },
+        {
+          "id": "I5",
+          "severity": "Important",
+          "status": "applied",
+          "location": "scripts/fleet-revive.sh matcher exit codes",
+          "finding": "a matcher crash was reported as no transcript carries this seed",
+          "action": "exit 1 for no match, 3 for an error; the shell branches on rc and shows the last stderr line (96a29bb)"
+        },
+        {
+          "id": "I6",
+          "severity": "Important",
+          "status": "applied",
+          "location": "scripts/tests/fleet-revive.sh",
+          "finding": "fixtures too idealised to see C1; the failure path, the legacy configuration path, the verb refusal and an outside-HOME cwd were untested",
+          "action": "realistic Codex rollout shape, a leading caveat row, a same-start fork, a failing shim, owners-map legacy record, the verb dry-run refusal, duplicate session and outside-HOME added, 35 checks (96a29bb); UNREACHABLE, PENDING-LAUNCH and released-lease rows are not fixturable hermetically and a released lease never reaches the board as DEAD, see OI-3"
+        },
+        {
+          "id": "I7",
+          "severity": "Important",
+          "status": "applied",
+          "location": "scripts/fleet-revive.sh resolve_root",
+          "finding": "the shell walk accepted a cwd outside HOME that fleet.root.find refuses",
+          "action": "the walk refuses a cwd not under HOME with the reason (96a29bb)"
+        },
+        {
+          "id": "M1",
+          "severity": "Minor",
+          "status": "applied",
+          "location": "scripts/fleet-revive.sh UNREACHABLE count",
+          "finding": "counted without the worker filter the DEAD selection applies",
+          "action": "filtered (96a29bb)"
+        },
+        {
+          "id": "M2",
+          "severity": "Minor",
+          "status": "wont-fix",
+          "location": "scripts/fleet-revive.sh runtime compare",
+          "finding": "compares the defaulted runtime rather than the raw field",
+          "action": "evidence.runtime is never empty for a record the current binary reads (the dataclass defaults it), and the dry-run repeats the verb check"
+        },
+        {
+          "id": "M3",
+          "severity": "Minor",
+          "status": "applied",
+          "location": "skills/reviving-dead-panes/SKILL.md",
+          "finding": "the documented command uses FLEET_RELEASES which the script then reports as ignored",
+          "action": "one clause says the lines are information, not an error (96a29bb)"
+        },
+        {
+          "id": "M4",
+          "severity": "Minor",
+          "status": "applied",
+          "location": "scripts/fleet-revive.sh pane-guard line",
+          "finding": "the immediate poll reads 14 or 10 on a booting pane and looked like a verdict",
+          "action": "labelled first poll, read the pane (96a29bb)"
+        },
+        {
+          "id": "M5",
+          "severity": "Minor",
+          "status": "applied",
+          "location": "scripts/tests/fleet-runtime-helpers.sh",
+          "finding": "dead fixture and unused imports after the revive assertions moved",
+          "action": "trimmed (96a29bb)"
+        },
+        {
+          "id": "M6",
+          "severity": "Minor",
+          "status": "wont-fix",
+          "location": "scripts/fleet-revive.sh awk -v id",
+          "finding": "backslash escapes processed in the value",
+          "action": "unreachable with the todo-id charset; revisit if the id shape widens"
+        },
+        {
+          "id": "M7",
+          "severity": "Minor",
+          "status": "applied",
+          "location": "docs/superpowers/fleet-infra-backlog.md",
+          "finding": "described the removed plan transcripts launcher start shape",
+          "action": "one sentence names the 0.6.1 shape (96a29bb)"
+        }
+      ]
+    },
+    {
+      "number": 2,
+      "scope": "code",
+      "verdict": "READY-WITH-FIXES",
+      "at": "2026-09-15T00:47:20Z",
+      "findings": [
+        {
+          "id": "V1",
+          "severity": "Important",
+          "status": "applied",
+          "location": "scripts/fleet-revive.sh matcher exit codes",
+          "finding": "the no-match exit was 1, which is also an uncaught exception exit, so a traceback was reported as an undelivered seed and its text discarded (residual of I5)",
+          "action": "no match exits 4, an exact write-time tie exits 5 and refuses with both candidates printed, anything else is an error shown with its last line; tests for the tie and for an unopenable transcript path (round 2 commit)"
+        },
+        {
+          "id": "V2",
+          "severity": "Minor",
+          "status": "applied",
+          "location": "scripts/fleet-revive.sh matcher per-file errors",
+          "finding": "one transcript vanishing or unreadable between the listing and the read aborted the whole search",
+          "action": "FileNotFoundError and PermissionError skip the file; a malformed cwd is skipped; other OSError still exits 3 (round 2 commit)"
+        },
+        {
+          "id": "V3",
+          "severity": "Minor",
+          "status": "applied",
+          "location": "scripts/fleet-revive.sh header",
+          "finding": "the environment claim named only FLEET_BIN while HOME and CLAUDE_OWNERS_MAP are read",
+          "action": "all three named (round 2 commit)"
+        },
+        {
+          "id": "V4",
+          "severity": "Minor",
+          "status": "applied",
+          "location": "scripts/fleet-revive.sh tiebreak",
+          "finding": "equal write times were broken silently by string order while the note said last written was chosen",
+          "action": "an exact tie refuses (V1) (round 2 commit)"
+        },
+        {
+          "id": "V5",
+          "severity": "Minor",
+          "status": "applied",
+          "location": "scripts/fleet-revive.sh duplicate-session loop",
+          "finding": "one shared transcript reported as two problems",
+          "action": "reported once per pair, naming both (round 2 commit)"
+        },
+        {
+          "id": "V6",
+          "severity": "Nit",
+          "status": "applied",
+          "location": "scripts/fleet-revive.sh USER_BLOCKS comment",
+          "finding": "the margin of five user blocks was not explained against the measured positions (1 for Claude, 2 for Codex, up to 8 after pre-seed slash commands)",
+          "action": "a comment states the measured positions and that the rule degrades to a refusal, never a wrong choice (round 2 commit)"
+        },
+        {
+          "id": "V7",
+          "severity": "Minor",
+          "status": "routed",
+          "location": "scripts/tests/fleet-revive.sh",
+          "finding": "no case for a marker without a name and none for the rc-3 branch beyond the unopenable path",
+          "action": "marker-without-name is refused by the same python the root walk and fleet-env share; left for a later instant"
+        }
+      ]
+    }
+  ]
+}

@@ -1,0 +1,6 @@
+fleet-revive: ignoring exported FLEET_HOME=/home/ubuntu/davis_root/.fleet (the root is derived from the working directory)
+fleet-revive: ignoring exported FLEET_TMUX_SOCKET=fleet-davis (the root is derived from the working directory)
+fleet-revive: ignoring exported FLEET_RELEASES=/home/ubuntu/davis_root/fleet-releases (the root is derived from the working directory)
+fleet root /home/ubuntu/davis_root   (name davis, server fleet-davis, store /home/ubuntu/davis_root/.fleet)
+fleet binary /home/ubuntu/davis_root/superpowers/bin/fleet
+nothing to revive: no DEAD record on the board of /home/ubuntu/davis_root

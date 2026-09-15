@@ -1,0 +1,41 @@
+end-to-end through the REAL verb, post-review script, 2026-09-15T00:35:37Z
+board before: ['e2e-09150030', 'worker', 'DEAD']
+--- revive rc 0
+fleet root /tmp/claude-1000/-home-ubuntu-davis-root-superpowers/53ee129f-4b4a-4005-bdb6-dfab263001b1/scratchpad/e2e-home/e2e_root   (name e2e, server fleet-e2e, store /tmp/claude-1000/-home-ubuntu-davis-root-superpowers/53ee129f-4b4a-4005-bdb6-dfab263001b1/scratchpad/e2e-home/e2e_root/.fleet)
+fleet binary /home/ubuntu/davis_root/superpowers/bin/fleet
+1 DEAD record(s): e2e-09150030
+revive plan for e2e-09150030
+  runtime      claude   (fleet selection: claude)
+  session      dt-e2e on tmux server itrevive-e2e-806563
+  instant      /tmp/claude-1000/-home-ubuntu-davis-root-superpowers/53ee129f-4b4a-4005-bdb6-dfab263001b1/scratchpad/e2e-home/e2e_root/instants/00000000-09150030-inflight-append-e2e
+  slot         /tmp/claude-1000/-home-ubuntu-davis-root-superpowers/53ee129f-4b4a-4005-bdb6-dfab263001b1/scratchpad/e2e-home/e2e_root/ws1
+  config dir   /tmp/claude-1000/-home-ubuntu-davis-root-superpowers/53ee129f-4b4a-4005-bdb6-dfab263001b1/scratchpad/e2e-home/cfg   (from the record)
+  transcript   44444444-4444-4444-8444-444444444444   (last written 2026-09-15T00:35:37Z)
+
+reviving e2e-09150030 ...
+todo_id     e2e-09150030
+session_id  44444444-4444-4444-8444-444444444444
+runtime     claude
+  pane-guard   14 indeterminate    (first poll; a resume menu reads 10 or 15 — read the pane)
+
+fleet: 2 holding a slot · 0 needs you · 6 not holding a slot (not shown, FD-4)
+  e2e  e2e-09150030              RUNNING          ws1  -  -
+  ses  session:pid806687:806687  UNKNOWN-SESSION  ws1  -  no dispatch record claims this session; it is reported so a human can decide, and this tool does nothing to it
+revived 1 of 1. The board corrects itself as each process comes up; no verb is needed
+
+root /tmp/claude-1000/-home-ubuntu-davis-root-superpowers/53ee129f-4b4a-4005-bdb6-dfab263001b1/scratchpad/e2e-home/e2e_root (--root)
+root /tmp/claude-1000/-home-ubuntu-davis-root-superpowers/53ee129f-4b4a-4005-bdb6-dfab263001b1/scratchpad/e2e-home/e2e_root (--root)
+
+--- status after:
+state	RUNNING
+evidence.liveness	session
+evidence.pid	806687
+evidence.tmux_socket	itrevive-e2e-806563
+--- pane:
+stand-in claude: --permission-mode auto --resume 44444444-4444-4444-8444-4444444
+44444
+launched_at moved: True 2026-09-15T00:35:38Z
+--- second revive while alive (expect: nothing to revive):
+rc 0 | nothing to revive: no DEAD record on the board of /tmp/claude-1000/-home-ubuntu-davis-root-superpowers/53ee129f-4b4a-4005-bdb6-dfab263001b1/scratchpad/e2e-home/e2e_root
+--- server killed; plan again (record DEAD again, same transcript):
+plan rc 0 | ['1 DEAD record(s): e2e-09150030', 'transcript   44444444-4444-4444-8444-444444444444   (last written 2026-09-15T00:35:37Z)']

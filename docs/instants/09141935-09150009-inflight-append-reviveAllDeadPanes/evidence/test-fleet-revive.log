@@ -1,0 +1,38 @@
+  ok   outside-root: rc 2
+  ok   outside-root: names the marker
+  ok   outside-home: rc 2 and says the walk only looks under $HOME
+  ok   unknown subcommand: rc 2 with usage
+  ok   stale-env: rc 0 from a subdirectory
+  ok   stale-env: says which exports it ignored
+  ok   plan: names the root, its server and the binary
+  ok   plan: both DEAD records
+  ok   claude-seed-match: record one → U1 past the caveat row
+  ok   claude-seed-match: the decoy, the older occupant and the subagent file are not chosen
+  ok   latest-of-two: record three → the one last written to, U3b
+  ok   latest-of-two: both candidates printed with write times
+  ok   plan: nothing started
+  ok   write-time-tie: rc 2 naming both, nothing started
+  ok   search-error: rc 2 reported as a failed search, not as an undelivered seed
+  ok   legacy-config: rc 0, owner resolved and said
+  ok   revive-all: rc 0
+  ok   revive-all: dry-run for every record before any start
+  ok   revive-all: exact session ids and roots on the start
+  ok   revive-all: pane-guard reported per record
+  ok   revive-all: summary
+  ok   partial-failure: rc 1, the other record still started, the failure named
+  ok   runtime-mismatch: rc 2
+  ok   runtime-mismatch: says so for both records
+  ok   runtime-mismatch: nothing started
+  ok   abort-recorded: rc 2
+  ok   abort-recorded: names fleet abort
+  ok   abort-recorded: the other record is not started either
+  ok   no-seed-match: rc 2, nothing started
+  ok   no-seed-match: names the hand path
+  ok   codex-seed-match: rc 0
+  ok   codex-seed-match: record two → U2 past the injected user blocks
+  ok   codex-seed-match: runtime line
+  ok   dry-run-refused: rc 2 naming the verb refusal, nothing started
+  ok   duplicate-session: rc 2, names both records, nothing started
+  ok   nothing-dead: rc 0 and says so
+  ok   nothing-dead: nothing started
+PASS: fleet-revive.sh derives root, server, slot, configuration and transcript from the directory and the records on either runtime, refuses outside a root, on a runtime mismatch, on a recorded abort, on an unmatched seed, on a verb refusal and on two records sharing a transcript without starting anything, and revives every DEAD record of the root otherwise

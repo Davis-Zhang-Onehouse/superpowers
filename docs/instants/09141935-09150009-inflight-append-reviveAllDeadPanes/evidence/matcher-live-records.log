@@ -1,0 +1,15 @@
+matcher extracted from scripts/fleet-revive.sh (post-review), 2026-09-15T00:35:15Z; rule: recorded config + cwd == slot + whole seed among the first 5 user blocks; tie → last written
+== claude slot /home/ubuntu/davis_root/ws1, seed of 00000000-09142012-inflight-append-veloxx8tipgreenci
+2026-09-15T00:16:34Z	d0db599f-80f4-402c-a29c-9254250102ba	/home/ubuntu/davis_root/.claude/projects/-home-ubuntu-davis-root-ws1/d0db599f-80f4-402c-a29c-9254250102ba.jsonl
+rc=0
+== claude slot /home/ubuntu/davis_root/ws3, seed of 00000000-09142011-inflight-append-gapevidencefiveclosures
+2026-09-15T00:12:01Z	3ffd9dc2-a2de-4cfc-89eb-8b42e948558c	/home/ubuntu/davis_root/.claude/projects/-home-ubuntu-davis-root-ws3/3ffd9dc2-a2de-4cfc-89eb-8b42e948558c.jsonl
+rc=0
+== codex cwd /home/ubuntu/davis_root/ws1/gluten-internal, prompt 'Reply with exactly: davis-root-ok' (rollout 01a0916d: the prompt is the SECOND user block, behind <recommended_plugins>)
+2026-09-11T17:04:35Z	01a0916d-8b1c-78a3-8136-246e01dc44f4	/home/ubuntu/davis_root/.codex/sessions/2026/09/11/rollout-2026-09-11T17-04-30-01a0916d-8b1c-78a3-8136-246e01dc44f4.jsonl
+rc=0
+== codex cwd /home/ubuntu/davis_root/superpowers, the 2026-09-11 runtime-selection session's first prompt (behind an AGENTS.md preamble)
+2026-09-11T21:38:42Z	01a0917b-b0d9-79b0-bf3e-69300a18a73c	/home/ubuntu/davis_root/.codex/sessions/2026/09/11/rollout-2026-09-11T17-19-57-01a0917b-b0d9-79b0-bf3e-69300a18a73c.jsonl
+rc=0
+== codex negative control: a prompt no rollout carries
+rc=1
