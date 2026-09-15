@@ -43,13 +43,15 @@ none:
 > *fleet-revive: /home/ubuntu is not inside a fleet root: no .fleet-root marker between here and $HOME.
 > cd into the fleet's root directory …*
 
-Each root has its own store and its own tmux server (`fleet-<name>`), and a record carries the server it
-was dispatched on; `fleet revive` follows the record, so a fleet whose older records still name another
+Each root has its own store and its own tmux server (`fleet-<name>`); the script's first two lines say which
+root and which `fleet` binary it resolved. A record carries the server it was dispatched on; `fleet revive` follows the record, so a fleet whose older records still name another
 server (`fleet`, on this box) revives correctly with no export. Exported `FLEET_HOME`, `FLEET_ROOT`,
 `FLEET_TMUX_SOCKET`, `FLEET_RELEASES` and `FLEET_INSTANTS` are **dropped and reported**, not honoured —
 `fleet` ranks `$FLEET_HOME` above `--root`, so a shell that sourced `fleet-env.sh` in another root would
 otherwise silently revive the wrong fleet. Measured from `/home/ubuntu/davis2_root` with `davis`'s exports
-still set: three `ignoring exported …` lines, then `davis2`'s board.
+still set: three `ignoring exported …` lines, then `davis2`'s board. Those lines are information, not an
+error — a shell that sourced `fleet-env.sh` always has them, including the `$FLEET_RELEASES` the command
+below uses to find the script.
 
 ## Decide first: revive, or abandon?
 
@@ -82,7 +84,7 @@ bash "$FLEET_RELEASES/current/scripts/fleet-revive.sh" revive     # the same pre
 
 (`$FLEET_RELEASES` is set by `scripts/fleet-env.sh`; the checkout's `scripts/fleet-revive.sh` is the same
 script.) `plan` prints, per record: runtime against the fleet selection, session and server, instant, slot,
-configuration directory and where it came from, and the transcript UUID with its start time. Then either
+configuration directory and where it came from, and the transcript UUID with the time it was last written. Then either
 `plan only: N record(s) would be revived` or `refusing: N problem(s), nothing started` with each problem
 named. `revive` runs the identical pre-flight plus `fleet revive --dry-run` for every record, and only then
 starts them, one after another, printing `pane-guard` for each and the board at the end.
@@ -91,7 +93,7 @@ starts them, one after another, printing `pane-guard` for each and the board at 
 |---|---|---|
 | *the record ran on codex and the fleet is set to claude* (or the reverse) | The fleet selection changed under open work; `fleet revive` refuses this too | `fleet runtime` shows the selection. Set it back with `fleet runtime --set <recorded>`, or harvest the record. Never revive across runtimes |
 | *an abort is recorded in …/.fleet/abort.json* | The worker chose to stop and the rename never completed | `fleet abort --id <id> --reason …` finishes it; then re-run |
-| *no transcript under … has cwd … and this record's seed as its first message* | The seed never reached a session, or the configuration directory is not the one the worker ran under | Inspect the slot's project directory yourself; `fleet revive --id <id> --session-id <uuid>` is the hand path |
+| *no transcript under … has cwd … and this record's seed among its first user messages* | The seed never reached a session, or the configuration directory is not the one the worker ran under | Inspect the slot's project directory yourself; `fleet revive --id <id> --session-id <uuid>` is the hand path |
 | *no lease in this store is held by <id>* | The lease was released; the work is not revivable in place | Dispatch again, or resume the instant with `fleet resume` |
 | *fleet revive --dry-run refused: …* | The verb's own check: pane occupied, a live agent in the workspace, executable unavailable | Read the reason; inspect the pane or workspace it names before retrying |
 
@@ -107,10 +109,15 @@ slot's project directory is **not** reliably the worker you are reviving — one
 three occupants weeks apart. What is identity: the worker's **first user message is the record's
 `.fleet/seed.txt` verbatim**, and the seed embeds the instant path with its dispatch timestamp. The script
 takes the transcript under the recorded configuration whose metadata cwd is the lease path and whose first
-user message carries that seed; a `subagents/` file is never a candidate. When several transcripts carry
-one seed (a resume that forked, a re-brief), it chooses the **latest-started** and prints all of them —
-read that list. Measured on the live fleet: for the worker in `ws1` the rule returns exactly the transcript
-that started one second after its dispatch, and nothing from the two earlier occupants of the slot.
+five user messages carry the **whole** seed — five, because both CLIs put user-role blocks ahead of the
+prompt (Claude a `<local-command-caveat>` row; Codex `<recommended_plugins>` and an `# AGENTS.md` preamble,
+measured on 4 of 6 rollouts here) — and a `subagents/` file is never a candidate. When several transcripts
+carry one seed (a resume that forked, a re-brief), it chooses the one **last written to** and prints all of
+them — read that list; a fork replays the history with its original timestamps, so the start time cannot
+tell them apart. Two records resolving to one transcript refuse the run. Measured on the live fleet: for
+the worker in `ws1` the rule returns exactly the transcript that started one second after its dispatch,
+and nothing from the two earlier occupants of the slot; for a Codex session here it finds the prompt behind
+the two injected blocks.
 
 ### Traps that survive the automation
 

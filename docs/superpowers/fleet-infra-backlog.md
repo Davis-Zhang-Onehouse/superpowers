@@ -911,7 +911,8 @@ no socket — only `status --porcelain` does), a launcher exporting `FLEET_HOME`
 created: revive on the server the record NAMES, or every verb resolves through the record and cannot see
 the pane you just brought back. The mechanics it was making an operator retype — the socket, the slot, the
 config dir, the transcript list, the launcher — moved to `scripts/fleet-revive.sh`, which derives all of
-them from the record and never sends a key.
+them from the record and never sends a key. (Since fleet 0.6.1 it takes no record at all: `plan|revive`, run from inside a
+root, revives every `DEAD` record on that root's board on either runtime, the transcript derived from the seed.)
 
 **Still open, deliberately.** `bin/fleet-view` keeps its own socket search. It is a second implementation
 of the enumeration now in `session.default_probes`, and it should read the product's answer instead —
