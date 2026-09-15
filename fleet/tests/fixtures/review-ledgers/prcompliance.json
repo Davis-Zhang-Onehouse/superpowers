@@ -1,0 +1,383 @@
+{
+ "schema_version": 1,
+ "rounds": [
+  {
+   "number": 1,
+   "scope": "all",
+   "verdict": "READY-WITH-FIXES",
+   "at": "2026-09-14T18:48:09Z",
+   "findings": [
+    {
+     "id": "RV-1",
+     "severity": "Critical",
+     "status": "applied",
+     "location": "-",
+     "finding": "-",
+     "action": "-"
+    },
+    {
+     "id": "RV-2",
+     "severity": "Critical",
+     "status": "applied",
+     "location": "-",
+     "finding": "-",
+     "action": "-"
+    },
+    {
+     "id": "RV-3",
+     "severity": "Critical",
+     "status": "applied",
+     "location": "-",
+     "finding": "-",
+     "action": "-"
+    },
+    {
+     "id": "RV-4",
+     "severity": "Important",
+     "status": "applied",
+     "location": "-",
+     "finding": "-",
+     "action": "-"
+    },
+    {
+     "id": "RV-5",
+     "severity": "Important",
+     "status": "applied",
+     "location": "-",
+     "finding": "-",
+     "action": "-"
+    },
+    {
+     "id": "RV-6",
+     "severity": "Important",
+     "status": "wont-fix",
+     "location": "-",
+     "finding": "-",
+     "action": "-"
+    },
+    {
+     "id": "RV-7",
+     "severity": "Important",
+     "status": "applied",
+     "location": "-",
+     "finding": "-",
+     "action": "-"
+    },
+    {
+     "id": "RV-8",
+     "severity": "Important",
+     "status": "applied",
+     "location": "-",
+     "finding": "-",
+     "action": "-"
+    }
+   ],
+   "heads": {
+    "hudi-rs-internal": "bba773b8aeb15f39a27f0de001f56849e1ac368c"
+   }
+  },
+  {
+   "number": 2,
+   "scope": "all",
+   "verdict": "READY-WITH-FIXES",
+   "at": "2026-09-14T18:58:49Z",
+   "findings": [
+    {
+     "id": "RV-9",
+     "severity": "Critical",
+     "status": "applied",
+     "location": "-",
+     "finding": "-",
+     "action": "-"
+    },
+    {
+     "id": "RV-10",
+     "severity": "Critical",
+     "status": "applied",
+     "location": "-",
+     "finding": "-",
+     "action": "-"
+    },
+    {
+     "id": "RV-11",
+     "severity": "Important",
+     "status": "applied",
+     "location": "-",
+     "finding": "-",
+     "action": "-"
+    },
+    {
+     "id": "RV-12",
+     "severity": "Important",
+     "status": "applied",
+     "location": "-",
+     "finding": "-",
+     "action": "-"
+    },
+    {
+     "id": "RV-13",
+     "severity": "Minor",
+     "status": "applied",
+     "location": "-",
+     "finding": "-",
+     "action": "-"
+    },
+    {
+     "id": "RV-14",
+     "severity": "Minor",
+     "status": "applied",
+     "location": "-",
+     "finding": "-",
+     "action": "-"
+    },
+    {
+     "id": "RV-15",
+     "severity": "Minor",
+     "status": "applied",
+     "location": "-",
+     "finding": "-",
+     "action": "-"
+    }
+   ],
+   "heads": {
+    "hudi-rs-internal": "99e1a94b91395697732af391b573d16c06705f48"
+   }
+  },
+  {
+   "number": 3,
+   "scope": "all",
+   "verdict": "READY-WITH-FIXES",
+   "at": "2026-09-14T19:16:38Z",
+   "findings": [
+    {
+     "id": "RV-16",
+     "severity": "Critical",
+     "status": "applied",
+     "location": "-",
+     "finding": "-",
+     "action": "-"
+    },
+    {
+     "id": "RV-17",
+     "severity": "Important",
+     "status": "applied",
+     "location": "-",
+     "finding": "-",
+     "action": "-"
+    },
+    {
+     "id": "RV-18",
+     "severity": "Important",
+     "status": "applied",
+     "location": "-",
+     "finding": "-",
+     "action": "-"
+    },
+    {
+     "id": "RV-19",
+     "severity": "Minor",
+     "status": "applied",
+     "location": "-",
+     "finding": "-",
+     "action": "-"
+    },
+    {
+     "id": "RV-20",
+     "severity": "Minor",
+     "status": "applied",
+     "location": "-",
+     "finding": "-",
+     "action": "-"
+    }
+   ],
+   "heads": {
+    "hudi-rs-internal": "b43c7542de7dbafc54424d8254a0b600e19b2e16"
+   }
+  },
+  {
+   "number": 4,
+   "scope": "all",
+   "verdict": "READY-WITH-FIXES",
+   "at": "2026-09-14T20:23:38Z",
+   "findings": [
+    {
+     "id": "RV-21",
+     "severity": "Important",
+     "status": "applied",
+     "location": "-",
+     "finding": "-",
+     "action": "-"
+    },
+    {
+     "id": "RV-22",
+     "severity": "Important",
+     "status": "applied",
+     "location": "-",
+     "finding": "-",
+     "action": "-"
+    },
+    {
+     "id": "RV-23",
+     "severity": "Minor",
+     "status": "applied",
+     "location": "-",
+     "finding": "-",
+     "action": "-"
+    },
+    {
+     "id": "RV-24",
+     "severity": "Minor",
+     "status": "applied",
+     "location": "-",
+     "finding": "-",
+     "action": "-"
+    }
+   ],
+   "heads": {
+    "hudi-rs-internal": "196ae70880a52a901e4f629907b9aec58d8a15a3"
+   }
+  },
+  {
+   "number": 5,
+   "scope": "all",
+   "verdict": "READY-WITH-FIXES",
+   "at": "2026-09-14T21:45:25Z",
+   "findings": [
+    {
+     "id": "RV-25",
+     "severity": "Critical",
+     "status": "applied",
+     "location": "-",
+     "finding": "-",
+     "action": "-"
+    },
+    {
+     "id": "RV-26",
+     "severity": "Important",
+     "status": "applied",
+     "location": "-",
+     "finding": "-",
+     "action": "-"
+    },
+    {
+     "id": "RV-27",
+     "severity": "Important",
+     "status": "applied",
+     "location": "-",
+     "finding": "-",
+     "action": "-"
+    },
+    {
+     "id": "RV-28",
+     "severity": "Important",
+     "status": "applied",
+     "location": "-",
+     "finding": "-",
+     "action": "-"
+    },
+    {
+     "id": "RV-29",
+     "severity": "Important",
+     "status": "applied",
+     "location": "-",
+     "finding": "-",
+     "action": "-"
+    },
+    {
+     "id": "RV-30",
+     "severity": "Important",
+     "status": "applied",
+     "location": "-",
+     "finding": "-",
+     "action": "-"
+    },
+    {
+     "id": "RV-31",
+     "severity": "Important",
+     "status": "applied",
+     "location": "-",
+     "finding": "-",
+     "action": "-"
+    },
+    {
+     "id": "RV-32",
+     "severity": "Minor",
+     "status": "applied",
+     "location": "-",
+     "finding": "-",
+     "action": "-"
+    }
+   ],
+   "heads": {
+    "hudi-rs-internal": "2fe762f620b8f587ad07ae080ccc388143837e3b"
+   }
+  },
+  {
+   "number": 6,
+   "scope": "alignment",
+   "verdict": "READY-WITH-FIXES",
+   "at": "2026-09-14T21:45:56Z",
+   "findings": [
+    {
+     "id": "RV-33",
+     "severity": "Important",
+     "status": "applied",
+     "location": "-",
+     "finding": "-",
+     "action": "-"
+    },
+    {
+     "id": "RV-34",
+     "severity": "Minor",
+     "status": "applied",
+     "location": "-",
+     "finding": "-",
+     "action": "-"
+    },
+    {
+     "id": "RV-35",
+     "severity": "Minor",
+     "status": "applied",
+     "location": "-",
+     "finding": "-",
+     "action": "-"
+    },
+    {
+     "id": "RV-36",
+     "severity": "Minor",
+     "status": "applied",
+     "location": "-",
+     "finding": "-",
+     "action": "-"
+    },
+    {
+     "id": "RV-37",
+     "severity": "Minor",
+     "status": "applied",
+     "location": "-",
+     "finding": "-",
+     "action": "-"
+    },
+    {
+     "id": "RV-38",
+     "severity": "Minor",
+     "status": "open",
+     "location": "-",
+     "finding": "-",
+     "action": "-"
+    },
+    {
+     "id": "RV-39",
+     "severity": "Minor",
+     "status": "wont-fix",
+     "location": "-",
+     "finding": "-",
+     "action": "-"
+    }
+   ],
+   "heads": {
+    "hudi-rs-internal": "2fe762f620b8f587ad07ae080ccc388143837e3b"
+   }
+  }
+ ]
+}
