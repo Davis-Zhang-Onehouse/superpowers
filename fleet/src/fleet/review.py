@@ -275,6 +275,10 @@ class Review:
         carries a Critical/Important finding whose id is first seen in that epoch and is not a
         coordinator's `CV-` id. The heads are the slot HEAD at record time, a proxy for the reviewed
         tip; that is why what reads them is an advisory and never a gate.
+
+        Heads are compared as WHOLE DICTS, so a repo that becomes readable between two rounds opens an
+        epoch; this diverges on purpose from `cli._head_disagreement`'s FI-417 intersection, because an
+        advisory may over-fire where a gate may not.
         """
         out = []
         seen = set()

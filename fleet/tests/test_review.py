@@ -493,6 +493,24 @@ class TestOscillationStreak(LedgerCase):
 
 
 class TestAdvisories(LedgerCase):
+    def test_advisory_boundary_is_three(self):
+        """The threshold itself, driven from constructed rounds rather than a calibration fixture: three
+        head-moving rounds each raising a NEW Important fire OSCILLATING; the same shape two rounds long
+        is silent. Two assertions in one test because a boundary asserted on one side only is satisfied
+        by a build that always fires (or never does)."""
+        three = self.review()
+        for n, head in enumerate(("aaa", "bbb", "ccc"), start=1):
+            three.add_round("all", "NOT-READY", [finding(f"RV-{n}", "Important")], heads={"r": head})
+        self.assertEqual(three.oscillation_streak(), 3)
+        self.assertTrue(any(a.startswith("OSCILLATING — 3 consecutive") for a in three.advisories()),
+                        three.advisories())
+
+        two = self.review(self.other_instant())
+        for n, head in enumerate(("aaa", "bbb"), start=1):
+            two.add_round("all", "NOT-READY", [finding(f"RV-{n}", "Important")], heads={"r": head})
+        self.assertEqual(two.oscillation_streak(), 2)
+        self.assertFalse(any(a.startswith("OSCILLATING") for a in two.advisories()), two.advisories())
+
     def test_oscillating_at_three_and_silent_at_two(self):
         loud = self.from_fixture("prcompliance").advisories()
         self.assertTrue(any(a.startswith("OSCILLATING — 5 consecutive") for a in loud), loud)
