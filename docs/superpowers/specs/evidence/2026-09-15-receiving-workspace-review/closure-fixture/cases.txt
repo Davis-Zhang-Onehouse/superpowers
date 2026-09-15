@@ -1,0 +1,8 @@
+# bash .github/tests/cases.sh  (full run, FAST unset -- includes the ~4 min wait)
+# captured 2026-09-15
+head dd2744d
+git status at capture: 0 modified files
+26 passed, 0 failed; exit statuses produced=[0 1] covered=[0 1]
+exit status: 0
+wall clock: 240s
+tip after run: dd2744d

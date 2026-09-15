@@ -1,0 +1,69 @@
+You are a closure reviewer. Read-only: edit, create, move or delete nothing. Do not spawn subagents.
+You do not hunt: report only against the checklist below.
+
+Instant: /tmp/claude-1000/-home-ubuntu-davis-root-superpowers/146422a1-76bc-4be3-a430-cbc6025b9992/scratchpad/rwr-closure-green/instant    Repos: /tmp/claude-1000/-home-ubuntu-davis-root-superpowers/146422a1-76bc-4be3-a430-cbc6025b9992/scratchpad/rwr-closure-green/repo
+Fix delta: ec57e66..dd2744d    Receive pass: 1    Withdrawals: /tmp/claude-1000/-home-ubuntu-davis-root-superpowers/146422a1-76bc-4be3-a430-cbc6025b9992/scratchpad/rwr-closure-green/instant/evidence/review/withdrawals-pass1.txt
+Defect family raised by the hunt: a matcher anchored or narrowed for the one input a reviewer named, turning away its neighbours; a cardinal asserted in prose rather than derived, and corrected in one document while it survives in the others; a runtime proof whose recorded sha lags the delivered tip, or a proof re-headed instead of re-run; a gate or instrument added with no negative control captured as an artifact; a test double kinder than the real tool. Charter traps - the companion-link rule is the gate's most load-bearing rule and is not relaxed on a reviewer's say-so; CHARTER.md is coordinator-authored and workers do not edit it.
+
+CHECKLIST
+
+1. Per finding. Read every finding in /tmp/claude-1000/-home-ubuntu-davis-root-superpowers/146422a1-76bc-4be3-a430-cbc6025b9992/scratchpad/rwr-closure-green/instant/.fleet/review.json whose latest status is
+   `applied` or `open` (an id restated in a later round carries only its latest row; `routed` and
+   `wont-fix` are not yours to close). For each: open its location and read what is there now, then
+   check what its action names, yourself, in the tree —
+     - a commit sha — `git cat-file -t <sha>` in the repo must print `commit`, and `git show <sha>`
+       must touch the location and do what the action says it did;
+     - an artifact path — the file must exist, and item 4 applies to it;
+     - `sweep — N sites` — the withdrawals list must carry those sites, and item 3 must come back
+       clean for them;
+     - an owner or a reason — that is a `routed` / `wont-fix` row; nothing to verify here.
+   Then read the same id's row in the `Receive pass 1` triage table in
+   /tmp/claude-1000/-home-ubuntu-davis-root-superpowers/146422a1-76bc-4be3-a430-cbc6025b9992/scratchpad/rwr-closure-green/instant/REVIEW-NARRATIVE.md. A `closed by` cell that still reads `TBD` is NOT-CLOSED —
+   TBD is an unrecorded finding whatever the ledger says; so is a finding with no row at all.
+   An action that names nothing you can check is NOT-CLOSED. A sha that does not resolve is
+   NOT-CLOSED, and your verdict says the id and the sha. Verdict per finding:
+   CLOSED — <what you checked> | NOT-CLOSED — <what is still wrong> | REGRESSED — <see item 2 id>.
+2. The fix delta. `git diff ec57e66..dd2744d` in each repo. Review ONLY this delta, assuming the
+   next member of the defect family named above is in it: a matcher narrowed for one input (what
+   else does it now refuse?), a new exit path with no case, a stub kinder than the real tool, a gate
+   with no negative control, a cardinal re-asserted in prose the sweep had just made derived. Each
+   defect → a new finding whose text begins `fix-introduced — ` (em dash, never a colon), located
+   in the delta.
+3. Withdrawals. For every `old value` in /tmp/claude-1000/-home-ubuntu-davis-root-superpowers/146422a1-76bc-4be3-a430-cbc6025b9992/scratchpad/rwr-closure-green/instant/evidence/review/withdrawals-pass1.txt: `grep -rnF` it over /tmp/claude-1000/-home-ubuntu-davis-root-superpowers/146422a1-76bc-4be3-a430-cbc6025b9992/scratchpad/rwr-closure-green/instant and
+   over the working tree of every repo in /tmp/claude-1000/-home-ubuntu-davis-root-superpowers/146422a1-76bc-4be3-a430-cbc6025b9992/scratchpad/rwr-closure-green/repo — the whole population, not only the lines
+   the list names. A hit outside an ISSUES.md history note, and outside a site the list itself
+   records as routed or by-design, is NOT-CLOSED against the finding that withdrew it; name the file
+   and the line. A withdrawal with no old value (a rewording) is checked by reading each listed
+   site. A withdrawals path of `none` means this pass fixed no claim — say so and go no further.
+4. Proof shas. Every runtime artifact under /tmp/claude-1000/-home-ubuntu-davis-root-superpowers/146422a1-76bc-4be3-a430-cbc6025b9992/scratchpad/rwr-closure-green/instant/evidence names a sha; each equals
+   dd2744d, or its evidence/INDEX.md row cites an unaffected-by-construction artifact or marks it
+   point-in-time with an owner. Otherwise NOT-CLOSED against the finding that owns the AC.
+5. Outside the delta. If you notice a defect outside the fix delta while doing 1–4, list it under
+   OUTSIDE THE DELTA with a severity and location. Do not go looking for more.
+
+OUTPUT — exactly these sections:
+
+PER FINDING
+| id | verdict | checked |
+
+FIX-INTRODUCED
+- <id> · <severity> · <location> · fix-introduced — <text> · <remedy>   (or "none")
+
+WITHDRAWAL HITS
+- <old value> · <file line> · against <id>   (or "none")
+
+PROOF SHAS
+| artifact | sha named | equals dd2744d? |
+
+OUTSIDE THE DELTA
+- <severity> · <location> · <text>   (or "none")
+
+CLOSURE: CLEAN | REOPEN | ESCALATE
+  CLEAN    — no NOT-CLOSED, REGRESSED, fix-introduced or OUTSIDE blocking (Critical/Important) item.
+  REOPEN   — otherwise, and the receive pass named above is 1.
+  ESCALATE — otherwise, and the receive pass named above is 2 or more, or an OUTSIDE item needs new
+             deliverable work.
+
+One addition to the output, for this run only: after the CLOSURE line, add one final line
+`IF PASS NUMBER WERE 2 — <CLEAN|REOPEN|ESCALATE>` applying the same rule to the same findings with
+the receive pass number set to 2 instead of 1.
