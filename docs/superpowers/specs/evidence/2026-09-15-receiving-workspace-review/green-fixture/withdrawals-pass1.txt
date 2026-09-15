@@ -1,0 +1,19 @@
+# Withdrawals — receive pass 1 (round 1, RV-1..RV-9)
+# Old values withdrawn from the instant + shipped tree, for the closure reviewer to grep.
+
+"22 cases" -> derived count, now 26 -> sites:
+  - instant/HANDOFF.md:4              (RV-3, applied)
+  - repo/README.md:2                  (RV-9, applied - replaced by a derivation, no fixed cardinal)
+  - instant/evidence/INDEX.md:5       (RV-7, applied - row now cites the re-captured artifact)
+  - instant/CHARTER.md:9              (RV-4, ROUTED - coordinator-owned file, still reads "22 cases")
+    NOTE: a grep for "22 cases" over the instant will still hit CHARTER.md:9 by design.
+
+"(none yet)" -> real issue register I-1..I-7 -> sites:
+  - instant/ISSUES.md:3               (RV-2, applied)
+
+"23 passed, 0 failed" (artifact body at ec57e66) -> "26 passed, 0 failed" at 7900304 -> sites:
+  - instant/evidence/04-policy/cases.txt  (RV-7; prior artifact kept as cases-at-ec57e66.txt)
+
+# Closed by reading, not by grep (reworded, no old value):
+  - repo/README.md:2 no longer states a cardinal at all; verify by reading it.
+  - instant/HANDOFF.md header gained "| Status: LIVE" (RV-1) - an addition, nothing withdrawn.

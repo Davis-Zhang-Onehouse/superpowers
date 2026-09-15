@@ -1,0 +1,5 @@
+638936e docs: the harness has 27 cases, not 22 (RV-9)
+0ba1c6d tests: pin the anchor cases and gate exit-status coverage (RV-5, RV-8)
+1114eca gate: anchor the right edge of the PR-number extractor (RV-5)
+5040d5e docs: readme
+55034b7 gate: companion link check, 22 cases

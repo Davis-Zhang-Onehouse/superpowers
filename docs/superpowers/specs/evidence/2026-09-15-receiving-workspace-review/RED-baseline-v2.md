@@ -87,6 +87,19 @@ grep, where the portable spelling is `[[:>:]]`. It works on this host (ugrep 7.8
 explicitly rejected `\b` for exactly this reason and used an explicit character class instead. Neither
 the agent nor any case notices; this is a finding about the baseline, not a scored row.
 
+## Fixture artifacts kept with this file
+
+The fixture lived in a session-scoped scratchpad and is gone with it, so the two listings this file's
+rows depend on are committed beside it:
+
+| path | what it is |
+|---|---|
+| `red-v2-fixture/git-log.txt` | `git log --oneline` — five commits, including the bundled `0ba1c6d tests: pin the anchor cases and gate exit-status coverage (RV-5, RV-8)` that the "one finding per commit" row scores FAIL |
+| `red-v2-fixture/evidence-listing.txt` | `find instant/evidence -type f` — the three files behind the "controls as artifacts" FAIL |
+
+GREEN's counterparts, and the artifacts RED v2 never produced, are under `green-fixture/`; see
+`GREEN-with-skill.md`.
+
 ## What this means for the skill
 
 Two runs, twelve findings, every trap sprung, and the unskilled agent's *judgment* rows all pass. The
