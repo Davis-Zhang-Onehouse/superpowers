@@ -9,7 +9,7 @@ Arguments: `$ARGUMENTS`
 - `--base <base-folder-path>` (**mandatory, always**): the folder that holds the instants. If absent, stop and elicit it.
 - `--instant <instant-folder>` (optional): default = the latest `…-inflight-…` instant under `--base`.
 - `--closure` (optional): run a closure round after a receive pass instead of a hunt. Requires the tip the findings were raised against, the tip now, the pass number and the withdrawals path — ask for any that is missing.
-- `--scope all|format|alignment|code` (optional, default `all`): which lenses the hunt dispatches. Each lens's findings are recorded under its own scope, and `fleet complete` needs all three covered across the ledger, so a single-lens hunt is deliberately partial.
+- `--scope all|format|alignment|code` (optional, default `all`): which lenses the hunt dispatches. Each lens's findings are recorded under its own scope, and `fleet complete` needs all three covered across the ledger, so a single-lens hunt is deliberately partial (not used under `--closure`; the closure's scope is the hunt's coverage).
 
 **Before doing anything:** confirm `--base`. If missing, ask your human partner for the base folder path and wait for it.
 
