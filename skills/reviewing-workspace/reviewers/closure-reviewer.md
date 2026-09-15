@@ -63,9 +63,11 @@ CHECKLIST
 4. Proof shas. Every runtime artifact under [INSTANT_PATH]/evidence names a sha; each equals
    [T_NOW], or its evidence/INDEX.md row cites an unaffected-by-construction artifact or marks it
    point-in-time. A negative control under evidence/review/control-<id>.txt is point-in-time by
-   construction — check instead that the code it exercised is unchanged between the sha it names and
-   [T_NOW] (`git diff <sha>..[T_NOW] -- <path>` empty); an owner is required only for an artifact
-   marked stale. Otherwise NOT-CLOSED against the finding that owns the AC.
+   construction — check instead that the gate or checker file(s) the control ran are unchanged
+   between the sha it names and [T_NOW] (`git diff <sha>..[T_NOW] -- <those files>` empty); an owner
+   is required only for an artifact marked stale. Otherwise NOT-CLOSED against the finding that owns
+   the AC. A control whose sha predates the commit carrying its gate is NOT-CLOSED — control
+   predates its gate; re-run after commit.
 5. Outside the delta. If you notice a defect outside the fix delta while doing 1–4, list it under
    OUTSIDE THE DELTA with a severity and location. Do not go looking for more.
 

@@ -148,7 +148,11 @@ proposal. One instant spent sixteen rounds reviewing the gates its rounds had ad
 
 **A control with no artifact is a control that did not happen.** Before the gate's finding is
 recorded, write the control to `evidence/review/control-<id>.txt`: what you injected, the exact
-command, its output, its exit status, and the restore you verified. Then name that path in
+command, its output, its exit status, and the restore you verified. **The control is run after the
+commit that carries the gate, and its artifact names that commit's sha** — a control captured while
+the gate was still uncommitted proves nothing about the delivered gate, because no later reader can
+diff the working tree it ran against; re-run it once after the commit and keep the earlier capture,
+renamed `…-at-<sha>` per Step 2. Then name that path in
 `closed by`. Two baseline runs each ran a real negative control and described it in chat only; in one
 the figure did not reproduce from the description, and in both the only surviving proof was a later
 reader's own re-derivation. Your session ends; `evidence/` does not.
