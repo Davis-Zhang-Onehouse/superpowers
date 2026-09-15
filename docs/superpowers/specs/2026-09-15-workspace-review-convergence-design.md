@@ -146,11 +146,11 @@ hands it to the closure reviewer.
 1. A closure with no `NOT-CLOSED`, `REGRESSED`, `fix-introduced` or outside-the-delta blocking
    finding → verdict `READY` (`READY-WITH-FIXES` if only Minor/Nit remain). Done.
 2. Closure after pass 1 found blocking work → pass 2, then closure 2.
-3. Closure after pass 2 still found a **fix-introduced** blocking defect, or any closure found a
-   blocking defect outside the delta that pass *n* cannot close without new deliverable work →
-   stop. Record the round `NOT-READY` (which refuses `fleet complete`), name the defect family in
-   HANDOFF next-actions, `fleet park` with the question. No third receive pass on the worker's own
-   authority.
+3. Any Critical/Important item still standing after pass 2 — a `NOT-CLOSED`, a `REGRESSED`, a
+   **fix-introduced** or an outside-the-delta item — or an outside-the-delta item that needs new
+   deliverable work at any pass → stop. Record the round `NOT-READY` (which refuses
+   `fleet complete`), name the defect family in HANDOFF next-actions, `fleet park` with the
+   question. No third receive pass on the worker's own authority.
 4. The worker never opens a second hunt against the same review. Only an operator instruction
    does; `/review-workspace` (the default kind) is how it is invoked, and the narrative records who
    asked.
