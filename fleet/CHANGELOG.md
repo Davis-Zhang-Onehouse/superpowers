@@ -1,5 +1,35 @@
 # fleet — changelog
 
+## fleet/v0.6.2 — 2026-09-15T22:22:02Z
+Cut from becc426 on `live` (upstream base snapshot/2026-08-17-221146). 22 commit(s) since fleet/v0.6.1.
+
+Every release ships the whole repository — all skills, `commands/`, `hooks/` and the plugin manifest, not only `fleet/`.
+Payload: fleet (11 files), skills (14 files), commands (1 file), docs (67 files).
+Skills changed: harvesting-an-instant, maintain-workspace, receiving-workspace-review, reviewing-workspace, working-as-a-dispatched-instant.
+
+- 86b12d3 docs: instant 09141935-09150009 complete — fleet 0.6.1 released (revive every dead pane, either runtime, from the root)
+- ec3b19b design: workspace review that converges — hunt once, receive with discipline, close by rule
+- 93c8173 plan: workspace review convergence — nine tasks, RED/GREEN for both skills, advisory-only fleet change
+- b2db3e0 plan: the fixture harness reports 23 cases so the stated 22 is a real claim defect
+- 15be907 fleet: six real review ledgers reduced as calibration fixtures
+- 8ac3506 fleet review: head epochs and the oscillation streak, calibrated on six real ledgers
+- 3f4f1f6 fleet review: OSCILLATING and RECEIVE advisories — the tool names the pattern, the skill owns the call
+- ab045a4 receiving-workspace-review: RED baseline — the fix pass without the skill
+- bda32f6 receiving-workspace-review: RED v2 — the fix pass under a real-shaped batch
+- c1204f6 receiving-workspace-review: the fix pass that does not seed the next round (RED/GREEN evidence attached)
+- b152bee receiving-workspace-review: make closed-by satisfiable at write time, score the instrument rule honestly, and commit the fixture artifacts
+- a4dc56a reviewing-workspace: closure reviewer — verifies closure, reviews the fix delta, never hunts
+- d1ce7d5 reviewing-workspace: closure reviewer — carve the audit trail out of the withdrawals grep, make the control check a diff, and give routed rows a verdict the orchestrator can record
+- 206a3f9 receiving-workspace-review + closure reviewer: a negative control is run after the commit that carries its gate, and the closure check names the files it ran
+- f948dc0 reviewing-workspace: hunt once at a frozen tip, receive, close by rule
+- e811c1e design: the advisories print on fleet review, not fleet brief
+- 843f877 reviewing-workspace: per-lens scopes, round verdicts, and the receive route for register findings
+- 07923bd skills: point maintain-workspace, the worker and the harvester at the hunt/receive/closure loop
+- a5a3e98 worker: a hunt is one review call per lens, and routed is in the status domain
+- aa4a48c review: name the epoch semantics and pin the OSCILLATING boundary at three
+- 3515152 review skills: a closure closes what the pass acted on, under the scope the hunt covered
+- becc426 closure reviewer: scope the triage check by what the pass recorded, not by what the table lists
+
 ## fleet/v0.6.1 — 2026-09-15T00:48:06Z
 Cut from ce7a866 on `live` (upstream base snapshot/2026-08-17-221146). 5 commit(s) since fleet/v0.6.0.
 
