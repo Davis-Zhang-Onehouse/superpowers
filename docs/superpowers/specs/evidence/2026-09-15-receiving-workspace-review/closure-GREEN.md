@@ -70,6 +70,12 @@ reproducible; RED found RV-12's shape too, independently.
   `NOT-CLOSED` unless its INDEX row says point-in-time with an owner. GREEN applied the rule as
   written and proposed the one-clause fix, which is the behaviour I want; but it is worth watching
   whether real instants find the INDEX clause a tax rather than a discipline.
+  **This describes the rule as it stood during this run; it was amended afterwards** (commit
+  `206a3f9` and its follow-up): a negative control under `evidence/review/control-<id>.txt` is now
+  point-in-time *by construction*, needing no INDEX clause, and is checked instead by
+  `git diff <sha>..[T_NOW] -- <the gate files it ran>` coming back empty. Under the amended rule a
+  control whose sha predates the commit carrying its gate is NOT-CLOSED — control predates its gate,
+  re-run after the commit.
 - **One dispatch, two pass numbers.** The pass-2 verdict came from an extra instruction in the same
   dispatch, not from a second run at `[PASS_NUMBER]`=2. It exercises the reviewer's reading of the
   rule, not a fresh run under it.

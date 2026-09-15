@@ -28,7 +28,7 @@ and the receive triage tables live.
 - Before `fleet complete` — the pre-complete hunt. Run it **before** proposing done, while the last
   CI wave is in flight, so a finding costs at most one wave.
 - Mid-effort, to catch deviation early. That is a separate review with its own `T0`.
-- After a receive pass — the closure round (`--closure`).
+- After a receive pass — the closure round (`/review-workspace --closure`).
 
 **Not for** a task with no instant. One instant per run.
 
@@ -101,9 +101,12 @@ table, anything it noticed outside the delta, and one `CLOSURE:` line. Record it
   the stop rule decides what happens to it. Prefix fix-introduced text with `fix-introduced — ` (an
   em dash; a colon in a finding's text is split by the verb).
 
-The closure round is one `fleet review --scope all` call carrying every restatement and every new
-finding, and its `--verdict` is read off the ledger by the same rule as a hunt's — `NOT-READY` while
-an `open` Critical/Important stands, `READY-WITH-FIXES` with only Minor/Nit open, `READY` with none.
+The closure round is one `fleet review` call carrying every restatement and every new finding, under
+the scope(s) the hunt actually covered — `--scope all` only when all three lenses ran; otherwise the
+lens scope(s) of the findings it restates, one call per scope. A closure recorded `all` after a
+one-lens hunt is the ledger telling the gate that two lenses ran which never did. Its `--verdict` is
+read off the ledger by the same rule as a hunt's — `NOT-READY` while an `open` Critical/Important
+stands, `READY-WITH-FIXES` with only Minor/Nit open, `READY` with none.
 
 **Stop rule** (counted in receive passes, which you perform and number):
 1. `CLOSURE: CLEAN` → verdict `READY` (`READY-WITH-FIXES` if only Minor/Nit remain). Stage 4.
@@ -131,7 +134,8 @@ them are about this loop. `OSCILLATING` — three or more consecutive head-movin
 the current epoch while the heads do not move) each raising a Critical/Important finding first seen
 in that epoch, `CV-` coordinator ids excluded; the slot HEAD is a proxy for the reviewed tip, so read
 the narrative before acting. `RECEIVE` — a round that records blocking findings names the receive
-skill.
+skill. A clean lens round records a verdict with no findings and the verb prints `THIN LEDGER` for
+it; under per-lens rounds that is expected, and never a reason to invent a finding.
 
 ## Ledger discipline
 
@@ -160,6 +164,7 @@ records it `NOT-CLOSED`. No colon inside a finding's text: locations are written
 | Code lens diffed since the last round | Whole authored delta, every hunt, with the defect family named. |
 | A closure round that "also had a look around" | Record what it noticed `open`, then the stop rule. It does not hunt. |
 | `routed` for a finding in a file this instant owns | `routed` means "not mine to edit". Everything else is `open`, `applied` or `wont-fix` with a reason. A closure `NOT MINE` row is the reviewer reading that status back, not a new one. |
+| Closure recorded `--scope all` after a partial hunt | The closure's scope is the hunt's coverage; `all` after one lens tells the gate two lenses ran that did not. |
 | A second hunt because closure found things | Stop rule 3: park it. The operator opens hunts. |
 | Findings only in the transcript | Everything through `fleet review --finding`; reasoning in `REVIEW-NARRATIVE.md`. |
 | Marking an AC VERIFIED on a prose or stale proof | Proof at `T0` (hunt) or `T_now` (closure), or `INSUFFICIENT`. |
