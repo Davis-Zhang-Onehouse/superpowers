@@ -177,15 +177,20 @@ fleet park --instant "$INSTANT" --question "which baseline is the ruler for the 
 
 Carry on with anything the answer does not block, and `fleet unpark --instant "$INSTANT"` once it is answered.
 
-**Finish.** Three commands, in this order:
+**Finish.** Three verbs, in this order — and the first, `review`, is one call per lens:
 
 ```bash
-fleet review --instant "$INSTANT" --scope all --verdict READY \
+fleet review --instant "$INSTANT" --scope format --verdict READY \
   --finding "RV-1:Minor:applied:evidence/INDEX.md:every AC has an artifact:none"
+fleet review --instant "$INSTANT" --scope alignment --verdict READY \
+  --finding "RV-2:Nit:applied:HANDOFF.md:the PR table names every delivered branch:none"
+fleet review --instant "$INSTANT" --scope code --verdict READY \
+  --finding "RV-3:Minor:applied:src/parse.py line 40:the widened matcher still turns away the neighbour input:covered by a case in 9f2c1ab"
 ```
 
-That round is the **hunt** — three read-only reviewers at a frozen sha (`superpowers:reviewing-workspace`).
-Its findings go through `superpowers:receiving-workspace-review` (code → proofs → docs, one finding per
+Those three rounds are the **hunt** — three read-only reviewers at a frozen sha, one call each under that
+lens's own `--scope`, and the gate reads the coverage as their union (`superpowers:reviewing-workspace`).
+Their findings go through `superpowers:receiving-workspace-review` (code → proofs → docs, one finding per
 commit, `applied` from the tree), then a closure round over the fix delta. The verb prints `RECEIVE` when a
 round records blocking findings and `OSCILLATING` when three consecutive head-moving rounds each raised new
 ones — the second is your cue to park, not to run another round.
@@ -197,7 +202,7 @@ invent the remedy. **Two of them are closed domains and a value outside them is 
 | Field | Allowed |
 |---|---|
 | `severity` | `Critical` · `Important` · `Minor` · `Nit` — capitalised |
-| `status` | `open` · `applied` · `wont-fix` |
+| `status` | `open` · `applied` · `wont-fix` · `routed` — `routed` is a file the worker does not own; its action names the owner |
 | `--verdict` | `READY` · `READY-WITH-FIXES` · `NOT-READY` |
 | `--scope` | `format` · `alignment` · `code` · `all` |
 
