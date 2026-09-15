@@ -32,6 +32,7 @@ from fleet.review import (
     Review,
     Round,
     exit_code_for,
+    receive_advisory,
 )
 
 #: The injected clock. One tick per recorded round, so the ledger — and therefore the rendered view —
@@ -489,6 +490,29 @@ class TestOscillationStreak(LedgerCase):
         rev.add_round("all", "NOT-READY", [finding("RV-2", "Critical")], heads={"r": "c"})
         rev.add_round("all", "NOT-READY", [finding("RV-3", "Critical")], heads={"r": "d"})
         self.assertEqual(rev.oscillation_streak(), 2)
+
+
+class TestAdvisories(LedgerCase):
+    def test_oscillating_at_three_and_silent_at_two(self):
+        loud = self.from_fixture("prcompliance").advisories()
+        self.assertTrue(any(a.startswith("OSCILLATING — 5 consecutive") for a in loud), loud)
+        quiet = self.from_fixture("prstack").advisories()
+        self.assertFalse(any(a.startswith("OSCILLATING") for a in quiet), quiet)
+
+    def test_oscillating_names_the_rounds_and_the_skill_rule(self):
+        note = next(a for a in self.from_fixture("trow").advisories() if a.startswith("OSCILLATING"))
+        self.assertIn("rounds 1", note)          # epoch 1 = round 1
+        self.assertIn("superpowers:reviewing-workspace", note)
+        self.assertIn("proxy", note)             # says the signal is the slot HEAD
+
+    def test_receive_advisory_fires_on_blocking_open_or_applied_only(self):
+        self.assertIsNone(receive_advisory([finding("F1", "Minor")]))
+        self.assertIsNone(receive_advisory([finding("F1", "Critical", "routed")]))
+        self.assertIsNone(receive_advisory([finding("F1", "Critical", "wont-fix")]))
+        note = receive_advisory([finding("F1", "Important", "applied"), finding("F2", "Critical")])
+        self.assertTrue(note.startswith("RECEIVE — 2 blocking finding(s)"), note)
+        self.assertIn("superpowers:receiving-workspace-review", note)
+        self.assertIn("code → proofs → docs", note)
 
 
 if __name__ == "__main__":

@@ -315,6 +315,16 @@ class Review:
                     f"{a_round.verdict} with no findings. A verdict with no visible basis must not "
                     "read identically to an evidenced one; the ledger remains the arbiter."
                 )
+        streak = self.oscillation_streak()
+        if streak >= OSCILLATION_ADVISORY_AT:
+            raising = [e for e in self.epochs() if e["raises"]][-streak:]
+            rounds = "; ".join("rounds " + ", ".join(str(n) for n in e["rounds"]) for e in raising)
+            out.append(
+                f"OSCILLATING — {streak} consecutive head-moving epochs each raised new Critical/Important "
+                f"findings ({rounds}). Under superpowers:reviewing-workspace a closure round that raises "
+                "is allowed once; the next stops the loop and routes to the operator. The signal is the "
+                "slot HEAD at record time, a proxy for the reviewed tip — read the narrative before acting."
+            )
         return out
 
     def population(self) -> dict:
@@ -516,6 +526,17 @@ def _cell(value: str) -> str:
     """A table cell that cannot break the table. Pipes are escaped and newlines folded, because a
     finding is free text and a broken table is a view nobody trusts."""
     return str(value).replace("|", "\\|").replace("\n", " ").strip()
+
+
+def receive_advisory(findings: list) -> str:
+    """The one line of the receive discipline the tool can carry: name the skill when a round records
+    blocking work to do. `routed` and `wont-fix` are dispositions, not work, so they do not count."""
+    blocking = [f for f in findings if f.blocking() and f.status in (OPEN, "applied")]
+    if not blocking:
+        return None
+    return (f"RECEIVE — {len(blocking)} blocking finding(s) recorded. Apply them with "
+            "superpowers:receiving-workspace-review — triage the batch, then code → proofs → docs, "
+            "one finding per commit, `applied` recorded only from the tree.")
 
 
 def exit_code_for(verdict: Verdict) -> int:
