@@ -46,9 +46,9 @@ CHECKLIST
    [INSTANT_PATH]/REVIEW-NARRATIVE.md. A `closed by` cell that still reads `TBD` is NOT-CLOSED —
    TBD is an unrecorded finding whatever the ledger says; so is a finding with no row at all.
    An action that names nothing you can check is NOT-CLOSED. The triage-table check applies only to
-   findings this receive pass acted on — the ids in the `Receive pass [PASS_NUMBER]` table. A sha
-   that does not resolve is NOT-CLOSED, and your verdict says the id and the sha. Verdict per
-   finding: CLOSED — <what you checked> | NOT-CLOSED — <what is still wrong> |
+   findings this receive pass acted on — the ids whose latest ledger status this receive pass
+   recorded. A sha that does not resolve is NOT-CLOSED, and your verdict says the id and the sha.
+   Verdict per finding: CLOSED — <what you checked> | NOT-CLOSED — <what is still wrong> |
    REGRESSED — <see item 2 id> | NOT MINE — <owner>.
 2. The fix delta. `git diff [T_PREV]..[T_NOW]` in each repo. Review ONLY this delta, assuming the
    next member of the defect family named above is in it: a matcher narrowed for one input (what
