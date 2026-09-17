@@ -4,6 +4,8 @@
 
 **Here for Fleet? Start with the [Fleet quickstart](#fleet-quickstart).** The official Superpowers marketplace installs upstream Superpowers, not this fork's Fleet additions. The upstream overview and harness instructions are retained below for reference.
 
+For the story behind the workflow, read [Closing the Loop on My Coding Workflow](docs/fleet-introduction.md).
+
 Superpowers is a complete software development methodology for your coding agents, built on top of a set of composable skills and some initial instructions that make sure your agent uses them.
 
 ## Table of Contents
