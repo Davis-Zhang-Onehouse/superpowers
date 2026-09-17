@@ -1,9 +1,19 @@
 # Superpowers
 
+**This fork adds Fleet: infrastructure for coordinating long-running coding agents.** Superpowers provides the engineering skills; Fleet adds isolated worker checkouts, durable task context, an evidence-backed roadmap, and a coordinator that dispatches and reviews work. You set the direction without becoming the message bus between sessions.
+
+**Here for Fleet? Start with the [Fleet quickstart](#fleet-quickstart).** The official Superpowers marketplace installs upstream Superpowers, not this fork's Fleet additions. The upstream overview and harness instructions are retained below for reference.
+
 Superpowers is a complete software development methodology for your coding agents, built on top of a set of composable skills and some initial instructions that make sure your agent uses them.
 
 ## Table of Contents
 
+- [Fleet quickstart](#fleet-quickstart)
+  - [Create a Fleet root](#1-create-a-fleet-root)
+  - [Install the fork in your runtime](#2-install-the-fork-in-your-runtime)
+  - [Prepare worker checkouts](#3-prepare-worker-checkouts)
+  - [Launch your coordinator](#4-launch-your-coordinator)
+  - [Use Fleet day to day](#5-use-fleet-day-to-day)
 - [How it works](#how-it-works)
 - [Commercial Services](#commercial-services)
 - [Getting Started](#installation)
@@ -30,6 +40,194 @@ Superpowers is a complete software development methodology for your coding agent
 - [License](#license)
 - [Visual companion telemetry](#visual-companion-telemetry)
 
+## Fleet quickstart
+
+This walkthrough creates a separate Fleet root, three execution slots (one coordinator plus two workers), and a shared directory for task records. It uses the source checkout directly; no Fleet release deployment is needed for a first run.
+
+Start on **Linux**, with **Python 3.10+**, **Git**, **Bash**, **tmux**, and either **Claude Code or Codex CLI** installed. Fleet's Python package uses only the standard library. Your project's build tools and dependencies are separate prerequisites. Workers are real CLI sessions and consume your account's usage; begin with a small cap.
+
+Choose one runtime per fleet, including its coordinator. Configure its model through the CLI, not Fleet. See [runtime support and measured CLI versions](docs/README.fleet-runtimes.md) if your terminal or CLI version behaves differently.
+
+### 1. Create a Fleet root
+
+Run these commands in a fresh Bash shell, with no `FLEET_*` settings inherited from another fleet. Use a new directory **under your home directory**, not your home directory itself or a directory inside an existing Fleet root. The root name also names its dedicated tmux server, so choose a distinct name for each fleet.
+
+```bash
+export FLEET_SETUP_ROOT="$HOME/fleet-demo"
+mkdir -p "$FLEET_SETUP_ROOT"
+git clone --branch live https://github.com/Davis-Zhang-Onehouse/superpowers.git \
+  "$FLEET_SETUP_ROOT/superpowers"
+
+cd "$FLEET_SETUP_ROOT"
+./superpowers/bin/fleet root-init --path "$FLEET_SETUP_ROOT" --name demo
+mkdir -p "$FLEET_SETUP_ROOT/efforts/demo/instants"
+. "$FLEET_SETUP_ROOT/superpowers/scripts/fleet-env.sh" \
+  "$FLEET_SETUP_ROOT/efforts/demo/instants"
+
+fleet runtime
+fleet leases
+```
+
+The environment script adds Fleet to `PATH` and selects this root's store, tmux server, and task-record directory. An empty pool is expected at this point. Check that Fleet's `root` line names your new directory before continuing.
+
+### 2. Install the fork in your runtime
+
+Pick **one** of the following. Install the plugin in the same runtime configuration that workers will use. If you already have upstream Superpowers enabled there, disable that copy first to avoid loading both versions. Review this fork and its hooks before trusting them.
+
+#### Claude Code setup
+
+Claude workers resolve their configuration through a workspace-owner map. Set up an explicit map for this root instead of relying on the machine-specific default:
+
+```bash
+fleet runtime --set claude
+export CLAUDE_OWNERS_MAP="$FLEET_SETUP_ROOT/claude-owners.tsv"
+export CLAUDE_CONFIG_DIR="$FLEET_SETUP_ROOT/.claude"
+mkdir -p "$CLAUDE_CONFIG_DIR"
+
+# Replace the email with the account that owns these workspaces.
+printf '%s\t%s\n' "$FLEET_SETUP_ROOT" 'you@example.com' > "$CLAUDE_OWNERS_MAP"
+claude auth login
+claude plugin marketplace add "$FLEET_SETUP_ROOT/superpowers" --scope user
+claude plugin install superpowers@superpowers-dev --scope user
+```
+
+This is a new root-local Claude configuration; signing in elsewhere does not configure it. Keep `CLAUDE_OWNERS_MAP` exported in shells that dispatch work. The launcher uses Claude's `auto` permission mode and `--remote-control`; your CLI/account must support those options.
+
+#### Codex CLI setup
+
+Codex workers use your existing `CODEX_HOME`, or `$HOME/.codex` if unset. Authenticate and install into that same configuration:
+
+```bash
+fleet runtime --set codex
+codex login
+codex plugin marketplace add "$FLEET_SETUP_ROOT/superpowers"
+codex plugin add superpowers@superpowers-dev
+```
+
+Keep native hooks enabled, review and trust the plugin's hook, and start a fresh session after installation. See the official [plugin instructions](https://developers.openai.com/codex/plugins) and [hook settings](https://developers.openai.com/codex/hooks). Fleet may require specific command approvals for tmux and peer-process inspection outside the Codex sandbox; do not disable the sandbox globally to get started.
+
+#### Check that skills actually load
+
+Before dispatching, open your selected CLI in a scratch directory under this root and send exactly:
+
+```text
+Let's make a react todo list
+```
+
+The agent should load `using-superpowers` and start brainstorming **before writing code**. Stop the smoke-test session after confirming this. A plugin appearing in a list is not enough: Fleet's coordination depends on its skills loading into new sessions.
+
+### 3. Prepare worker checkouts
+
+A **slot** is an execution directory containing one or more repositories. A task's **instant** is its durable context record, stored separately from the checkout. A **golden workspace** is the prepared template Fleet copies when creating slots.
+
+Replace the URL below with your project, check out the intended starting branch, and install its dependencies in the golden workspace before copying it:
+
+```bash
+export FLEET_PROJECT_URL='https://github.com/YOUR-ORG/YOUR-PROJECT.git'
+mkdir -p "$FLEET_SETUP_ROOT/golden"
+git clone "$FLEET_PROJECT_URL" "$FLEET_SETUP_ROOT/golden/project"
+
+# Do any project-specific checkout/build setup in golden/project now.
+fleet set-golden --path "$FLEET_SETUP_ROOT/golden"
+fleet clone --slot "$FLEET_SETUP_ROOT/ws1" --verify-repos project
+fleet clone --slot "$FLEET_SETUP_ROOT/ws2" --verify-repos project
+fleet clone --slot "$FLEET_SETUP_ROOT/ws3" --verify-repos project
+fleet leases
+```
+
+You should now see three enrolled, unleased slots. `fleet clone` copies the whole golden directory, verifies the named repositories' HEADs, then enrolls the slot. Use ordinary, self-contained Git clones for this walkthrough, not linked worktrees; keep credentials and unrelated files out of the golden template. Do not enroll the golden workspace itself.
+
+Your layout is now:
+
+```text
+fleet-demo/
+├── .fleet-root                  # fleet identity
+├── .fleet/                      # records, pool, leases, runtime selection
+├── superpowers/                 # Fleet CLI + this fork's skills
+├── golden/project/              # prepared source template; not a worker
+├── ws1/project/                 # independent execution slots
+├── ws2/project/
+├── ws3/project/
+└── efforts/demo/instants/        # coordinator and worker task records
+    └── …-inflight-append-…/      # created on dispatch
+        ├── CHARTER.md
+        ├── HANDOFF.md
+        └── .fleet/roadmap.json   # the coordinator's project roadmap
+```
+
+### 4. Launch your coordinator
+
+Create `efforts/demo/brief.md` in your editor. Give it a small, concrete first goal, acceptance criteria, and limits. For example:
+
+```text
+You are the coordinator for this effort. Load coordinating-instants and using-fleet.
+The project repository is named project inside each execution slot.
+
+Goal: assess this project's test coverage before we change its behavior.
+Done means: a reproducible baseline test result, a map of the existing tests,
+and a ranked list of gaps, each backed by a code path or observed test result.
+
+Write the effort charter and propose a dependency-aware roadmap for my approval.
+After approval, prepare task-specific worker profiles and dispatch with a fleet
+cap of 3, including yourself: at most two workers alongside this coordinator.
+Pin each worker's repository baseline and keep the roadmap evidence-backed.
+Do not change application code, push branches, open PRs, or deploy anything.
+Stop when the acceptance criteria are met; escalate decisions outside this scope.
+```
+
+Then launch the coordinator using the included role profile and your brief:
+
+```bash
+fleet dispatch \
+  --profile "$FLEET_SETUP_ROOT/superpowers/skills/using-fleet/profiles/coordinator" \
+  --title demo-coordinator \
+  --seed-extra "$FLEET_SETUP_ROOT/efforts/demo/brief.md" \
+  --cap 3
+
+fleet-view
+tmux -L "$FLEET_TMUX_SOCKET" list-sessions
+```
+
+Dispatch creates the coordinator's instant, leases a slot, and starts its CLI in tmux. Attach to the session named in the output, handle any trust/authentication dialogs, review the proposed roadmap, and approve it when ready. The coordinator then prepares and dispatches the first workers. No separate `fleet init` is needed for this path.
+
+The coordinator is a long-running agent session following a workflow, **not an unattended scheduler installed by this quickstart**. Keep it running, authorize an appropriate continuation/monitoring mechanism in your harness, and expect human input for approval dialogs or out-of-scope decisions. A tmux session surviving a disconnect does not itself guarantee the agent keeps taking turns.
+
+### 5. Use Fleet day to day
+
+In each new terminal, restore the environment before issuing Fleet commands:
+
+```bash
+export FLEET_SETUP_ROOT="$HOME/fleet-demo"
+cd "$FLEET_SETUP_ROOT"
+. "$FLEET_SETUP_ROOT/superpowers/scripts/fleet-env.sh" \
+  "$FLEET_SETUP_ROOT/efforts/demo/instants"
+# Claude users also restore the map used for dispatch:
+# export CLAUDE_OWNERS_MAP="$FLEET_SETUP_ROOT/claude-owners.tsv"
+
+fleet-view                       # workers and slot occupancy
+fleet-view roadmap               # coordinator roadmap; use --instant PATH if needed
+fleet board --porcelain           # machine-readable observations
+fleet leases                     # execution capacity
+```
+
+To interact with a coding session the old way, list the sessions and attach to the one you want:
+
+```bash
+tmux -L "$FLEET_TMUX_SOCKET" list-sessions
+tmux -L "$FLEET_TMUX_SOCKET" attach -t SESSION_NAME
+```
+
+Detach with **Ctrl-b, then d**; this leaves the session running. Review results through the task's assembled context and evidence, not just its last chat message. Let the coordinator follow the review, completion, and harvest workflow before reusing a slot; a worker saying “done” is not a released lease.
+
+**If the first dispatch stalls:** inspect the session for a trust or approval dialog; check `fleet runtime` and `fleet leases`; confirm the selected runtime is authenticated and the fork's plugin loads in that configuration. For Claude owner-resolution errors, check the map and root-local `.claude` directory. For Codex host-access refusals, approve the specific Fleet command and retry. A refusal's `clears when` text names the prerequisite—do not jump to `--force`.
+
+Next steps:
+
+- [Runtime setup, messaging, recovery, and limitations](docs/README.fleet-runtimes.md).
+- [Fleet command reference](skills/using-fleet/SKILL.md) and [coordinator workflow](skills/coordinating-instants/SKILL.md).
+- [Multi-milestone efforts and PR stacks](skills/running-a-stacked-effort/SKILL.md), once the small first run works.
+- [Tested Fleet releases and deployment](skills/releasing-fleet/SKILL.md), before updating infrastructure under active work. This quickstart runs from source; pulling new code into that checkout changes the CLI future commands execute. Updating the CLI and refreshing a runtime's installed plugin are separate operations.
+
 ## How it works
 
 It starts from the moment you fire up your coding agent. As soon as it sees that you're building something, it *doesn't* just jump into trying to write code. Instead, it steps back and asks you what you're really trying to do. 
@@ -47,6 +245,8 @@ There's a bunch more to it, but that's the core of the system. And because the s
 If you're using Superpowers in enterprise and could benefit from commercial support, additional tooling, or managed spending, please don't hesitate to drop us a line at sales@primeradiant.com.
 
 ## Installation
+
+These are the **upstream Superpowers** harness instructions. To install this fork with Fleet, use the [Fleet quickstart](#fleet-quickstart) above. Fleet's worker runtimes are Claude Code and Codex CLI; the other harness integrations below are not Fleet runtime support claims.
 
 Installation differs by harness. If you use more than one, install Superpowers separately for each one.
 
