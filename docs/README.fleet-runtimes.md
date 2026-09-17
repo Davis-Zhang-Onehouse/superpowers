@@ -35,6 +35,11 @@ refusal starts no worker; retry after the holder finishes.
 
 ## Setup
 
+For a fresh machine or a new project, start with the [Fleet quickstart](../README.md#fleet-quickstart).
+It covers root creation, this fork's native plugin installation, workspace-owner configuration,
+the golden workspace and worker pool, and launching a coordinator. This page covers runtime-specific
+behavior after that bootstrap.
+
 Install and authenticate the CLI you intend to use. The measured terminal fixtures were captured on
 Codex CLI 0.154.0 and Claude Code 2.1.268, with tmux 3.2a at 100×35. Other terminal layouts may produce
 an indeterminate observation, which refuses messaging rather than guessing input readiness.
@@ -50,8 +55,8 @@ a seed-delivery shim. Claude's existing `REAL_CLAUDE` override
 remains supported. Executable, configuration directory and runtime are recorded for recovery; credentials
 are never copied into fleet records or launchers.
 
-Install the repository as a native plugin in the selected CLI, following its existing setup guide
-([Codex CLI](../README.md#codex-cli), [Claude Code](../README.md)). The Codex package includes
+Install **this fork** as a native plugin in the selected CLI, following the quickstart's
+[runtime installation](../README.md#2-install-the-fork-in-your-runtime), not the upstream marketplace instructions. The Codex package includes
 `hooks/hooks-codex.json` and `hooks/session-start-codex`. Enable native hooks in the CLI configuration,
 review and trust the plugin hook when prompted, then start a fresh session. Its SessionStart hook loads
 `using-superpowers` for startup, resume, clear and compact events. Merely putting skills on disk does
