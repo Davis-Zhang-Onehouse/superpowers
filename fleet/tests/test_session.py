@@ -810,7 +810,7 @@ class TestAttachmentIsCollected(unittest.TestCase):
 
     def test_interactive_clients_are_counted_with_their_latest_input(self):
         got, seen = self.ask(0, self.row(act=1700000100) + self.row(act=1700000123))
-        self.assertEqual(got, (2, 1700000123))
+        self.assertEqual(got, (2, 1700000123, 0))
         self.assertEqual(seen[0][:3], ["tmux", "-L", "itfleet-selftest-attach"],
                          "the probe must ask the layer's own server, like every other tmux call")
         self.assertIn("list-clients", seen[0])
@@ -821,16 +821,21 @@ class TestAttachmentIsCollected(unittest.TestCase):
         answer the modal, so neither is a human at the pane; their input does not count either."""
         got, _ = self.ask(0, self.row(ro=1, act=1700000999) + self.row(cm=1, act=1700000998)
                           + self.row(act=1700000100))
-        self.assertEqual(got, (1, 1700000100))
+        self.assertEqual(got, (1, 1700000100, 2))
 
-    def test_only_non_interactive_clients_is_zero_clients(self):
+    def test_non_interactive_clients_are_reported_as_OBSERVERS_not_as_nobody(self):
+        """`RV-36`, measured (`evidence/20-red/tmux-control-mode-client-probe.txt`): a control-mode client CAN put
+        keys into the pane (`send-keys`, which is how iTerm2 `-CC` types for a human) and its `client_activity`
+        does NOT move when it does. So a human may be there with no visible recency. They are not "a human who
+        typed recently" (the count keeps them counted), and they are not "nobody" either: an actuator (B12) must
+        see that somebody is attached."""
         got, _ = self.ask(0, self.row(ro=1) + self.row(cm=1))
-        self.assertEqual(got, (0, 0))
+        self.assertEqual(got, (0, 0, 2))
 
     def test_a_session_with_no_client_is_zero_clients_not_unknown(self):
         """`list-clients -t =<name>` exits 0 with no rows for a live session nobody is attached to."""
         got, _ = self.ask(0, "")
-        self.assertEqual(got, (0, 0))
+        self.assertEqual(got, (0, 0, 0))
 
     def test_the_target_is_EXACT(self):
         """`FI-23`'s hazard in a new place: a bare `-t dt-w` would resolve to `dt-wide` by prefix."""
@@ -860,6 +865,14 @@ class TestAttachmentIsCollected(unittest.TestCase):
                                         kill_session=lambda n: None, attachment=lambda n, a=odd: a))
                 self.assertIsNone(s.attachment("dt-w"))
 
+    def test_the_layer_carries_the_observer_count_and_accepts_the_two_count_form(self):
+        def layer_answering(answer):
+            return SessionLayer(Probes(list_processes=lambda: [], capture_pane=lambda n: "",
+                                       has_session=lambda n: True, start_session=lambda n, c, m: None,
+                                       kill_session=lambda n: None, attachment=lambda n: answer))
+        self.assertEqual(layer_answering((0, 0, 2)).attachment("dt-w").observers, 2)
+        self.assertEqual(layer_answering((1, 1700000000)).attachment("dt-w").observers, 0)
+
     def test_the_layer_says_None_when_no_probe_was_supplied(self):
         s, _, _ = layer()
         self.assertIsNone(s.attachment("dt-w"))
@@ -873,7 +886,7 @@ class TestAttachmentIsCollected(unittest.TestCase):
         subprocess.run(tmux + ["new-session", "-d", "-s", name, "sleep 60"], capture_output=True)
         try:
             probes = default_probes(tmux_socket=SELFTEST_TMUX_SOCKET)
-            self.assertEqual(probes.attachment(name), (0, 0),
+            self.assertEqual(probes.attachment(name), (0, 0, 0),
                              "a live session with no client must read as zero clients, not as not measured")
             self.assertIsNone(probes.attachment(name + "x"))
         finally:
