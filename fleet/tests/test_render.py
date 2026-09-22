@@ -473,6 +473,8 @@ class TestRoadmapPorcelainNamesReadyMilestones(unittest.TestCase):
         self.assertEqual(dispatchable, ["free"])
         human = render.roadmap_view(rm)
         self.assertIn("the free one", human, "the human form names the ready milestone's title too")
+        self.assertIn("2 ready (1 unclaimed)", human.splitlines()[0],
+                      "the banner's ready count must not pass a claimed milestone off as dispatchable")
 
 
 if __name__ == "__main__":

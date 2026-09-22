@@ -49,6 +49,13 @@ dispatchable="$("$FLEET" roadmap --instant "$I" --porcelain 2>/dev/null \
                 | awk -F'\t' '$1=="ready" && $8==""{print $2 "=" $7}' | sort | tr '\n' ' ')"
 check "the ready rows name exactly the dispatchable set, with titles" \
       "m1=wave member one m2=wave member two " "$dispatchable"
+# The claimed half: a claim leaves m2 READY (readiness never reads the owner) but not dispatchable. Claimed
+# through the library because the only verb that claims is a real dispatch, which this suite never runs.
+PYTHONPATH="$REPO/fleet/src" python3 -c 'import sys, pathlib; from fleet.roadmap import Roadmap
+Roadmap(pathlib.Path(sys.argv[1])).claim("m2", sys.argv[2])' "$I" "$TMP/someWorker"
+dispatchable="$("$FLEET" roadmap --instant "$I" --porcelain 2>/dev/null \
+                | awk -F'\t' '$1=="ready" && $8==""{print $2}' | tr '\n' ' ')"
+check "a claimed ready milestone drops out of the dispatchable set" "m1 " "$dispatchable"
 
 # Routine step 3. The cap comes from the guard, not from a formula.
 "$FLEET" dispatch --profile "$PROFILE" --title waveOne --base 00000000 --optype append \

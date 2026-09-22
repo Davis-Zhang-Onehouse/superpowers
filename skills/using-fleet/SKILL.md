@@ -269,9 +269,10 @@ fleet roadmap --instant . --porcelain | awk -F'\t' '$1=="not-ready"{print $2, $4
 ```
 
 **Parse columns; never grep a sentence.** Checker verbs emit `kind`, `subject`, `severity`, `detail`,
-`clears_when`, `clears_who`; `roadmap` appends `title` and `owner`, filled on every row about a milestone.
-Every milestone is a row: `ready` (its deps have landed — `owner` empty means dispatchable, non-empty means
-already claimed), `not-ready` (the `detail` names the blocker), or `pending-proposal`. Act on
+`clears_when`, `clears_who`; `roadmap` appends `title` and `owner`, filled on every row about a milestone
+(empty on a proposal whose milestone is not on the roadmap). Every milestone gets exactly one `ready` row (its
+deps have landed — `owner` empty means dispatchable, non-empty means already claimed) or one `not-ready` row
+(the `detail` names the blocker), plus one `pending-proposal` row per proposal waiting on it. Act on
 `severity=violation`; report `severity=info`. A finished milestone, a ready one and a legitimately empty
 population are `info`, and treating them as alarms is how a healthy board comes to read as red and then gets
 ignored.

@@ -298,6 +298,10 @@ def roadmap_view(roadmap, porcelain: bool = False) -> str:
     if porcelain:
         return _tsv(cells, ROADMAP_COLUMNS)
     attention = sum(1 for c in cells if c["severity"] == "attention")
-    ready = sum(1 for c in cells if c["kind"] == "ready")
-    banner = f"roadmap: {len(cells)} row(s) · {ready} ready · {attention} needing attention"
+    ready = [c for c in cells if c["kind"] == "ready"]
+    unclaimed = sum(1 for c in ready if not c["owner"])
+    #: The unclaimed count is stated beside the total: "N ready" alone includes claimed milestones, the same
+    #: trap the skills warn about for the population row's prose.
+    banner = (f"roadmap: {len(cells)} row(s) · {len(ready)} ready ({unclaimed} unclaimed) · "
+              f"{attention} needing attention")
     return banner + "\n" + _columns(cells, ROADMAP_HUMAN_COLUMNS)
