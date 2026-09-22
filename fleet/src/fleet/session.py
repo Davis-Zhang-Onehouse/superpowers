@@ -109,9 +109,12 @@ class Probes:
 
 @dataclass(frozen=True)
 class Attachment:
-    """`B24`. Clients attached to a session and the epoch of the last input one of them gave it."""
+    """`B24`. INTERACTIVE clients attached to a session and the epoch of the last input one of them gave it,
+    plus `observers`: clients that are read-only or control-mode (`RV-36`) — attached, so somebody may be
+    there, but showing no input fleet can see."""
     clients: int
     last_input: float
+    observers: int = 0
 
 
 #: tmux's exact-match marker. A BARE target is resolved by PREFIX: with only `itfleet-N-pre-ab` alive,
@@ -214,8 +217,10 @@ class SessionLayer:
         input — or `None` when that could not be observed (no probe, no name, tmux did not answer).
 
         `B24` (x2 `G-4`). `BLOCKED` could not tell a worker stuck at a modal from a human attached and
-        mid-sentence, because this fact was never collected. "Clients" means INTERACTIVE clients: a read-only
-        or control-mode client cannot answer anything, so it is not counted (`RV-28`). It is deliberately returned RAW and
+        mid-sentence, because this fact was never collected. "Clients" means INTERACTIVE clients (`RV-28`); a
+        read-only or control-mode client is an OBSERVER (`RV-36`): somebody may be there — a control-mode client
+        can `send-keys`, which is how iTerm2 `-CC` types — but tmux shows no input clock for it, so it can never
+        show that a human was at the pane recently. An actuator must treat observers as occupied too. It is deliberately returned RAW and
         tri-state, because its two consumers fail safe in OPPOSITE directions:
 
         - the attention count (`reconcile`) treats `None` as "not a human" — it keeps counting, which is
@@ -236,14 +241,18 @@ class SessionLayer:
         #: wrong shape is NOT MEASURED rather than an exception that takes the whole board down with it.
         #: `RV-35`: and a non-finite number is not a measurement either — `inf`/`nan` pass `float()` (or
         #: overflow `int()`) here and would crash the age arithmetic in `reconcile` instead.
+        #: The two-count form `(clients, last_input)` predates `observers` (`RV-36`) and reads as none.
         try:
-            clients, last_input = answer
+            clients, last_input, *rest = answer
+            if len(rest) > 1:
+                return None
+            observers = int(rest[0]) if rest else 0
             clients, last_input = int(clients), float(last_input)
         except (TypeError, ValueError, OverflowError):
             return None
         if not math.isfinite(last_input):
             return None
-        return Attachment(clients=clients, last_input=last_input)
+        return Attachment(clients=clients, last_input=last_input, observers=observers)
 
     # --- pane --------------------------------------------------------------------------------
 
@@ -626,13 +635,16 @@ def default_probes(process_name: str = "claude", tmux_socket=_FROM_ENV, *,
         return found
 
     def attachment(name: str):
-        """`(interactive_clients, last_input_epoch)` for the session named EXACTLY `name`, or None when
-        unobserved. No interactive client is `(0, 0)`.
+        """`(interactive_clients, last_input_epoch, observers)` for the session named EXACTLY `name`, or None
+        when unobserved. No client at all is `(0, 0, 0)`; `observers` counts read-only and control-mode clients.
 
         Read per CLIENT (`RV-28`), because `#{session_attached}` counts read-only (`attach -r`) and
         control-mode (`-C`) clients, and a read-only client's keystroke — dropped before it reaches the pane —
-        still moves `#{session_activity}`. Neither kind of client can answer a modal, so only clients that are
-        neither count, and last input is the newest `#{client_activity}` among them. On tmux 3.2a that moves
+        still moves `#{session_activity}`. A read-only client cannot type into the pane; a control-mode client
+        can (`send-keys`), but its `#{client_activity}` does NOT move when it does (`RV-36`,
+        `evidence/20-red/tmux-control-mode-client-probe.txt`). Neither can show a human typed recently, so only
+        interactive clients count and last input is the newest `#{client_activity}` among them; the others are
+        returned as `observers`, never dropped, because "nobody attached" would be false. On tmux 3.2a that moves
         on the client's attach and its own keystroke, not on pane output, resize or SIGWINCH (B24 instant,
         `evidence/20-red/tmux-client-activity-probe.txt`).
 
@@ -645,7 +657,7 @@ def default_probes(process_name: str = "claude", tmux_socket=_FROM_ENV, *,
                            "#{client_session}\t#{client_readonly}\t#{client_control_mode}\t#{client_activity}"])
         if done.returncode != 0:
             return None
-        clients, last_input = 0, 0
+        clients, last_input, observers = 0, 0, 0
         for line in (done.stdout or "").splitlines():
             parts = line.split("\t")
             if len(parts) != 4 or parts[1] not in ("0", "1") or parts[2] not in ("0", "1"):
@@ -657,7 +669,9 @@ def default_probes(process_name: str = "claude", tmux_socket=_FROM_ENV, *,
             if parts[1] == "0" and parts[2] == "0":
                 clients += 1
                 last_input = max(last_input, activity)
-        return clients, last_input
+            else:
+                observers += 1
+        return clients, last_input, observers
 
     def send_literal(name, text):
         import uuid

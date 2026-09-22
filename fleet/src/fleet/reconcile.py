@@ -337,6 +337,11 @@ def _attended(attachment, idle_after_s, now):
     if attachment is None:
         return False, "whether a human is attached could not be observed, so this is counted as waiting on one"
     if attachment.clients < 1:
+        if attachment.observers:
+            #: `RV-36`. Somebody may be there, but a read-only client cannot type into the pane and a
+            #: control-mode client's input moves no clock tmux exposes, so nothing shows a human was at it.
+            return False, ("a read-only or control-mode client is attached, which shows no input fleet can see, "
+                           "so this is counted as waiting on a human")
         return False, ""
     quiet = max(0, int(now - attachment.last_input))
     clients = f"{attachment.clients} client{'s' if attachment.clients != 1 else ''}"
@@ -350,10 +355,14 @@ def _attended(attachment, idle_after_s, now):
 def _attachment_summary(attachment, now) -> str:
     if attachment is None:
         return "not observed"
+    #: `RV-36`. Never "no client" while an observer is attached: the next consumer is an actuator (B12).
+    observed = (f"{attachment.observers} read-only or control-mode client"
+                f"{'s' if attachment.observers != 1 else ''} (input not observable)") if attachment.observers else ""
     if attachment.clients < 1:
-        return "no client"
-    return (f"{attachment.clients} client{'s' if attachment.clients != 1 else ''}, last input "
-            f"{max(0, int(now - attachment.last_input))}s ago")
+        return observed or "no client"
+    interactive = (f"{attachment.clients} client{'s' if attachment.clients != 1 else ''}, last input "
+                   f"{max(0, int(now - attachment.last_input))}s ago")
+    return f"{interactive}; {observed}" if observed else interactive
 
 
 def _slot_holder_pid(rec, pool, live_sessions):

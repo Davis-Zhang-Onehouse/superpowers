@@ -1078,6 +1078,18 @@ class TestAnAttachedHumanIsNotAStuckWorker(unittest.TestCase):
         in_evidence = re.search(r"last input (\d+)s ago", subject.evidence["attached"]).group(1)
         self.assertEqual(in_note, in_evidence, f"{subject.note!r} vs {subject.evidence['attached']!r}")
 
+    def test_a_dialog_with_only_a_non_interactive_client_is_counted_and_says_why(self):
+        """`RV-36`. A read-only or control-mode client shows no recency fleet can see, so it does not excuse the
+        pane — and the note says a client IS there, rather than reading like a detached pane."""
+        self.worker("observed-07300613", "dt-observed", 5313, DIALOG_PANE, attached=(0, 0, 1))
+
+        subject = self.subjects()["observed-07300613"]
+
+        self.assertTrue(needs_a_human(subject), subject.note)
+        self.assertIn("read-only or control-mode", subject.note)
+        self.assertIn("read-only or control-mode", subject.evidence["attached"])
+        self.assertNotEqual(subject.evidence["attached"], "no client")
+
     def test_attachment_alone_makes_nothing_actionable_or_blocked(self):
         self.worker("watched-07300607", "dt-watched", 5307, QUIET_PANE, attached=(2, time.time()))
 
