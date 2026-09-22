@@ -280,6 +280,10 @@ def _worker_subject(rec, pool, sessions, instants_dir: Path, idle_after_s: int, 
         state, note = BLOCKED, f'live runtime {sess.runtime} differs from record runtime {rec.runtime}'
         on_pane = False
     attachment = sessions.attachment(rec.tmux) if (live and rec.tmux) else None
+    if attachment is not None and attachment.clients > 0 and attachment.last_input > time.time() + 1:
+        #: `RV-33`. Input stamped in the future means the clock stepped backwards; an age that cannot be true
+        #: is not a measurement, and clamping it to 0 would have read it as "input 0s ago" — attended.
+        attachment = None
     attended = False
     if state == BLOCKED and on_pane and not parked:
         attended, why = _attended(attachment, idle_after_s)
