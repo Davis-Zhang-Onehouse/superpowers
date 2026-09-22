@@ -81,6 +81,11 @@ KINDS = (KIND_WORKER, KIND_UNKNOWN, KIND_STALE_LEASE)
 #: called for attention on a human who was already present, and stayed silent on a worker that had
 #: stopped. Exactly backwards.
 #:
+#: `B24` (x2 `G-4`) closed the other half of that inversion. `BLOCKED` stays here — a worker stopped at a
+#: permission modal has no `park.json`, so narrowing its source would delete the very signal it exists for
+#: (the reporter's retracted remedy) — and the subject carries `attended` when the pane's own BLOCKED is in
+#: front of a human who is attached and typing. `needs_a_human` does not count that one.
+#:
 #: Deliberately still narrow. `DEAD` needs a reap, not a keystroke, and counting it here is the defect
 #: `W2-14`/`OBS-57` recorded: a banner that cries for attention on a session nobody can answer trains
 #: people to ignore the banner. That is the same failure this fix is curing, so widening past what a
@@ -115,7 +120,9 @@ def needs_a_human(subject) -> bool:
     which is the same failure `FI-14` and `FI-12` are both instances of.
     """
     if subject.state in ACTIONABLE_STATES:
-        return True
+        #: `B24`. A pane-level BLOCKED with a human attached and giving it input is that human's to finish;
+        #: `attended` is only ever set for that case (see `_attended`), so every other state is untouched.
+        return not subject.attended
     return subject.state == COMPLETE and subject.holds_slot
 
 #: Folder states that mean the work is over. The instant's own rename is the completion signal, so disk
@@ -146,6 +153,11 @@ class Subject:
     holds_slot: bool
     evidence: dict
     note: str
+    #: `B24`. True only for a BLOCKED read off the PANE (a dialog, unsubmitted text, codex's modal input)
+    #: while a human is attached to that session and has given it input within the idle threshold: the
+    #: thing on the pane is in front of somebody already. Not a state — the row still says BLOCKED and what
+    #: the pane shows (B16's fence: add no state) — only the answer to "is somebody NOT here needed".
+    attended: bool = False
 
 
 def reconcile(store, pool, sessions, instants_dir: Path, idle_after_s: int = 1800,
@@ -262,10 +274,17 @@ def _worker_subject(rec, pool, sessions, instants_dir: Path, idle_after_s: int, 
     #: pid, so it silently switched auto-resume OFF for a live coordinator. Observed on the live effort.
     holds = _holds_slot(pool, rec)
     holder = _slot_holder_pid(rec, pool, live_sessions) if holds else None
-    state, note = _state_of(rec, folder_state, live, phase, parked, pane, sessions,
-                            instant, idle_after_s, holder, capture_failed=captured is None)
+    state, note, on_pane = _state_of(rec, folder_state, live, phase, parked, pane, sessions,
+                                     instant, idle_after_s, holder, capture_failed=captured is None)
     if sess is not None and sess.runtime != rec.runtime:
         state, note = BLOCKED, f'live runtime {sess.runtime} differs from record runtime {rec.runtime}'
+        on_pane = False
+    attachment = sessions.attachment(rec.tmux) if (live and rec.tmux) else None
+    attended = False
+    if state == BLOCKED and on_pane and not parked:
+        attended, why = _attended(attachment, idle_after_s)
+        if why:
+            note = f"{note}; {why}"
     evidence = {
         "record": rec.todo_id,
         "runtime": rec.runtime,
@@ -291,9 +310,45 @@ def _worker_subject(rec, pool, sessions, instants_dir: Path, idle_after_s: int, 
         "declared_phase": phase or "",
         "parked": parked or "",
         "pane": _pane_summary(sessions, pane) if live else "",
+        #: `B24`. Reported for every live worker, not only the BLOCKED ones, because the next consumer is an
+        #: actuator (B12) that must not type into a pane a human is at, whatever its state.
+        "attached": _attachment_summary(attachment) if live else "",
     }
     return Subject(kind=KIND_WORKER, identity=rec.todo_id, state=state, holds_slot=holds,
-                   evidence=evidence, note=note)
+                   evidence=evidence, note=note, attended=attended)
+
+
+def _attended(attachment, idle_after_s):
+    """`(attended, why)` for a BLOCKED read off the pane. `B24`, x2 `G-4`.
+
+    Attended means a client is attached AND has given the session input within `idle_after_s` — the same
+    threshold that turns a quiet worker IDLE, so no new knob. Attachment alone is not enough: a terminal
+    left attached overnight would otherwise silence a genuinely stuck modal forever, and nothing would
+    ever surface it again. Unobserved is not attended: the count keeps the answer it gave before this fact
+    was collected, so a tmux hiccup cannot hide a stuck worker. `why` is empty when nobody is attached, so
+    a detached pane's note reads exactly as it always did.
+    """
+    if attachment is None:
+        return False, ("whether a human is attached could not be observed (tmux did not answer), so this "
+                       "is counted as waiting on one")
+    if attachment.clients < 1:
+        return False, ""
+    quiet = max(0, int(time.time() - attachment.last_input))
+    clients = f"{attachment.clients} client{'s' if attachment.clients != 1 else ''}"
+    if quiet > idle_after_s:
+        return False, (f"{clients} attached but no input for {quiet}s (over {idle_after_s}s), so that is not "
+                       f"taken as a human at the pane")
+    return True, (f"a human is attached ({clients}, last input {quiet}s ago), so this is theirs to finish "
+                  f"and is not counted as needing you")
+
+
+def _attachment_summary(attachment) -> str:
+    if attachment is None:
+        return "not observed"
+    if attachment.clients < 1:
+        return "no client"
+    return (f"{attachment.clients} client{'s' if attachment.clients != 1 else ''}, last input "
+            f"{max(0, int(time.time() - attachment.last_input))}s ago")
 
 
 def _slot_holder_pid(rec, pool, live_sessions):
@@ -324,14 +379,19 @@ def _slot_holder_pid(rec, pool, live_sessions):
 
 def _state_of(rec, folder_state, live, phase, parked, pane, sessions, instant, idle_after_s,
               slot_holder=None, capture_failed=False):
-    """The single state decision. Every branch is reachable from one join of all five fact sources."""
+    """The single state decision. Every branch is reachable from one join of all five fact sources.
+
+    Returns `(state, note, on_pane)`. `on_pane` (`B24`) is True only when the state is a BLOCKED read off
+    what the PANE shows — the thing a human attached to it would be looking at — and it is decided here, at
+    the branch that produced the state, rather than re-derived by a caller in a second copy of this order.
+    """
     if folder_state in TERMINAL_FOLDER_STATES:
         # The worker's own rename is the completion signal, and it outranks the recorded path — that is
         # what "a renamed instant is followed" means. `abort` is terminal too: W2-21's fix reached
         # inflight and complete and never abort, and abort is legal.
-        return COMPLETE, f"the instant folder is `-{folder_state}-`; the work is over"
+        return COMPLETE, f"the instant folder is `-{folder_state}-`; the work is over", False
     if live and rec.runtime == 'codex' and sessions.observe(rec.tmux).state in ('unknown', 'dialog'):
-        return BLOCKED, 'Codex input is modal or unrecognized; inspect before acting'
+        return BLOCKED, 'Codex input is modal or unrecognized; inspect before acting', True
     if not live:
         if slot_holder is not None:
             # Alive by the probe that does not need tmux. Say what is missing rather than inventing a
@@ -345,7 +405,7 @@ def _state_of(rec, folder_state, live, phase, parked, pane, sessions, instant, i
                    f"session may have been killed while the process lives on."
                    if rec.tmux_socket else
                    "This record predates the server field, so nothing says where to look: usually the "
-                   "wrong tmux server, and `export FLEET_TMUX_SOCKET` to the one it was dispatched on."))
+                   "wrong tmux server, and `export FLEET_TMUX_SOCKET` to the one it was dispatched on.")), False
         #: `SI-59`. The record NAMES a server, and it is not the one we looked on. `SI-39` gave this
         #: situation its own state because DEAD is an ACTIONABLE claim — the response is `reap` — and a
         #: wrong DEAD invites a human to free a slot out from under running work. That state needed a live
@@ -359,16 +419,16 @@ def _state_of(rec, folder_state, live, phase, parked, pane, sessions, instant, i
                 f"server {rec.tmux_socket!r} while this command is talking to "
                 f"{getattr(sessions, 'socket', '') or 'the default server'!r}. Nothing has been observed "
                 f"about whether the work is alive: export FLEET_TMUX_SOCKET={rec.tmux_socket} and ask "
-                f"again.")
+                f"again."), False
         if rec.launched_at is None:
             # READ from an absent field, never stamped. Back-filling it here is exactly the defect that
             # made the predecessor's report a writer.
-            return PENDING_LAUNCH, "dispatched, with no launch recorded and no live session"
+            return PENDING_LAUNCH, "dispatched, with no launch recorded and no live session", False
         #: Names the server, because that is what makes DEAD an honest claim rather than a local one. It
         #: is reached only after the record's OWN server was asked, when it names one.
         asked = getattr(sessions, "socket", "") or "the default server"
         return DEAD, (f"launched at {rec.launched_at} and no session is alive on tmux server {asked!r}: "
-                      "the work stopped without renaming its folder")
+                      "the work stopped without renaming its folder"), False
     if instant is None and rec.child_instant:
         #: `B06`, re-measure `scenD` D3. The record names an instant and nothing on disk answers for it,
         #: while the session is live. Every verb this worker would run to report or finish (`brief`,
@@ -383,7 +443,7 @@ def _state_of(rec, folder_state, live, phase, parked, pane, sessions, instant, i
         #: by `test_a_missing_folder_outranks_a_busy_pane`.
         return BLOCKED, (f"the instant folder this record names, {rec.child_instant}, is not on disk "
                          f"(deleted, or moved outside {Path(rec.child_instant).parent}); the session is "
-                         f"live, and every fleet verb it would run to report or finish refuses")
+                         f"live, and every fleet verb it would run to report or finish refuses"), False
     return _live_state(phase, parked, pane, sessions, instant, idle_after_s,
                        capture_failed=capture_failed)
 
@@ -394,6 +454,7 @@ def _live_state(phase, parked, pane, sessions, instant, idle_after_s, capture_fa
     unwatched = (phase == PHASE_AWAITING_CI and sessions.runtime != 'codex'
                  and _watcher_of(pane, sessions, instant,
                                  capture_failed=capture_failed)[0] == WATCHER_NONE)
+    on_pane = False
     if not busy and sessions.asking(pane):
         #: `B06`/`FI-55`. `pane-guard` has answered `15 awaiting-operator` for this frame since `I-16`, and
         #: this join still said RUNNING with an empty note: an `AskUserQuestion` selection carries no caret
@@ -402,10 +463,12 @@ def _live_state(phase, parked, pane, sessions, instant, idle_after_s, capture_fa
         #: cannot disagree about one frame. Waiting will not clear a dialog, and only an answer will.
         state, note = BLOCKED, ("the pane is showing an operator dialog (a selection question, a trust "
                                 "screen or an approval prompt) and nothing moves until a human answers it")
+        on_pane = True
     elif waiting and not busy:
         # A pane holding text nobody submitted needs a keystroke: a modal, or a swallowed submit. Text
         # queued while the agent is still working is not blocked — it is queued, and it will be sent.
         state, note = BLOCKED, f"the pane is waiting on a human: {waiting!r}"
+        on_pane = True
     elif phase == PHASE_AWAITING_CI and sessions.runtime == 'codex':
         state, note = BLOCKED, 'Codex has no verified CI wake mechanism; this worker still consumes capacity'
     elif phase == PHASE_AWAITING_CI and not unwatched:
@@ -448,7 +511,7 @@ def _live_state(phase, parked, pane, sessions, instant, idle_after_s, capture_fa
                                     f"still working is just a note: {parked}")
         else:
             state, note = PARKED, f"parked decision: {parked}"
-    return state, note
+    return state, note, on_pane and state == BLOCKED
 
 
 def _declared_age_s(instant, now):
