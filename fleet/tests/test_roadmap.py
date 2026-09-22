@@ -26,7 +26,7 @@ from unittest import mock
 
 from fleet.errors import BadInput
 from fleet.roadmap import (ATTENTION, INFO, LANDED, NOT_READY, PENDING_PROPOSAL,
-                           POPULATION, STATUSES, TERMINAL, Milestone, Proposal,
+                           POPULATION, READY, STATUSES, TERMINAL, Milestone, Proposal,
                            Roadmap)
 
 COORD = "00000000-07300312-inflight-append-fleetInfraRebuild"
@@ -237,6 +237,63 @@ class TestPopulation(RoadmapCase):
         empty = [r for r in self.fresh().report() if r.kind == POPULATION]
         self.assertEqual(len(empty), 1)
         self.assertIn("0 milestone", empty[0].detail)
+
+
+class TestTheReadyPopulationIsRows(RoadmapCase):
+    """`B04` / `SI-47`. `report()` dropped every milestone whose blocker was None, so the one state a
+    coordinator acts on — ready — had no row in either form, and its count lived only in the population
+    row's prose. Readiness was derived correctly and then never emitted."""
+
+    def test_every_ready_milestone_is_a_ready_row(self):
+        self.rm.add(ms("landed", status="done", evidence=["evidence/x"]))
+        self.rm.add(ms("free", status="ready"))
+        self.rm.add(ms("stacked", deps=["landed"]))
+        self.rm.add(ms("claimed", status="ready", owner=WORKER))
+        self.rm.add(ms("waiting", deps=["free"]))
+        ready = {m.id for m in self.rm.ready()}
+        self.assertEqual(ready, {"free", "stacked", "claimed"})
+        rows = {r.subject: r for r in self.rows(READY)}
+        self.assertEqual(set(rows), ready, "every ready milestone, and only those, gets a ready row")
+        for mid, row in rows.items():
+            with self.subTest(milestone=mid):
+                self.assertEqual(row.severity, INFO, "ready is the healthy state; it is not an alarm")
+                self.assertEqual(row.title, f"milestone {mid}", "the row carries the title as a FIELD")
+        # The count in the population prose and the rows can never disagree: both read `_readiness`.
+        population = self.rows(POPULATION)[0]
+        self.assertIn(f"of which {len(rows)} ready", population.detail)
+        self.assertNotIn("waiting", rows, "a milestone whose dep has not landed is not ready")
+        self.assertEqual({r.subject for r in self.rows(NOT_READY)}, {"landed", "waiting"})
+
+    def test_the_owner_is_a_field_so_dispatchable_is_a_column_read(self):
+        # i22(a): the owner reached output only as the ACTOR in some other milestone's blocker prose, so a
+        # coordinator hand-parsed roadmap.json (and once read `claimed_by`, a field that does not exist).
+        self.rm.add(ms("free", status="ready"))
+        self.rm.add(ms("claimed", status="ready", owner=WORKER))
+        self.rm.add(ms("inflight", status="running", owner=WORKER))
+        rows = {r.subject: r for r in self.rm.report() if r.kind in (READY, NOT_READY)}
+        self.assertEqual(rows["free"].owner, "", "an unclaimed milestone has an EMPTY owner field")
+        self.assertEqual(rows["claimed"].owner, WORKER)
+        self.assertEqual(rows["inflight"].owner, WORKER, "not-ready rows carry the owner too")
+        self.assertIn("dispatchable", rows["free"].detail)
+        self.assertIn("claimed by", rows["claimed"].detail)
+        self.assertNotIn("dispatchable", rows["claimed"].detail.replace("not dispatchable", ""))
+
+    def test_a_ready_row_names_what_clears_it_and_who(self):
+        self.rm.add(ms("free", status="ready"))
+        row = self.rows(READY)[0]
+        self.assertTrue(row.clears_when)
+        self.assertTrue(row.clears_who)
+
+    def test_pending_proposal_rows_carry_the_milestone_title_and_owner(self):
+        self.rm.add(ms("m1", status="running", owner=WORKER))
+        self.rm.propose(self.worker, "m1", "awaiting-ci", ["evidence/y"])
+        row = self.rows(PENDING_PROPOSAL)[0]
+        self.assertEqual((row.title, row.owner), ("milestone m1", WORKER))
+
+    def test_the_population_row_carries_no_milestone_fields(self):
+        self.rm.add(ms("m1", status="ready"))
+        population = self.rows(POPULATION)[0]
+        self.assertEqual((population.title or "", population.owner or ""), ("", ""))
 
 
 if __name__ == "__main__":

@@ -84,6 +84,18 @@ ATTEMPT_PREFIX = "attempt-"
 #: The live-subject probe. A command string, because that is what the injected runner takes.
 BOARD_COMMAND = "fleet board --porcelain"
 
+
+def live_subject_rows(board_porcelain: str) -> str:
+    """The SUBJECT rows of `board --porcelain`, without its trailing `population` row (`B04`).
+
+    The two samples taken either side of a run are compared for equality, and the population row counts
+    subjects NOT holding a slot as well — processes that come and go on a busy box without holding anything
+    this verify could be contaminated by. Comparing it would widen "the box was busy" (INCONCLUSIVE) past
+    what it has always meant: a slot-holding subject changed."""
+    kind = 1  # render.BOARD_COLUMNS.index("kind"); render is not imported by this module
+    return "".join(line for line in board_porcelain.splitlines(keepends=True)
+                   if line.rstrip("\n").split("\t")[kind:kind + 1] != ["population"])
+
 #: The two suites, as the working copy sees them.
 HERMETIC_COMMAND = "python3 -m unittest discover -s tests -q"
 IT_SCRIPT = ("fleet", "it", "run-all.sh")
@@ -438,7 +450,7 @@ class Verify:
         """This box's live subject set, as text. Sampled either side of the run: if it moved, a failure
         may be somebody else's session rather than this release's defect."""
         code, out, _ = self.runner(BOARD_COMMAND)
-        return out if code == 0 else ""
+        return live_subject_rows(out) if code == 0 else ""
 
     def _worktree(self) -> Path:
         """A git worktree at the release's tag, under the releases root, at a name no other writer can

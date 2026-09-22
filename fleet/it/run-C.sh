@@ -474,7 +474,8 @@ c1_two_fresh_slots_are_free() {
   fleet enroll --slot "$C_SLOTS/s1" --porcelain >> "$CD/enroll.out" 2>&1
   fleet enroll --slot "$C_SLOTS/s2" --porcelain >> "$CD/enroll.out" 2>&1
   fleet leases --porcelain > "$log" 2>&1
-  rows="$(grep -c . "$log")"
+  #: `B04`: the last row is `population` (the pool that was read), so slots are counted by excluding it.
+  rows="$(awk -F'\t' '$2!="population"' "$log" | grep -c .)"
   free="$(awk -F'\t' '$2=="free"{print $1}' "$log" | tr '\n' ' ' | sed 's/ $//')"
   {
     printf -- '--- fleet leases --porcelain, two fresh slots ---\n'; cat "$log"

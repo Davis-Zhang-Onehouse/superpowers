@@ -88,8 +88,15 @@ def porcelain_rows(text: str) -> list:
     return [line.split("\t") for line in text.splitlines() if line]
 
 
+def subject_rows(text: str) -> list:
+    """The board's SUBJECT rows: every porcelain row except the trailing `population` row (`B04`), which
+    states the scope and is asserted on its own in `TestPorcelainStatesItsPopulation`."""
+    kind = render.BOARD_COLUMNS.index("kind")
+    return [fields for fields in porcelain_rows(text) if fields[kind] != render.POPULATION]
+
+
 def porcelain_dicts(text: str) -> list:
-    return [dict(zip(render.BOARD_COLUMNS, fields)) for fields in porcelain_rows(text)]
+    return [dict(zip(render.BOARD_COLUMNS, fields)) for fields in subject_rows(text)]
 
 
 def human_rows(text: str) -> list:
@@ -127,7 +134,7 @@ class TestBoard(unittest.TestCase):
                                  "a harvested, slot-released subject is on the board")
                 for row in legacy:
                     self.assertNotIn(row.identity, text)
-        rows = porcelain_rows(render.board(subjects, porcelain=True))
+        rows = subject_rows(render.board(subjects, porcelain=True))
         self.assertEqual(len(rows), 1, f"the board is not small: {rows}")
 
     def test_a_dead_session_is_never_rendered_as_parked(self):
@@ -213,7 +220,7 @@ class TestBoard(unittest.TestCase):
         subjects = [DEAD, BLOCKED, unknown(), stale_lease(), HARVESTED]
         expected = {s.identity for s in subjects if s.holds_slot}
         text = render.board(subjects, porcelain=True)
-        rows = porcelain_rows(text)
+        rows = subject_rows(text)
         self.assertEqual(len(rows), len(expected), rows)
         self.assertIn("identity", render.BOARD_COLUMNS)
         seen = set()
@@ -272,9 +279,8 @@ class TestBoard(unittest.TestCase):
                               stdout=subprocess.PIPE, stderr=subprocess.DEVNULL, timeout=60)
         self.assertEqual(proc.returncode, 0)
         out = proc.stdout.decode()
-        rows = porcelain_rows(out)
-        self.assertEqual(len(rows), 2, out)
-        for fields in rows:
+        self.assertEqual(len(subject_rows(out)), 2, out)
+        for fields in porcelain_rows(out):
             self.assertEqual(len(fields), len(render.BOARD_COLUMNS), fields)
         self.assertNotIn("commentary", out)
         for line in out.splitlines():
@@ -340,7 +346,8 @@ class TestLeaseView(unittest.TestCase):
         text = render.leases(self.pool)
         for needle in ("ws1", "ws2", "deadWorker-07300301", OURS):
             self.assertIn(needle, text)
-        rows = porcelain_rows(render.leases(self.pool, porcelain=True))
+        rows = [fields for fields in porcelain_rows(render.leases(self.pool, porcelain=True))
+                if fields[render.LEASE_COLUMNS.index("lease")] != render.POPULATION]
         self.assertEqual(len(rows), 2, rows)
         for fields in rows:
             self.assertEqual(len(fields), len(render.LEASE_COLUMNS), fields)
@@ -379,6 +386,95 @@ class TestRoadmapView(unittest.TestCase):
         for row in expected:
             self.assertIn(row.subject, machine)
             self.assertIn(row.subject, human)
+
+
+class TestPorcelainStatesItsPopulation(unittest.TestCase):
+    """`B04` i22(b). `board --porcelain` and `leases --porcelain` printed ZERO BYTES and exit 0 on an empty
+    population, while the human form stated the scope — so a wrong `FLEET_HOME`, an empty fleet and a verb
+    that failed silently were one and the same to the only consumer that cannot ask a follow-up. The
+    scope sentence was withheld from exactly the reader `board`'s own docstring wrote it for."""
+
+    def population(self, text, columns, kind_column):
+        rows = porcelain_rows(text)
+        self.assertTrue(rows, "the porcelain form printed nothing at all")
+        for fields in rows:
+            self.assertEqual(len(fields), len(columns), fields)
+        found = [dict(zip(columns, f)) for f in rows if f[columns.index(kind_column)] == render.POPULATION]
+        self.assertEqual(len(found), 1, rows)
+        self.assertEqual(rows[-1][columns.index(kind_column)], render.POPULATION,
+                         "the population row is the LAST word, as for every checker verb")
+        return found[0]
+
+    def test_an_empty_board_still_says_what_it_examined(self):
+        row = self.population(render.board([], porcelain=True, scope="/store/home"),
+                              render.BOARD_COLUMNS, "kind")
+        self.assertEqual(row["identity"], "/store/home", "the population row names WHERE it looked")
+        self.assertIn("0 subject(s)", row["note"])
+        self.assertIn("0 holding a slot", row["note"])
+
+    def test_the_board_population_counts_what_the_human_banner_counts(self):
+        subjects = [DEAD, BLOCKED, HARVESTED]
+        row = self.population(render.board(subjects, porcelain=True, scope="/store/home"),
+                              render.BOARD_COLUMNS, "kind")
+        human = render.board(subjects, scope="/store/home").splitlines()[0]
+        for token in ("2 holding a slot", "1 needs you", "1 not holding a slot"):
+            with self.subTest(token=token):
+                self.assertIn(token, row["note"])
+                self.assertIn(token, human)
+        self.assertEqual(row["state"], "", "the population row has no state a state filter could match")
+
+    def test_an_empty_pool_still_says_what_it_examined(self):
+        tmp = pathlib.Path(tempfile.mkdtemp())
+        pool = Pool(tmp / "home", cwd_probe=lambda p: [], alive=lambda n: False)
+        row = self.population(render.leases(pool, porcelain=True), render.LEASE_COLUMNS, "lease")
+        self.assertEqual(row["slot"], str(pool.root), "the population row names the pool it read")
+        self.assertIn("0 enrolled", row["note"])
+
+    def test_the_lease_population_counts_what_the_human_banner_counts(self):
+        tmp = pathlib.Path(tempfile.mkdtemp())
+        pool = Pool(tmp / "home", cwd_probe=lambda p: [], alive=lambda n: False)
+        for slot in ("ws1", "ws2"):
+            (tmp / slot).mkdir()
+            pool.enroll(tmp / slot)
+        pool.claim(todo_id="deadWorker-07300301", tmux="dt-deadWorker", base_instant=OURS,
+                   child_instant=OURS + "/child", slot="ws1")
+        row = self.population(render.leases(pool, porcelain=True), render.LEASE_COLUMNS, "lease")
+        for token in ("2 enrolled", "1 held", "1 free"):
+            with self.subTest(token=token):
+                self.assertIn(token, row["note"])
+        for column in ("todo_id", "owner", "tmux", "claimed_at"):
+            self.assertEqual(row[column], "", f"the population row fills {column}, which a filter could match")
+
+    def test_new_columns_are_APPENDED_so_positional_consumers_are_unchanged(self):
+        # Every awk recipe in the skills and ~10 IT runners reads `$1..$7` by position.
+        self.assertEqual(render.LEASE_COLUMNS[:7],
+                         ("slot", "lease", "todo_id", "owner", "tmux", "claimed_at", "path"))
+        self.assertEqual(render.ROADMAP_COLUMNS[:6],
+                         ("kind", "subject", "severity", "detail", "clears_when", "clears_who"))
+        self.assertEqual(render.ROADMAP_COLUMNS[6:], ("title", "owner"))
+
+
+class TestRoadmapPorcelainNamesReadyMilestones(unittest.TestCase):
+    """`B04` row30 / `SI-47`, at the rendered surface a coordinator loop actually reads."""
+
+    def test_the_dispatchable_set_is_a_column_read(self):
+        from fleet.roadmap import Milestone, Roadmap
+        rm = Roadmap(pathlib.Path(tempfile.mkdtemp()))
+        rm.add(Milestone(id="free", title="the free one", status="ready", deps=[], evidence=[]))
+        rm.add(Milestone(id="taken", title="the taken one", status="ready", deps=[], evidence=[],
+                         owner="/i/worker"))
+        rows = [dict(zip(render.ROADMAP_COLUMNS, line.split("\t")))
+                for line in render.roadmap_view(rm, porcelain=True).splitlines()]
+        ready = {r["subject"]: r for r in rows if r["kind"] == "ready"}
+        self.assertEqual(set(ready), {"free", "taken"})
+        self.assertEqual((ready["free"]["title"], ready["free"]["owner"]), ("the free one", ""))
+        self.assertEqual((ready["taken"]["title"], ready["taken"]["owner"]), ("the taken one", "/i/worker"))
+        dispatchable = [r["subject"] for r in rows if r["kind"] == "ready" and not r["owner"]]
+        self.assertEqual(dispatchable, ["free"])
+        human = render.roadmap_view(rm)
+        self.assertIn("the free one", human, "the human form names the ready milestone's title too")
+        self.assertIn("2 ready (1 unclaimed)", human.splitlines()[0],
+                      "the banner's ready count must not pass a claimed milestone off as dispatchable")
 
 
 if __name__ == "__main__":
