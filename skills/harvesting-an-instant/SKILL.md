@@ -59,7 +59,9 @@ applied is applied by the harvest, in the order it arrived — `harvest --id <to
 first. So applying first (step 2 below) is where your judgement goes; harvest is not a way to skip a row.
 The one exception it holds back is a row that would move a `done` or `dropped` milestone: it stays pending
 and harvest reports it, because that is the silent regression step 2 exists to catch. It also gives back
-the worker's claim on a milestone it left unfinished, so that milestone can be dispatched again.
+the worker's claim on a milestone it left unfinished, so no closed instant holds it. A milestone the
+worker left `running` or `awaiting-ci` still cannot be dispatched until you move its status — that part is
+your call, not harvest's.
 
 ## Never close on one pane sample
 
