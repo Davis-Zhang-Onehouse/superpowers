@@ -38,10 +38,10 @@ class LiveFleetGuardCase(unittest.TestCase):
                              *named], stdout=io.StringIO(), stderr=io.StringIO())
 
     def test_it_is_installed_on_the_seams_cli_calls(self):
-        """`main` looks `default_context` up by name at call time, `_releases` does the same for
+        """`default_context` looks `resolve_home` up by name at call time, `_releases` does the same for
         `resolve_releases`, and every marker read goes through `root.load` — wrapped anywhere else, the
         guard would watch a name nobody calls."""
-        for seam in (root_mod.load, cli.default_context, cli.resolve_releases):
+        for seam in (root_mod.load, cli.resolve_home, cli.resolve_releases):
             self.assertTrue(getattr(seam, "live_fleet_guard", False), f"{seam!r} is not the guard")
 
     def test_it_fires_on_a_live_root(self):
@@ -54,6 +54,17 @@ class LiveFleetGuardCase(unittest.TestCase):
         with mock.patch.object(tests, "LIVE_STORES", frozenset({store.resolve()})):
             with self.assertRaises(LiveFleetReached):
                 self._promote("--home", str(store))
+
+    def test_a_live_store_is_refused_before_anything_reads_it(self):
+        """Refuse-before-touching, not read-then-object: `default_context` reads the store's
+        `runtime.json` as soon as it has a home, so a check after it returns has already read the live
+        store."""
+        store = self.tmp / "store"
+        with mock.patch.object(tests, "LIVE_STORES", frozenset({store.resolve()})), \
+                mock.patch.object(cli, "read_runtime", wraps=cli.read_runtime) as read:
+            with self.assertRaises(LiveFleetReached):
+                self._promote("--home", str(store))
+        self.assertEqual(read.call_count, 0, "the live store was read before the guard refused it")
 
     def test_it_fires_on_a_live_release_area(self):
         with mock.patch.object(tests, "LIVE_RELEASES", frozenset({self.releases.resolve()})):

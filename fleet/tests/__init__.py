@@ -115,7 +115,7 @@ def _install_live_fleet_guard():
     if getattr(root_mod.load, "live_fleet_guard", False):
         return
     real_load = root_mod.load
-    real_context = cli.default_context
+    real_home = cli.resolve_home
     real_releases = cli.resolve_releases
 
     def load(root_dir):
@@ -123,11 +123,13 @@ def _install_live_fleet_guard():
             _refuse("fleet root", root_dir, "its .fleet-root marker")
         return real_load(root_dir)
 
-    def default_context(parsed, out, err):
-        ctx = real_context(parsed, out, err)
-        if ctx.home is not None and _resolved(ctx.home) in LIVE_STORES:
-            _refuse("store", ctx.home, f"`{parsed.verb}`'s context")
-        return ctx
+    #: `resolve_home`, not `default_context`: the context reads the store's `runtime.json` as soon as it
+    #: has a home, so a check on the finished context would object only after the live store was read.
+    def resolve_home(parsed, environ, cwd):
+        home, source = real_home(parsed, environ, cwd)
+        if _resolved(home) in LIVE_STORES:
+            _refuse("store", home, f"`{parsed.verb}`'s {source}")
+        return home, source
 
     def resolve_releases(parsed, environ, cwd):
         rel = real_releases(parsed, environ, cwd)
@@ -135,10 +137,10 @@ def _install_live_fleet_guard():
             _refuse("release area", rel.root, f"`{parsed.verb}`'s release resolution")
         return rel
 
-    for wrapper in (load, default_context, resolve_releases):
+    for wrapper in (load, resolve_home, resolve_releases):
         wrapper.live_fleet_guard = True
     root_mod.load = load
-    cli.default_context = default_context
+    cli.resolve_home = resolve_home
     cli.resolve_releases = resolve_releases
 
 
