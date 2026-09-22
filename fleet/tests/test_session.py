@@ -847,6 +847,16 @@ class TestAttachmentIsCollected(unittest.TestCase):
         got, _ = self.ask(0, "dt-w\tmaybe\t0\tsoon\n")
         self.assertIsNone(got)
 
+    def test_a_malformed_probe_answer_is_NOT_MEASURED_not_a_crash(self):
+        """`RV-29`. `Probes.attachment` is an injectable field, and `SessionLayer.attachment` runs inside
+        `reconcile`: an odd answer that raised here would take down `board`, `status` and `reconcile` at once."""
+        for odd in ((1, 2, 3), ("many", 1700000000), (1, "soon"), "1 1700000000", 7):
+            with self.subTest(answer=odd):
+                s = SessionLayer(Probes(list_processes=lambda: [], capture_pane=lambda n: "",
+                                        has_session=lambda n: True, start_session=lambda n, c, m: None,
+                                        kill_session=lambda n: None, attachment=lambda n, a=odd: a))
+                self.assertIsNone(s.attachment("dt-w"))
+
     def test_the_layer_says_None_when_no_probe_was_supplied(self):
         s, _, _ = layer()
         self.assertIsNone(s.attachment("dt-w"))
