@@ -547,8 +547,9 @@ class TestTheIdleStateIsProduced(unittest.TestCase):
 
     `test_render.test_a_stalled_worker_is_counted_as_needing_a_human` hand-builds a subject already
     labelled `IDLE` and asserts the view, so it passes whether or not the producer can ever emit one.
-    Measured by mutation: `_live_state`'s threshold branch made dead (`elif False and ...`) left all 2009
-    tests green, while dropping `IDLE` from `ACTIONABLE_STATES` is killed in `test_render`. The harness
+    Measured by mutation on dd2e4ce3: `_live_state`'s threshold branch made dead (`elif False and ...`) left
+    all 2009 tests green, as did `_idle_for` always reporting fresh, while dropping `IDLE` from
+    `ACTIONABLE_STATES` is killed in `test_render`. Both now die here, as does the over-eager `>= 0`. The harness
     could kill; it never looked at the producer. These cases drive the real join through a worker whose
     instant has been quiet past `idle_after_s`.
     """
@@ -562,6 +563,7 @@ class TestTheIdleStateIsProduced(unittest.TestCase):
             self.fleet.instants, idle_after_s=idle_after_s)}
 
     def quiet_worker(self, todo_id, tmux, pid, pane=QUIET_PANE):
+        # ws9 is the fixture's only unleased slot; each case builds its own fleet and takes it once.
         stamp = todo_id.split("-")[1]
         self.fleet.dispatch(todo_id, f"00000000-{stamp}-inflight-append-{todo_id.split('-')[0]}",
                             "ws9", tmux)
@@ -611,3 +613,18 @@ class TestTheIdleStateIsProduced(unittest.TestCase):
                          "600s quiet against a 300s threshold is not IDLE")
         self.assertEqual(self.subjects(idle_after_s=1800)["edge-07300404"].state, RUNNING,
                          "600s quiet against an 1800s threshold was reported IDLE")
+
+    def test_a_parked_worker_quiet_past_the_threshold_is_still_idle(self):
+        """A declaration lives in `.fleet/`, which `_idle_for` reads — so a stalled worker that once parked a
+        question is IDLE with the park appended, never masked as PARKED (OBS-7). This is also the case that
+        makes `age()` walking `.fleet/*` load-bearing: an unaged `declare.json` reads as fresh activity."""
+        self.quiet_worker("parked-07300405", "dt-parked", 5105)
+        Declarations(self.fleet.paths["parked-07300405"]).park(PARK_BLOCKED_Q)
+        self.fleet.age("parked-07300405", 2700)
+
+        subject = self.subjects()["parked-07300405"]
+
+        self.assertEqual(subject.state, IDLE,
+                         f"a parked worker quiet for 2700s was reported {subject.state}: {subject.note!r}")
+        self.assertIn(PARK_BLOCKED_Q, subject.note, "the standing park was dropped from the IDLE note")
+        self.assertTrue(needs_a_human(subject), "a stalled parked worker is not asked of a human")
