@@ -657,13 +657,20 @@ class Roadmap:
                     d["status"] = status
                     #: `B03`. Written ANCHORED — where the item is now — because a relative string on a
                     #: milestone has no proposer left to be relative to. Deduplicated by location, so one
-                    #: file cited while `-inflight-` and again after `-complete-` lands once.
-                    seen = {str(evidence_mod.locate(e, d.get("owner")) or e) for e in d["evidence"]}
+                    #: file cited while `-inflight-` and again after `-complete-` lands once. A legacy
+                    #: RELATIVE entry for the same file is UPGRADED to the anchored form rather than kept
+                    #: (RV-20): kept, it stays readable only while `owner` still names its proposer.
+                    seen = {str(evidence_mod.locate(e, d.get("owner")) or e): i
+                            for i, e in enumerate(d["evidence"])}
                     for item in evidence:
                         where = evidence_mod.locate(item, proposal.instant)
-                        if str(where or item) not in seen:
-                            seen.add(str(where or item))
-                            d["evidence"].append(evidence_mod.anchored(item, proposal.instant))
+                        key, stored = str(where or item), evidence_mod.anchored(item, proposal.instant)
+                        if key not in seen:
+                            seen[key] = len(d["evidence"])
+                            d["evidence"].append(stored)
+                        elif not (Path(d["evidence"][seen[key]]).is_absolute()
+                                  or evidence_mod.is_url(d["evidence"][seen[key]])):
+                            d["evidence"][seen[key]] = stored
                     self._save(self.path, data)
                     self._consume(proposal)
                     return Milestone(**d)
