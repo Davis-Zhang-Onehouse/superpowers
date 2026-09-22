@@ -3482,8 +3482,9 @@ def _do_harvest(ctx: Ctx, parsed: Parsed) -> int:
             rows.append(Row(
                 kind="harvest-refused", subject=record.todo_id, severity=VIOLATION, detail=refused,
                 clears_when=("the worker (or the coordinator on its behalf) re-proposes citing evidence that "
-                             "resolves — relative to the worker's own folder — or `fleet withdraw` closes "
-                             "the row; then harvest again"),
+                             "resolves — relative to the worker's own folder — then harvest again. `fleet "
+                             "withdraw` closes the row instead only when it is residue: withdrawing a "
+                             "worker's only report leaves it unreported, which harvest also refuses"),
                 clears_who="the dispatched instant, or the coordinator on its behalf"))
         elif ctx.dry_run:
             roadmap, mine, held, recorded = _harvest_inbox(ctx, child)
