@@ -122,7 +122,10 @@ else
   if [ "$b_d" != 0 ] && grep -q "tmux refused to start 'dt-teworkerb': server exited unexpectedly · clears when:" "$OUT/B-dispatch.out" &&
      grep -q 'ps -o pid,stat,args -C tmux' "$OUT/B-dispatch.out" && cmp -s "$OUT/B-leases-before.out" "$OUT/B-leases-after.out"; then
     it_pass TE5 "fleet/it/TE/out/B-dispatch.out" "dispatch onto the exiting server is refused at new-session (rc=$b_d), names the route, and gives its lease back"
-  else it_fail TE5 "fleet/it/TE/out/B-dispatch.out" "dispatch rc=$b_d without a route"; fi
+  else
+    cmp -s "$OUT/B-leases-before.out" "$OUT/B-leases-after.out"; leases_same=$?
+    it_fail TE5 "fleet/it/TE/out/B-dispatch.out" "dispatch rc=$b_d; new-session route present: $(grep -c 'tmux refused to start' "$OUT/B-dispatch.out"); leases unchanged (cmp rc): $leases_same"
+  fi
 fi
 
 # ---- TE6: the fixtures are the states they claim, or every verdict above is about something else ----------

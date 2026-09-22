@@ -414,7 +414,7 @@ def default_probes(process_name: str = "claude", tmux_socket=_FROM_ENV, *,
             error = done.stderr.strip()
             if _no_server(error):
                 return owners
-            confirm = ""
+            confirm, route = "", ""
             if error in ("no current target", "server exited unexpectedly"):
                 # Neither string is trusted alone: a second, different command must agree that there is
                 # no session — rc=0 with zero rows (A), or no server answering it either (B).
@@ -424,9 +424,14 @@ def default_probes(process_name: str = "claude", tmux_socket=_FROM_ENV, *,
                     return owners
                 if listed.returncode != 0 and (_no_server(answer) or answer == "server exited unexpectedly"):
                     return owners
+                rows = len(listed.stdout.splitlines()) if listed.returncode == 0 else 0
                 confirm = (f"; `{shlex.join(tmux + ['list-sessions'])}` then exited {listed.returncode}"
-                           + (f": {answer}" if answer else f" listing {len(listed.stdout.split())} session(s)"))
-            route = f" ({held_route})" if confirm else ""
+                           + (f": {answer}" if answer else f" listing {rows} session(s)"))
+                # The held-client route explains a server with NO sessions; when sessions were listed it
+                # would send the reader after a client that is not the cause.
+                route = "" if rows else f" ({held_route})"
+            else:
+                route = ""
             raise FleetError(
                 f"Cannot inspect tmux server on {where}: `{shlex.join(argv[:-2])}` exited {done.returncode}: "
                 f"{error or 'no message'}{confirm} · clears when: `{shlex.join(tmux + ['list-panes', '-a'])}` "
