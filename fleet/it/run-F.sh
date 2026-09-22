@@ -307,9 +307,19 @@ done
   echo "F4_EXIT=$?"
   echo "F5_DECLARE_START"
   COMPACT_INST="$(find "$FZ_INST" -maxdepth 1 -name '*-inflight-compact-fzcompaction' | head -1)"
-  fleet declare --instant "$COMPACT_INST" --phase AWAITING-CI --porcelain
+  #: `RV-41`/`B06`. NAMES ITS WATCHER, as F2 and §K's K5 do. A claim with nothing observed on the pane and
+  #: nothing recorded is disregarded by `reconcile`, so it frees no cap — and F5's whole claim is that this
+  #: declaration DOES take the compaction out of the cap's count while the exclusivity rule still refuses.
+  #: The compaction's pane is the harness stub, which renders no status line, so the watcher is attested.
+  fleet declare --instant "$COMPACT_INST" --phase AWAITING-CI \
+        --watcher 'cron 0,30 * * * * gh-run-poll' --porcelain
   echo "F5_CAP_START"
   fleet compaction-status --porcelain
+  #: `RV-41`. The cap half, MEASURED rather than narrated (SI-50 recorded that it never was): the dry run
+  #: prints each guard's own verdict, so `guard.wip-cap` says whether the cap has room while
+  #: `guard.compaction-exclusive` refuses.
+  fleet dispatch --dry-run --profile "$OUT/profile" --title "fzCapProbe" --base 00000000 \
+        --optype append --porcelain
   fleet dispatch --profile "$OUT/profile" --title "fzBlocked2" --base 00000000 --optype append
   echo "F5_EXIT=$?"
   echo "F6_RESUME_START"
@@ -341,19 +351,22 @@ fi
 
 # ---- F5: the cap has room AND the dispatch is still refused ----
 f5_rc="$(ex F5_EXIT)"
-# shellcheck disable=SC2034  # F5's title claims 'the cap has room', but the gate below asserts on
-# f5_declared/f5_still_refused only -- this measurement is never checked. See SI-50.
+#: `RV-41`. ASSERTED now, not merely measured. SI-50 recorded that F5's title claimed "the cap has room"
+#: while the gate read `f5_declared`/`f5_still_refused` only — so when `B06` made an unbacked declaration
+#: stop freeing the cap, this case kept passing while its own artifact printed the compaction as counted.
+#: The value comes from the dry run's own `guard.wip-cap` row.
 f5_cap_room=0
-# shellcheck disable=SC2034  # see the note above: measured, never asserted. SI-50.
-sec F5_CAP_START F5_EXIT= | grep -qiE 'no compaction|examined' && f5_cap_room=1
+case "$(sec F5_CAP_START F5_EXIT= | awk -F'\t' '$1=="guard.wip-cap"{print $2; exit}')" in
+  allow*) f5_cap_room=1 ;;
+esac
 f5_still_refused=0; [ "$f5_rc" = 4 ] && f5_still_refused=1
 f5_declared=0; sec F5_DECLARE_START F5_CAP_START | grep -qi 'awaiting-ci' && f5_declared=1
-if [ "$f5_declared" = 1 ] && [ "$f5_still_refused" = 1 ]; then
+if [ "$f5_declared" = 1 ] && [ "$f5_still_refused" = 1 ] && [ "$f5_cap_room" = 1 ]; then
   it_pass F5 "fleet/it/F/out/F4-F7.out" \
-    "the compaction declared AWAITING-CI — which takes it OUT of the cap's active-dev count — and the dispatch is STILL refused (exit $f5_rc). Two rules kept structurally apart, each reporting its own verdict: folding them together gets exactly one of these two cases wrong whichever way you fold it, and 'the cap says I have room' is not an answer to 'may I dispatch?'"
+    "the compaction declared AWAITING-CI with a watcher behind it — and the dry run's guard.wip-cap row says ALLOW, which is the cap reporting room, measured rather than narrated — while the dispatch is STILL refused (exit $f5_rc). Two rules kept structurally apart, each reporting its own verdict: folding them together gets exactly one of these two cases wrong whichever way you fold it, and 'the cap says I have room' is not an answer to 'may I dispatch?'"
 else
   it_fail F5 "fleet/it/F/out/F4-F7.out" \
-    "declared=$f5_declared still_refused=$f5_still_refused (exit=$f5_rc, want 4)"
+    "declared=$f5_declared cap_room=$f5_cap_room still_refused=$f5_still_refused (exit=$f5_rc, want 4)"
 fi
 
 # ---- F6: a resume is never refused ----
