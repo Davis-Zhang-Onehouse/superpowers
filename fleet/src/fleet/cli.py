@@ -3228,12 +3228,90 @@ def _unreported_to_coordinator(ctx: Ctx, child: Path):
         return None
     if milestone.status in TERMINAL:
         return None
-    if any(proposal.milestone == recorded.milestone for proposal in roadmap.proposals()):
+    #: `B01`. Only THIS worker's rows count: `harvest` applies nothing else (`_harvest_inbox`), so a row
+    #: another instant wrote about the same milestone proves nothing about whether this one reported.
+    if any(proposal.milestone == recorded.milestone and _proposed_by(child, proposal)
+           for proposal in roadmap.proposals()):
         return None
     return (f"this instant was dispatched for milestone {recorded.milestone!r} on {coordinator}, and that "
             f"milestone still reads status={milestone.status!r} there with NO proposal pending. Harvesting "
             f"now would kill the session, release the slot and stamp the record while the project-level "
             f"roadmap never learns what happened — and after that the loss is unrecoverable.")
+
+
+def _proposed_by(child: Path, proposal) -> bool:
+    """Did `child` write this proposal? Rename-tolerant: a worker proposes from its `-inflight-` folder and
+    is `-complete-` by the time it is harvested, so the recorded path is followed, never compared as text."""
+    return resolve(Path(proposal.instant)) == child
+
+
+def _harvest_inbox(ctx: Ctx, child: Path):
+    """-> (the roadmap `propose` delivered this worker's reports to, the proposals it wrote there that
+    harvest will apply, the ones it holds back, the worker's origin).  `B01`.
+
+    `harvest` used to read `Roadmap(child)` — the WORKER's own inbox. Since `SI-27`, `propose` resolves its
+    destination through `origin.json` to the COORDINATOR, so for every dispatched worker that inbox was empty
+    by construction: `harvest` printed `delta applied (none pending)`, killed the session and released the
+    slot while the report sat unapplied at the coordinator and the milestone still read `blocked`.
+
+    So the inbox is chosen the way `propose` chose it — the recorded coordinator, else the instant itself —
+    and only rows THIS worker wrote are returned: the coordinator's inbox also holds other workers' reports
+    and the coordinator's own, and closing one worker must not apply them. A coordinator that no longer
+    resolves falls back to the instant itself (the pre-`SI-27` behaviour), and the row says where it read.
+    """
+    recorded = origin_mod.read(child)
+    destination = child
+    if recorded is not None:
+        try:
+            destination = _resolve_instant(ctx, recorded.coordinator)
+        except BadInput:
+            destination = child
+    roadmap = Roadmap(destination)
+    mine = [p for p in roadmap.proposals() if _proposed_by(child, p)]
+    #: Held back, never applied: a row that would move a TERMINAL milestone somewhere else. `apply` does not
+    #: compare the incoming status with the current one (`SI-48`), so applying it here would make closing a
+    #: worker a silent way to un-land a milestone. It stays PENDING in the inbox for the coordinator.
+    #: Judged against the status BEFORE anything is applied: a worker's own ordered rows over a milestone
+    #: that was not finished are its report, and are applied as written.
+    current = {m.id: m.status for m in roadmap.milestones()}
+    held = [p for p in mine if current.get(p.milestone) in TERMINAL and p.status != current[p.milestone]]
+    return roadmap, [p for p in mine if p not in held], held, recorded
+
+
+def _stranded_claim(roadmap: Roadmap, recorded, child: Path):
+    """-> the milestone this worker still OWNS and did not finish, else None.  `B01` (re-measure `NEW-2`).
+
+    `dispatch` claims the milestone for the worker's `-inflight-` path; `abort` gives it back, and `harvest`
+    never did. A worker harvested with a non-terminal status therefore held the claim forever, and every
+    later dispatch onto that milestone was refused as "already claimed" by an instant that no longer
+    exists. A TERMINAL milestone keeps its owner: nothing can claim it again, and the owner is the record of
+    who did the work.
+    """
+    if recorded is None or not recorded.milestone or roadmap.instant == child:
+        return None
+    try:
+        milestone = roadmap.milestone(recorded.milestone)
+    except BadInput:
+        return None
+    if not milestone.owner or milestone.status in TERMINAL:
+        return None
+    if resolve(Path(milestone.owner)) != child:
+        return None                                  # somebody else holds it now; never free their claim
+    return milestone
+
+
+def _held_rows(record, roadmap: Roadmap, held: list) -> list:
+    """One ATTENTION row per proposal `_harvest_inbox` held back — the decision is the coordinator's."""
+    return [Row(kind="harvest-held", subject=p.milestone, severity=ATTENTION,
+                detail=(f"{record.todo_id} proposed {p.milestone} -> {p.status} at {p.at}, but {p.milestone} "
+                        f"already reads {roadmap.milestone(p.milestone).status} on {roadmap.instant.name}. "
+                        f"Applying it would un-land a finished milestone (`SI-48`), so harvest left it "
+                        f"PENDING instead of applying it as a side effect of closing the worker"),
+                clears_when=(f"the coordinator reads it and decides: `fleet apply --instant {roadmap.instant} "
+                             f"--milestone {p.milestone} --dry-run`, then apply it only if the move is "
+                             f"intended"),
+                clears_who=COORDINATOR)
+            for p in held]
 
 
 def _do_harvest(ctx: Ctx, parsed: Parsed) -> int:
@@ -3263,17 +3341,25 @@ def _do_harvest(ctx: Ctx, parsed: Parsed) -> int:
                              "--instant <this> --reason <why>`"),
                 clears_who="the dispatched instant, or the coordinator if it is abandoning the work"))
         elif ctx.dry_run:
+            roadmap, mine, held, _ = _harvest_inbox(ctx, child)
             rows.append(Row(kind="would-harvest", subject=record.todo_id, severity=INFO,
                             detail=(f"the gate allows ({gate.guard}) and the folder is {child.name}; a "
-                                    f"real run would apply "
-                                    f"{len(Roadmap(child).proposals())} proposal(s), close {record.tmux}, "
+                                    f"real run would apply {len(mine)} proposal(s) this instant wrote to "
+                                    f"{roadmap.instant.name}, close {record.tmux}, "
                                     f"release {record.slot or '(no slot)'} and stamp the record. "
                                     f"Nothing was changed.")))
+            rows += _held_rows(record, roadmap, held)
         else:
-            roadmap = Roadmap(child)
+            roadmap, mine, held, recorded = _harvest_inbox(ctx, child)
             applied = []
-            for proposal in roadmap.proposals():
+            for proposal in mine:
                 applied.append(roadmap.apply(proposal).id)
+            #: After the apply, so the status the release is judged on is the one this worker reported.
+            stranded = _stranded_claim(roadmap, recorded, child)
+            if stranded is not None:
+                roadmap.disown(stranded.id, expect_owner=stranded.owner,
+                               reason=(f"harvested: {child.name} was closed with {stranded.id} at "
+                                       f"status={stranded.status}"))
             if record.tmux:
                 ctx.sessions_for(record).kill(record.tmux)
             # `SI-31`. STAMP BEFORE RELEASING. The order used to be release-then-stamp, and `J9` measured
@@ -3302,10 +3388,15 @@ def _do_harvest(ctx: Ctx, parsed: Parsed) -> int:
             if record.slot:
                 ctx.pool.release(record.slot)
             rows.append(Row(kind="harvested", subject=record.todo_id, severity=INFO,
-                            detail=(f"delta applied ({', '.join(applied) or 'none pending'}), session "
+                            detail=(f"delta applied at {roadmap.instant.name} "
+                                    f"({', '.join(applied) or 'none pending'})"
+                                    + (f", claim on {stranded.id} given back (status={stranded.status})"
+                                       if stranded is not None else "")
+                                    + f", session "
                                     f"{record.tmux} closed, slot {record.slot or '(none)'} released, "
                                     f"record stamped at {record.harvested_at}; the row has left the "
                                     f"board (FD-5)")))
+            rows += _held_rows(record, roadmap, held)
 
     if ctx.dry_run:
         sources = ctx.harvest.sources()
