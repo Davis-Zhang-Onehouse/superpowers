@@ -682,7 +682,7 @@ d10b_child_path_is_a_live_instant() {
   held_slot="$(awk -F'\t' '$2=="held"{print $1}' "$CD/leases.out" | tr '\n' ' ')"
   slot_now="$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1]))["slot"])' "$CD/record-after.json")"
   d_run "$CD/board.out" board --porcelain
-  board_rows="$(grep -c . "$CD/board.out")"
+  board_rows="$(awk -F'\t' '$2!="population"' "$CD/board.out" | grep -c .)"   # subjects, not the scope row (B04)
   {
     printf 'second dispatch exit\t%s\n' "$rc2"
     printf 'charter sha before / after\t%s / %s\n' "$sha_before" "$sha_after"
@@ -844,10 +844,10 @@ d_sigkill_case() {                # d_sigkill_case <case> <trigger> <iters>
         #: `board` would report the SI-7 leak as unnamed, which is wrong, and only `leases` would miss the
         #: stale-lease subject. The row records what each one said.
         d_run "$CD/leases.out" leases --porcelain
-        leases_view="$(awk -F'\t' 'NR==1{print $2}' "$CD/leases.out")"
+        leases_view="$(awk -F'\t' '$2!="population"{print $2; exit}' "$CD/leases.out")"   # first SLOT row (B04)
         [ -z "$leases_view" ] && leases_view=empty
         d_run "$CD/board.out" board --porcelain
-        board_row="$(awk -F'\t' 'NR==1{print $2}' "$CD/board.out")"
+        board_row="$(awk -F'\t' '$2!="population"{print $2; exit}' "$CD/board.out")"   # first SUBJECT row (B04)
         [ -z "$board_row" ] && board_row=empty
         case "$leases_view$board_row" in
           *interrupted*|*held*|*stale-lease*) named_n=$((named_n + 1)) ;;

@@ -99,6 +99,10 @@ def _proposer(recorded) -> str:
 
 
 NOT_READY, PENDING_PROPOSAL, POPULATION = "not-ready", "pending-proposal", "population"
+#: `B04` / `SI-47`. A milestone whose deps have LANDED. It used to have no row at all — `report()` skipped
+#: every milestone with no blocker — so the one state a coordinator acts on was the one it had to parse out
+#: of the population row's prose.
+READY = "ready"
 
 #: `B02`. The ways a proposal leaves `pending` other than being applied. Each lands in the inbox's
 #: `closed` list with the reason, so a report is never lost — only decided.
@@ -172,6 +176,12 @@ class Row:
     severity: str
     clears_when: str = None
     clears_who: str = None
+    #: `B04` i22(a). The milestone's title and owner as FIELDS, on every row about a milestone. The owner
+    #: used to reach a reader only as the ACTOR inside another milestone's blocker prose, so "what is
+    #: dispatchable" was answered by hand-parsing `roadmap.json`. Empty (not None) when there is none, so
+    #: `owner == ""` is the dispatchable test; None on the population row, which is about no milestone.
+    title: str = None
+    owner: str = None
 
 
 def _check_status(status: str) -> str:
@@ -281,8 +291,8 @@ class Roadmap:
         superseded milestone has no worker and never will. Both doors correctly shut, and no third one.
 
         The cost is not cosmetic: once its deps land, a superseded milestone is derived READY forever,
-        and `roadmap --porcelain` prints `not-ready` rows but not ready ones — so it is a phantom
-        dispatchable milestone that no report shows.
+        and `roadmap --porcelain` prints it as a `ready` row (`B04`) — a phantom dispatchable milestone
+        until it is retired.
 
         **On the module's stated invariant.** The header says `apply` is the only function that changes a
         milestone's status. That is now stated more precisely, because this writes one too: `apply` is
@@ -683,6 +693,26 @@ class Roadmap:
 
     # ------------------------------------------------------------------ the report
 
+    @staticmethod
+    def _ready_row(m: Milestone) -> Row:
+        """`B04`. A ready milestone, as a row. INFO: ready work is the healthy state of a roadmap, and an
+        `attention` row on a normal state trains the reader to scroll past the one that matters (`FI-2`).
+
+        A CLAIMED ready milestone is still `ready` — readiness is derived from deps alone and never reads
+        the owner (`--owner`: "informational only") — so the row says which of the two it is and the
+        `owner` field carries it for a machine: `kind == ready and owner == ""` is the dispatchable set."""
+        if m.owner:
+            state = f"claimed by {m.owner} — already dispatched, so not dispatchable"
+            when, who = f"{m.owner} proposes its next status and the coordinator applies it", m.owner
+        else:
+            state = "unclaimed — dispatchable now"
+            when, who = f"the coordinator dispatches it (`fleet dispatch … --milestone {m.id}`)", COORDINATOR
+        deps = ", ".join(repr(d) for d in m.deps)
+        why = f"every dep has LANDED ({deps})" if m.deps else "it has no deps"
+        return Row(kind=READY, subject=m.id, severity=INFO,
+                   detail=f"READY: {m.title!r} — {why}; status={m.status}; {state}",
+                   clears_when=when, clears_who=who, title=m.title, owner=m.owner or "")
+
     def report(self) -> list:
         """Everything the coordinator has to act on, plus the population it was derived from.
 
@@ -691,12 +721,16 @@ class Roadmap:
         rows = []
         for m, blocker, clears_when, clears_who, severity in self._readiness():
             if blocker is None:
+                rows.append(self._ready_row(m))
                 continue
             #: `severity` comes from `_blocker`, which is the only thing that knows WHY (`FI-2`).
             rows.append(Row(kind=NOT_READY, subject=m.id, detail=blocker,
                             severity=severity,
-                            clears_when=clears_when, clears_who=clears_who))
+                            clears_when=clears_when, clears_who=clears_who,
+                            title=m.title, owner=m.owner or ""))
 
+        milestones = self.milestones()
+        by_id = {m.id: m for m in milestones}
         pending = self.proposals()
         #: `B02` (i26(b-2)). Which row `apply` would land for each milestone — the last one to arrive — so
         #: the others can SAY they are superseded instead of reading identically to the current one, and
@@ -721,6 +755,10 @@ class Roadmap:
             #: meant to improve.
             note = f'"{p.note}" — ' if p.note else ""
             entry = entries.get(p.milestone)
+            milestone = by_id.get(p.milestone)
+            #: `B04`: which milestone this proposal is about, as fields — empty for one no longer on the roadmap.
+            about = {"title": milestone.title if milestone else "",
+                     "owner": (milestone.owner or "") if milestone else ""}
             withdraw = (f"`fleet withdraw --instant {self.instant} --milestone {p.milestone} --at {p.at} "
                         f"--reason <why>`")
             if newest[p.milestone] is not p:
@@ -733,7 +771,7 @@ class Roadmap:
                                  f"closes it" if p.milestone in stale_newest else
                                  f"closed as superseded when a newer row for {p.milestone} is applied; "
                                  f"{withdraw} closes it now"),
-                    clears_who=COORDINATOR))
+                    clears_who=COORDINATOR, **about))
             elif p.milestone in stale_newest:
                 stale += 1
                 rows.append(Row(
@@ -743,18 +781,19 @@ class Roadmap:
                     severity=ATTENTION,
                     clears_when=(f"{withdraw} if it is residue, or `fleet apply --instant {self.instant} "
                                  f"--milestone {p.milestone} --reopen` if re-opening is intended"),
-                    clears_who=COORDINATOR))
+                    clears_who=COORDINATOR, **about))
             else:
                 rows.append(Row(
                     kind=PENDING_PROPOSAL, subject=p.milestone, detail=note + base,
                     severity=ATTENTION,
                     clears_when="the coordinator applies the proposal (single writer)",
-                    clears_who=COORDINATOR))
+                    clears_who=COORDINATOR, **about))
 
-        milestones = self.milestones()
+        #: Counted from the `ready` rows already built (`B04`), so the number and the rows agree by construction.
+        ready = sum(1 for r in rows if r.kind == READY)
         rows.append(Row(
             kind=POPULATION, subject=str(self.instant),
-            detail=(f"examined {len(milestones)} milestone(s) of which {len(self.ready())} ready, "
+            detail=(f"examined {len(milestones)} milestone(s) of which {ready} ready, "
                     f"{len(pending)} pending proposal(s) ({superseded} superseded, {stale} against a "
                     f"terminal milestone), from {self.path}"),
             severity=INFO))
