@@ -150,17 +150,24 @@ f2b_rc=$?
 #: the lookup returned "" and `[ "" != "AWAITING-CI" ]` passed on a failed measurement — absence read as
 #: success, inside the case written to close that very family. Asserted POSITIVELY for the same reason: a
 #: negative assertion is satisfied by every kind of nothing.
-f2b_state="$(fleet board --porcelain 2>/dev/null | awk -F'\t' -v id="$W1_ID" '$1==id {print $3; exit}')"
+#: `RV-48`. The board is run ONCE, into a file, and its own exit status is judged — the first draft piped
+#: it into `awk` and grepped a second, unjudged run through a process substitution, so a board that failed
+#: would have been read as "no disregard note" rather than as a failure. The note is read from THIS
+#: worker's row too: `disregarded` anywhere on the board would otherwise satisfy a claim about W1.
+fleet board --porcelain > "$OUT/F2b-board.out" 2>&1
+f2b_board_rc=$?
+f2b_state="$(awk -F'\t' -v id="$W1_ID" '$1==id {print $3; exit}' "$OUT/F2b-board.out")"
+f2b_note="$(awk -F'\t' -v id="$W1_ID" '$1==id {print $7; exit}' "$OUT/F2b-board.out")"
 f2b_disregarded=0
-grep -qi 'disregarded' <(fleet board --porcelain 2>/dev/null) && f2b_disregarded=1
+case "$f2b_note" in *disregarded*) f2b_disregarded=1 ;; esac
 case "$f2b_state" in RUNNING|IDLE) f2b_counted=1 ;; *) f2b_counted=0 ;; esac
-if [ "$f2b_declare_rc" = 0 ] && [ "$f2b_rc" != 0 ] \
+if [ "$f2b_declare_rc" = 0 ] && [ "$f2b_board_rc" = 0 ] && [ "$f2b_rc" != 0 ] \
    && [ "$f2b_counted" = 1 ] && [ "$f2b_disregarded" = 1 ]; then
   it_pass F2b "fleet/it/F/out/F2b-dispatch.out" \
     "the SAME declaration with no watcher behind it did NOT free the cap: declare exit 0, the board reports $W1_ID as $f2b_state with a note saying the declaration is disregarded, and the dispatch is still refused (exit $f2b_rc). F2 and F2b differ by one flag, so neither can be explained by the cap's state"
 else
   it_fail F2b "fleet/it/F/out/F2b-dispatch.out" \
-    "declare_rc=$f2b_declare_rc dispatch_rc=$f2b_rc state='$f2b_state' (want RUNNING or IDLE for $W1_ID) disregarded=$f2b_disregarded"
+    "declare_rc=$f2b_declare_rc board_rc=$f2b_board_rc dispatch_rc=$f2b_rc state='$f2b_state' (want RUNNING or IDLE for $W1_ID) disregarded=$f2b_disregarded note='$f2b_note'"
 fi
 #: F2's exemption is restored for everything below, which was written against a freed cap.
 rm -f "$W1/.fleet/declare.json"
