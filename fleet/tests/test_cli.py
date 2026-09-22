@@ -5917,6 +5917,14 @@ class TestEvidenceIsALocation(CliCase):
                     self.assertIn(typo, err)
                     self.assertEqual([], self.pending())
 
+    def test_the_dry_run_refuses_empty_evidence_like_the_real_run(self):
+        """Final review Minor-3: the dry run judged `admit` alone and skipped the empty-evidence gate."""
+        for dry in (True, False):
+            with self.subTest(dry_run=dry):
+                code, out, err = self.propose("", dry=dry)
+                self.assertEqual(EXIT_BAD_INPUT, code, out)
+                self.assertIn("needs at least one evidence path", err)
+
     def test_an_absolute_self_path_survives_the_rename_through_roadmap_and_apply(self):
         code, out, err = self.propose(str(self.worker / "evidence" / "proof.log"), dry=True)
         self.assertEqual(EXIT_OK, code, err)

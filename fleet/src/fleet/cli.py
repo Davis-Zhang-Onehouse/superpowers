@@ -90,7 +90,7 @@ from fleet import origin as origin_mod
 from fleet import evidence as evidence_mod
 from fleet.origin import Origin
 from fleet.roadmap import (ATTENTION, COORDINATOR, RETIRED, SUPERSEDED, TERMINAL, Milestone,
-                           Proposal, Roadmap, last_index)
+                           Proposal, Roadmap, _check_evidence, last_index)
 from fleet.session import (TMUX_SOCKET_ENV, SessionLayer, default_probes,
                            plain as pane_plain)
 from fleet.store import Declarations, Record, Store
@@ -2674,7 +2674,8 @@ def _do_propose(ctx: Ctx, parsed: Parsed) -> int:
         _emit(ctx, "propose", [("dry-run", "no proposal was written"), ("milestone", milestone),
                                ("status", status), ("proposer", str(proposer)),
                                ("roadmap", str(destination)), ("destination-chosen", chosen),
-                               ("evidence", ", ".join(evidence_mod.admit(evidence, proposer)))] + extra)
+                               ("evidence", ", ".join(evidence_mod.admit(
+                                   _check_evidence(evidence, milestone), proposer)))] + extra)
         return EXIT_OK
     proposal = roadmap.propose(proposer, milestone, status, evidence, note=parsed.get("note") or "")
     _emit(ctx, "propose", [("milestone", proposal.milestone), ("status", proposal.status),
