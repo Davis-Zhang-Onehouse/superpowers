@@ -480,10 +480,6 @@ class TestRoadmapPorcelainNamesReadyMilestones(unittest.TestCase):
                       "the banner's ready count must not pass a claimed milestone off as dispatchable")
 
 
-if __name__ == "__main__":
-    unittest.main()
-
-
 class TestRoadmapPorcelainPrintsEvidence(unittest.TestCase):
     """`B03`. `fleet roadmap` printed a proposal's evidence as a count and a milestone's not at all."""
 
@@ -505,3 +501,7 @@ class TestRoadmapPorcelainPrintsEvidence(unittest.TestCase):
         [k1] = [r for r in rows if r["subject"] == "k1"]
         self.assertEqual(str(done / "evidence" / "proof.log"), k1["evidence"])
         self.assertTrue(pathlib.Path(k1["evidence"]).is_file())
+
+
+if __name__ == "__main__":
+    unittest.main()
