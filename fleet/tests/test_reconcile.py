@@ -1061,6 +1061,23 @@ class TestAnAttachedHumanIsNotAStuckWorker(unittest.TestCase):
         self.assertTrue(needs_a_human(subject), subject.note)
         self.assertIn("could not be observed", subject.note)
 
+    def test_the_note_and_the_evidence_state_one_age(self):
+        """`RV-32`. The note and `evidence.attached` each read the clock, so they could state two ages for one
+        fact. Driven with a clock that advances one second per read, which makes a second read visible."""
+        import re
+        from unittest import mock
+        import fleet.reconcile as rc
+        start = time.time()
+        ticks = iter(start + n for n in range(1000))
+        self.worker("oneage-07300612", "dt-oneage", 5312, DIALOG_PANE, attached=(1, start - 100))
+
+        with mock.patch.object(rc.time, "time", lambda: next(ticks)):
+            subject = self.subjects()["oneage-07300612"]
+
+        in_note = re.search(r"last input (\d+)s ago", subject.note).group(1)
+        in_evidence = re.search(r"last input (\d+)s ago", subject.evidence["attached"]).group(1)
+        self.assertEqual(in_note, in_evidence, f"{subject.note!r} vs {subject.evidence['attached']!r}")
+
     def test_attachment_alone_makes_nothing_actionable_or_blocked(self):
         self.worker("watched-07300607", "dt-watched", 5307, QUIET_PANE, attached=(2, time.time()))
 

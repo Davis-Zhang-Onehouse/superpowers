@@ -280,13 +280,15 @@ def _worker_subject(rec, pool, sessions, instants_dir: Path, idle_after_s: int, 
         state, note = BLOCKED, f'live runtime {sess.runtime} differs from record runtime {rec.runtime}'
         on_pane = False
     attachment = sessions.attachment(rec.tmux) if (live and rec.tmux) else None
-    if attachment is not None and attachment.clients > 0 and attachment.last_input > time.time() + 1:
+    #: `RV-32`. ONE clock read for the attachment, so the note and `evidence.attached` state one age.
+    now = time.time()
+    if attachment is not None and attachment.clients > 0 and attachment.last_input > now + 1:
         #: `RV-33`. Input stamped in the future means the clock stepped backwards; an age that cannot be true
         #: is not a measurement, and clamping it to 0 would have read it as "input 0s ago" — attended.
         attachment = None
     attended = False
     if state == BLOCKED and on_pane and not parked:
-        attended, why = _attended(attachment, idle_after_s)
+        attended, why = _attended(attachment, idle_after_s, now)
         if why:
             note = f"{note}; {why}"
     evidence = {
@@ -316,13 +318,13 @@ def _worker_subject(rec, pool, sessions, instants_dir: Path, idle_after_s: int, 
         "pane": _pane_summary(sessions, pane) if live else "",
         #: `B24`. Reported for every live worker, not only the BLOCKED ones, because the next consumer is an
         #: actuator (B12) that must not type into a pane a human is at, whatever its state.
-        "attached": _attachment_summary(attachment) if live else "",
+        "attached": _attachment_summary(attachment, now) if live else "",
     }
     return Subject(kind=KIND_WORKER, identity=rec.todo_id, state=state, holds_slot=holds,
                    evidence=evidence, note=note, attended=attended)
 
 
-def _attended(attachment, idle_after_s):
+def _attended(attachment, idle_after_s, now):
     """`(attended, why)` for a BLOCKED read off the pane. `B24`, x2 `G-4`.
 
     Attended means a client is attached AND has given the session input within `idle_after_s` — the same
@@ -336,7 +338,7 @@ def _attended(attachment, idle_after_s):
         return False, "whether a human is attached could not be observed, so this is counted as waiting on one"
     if attachment.clients < 1:
         return False, ""
-    quiet = max(0, int(time.time() - attachment.last_input))
+    quiet = max(0, int(now - attachment.last_input))
     clients = f"{attachment.clients} client{'s' if attachment.clients != 1 else ''}"
     if quiet > idle_after_s:
         return False, (f"{clients} attached but no input for {quiet}s (over {idle_after_s}s), so that is not "
@@ -345,13 +347,13 @@ def _attended(attachment, idle_after_s):
                   f"and is not counted as needing you")
 
 
-def _attachment_summary(attachment) -> str:
+def _attachment_summary(attachment, now) -> str:
     if attachment is None:
         return "not observed"
     if attachment.clients < 1:
         return "no client"
     return (f"{attachment.clients} client{'s' if attachment.clients != 1 else ''}, last input "
-            f"{max(0, int(time.time() - attachment.last_input))}s ago")
+            f"{max(0, int(now - attachment.last_input))}s ago")
 
 
 def _slot_holder_pid(rec, pool, live_sessions):
