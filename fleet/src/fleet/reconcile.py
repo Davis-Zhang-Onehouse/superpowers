@@ -339,7 +339,8 @@ def _attended(attachment, idle_after_s, now):
     if attachment.clients < 1:
         if attachment.observers:
             #: `RV-36`. Somebody may be there, but a read-only client cannot type into the pane and a
-            #: control-mode client's input moves no clock tmux exposes, so nothing shows a human was at it.
+            #: control-mode client's `send-keys` does not move its `client_activity`, so nothing shows a human was
+            #: at it recently.
             return False, ("a read-only or control-mode client is attached, which shows no input fleet can see, "
                            "so this is counted as waiting on a human")
         return False, ""
