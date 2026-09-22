@@ -1,4 +1,6 @@
 import json
+import os
+import shutil
 from pathlib import Path
 import subprocess
 import tempfile
@@ -74,3 +76,99 @@ class DiscoveryTests(unittest.TestCase):
                 (proc / 'stat').write_text('101 (codex) S 1 0')
                 with self.assertRaises(FleetError):
                     probes.list_processes()
+
+
+class EmptyOrExitingTmuxServerTests(unittest.TestCase):
+    """B26. Two server states that hold no pane, measured on tmux 3.2a, used to kill every observation verb.
+
+    A: alive with ZERO sessions — `list-panes -a` answers `no current target` rc=1 because it needs a current
+       session even with `-a`, while `list-sessions` answers rc=0 with no rows. Reached live when a stopped
+       (`T`) `tmux attach` client outlived its session and held the server up.
+    B: exiting but held — `kill-server` on such a server leaves it waiting for that client, and EVERY command
+       answers `server exited unexpectedly`. It holds no session: `new-session` and `has-session` fail too.
+    """
+
+    @staticmethod
+    def fake(panes, sessions=(0, '', ''), calls=None):
+        def run(argv, **kw):
+            if calls is not None:
+                calls.append(argv)
+            if argv[0] == 'pgrep':
+                return subprocess.CompletedProcess(argv, 1, '', '')
+            if 'list-panes' in argv:
+                return subprocess.CompletedProcess(argv, *panes)
+            if 'list-sessions' in argv:
+                return subprocess.CompletedProcess(argv, *sessions)
+            raise AssertionError(f'unexpected argv {argv}')
+        return run
+
+    def test_a_live_server_with_zero_sessions_is_an_empty_population(self):
+        calls = []
+        with patch('subprocess.run', self.fake((1, '', 'no current target\n'), calls=calls)):
+            self.assertEqual(default_probes(both_runtimes=True, tmux_socket='priv').list_processes(), [])
+        # Confirmed by a POSITIVE observation, not by the string alone.
+        self.assertIn(['tmux', '-L', 'priv', 'list-sessions', '-F', '#{session_name}'], calls)
+
+    def test_no_current_target_with_sessions_listed_is_not_read_as_empty(self):
+        """The string alone is not the fact: if sessions DO exist and list-panes still cannot answer, refuse."""
+        with patch('subprocess.run', self.fake((1, '', 'no current target'), sessions=(0, 'w1\n', ''))):
+            with self.assertRaisesRegex(FleetError, 'no current target'):
+                default_probes(both_runtimes=True, tmux_socket='priv').list_processes()
+
+    def test_a_server_that_is_exiting_under_the_call_is_an_empty_population(self):
+        with patch('subprocess.run', self.fake((1, '', 'server exited unexpectedly\n'))):
+            self.assertEqual(default_probes(both_runtimes=True, tmux_socket='priv').list_processes(), [])
+
+    def test_the_refusal_names_the_socket_the_command_the_stderr_and_what_clears_it(self):
+        error = 'error connecting to /tmp/tmux-1000/priv (Operation not permitted)'
+        with patch('subprocess.run', self.fake((1, '', error))):
+            with self.assertRaises(FleetError) as raised:
+                default_probes(both_runtimes=True, tmux_socket='priv').list_processes()
+        message = str(raised.exception)
+        for needle in ("socket 'priv'", 'tmux -L priv list-panes -a', 'Operation not permitted',
+                       'clears when:', 'tmux -L priv list-sessions', 'clears who:'):
+            self.assertIn(needle, message)
+
+    def test_the_default_server_is_named_as_such_in_the_refusal(self):
+        with patch('subprocess.run', self.fake((1, '', 'boom'))):
+            with self.assertRaisesRegex(FleetError, 'the default socket'):
+                default_probes(both_runtimes=True, tmux_socket=None).list_processes()
+
+    def test_starting_a_session_on_an_exiting_server_names_the_route(self):
+        def run(argv, **kw):
+            return subprocess.CompletedProcess(argv, 1, '', 'server exited unexpectedly\n')
+        with patch('subprocess.run', run):
+            with self.assertRaises(Exception) as raised:
+                default_probes(tmux_socket='priv').start_session('w', Path('/'), 'true')
+        message = str(raised.exception)
+        for needle in ('server exited unexpectedly', 'clears when:', 'ps -o pid,stat,args -C tmux', 'clears who:'):
+            self.assertIn(needle, message)
+
+
+@unittest.skipUnless(shutil.which('tmux'), 'tmux is not installed')
+class EmptyTmuxServerAgainstRealTmux(unittest.TestCase):
+    """State A on a REAL private server: `exit-empty off` keeps it alive after its only session is killed."""
+
+    def setUp(self):
+        self.socket = f'itfleet-selftest-b26-{os.getpid()}'
+        self.directory = tempfile.TemporaryDirectory()
+        config = Path(self.directory.name) / 'tmux.conf'
+        config.write_text('set -g exit-empty off\n')
+        tmux = ['tmux', '-L', self.socket]
+        subprocess.run(tmux + ['-f', str(config), 'new-session', '-d', '-s', 'x', 'sleep 60'], check=True)
+        subprocess.run(tmux + ['kill-session', '-t', '=x'], check=True)
+        # Cleanups run last-in first-out: kill the server, THEN remove the socket file it leaves behind.
+        path = Path(os.environ.get('TMUX_TMPDIR') or '/tmp') / f'tmux-{os.getuid()}' / self.socket
+        self.addCleanup(lambda: path.unlink(missing_ok=True))
+        self.addCleanup(subprocess.run, tmux + ['kill-server'], capture_output=True)
+        self.addCleanup(self.directory.cleanup)
+
+    def test_the_fixture_is_really_an_empty_live_server(self):
+        panes = subprocess.run(['tmux', '-L', self.socket, 'list-panes', '-a'], capture_output=True, text=True)
+        sessions = subprocess.run(['tmux', '-L', self.socket, 'list-sessions'], capture_output=True, text=True)
+        self.assertEqual((panes.returncode, panes.stderr.strip()), (1, 'no current target'))
+        self.assertEqual((sessions.returncode, sessions.stdout), (0, ''))
+
+    def test_list_processes_reads_it_as_an_empty_population(self):
+        probes = default_probes(process_name='fleet-b26-no-such-process', tmux_socket=self.socket)
+        self.assertEqual(probes.list_processes(), [])
