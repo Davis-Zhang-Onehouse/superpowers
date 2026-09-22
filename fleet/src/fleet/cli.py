@@ -3344,6 +3344,10 @@ def _harvest_evidence_refusal(ctx: Ctx, child: Path) -> str:
     longer resolves (`Roadmap.evidence_refusal`) — else "". Held rows are not asked: harvest leaves them
     pending for the coordinator anyway."""
     roadmap, mine, _, _ = _harvest_inbox(ctx, child)
+    #: RV-24. A check, then the loop that applies: a file deleted in between makes a later `apply` in that
+    #: loop refuse after earlier rows landed. The window is the loop's own duration and the worker is not
+    #: closed by it (the refusal aborts before the session kill); the refused row stays pending, so a re-run
+    #: of harvest refuses the same way — with this pre-check's message — until the worker re-proposes.
     return " ".join(r for r in (roadmap.evidence_refusal(p) for p in mine) if r)
 
 

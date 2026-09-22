@@ -640,7 +640,10 @@ class Roadmap:
         status = _check_status(proposal.status)
         evidence = _check_evidence(proposal.evidence, proposal.milestone)
         #: `B03`. Judged before the lock (it reads only the proposer's folder) and raised AFTER the terminal
-        #: judgement below, so the real run names the same reason `apply_refusal`'s dry run does.
+        #: judgement below, so the real run names the same reason `apply_refusal`'s dry run does. The lock does
+        #: not cover the proposer's folder, so a file deleted between this check and the write below is stored
+        #: as written (`anchored` keeps an item it cannot locate) — the same outcome as deleting it one moment
+        #: after the apply, and visible as `(does not resolve)` on the next read (RV-24).
         evidence_refusal = self.evidence_refusal(proposal)
         # FI-30c. `_consume` is called INSIDE this lock and takes its own on `proposals_path` — a
         # different file, and always in this order (roadmap then proposals), which is the only order any
