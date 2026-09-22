@@ -119,9 +119,10 @@ class VerbSpec:
 
     `checker` is DECLARED, for the same reason and one lesson later. It was derived from
     `columns == ROW_COLUMNS`, which put `roadmap` in the checker set only because `render.ROADMAP_COLUMNS`
-    happened to be tuple-equal to `ROW_COLUMNS` (until `B04` appended two columns) — `OBS-44`'s family, *a property that holds because two
-    things share a value is not a property*. Either tuple changing would have silently re-classified a
-    verb, and what is applied to the classification is §9's population rule (`FI-19c`).
+    happened to be tuple-equal to `ROW_COLUMNS` (until `B04` appended two columns) — `OBS-44`'s family,
+    *a property that holds because two things share a value is not a property*. Either tuple changing would
+    have silently re-classified a verb, and what is applied to the classification is §9's population rule
+    (`FI-19c`).
     """
 
     name: str
@@ -5771,8 +5772,9 @@ def checker_verbs(verbs: dict = None) -> tuple:
 
     This used to be `columns == ROW_COLUMNS` over `PORCELAIN_COLUMNS`, which classified `roadmap` correctly
     **by accident**: `render.ROADMAP_COLUMNS` was a different tuple object that happened to hold the same six
-    names — and it has since grown `title` and `owner` (`B04`), exactly the drift this guards against. `OBS-44`: a property that holds because two things share a value is not a property — add a
-    column to either tuple and a checker silently stops being one, taking §9's population rule with it.
+    names — and it has since grown `title` and `owner` (`B04`), exactly the drift this guards against.
+    `OBS-44`: a property that holds because two things share a value is not a property — add a column to
+    either tuple and a checker silently stops being one, taking §9's population rule with it.
     The table is a parameter so the derivation can be exercised over a verb table this module does not
     export; a classification nobody can probe is a classification nobody can falsify (`FI-19c`).
     """
