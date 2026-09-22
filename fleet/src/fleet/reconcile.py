@@ -329,8 +329,7 @@ def _attended(attachment, idle_after_s):
     a detached pane's note reads exactly as it always did.
     """
     if attachment is None:
-        return False, ("whether a human is attached could not be observed (tmux did not answer), so this "
-                       "is counted as waiting on one")
+        return False, "whether a human is attached could not be observed, so this is counted as waiting on one"
     if attachment.clients < 1:
         return False, ""
     quiet = max(0, int(time.time() - attachment.last_input))
