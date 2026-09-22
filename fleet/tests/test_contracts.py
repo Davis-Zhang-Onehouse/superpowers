@@ -173,6 +173,9 @@ class Fleet:
         path.mkdir()
         (path / "HANDOFF.md").write_text("Updated: now\n")
         (path / "RUNBOOK.md").write_text(RUNBOOK)
+        #: `B03`: a real instant has an evidence index, and `propose` admits only evidence that resolves.
+        (path / "evidence").mkdir()
+        (path / "evidence" / "INDEX.md").write_text("# evidence index\n")
         todo_id, tmux = f"{name}-{curr}", f"dt-{name}"
         self.store.write(Record(todo_id=todo_id, child_instant=str(path), base_instant=base,
                                 slot=slot or "", tmux=tmux, profile=str(self.profile()),
@@ -324,6 +327,11 @@ class Loaded(unittest.TestCase):
         roadmap = Roadmap(ready)
         roadmap.add(Milestone(id="M1", title="land the cli", status="blocked", deps=[], evidence=[],
                               owner="the worker"))
+        #: `B03`: `propose` admits only evidence that resolves against the proposer — the fixture holds the
+        #: artifacts it and the contract's `propose` row cite.
+        for cited in ("evidence/02-acceptance/verify-acs.sh", "evidence/x.sh"):
+            (ready / cited).parent.mkdir(parents=True, exist_ok=True)
+            (ready / cited).write_text("#!/bin/sh\n")
         roadmap.propose(ready, "M1", "running", ["evidence/02-acceptance/verify-acs.sh"])
         harvestable = fleet.worker("harvestable", state="complete", slot="ws3", live=False)
         Review(harvestable, now=lambda: NOW).add_round(

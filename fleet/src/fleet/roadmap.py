@@ -53,7 +53,7 @@ from pathlib import Path
 
 from fleet import evidence as evidence_mod
 from fleet.atomic import atomic_write, held_for_update
-from fleet.errors import BadInput
+from fleet.errors import AmbiguousId, BadInput
 from fleet.identity import resolve
 from fleet.store import SCHEMA_VERSION
 
@@ -93,7 +93,12 @@ def _proposer(recorded) -> str:
     substitutes its input is worse than one that admits it failed.
     """
     recorded = Path(recorded)
-    found = resolve(recorded)
+    try:
+        found = resolve(recorded)
+    except AmbiguousId as ambiguous:
+        #: `B03`. Two folders sharing the proposer's stable key: say so on the row rather than take the
+        #: whole view (and every refusal that names the proposer) down with the exception.
+        return f"{recorded} (ambiguous: {ambiguous})"
     if found is None:
         return f"{recorded} (no longer on disk)"
     return str(found)
@@ -634,9 +639,9 @@ class Roadmap:
         `retired_reason`, which would otherwise explain why a live milestone is not live."""
         status = _check_status(proposal.status)
         evidence = _check_evidence(proposal.evidence, proposal.milestone)
-        refusal = self.evidence_refusal(proposal)
-        if refusal:
-            raise BadInput(refusal)
+        #: `B03`. Judged before the lock (it reads only the proposer's folder) and raised AFTER the terminal
+        #: judgement below, so the real run names the same reason `apply_refusal`'s dry run does.
+        evidence_refusal = self.evidence_refusal(proposal)
         # FI-30c. `_consume` is called INSIDE this lock and takes its own on `proposals_path` — a
         # different file, and always in this order (roadmap then proposals), which is the only order any
         # path here uses. Two locks acquired in one order cannot deadlock against themselves.
@@ -644,7 +649,7 @@ class Roadmap:
             data = self._load()
             for d in data["milestones"]:
                 if d["id"] == proposal.milestone:
-                    refusal = self._terminal_refusal(d, proposal, reopen)
+                    refusal = self._terminal_refusal(d, proposal, reopen) or evidence_refusal
                     if refusal:
                         raise BadInput(refusal)
                     if reopen and d["status"] == "dropped" and status != "dropped":
