@@ -87,7 +87,7 @@ from fleet.release_verify import (EXEMPT, EXEMPT_ROSTER, FULL_ROSTER, GATE_ROSTE
 from fleet.review import Finding, Review, exit_code_for, receive_advisory
 from fleet import origin as origin_mod
 from fleet.origin import Origin
-from fleet.roadmap import ATTENTION, COORDINATOR, TERMINAL, Milestone, Roadmap
+from fleet.roadmap import ATTENTION, COORDINATOR, PENDING, TERMINAL, Milestone, Roadmap
 from fleet.session import (TMUX_SOCKET_ENV, SessionLayer, default_probes,
                            plain as pane_plain)
 from fleet.store import Declarations, Record, Store
@@ -3207,9 +3207,10 @@ def _unreported_to_coordinator(ctx: Ctx, child: Path):
         check's to diagnose;
       * that milestone is NOT terminal at the coordinator — if it already reads done or dropped, the report
         arrived or the work was written off, and either way nothing is being lost;
-      * and no proposal for it BY THIS WORKER is pending or applied there — a pending one means the report
-        DID arrive and is merely unapplied, which `harvest` itself is about to do; an applied one means the
-        coordinator already acted on it (`B01`).
+      * and no proposal for it BY THIS WORKER is pending there, and none carrying an OUTCOME (a `PENDING`
+        or `TERMINAL` status) was applied — a pending one means the report DID arrive and is merely
+        unapplied, which `harvest` itself is about to do; an applied outcome means the coordinator already
+        acted on the worker's final word (`B01`). An applied in-flight row is only progress.
 
     So the refusal fires only when the report exists nowhere. It is a refusal rather than a warning because
     `harvest` is the step that makes the loss unrecoverable: after it the slot is gone, the session is dead
@@ -3231,17 +3232,24 @@ def _unreported_to_coordinator(ctx: Ctx, child: Path):
         return None
     #: `B01`. Only THIS worker's rows count: `harvest` applies nothing else (`_harvest_inbox`), so a row
     #: another instant wrote about the same milestone proves nothing about whether this one reported.
-    #: PENDING or already APPLIED: `harvesting-an-instant` applies first and harvests second, and a harvest
-    #: killed between its own apply and its stamp is retried — in both, the report arrived and was consumed,
-    #: and reading only the pending inbox refused the close-out as a report that "exists nowhere".
-    if any(proposal.milestone == recorded.milestone and _proposed_by(child, proposal)
-           for proposal in roadmap.proposals() + roadmap.applied()):
+    #: PENDING, any status — what this guard has always accepted: `harvest` is about to apply it.
+    #: Or already APPLIED with an OUTCOME: `harvesting-an-instant` applies first and harvests second, and a
+    #: harvest killed between its own apply and its stamp is retried — in both, the report arrived and was
+    #: consumed. But only an outcome counts once applied: back to the queue (`PENDING` statuses) or finished
+    #: (`TERMINAL`). An applied IN-FLIGHT row is a mid-flight progress report the coordinator already acted
+    #: on, and counting it let a worker that never sent its final word be harvested (measured in review).
+    #: Pending is read before applied deliberately: a concurrent `apply` moves a row from the first list to
+    #: the second, so this order sees it in one of them.
+    mine = [p for p in roadmap.proposals() if p.milestone == recorded.milestone and _proposed_by(child, p)]
+    mine += [p for p in roadmap.applied() if p.milestone == recorded.milestone and _proposed_by(child, p)
+             and (p.status in PENDING or p.status in TERMINAL)]
+    if mine:
         return None
     return (f"this instant was dispatched for milestone {recorded.milestone!r} on {coordinator}, and that "
-            f"milestone still reads status={milestone.status!r} there with NO proposal from this instant "
-            f"pending or applied. Harvesting "
-            f"now would kill the session, release the slot and stamp the record while the project-level "
-            f"roadmap never learns what happened — and after that the loss is unrecoverable.")
+            f"milestone still reads status={milestone.status!r} there with NO report from this instant "
+            f"pending and no outcome from it applied. Harvesting now would kill the session, release the "
+            f"slot and stamp the record while the project-level roadmap never learns what happened — and "
+            f"after that the loss is unrecoverable.")
 
 
 def _proposed_by(child: Path, proposal) -> bool:
@@ -3287,7 +3295,7 @@ def _harvest_inbox(ctx: Ctx, child: Path):
     return roadmap, [p for p in mine if p not in held], held, recorded
 
 
-def _stranded_claim(roadmap: Roadmap, recorded, child: Path, status: str = None):
+def _stranded_claim(roadmap: Roadmap, recorded, child: Path, status: str | None = None):
     """-> the milestone this worker still OWNS and did not finish, else None.  `B01` (re-measure `NEW-2`).
 
     `dispatch` claims the milestone for the worker's `-inflight-` path; `abort` gives it back, and `harvest`
