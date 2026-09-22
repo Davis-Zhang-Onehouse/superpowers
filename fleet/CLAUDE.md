@@ -45,6 +45,8 @@ so `assert-head-green.sh` was RED at every tree (FB-35).
 The guard is installed when the `tests` package is imported. That always happens for `discover -s tests`
 over the whole suite, which is how P-1, `selftest` and `release-verify` run it, and for any
 `tests.<module>` target. A `-p` subset whose modules never import `tests` runs unguarded.
+It does not watch a tmux SERVER. A test that inherits `FLEET_TMUX_SOCKET` and resolves no root can still
+probe the live server, and nothing fails. `hermetic_environment` clears that variable.
 
 ## Running the integration sections
 
