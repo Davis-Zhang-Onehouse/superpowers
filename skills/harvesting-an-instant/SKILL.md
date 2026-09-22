@@ -54,8 +54,8 @@ failure reaches for the one flag that could take a slot somebody is still workin
 **`fleet harvest` exiting 1 does not mean it failed.** Read the `harvested … info` row for the outcome;
 the exit status can be dominated by an unrelated standing violation.
 
-**`fleet harvest` applies what you left.** Any proposal the worker delivered to your inbox that you have not
-applied is applied by the harvest, in the order it arrived — `harvest --id <todo> --dry-run` counts them
+**`fleet harvest` applies what you left.** The worker's last unapplied report per milestone is applied by
+the harvest, and its earlier ones are closed as superseded — `harvest --id <todo> --dry-run` counts both
 first. So applying first (step 2 below) is where your judgement goes; harvest is not a way to skip a row.
 The one exception it holds back is a row that would move a `done` or `dropped` milestone: it stays pending
 and harvest reports it, because that is the silent regression step 2 exists to catch. It also gives back
@@ -154,24 +154,22 @@ Read the note. Then decide.
 
 **Before you apply anything, look at what applying would do.**
 
-`fleet apply` moves a milestone to the status the proposal names. It validates the status name and the
-evidence path — and nothing else. In particular it does not compare the incoming status to the one the
-milestone already has, so **a stale proposal can move a `done` milestone backwards, at exit 0, with no
-warning.**
+`fleet apply` lands the NEWEST pending row for the milestone (or the one `--at <stamp>` names) and closes
+the earlier rows as superseded. Since B02 it **refuses to move a `done` or `dropped` milestone** to another
+status (exit 2, the row stays pending) unless you pass `--reopen` — the stale `awaiting-ci` that once moved
+a landed milestone backwards and re-blocked its dependents (`SI-48`) is now a refusal, not a silent exit 0.
+`fleet roadmap` prints such a row as `STALE`; if it is residue, `fleet withdraw --instant <you> --milestone
+<m> --at <stamp> --reason "<why>"` closes it without applying it.
 
-Reproduced: a milestone landed `done`, then a stale `awaiting-ci` proposal from an earlier round was
-applied, and the row moved back. Because readiness is derived, a dependent row that had opened went back
-to blocked with it. Nothing in the output said anything had gone wrong.
+It still does not judge a move between two unfinished statuses, so the check is yours:
 
-This is `SI-48`. Until it is fixed, the check is yours:
-
-- `fleet apply --dry-run` first, always, and read what it would land.
-- Compare the proposal's status against the milestone's current status.
+- `fleet apply --dry-run` first, always, and read the ONE row it would land and the rows it would supersede.
+- Compare that row's status against the milestone's current status.
 - Be suspicious of any proposal whose **instant has already completed** — that is the shape that produced
   the 13-day-old trap found in a live inbox.
 
-`apply` carries the proposal's evidence onto the milestone and consumes the proposal, so replaying an
-inbox cannot apply the same report twice.
+`apply` carries the landed row's evidence onto the milestone and consumes it; a superseded row's evidence
+never lands, and replaying an inbox cannot apply the same report twice.
 <!-- v2-cite: apply-carries-evidence-and-consumes H3 -->
 
 ## 3. Carry findings up, with a non-colliding id
