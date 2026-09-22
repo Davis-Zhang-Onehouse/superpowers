@@ -381,15 +381,19 @@ a1_real_store_untouched() {
 #: The number of candidate files examined goes to `$OUT/A1e-examined.txt` so that is visible, not silent.
 #: Whole lines are sorted under `LC_ALL=C`, because `comm` below needs exactly that order.
 a1_inherited_attributable() {
-  local st examined=0
+  local st examined=0 it_phys
+  it_phys="$(cd "$IT_ROOT" && pwd -P)"
   { while IFS= read -r st; do
     [ -n "$st" ] && [ -d "$st" ] || continue
     st="$(cd "$st" && pwd -P)" || continue
-    examined=$((examined + $(find "$st" -maxdepth 2 -type f \( -path "$st/records/*" -o -path "$st/golden" \
-                                  -o -path "$st/harvest/*" \) | grep -c .)))
-    find "$st" -maxdepth 2 -type f \( -path "$st/records/*" -o -path "$st/golden" -o -path "$st/harvest/*" \) \
-         -exec grep -lF "$IT_ROOT" {} + 2>/dev/null | while IFS= read -r f; do
-      printf '%s %s\n' "$(stat -c '%Y' "$f" 2>/dev/null)" "$f"
+    #: Every store file to depth 4 (records/, pool/enrolled/, pool/leases/<slot>/lease.json, harvest/seen/, golden)
+    #: except the instants tree, which is not store state. Both spellings of the harness root are matched: a
+    #: verb that `resolve()`s a path before storing it writes the physical one. Sub-second mtimes, so a
+    #: rewrite within the same second as the pre-image still reads as a change.
+    examined=$((examined + $(find "$st" -maxdepth 4 -path "$st/instants" -prune -o -type f -print | grep -c .)))
+    find "$st" -maxdepth 4 -path "$st/instants" -prune -o -type f -print0 \
+         | xargs -0 -r grep -lF -e "$IT_ROOT" -e "$it_phys" 2>/dev/null | while IFS= read -r f; do
+      printf '%s %s\n' "$(stat -c '%.Y' "$f" 2>/dev/null)" "$f"
     done
   done <<<"$A_INHERITED_STORES"
     printf '%s\n' "$examined" > "$OUT/A1e-examined.txt"; } | LC_ALL=C sort
@@ -407,7 +411,7 @@ a1_inherited_store_untouched() {
     #: Worded as narrowly as the check. It sees writes that CARRY this harness tree's path (records, harvest,
     #: golden); a probe whose argv names no harness path (`runtime --set`, `reap`, `init --name`) could write
     #: the inherited store without this case noticing. `A1b` — every verb refused — is the real protection.
-    a_pass A1e "$OUT/A1e-inherited-after.txt" "$(sq "no file naming this harness tree appeared or changed in the store(s) the caller's FLEET_ROOT/FLEET_HOME name ($(printf '%s' "$A_INHERITED_STORES" | scrub | tr '\n' ' ')) across the whole A1 probe; $examined candidate file(s) under records/, harvest/ and golden were examined. This sees only writes carrying the harness path — A1b is what shows no verb resolved the inherited root")"
+    a_pass A1e "$OUT/A1e-inherited-after.txt" "$(sq "no file naming this harness tree appeared or changed in the store(s) the caller's FLEET_ROOT/FLEET_HOME name ($(printf '%s' "$A_INHERITED_STORES" | scrub | tr '\n' ' ')) across the whole A1 probe; $examined store file(s) to depth 4 (instants/ excluded) were examined. This sees only writes carrying the harness path — A1b is what shows no verb resolved the inherited root")"
   else
     printf '%s\n' "$new" > "$OUT/A1e-escaped.txt"
     a_fail A1e "$OUT/A1e-escaped.txt" "$(sq "$(printf '%s\n' "$new" | grep -c .) file(s) naming this harness tree were written into a store the CALLER's environment names during the A1 probe: $(printf '%s' "$new" | awk '{print $2}' | scrub | tr '\n' ' ')— a probe verb resolved the inherited root (FLEET_ROOT is root tier 4) instead of refusing, and wrote that root's store")"
