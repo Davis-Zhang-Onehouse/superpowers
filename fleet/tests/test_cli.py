@@ -5882,7 +5882,6 @@ class TestReadSurfaceStatesItsPopulation(CliCase):
         self.assertEqual([("m1", "first", "")], ready, out)
 
 
-
 class TestEvidenceIsALocation(CliCase):
     """`B03` at the verbs. `propose` accepted a never-existing path with exit 0, `apply` copied it onto the
     milestone with exit 0, an absolute `-inflight-` path dangled after the proposer's rename, and `fleet
@@ -5919,6 +5918,9 @@ class TestEvidenceIsALocation(CliCase):
                     self.assertEqual([], self.pending())
 
     def test_an_absolute_self_path_survives_the_rename_through_roadmap_and_apply(self):
+        code, out, err = self.propose(str(self.worker / "evidence" / "proof.log"), dry=True)
+        self.assertEqual(EXIT_OK, code, err)
+        self.assertIn("evidence\tevidence/proof.log", out, "the dry run prints the form it would store")
         code, out, err = self.propose(str(self.worker / "evidence" / "proof.log"))
         self.assertEqual(EXIT_OK, code, err)
         self.assertIn("evidence\tevidence/proof.log", out, "stored relative, and the verb says so")

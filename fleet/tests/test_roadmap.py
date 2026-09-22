@@ -1012,3 +1012,22 @@ class TestEvidenceResolves(RoadmapCase):
         rows = {r.subject: r for r in self.rows(NOT_READY)}
         self.assertEqual(str(done / "evidence" / "proof.log"), rows["legacy"].evidence)
         self.assertEqual("evidence/proof.log (does not resolve)", rows["orphan"].evidence)
+
+    def test_an_ambiguous_proposer_is_named_on_the_row_not_raised(self):
+        """Two folders sharing the proposer's stable key: the view says so instead of dying on the exception."""
+        self.rm.propose(self.worker, "k1", "running", ["evidence/proof.log"])
+        done = self.complete()
+        shutil.copytree(done, self.tasks / WORKER.replace("-inflight-", "-abort-"))
+        [row] = self.rows(PENDING_PROPOSAL)
+        self.assertIn("(ambiguous:", row.detail)
+        self.assertTrue(row.detail.startswith("DANGLING EVIDENCE:"), row.detail)
+
+    def test_apply_names_the_terminal_refusal_before_the_evidence_one_like_its_dry_run(self):
+        self.rm.add(ms("t", status="done"))
+        row = self.rm.propose(self.worker, "t", "running", ["evidence/proof.log"])
+        self.proof.unlink()
+        dry = self.rm.apply_refusal(row)
+        with self.assertRaises(BadInput) as caught:
+            self.rm.apply(row)
+        self.assertIn("terminal", dry)
+        self.assertEqual(dry, str(caught.exception))
