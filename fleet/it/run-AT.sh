@@ -4,7 +4,8 @@
 # §AT — B24 (x2 G-4, FI-9): A HUMAN ATTACHED AND TYPING IS NOT A WORKER WAITING ON ONE.
 #
 # `BLOCKED` is actionable, and a pane showing unsubmitted text or a dialog reads the same whether a worker is
-# stuck there or a human is attached and mid-sentence. fleet never read tmux's `#{session_attached}`, so the
+# stuck there or a human is attached and mid-sentence. fleet never asked tmux which clients are attached (it now
+# reads them per client — `list-clients`: interactive or not, and when each last gave input), so the
 # board said "needs you" to the person already at the pane. Each case here is a REAL dispatch on this
 # section's PRIVATE server with a REAL attached client (a pty from util-linux `script`), read back through
 # `board`, `reconcile` and `status`. Pane CONTENT is a frame, because the stand-in `claude` draws no chrome.
