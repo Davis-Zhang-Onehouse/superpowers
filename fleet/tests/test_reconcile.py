@@ -19,8 +19,9 @@ import time
 import unittest
 from dataclasses import fields as dataclass_fields
 
+from fleet.guards import CAP_EXCLUDED_STATES
 from fleet.pool import Pool
-from fleet.reconcile import (BLOCKED, COMPLETE, DEAD, IDLE, KINDS, PARKED, RUNNING, STALE_WAIT_S, STATES,
+from fleet.reconcile import (AWAITING_CI, BLOCKED, COMPLETE, DEAD, IDLE, KINDS, PARKED, RUNNING, STALE_WAIT_S, STATES,
                              UNREACHABLE, Subject, _awaiting_note, needs_a_human, reconcile)
 from fleet.session import LiveSession, Probes, SessionLayer
 from fleet.store import Declarations, Record, Store
@@ -40,6 +41,11 @@ BUSY_PANE = "\n".join(["reading src/fleet/pool.py", "Thinking...", "  esc to int
 MODAL_PANE = "\n".join(["Edit file src/fleet/pool.py?",
                         "❯ 1. Yes",
                         "  2. No, tell Claude what to do differently"])
+
+#: A quiet pane whose STATUS LINE shows an armed watcher, the shape `declare --phase awaiting-ci` accepts.
+#: Not busy (no interrupt hint), so the watcher is the only thing that will wake the session.
+WATCHED_PANE = "\n".join(["gh run watch 1234 --exit-status", "",
+                          "  auto mode on · 1 monitor · ? for shortcuts"])
 
 PARK_BUSY_Q = "should the shim land before the rebase, or after?"
 PARK_BLOCKED_Q = "is merging #441 mine to do?"
@@ -172,8 +178,10 @@ class SyntheticFleet:
         # 6. A declared CI waiter. Read from STRUCTURED state, never from prose.
         ci = self.dispatch("ciWaiter-07300304", "00000000-07300304-inflight-append-ciWaiter",
                            "ws4", "dt-ciWaiter")
+        # B06: with a watcher on its status line. A claim nothing watches is disregarded (tested in
+        # `TestNeedsAHumanUsesKnownFacts`), so the fixture that means "a real CI wait" shows its watcher.
         Declarations(ci).set_phase("awaiting-ci")
-        self.launch("dt-ciWaiter", 101, "ws4", QUIET_PANE)
+        self.launch("dt-ciWaiter", 101, "ws4", WATCHED_PANE)
 
         # 7. PROSE claiming the same phase, with no declaration. RCF-9, made unreachable.
         self.dispatch("proseClaimer-07300305", "00000000-07300305-inflight-append-proseClaimer",
@@ -287,7 +295,7 @@ class TestReconcile(unittest.TestCase):
         #: `_awaiting_note` re-observes the pane's own status line rather than trusting the declaration
         #: alone; asserting on `.state` only lets that branch be unwired and the suite stay green (I8).
         self.assertIn("declared awaiting-ci", s.note)
-        self.assertIn("NO WATCHER OBSERVABLE", s.note)
+        self.assertIn("watcher observed (1 monitor)", s.note)
 
     def test_prose_claiming_a_phase_does_not_change_the_state(self):
         # RCF-9 made unreachable: the prose is right there, and it is not a control signal.
@@ -763,3 +771,72 @@ class TestNeedsAHumanUsesKnownFacts(unittest.TestCase):
 
         self.assertEqual(subject.state, RUNNING, f"{subject.state}: {subject.note!r}")
         self.assertFalse(needs_a_human(subject))
+
+    # --- fact 4: an awaiting-ci claim with nothing watching ------------------------------------------
+
+    def ci_worker(self, todo_id, tmux, pid, pane=QUIET_PANE, recorded=None):
+        path = self.worker(todo_id, tmux, pid, pane=pane)
+        Declarations(path).set_phase("awaiting-ci")
+        if recorded is not None:
+            Declarations(path).set_watchers(recorded)
+        return path
+
+    def test_an_unwatched_ci_claim_counts_against_the_cap(self):
+        """x2 `M-3`/`D-10`, re-measure scenC. `awaiting-ci` is the one phase that outranks `busy` AND the idle
+        threshold, and it takes the worker out of the WIP cap. Claimed with nothing observed on the pane and
+        nothing recorded at the claim, it is an exemption nothing backs. The note already said "NO WATCHER
+        OBSERVABLE", and the state stayed AWAITING-CI, so the claim kept its exemption."""
+        self.ci_worker("unwatched-07300531", "dt-unwatched", 5231)
+
+        subject = self.subjects()["unwatched-07300531"]
+
+        self.assertNotEqual(subject.state, AWAITING_CI,
+                            f"an awaiting-ci claim nothing watches kept its exemption: {subject.note!r}")
+        self.assertNotIn(subject.state, CAP_EXCLUDED_STATES)
+        self.assertIn("NO WATCHER OBSERVABLE", subject.note)
+        self.assertIn("disregarded", subject.note, "the note does not say the declaration was set aside")
+
+    def test_an_unwatched_ci_claim_ages_into_idle(self):
+        """The half a human sees: nothing will wake it, so once the instant has been quiet past the
+        threshold it is IDLE and asks for a human, like any undeclared worker in the same state."""
+        self.ci_worker("unwatchedold-07300532", "dt-unwatchedold", 5232)
+        self.fleet.age("unwatchedold-07300532", 2700)
+
+        subject = self.subjects()["unwatchedold-07300532"]
+
+        self.assertEqual(subject.state, IDLE, f"{subject.state}: {subject.note!r}")
+        self.assertTrue(needs_a_human(subject))
+
+    def test_a_watched_ci_claim_keeps_its_exemption_however_old(self):
+        """Control: the watcher is on the status line now. The wait is real and it is excluded from the cap."""
+        self.ci_worker("watched-07300533", "dt-watched", 5233, pane=WATCHED_PANE)
+        self.fleet.age("watched-07300533", 2700)
+
+        subject = self.subjects()["watched-07300533"]
+
+        self.assertEqual(subject.state, AWAITING_CI, f"{subject.state}: {subject.note!r}")
+        self.assertFalse(needs_a_human(subject))
+
+    def test_an_attested_ci_claim_keeps_its_exemption(self):
+        """Control: an attestation (`declare --watcher`) names a watcher this tool cannot see, such as a
+        cron or a peer's monitor. It was accepted at the claim and is trusted, labelled ATTESTED. Telling a
+        genuine attestation from an observed watcher that has since vanished is B07's, not this change's."""
+        self.ci_worker("attested-07300534", "dt-attested", 5234,
+                       recorded="attested: cron 0,30 * * * * gh-run-poll")
+        self.fleet.age("attested-07300534", 2700)
+
+        subject = self.subjects()["attested-07300534"]
+
+        self.assertEqual(subject.state, AWAITING_CI, f"{subject.state}: {subject.note!r}")
+        self.assertIn("ATTESTED", subject.note)
+
+    def test_a_watched_claim_blocked_on_a_dialog_is_not_called_unwatched(self):
+        """The disregard note is keyed on the watcher classification, never on "the state is not AWAITING-CI".
+        A dialog outranks the phase, and the watcher is still there, so saying NO WATCHER here would be false."""
+        self.ci_worker("dlgwatched-07300535", "dt-dlgwatched", 5235,
+                       recorded="attested: cron 0,30 * * * * gh-run-poll", pane=DIALOG_PANE)
+
+        subject = self.subjects()["dlgwatched-07300535"]
+
+        self.assertEqual(subject.state, BLOCKED, f"{subject.state}: {subject.note!r}")
+        self.assertNotIn("NO WATCHER", subject.note)

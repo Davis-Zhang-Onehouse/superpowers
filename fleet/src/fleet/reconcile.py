@@ -381,6 +381,8 @@ def _state_of(rec, folder_state, live, phase, parked, pane, sessions, instant, i
 def _live_state(phase, parked, pane, sessions, instant, idle_after_s):
     waiting = sessions.unsubmitted(pane)
     busy = sessions.busy(pane)
+    unwatched = (phase == PHASE_AWAITING_CI and sessions.runtime != 'codex'
+                 and _watcher_of(pane, sessions, instant)[0] == WATCHER_NONE)
     if not busy and sessions.asking(pane):
         #: `B06`/`FI-55`. `pane-guard` has answered `15 awaiting-operator` for this frame since `I-16`, and
         #: this join still said RUNNING with an empty note: an `AskUserQuestion` selection carries no caret
@@ -395,7 +397,7 @@ def _live_state(phase, parked, pane, sessions, instant, idle_after_s):
         state, note = BLOCKED, f"the pane is waiting on a human: {waiting!r}"
     elif phase == PHASE_AWAITING_CI and sessions.runtime == 'codex':
         state, note = BLOCKED, 'Codex has no verified CI wake mechanism; this worker still consumes capacity'
-    elif phase == PHASE_AWAITING_CI:
+    elif phase == PHASE_AWAITING_CI and not unwatched:
         state, note = AWAITING_CI, _awaiting_note(pane, sessions, instant)
     elif busy:
         state, note = RUNNING, ""
@@ -404,6 +406,20 @@ def _live_state(phase, parked, pane, sessions, instant, idle_after_s):
                              f"{idle_after_s}s and the pane is not working")
     else:
         state, note = RUNNING, ""
+
+    if unwatched:
+        #: `B06` (x2 `M-3`, the design `D-10` shipped on a branch that was never deployed). `awaiting-ci` is
+        #: the one phase that outranks both `busy` and the idle threshold, and it takes the worker out of the
+        #: WIP cap. With nothing observed on the pane and nothing recorded at the claim, that exemption is
+        #: backed by nothing. The note already said so and the state kept the exemption. So the claim is
+        #: DISREGARDED here and the ordinary detector decides, exactly as for an undeclared worker: it counts
+        #: against the cap, and it ages into IDLE once nothing has moved. Disregarded rather than cleaned
+        #: up, because this module never writes (property 2), and a stale claim stops lying without a sweep.
+        #: The phase stays visible in `evidence.declared_phase`.
+        disregarded = (f"declared {PHASE_AWAITING_CI}; NO WATCHER OBSERVABLE on the pane and none recorded "
+                       f"at the claim, so the declaration is disregarded: this worker counts against the "
+                       f"WIP cap and ages into IDLE like any other")
+        note = f"{note}; {disregarded}" if note else disregarded
 
     if parked:
         if state in ACTIONABLE_STATES:
@@ -431,6 +447,31 @@ def _declared_age_s(instant, now):
         return None
 
 
+#: What stands behind an `awaiting-ci` claim, as `_watcher_of` classifies it.
+WATCHER_OBSERVED = "observed"
+WATCHER_ATTESTED = "attested"
+WATCHER_NONE = "none"
+
+
+def _watcher_of(pane, sessions, instant) -> tuple:
+    """`(kind, text)`: what backs an `awaiting-ci` claim right now. OBSERVED is on the pane's status line
+    at this moment; ATTESTED is what the claim recorded in `declare.json`; NONE is neither.
+
+    ONE classification, read by both the note (`_awaiting_note`) and the state (`_live_state`), so the two
+    cannot disagree about one worker. `B07` lives here too: a watcher OBSERVED at the claim is stored bare
+    and one ATTESTED is stored with an `attested:` prefix, and this reads only whether something was
+    recorded. So an observed watcher that has since vanished still classifies ATTESTED. Fixing that here
+    moves the note and the state together.
+    """
+    observed = sessions.watchers(pane)
+    if observed:
+        return WATCHER_OBSERVED, observed
+    recorded = Declarations(instant).watchers() if instant is not None else None
+    if recorded:
+        return WATCHER_ATTESTED, recorded
+    return WATCHER_NONE, ""
+
+
 def _awaiting_note(pane, sessions, instant, stale_after_s=STALE_WAIT_S, now=None) -> str:
     """What the board says about a worker that claims to be waiting on CI.
 
@@ -441,12 +482,11 @@ def _awaiting_note(pane, sessions, instant, stale_after_s=STALE_WAIT_S, now=None
     live observation is not possible — falls back to what was ATTESTED at claim time, distinguishably
     from what is actually OBSERVED now.
     """
-    observed = sessions.watchers(pane)
-    attested = Declarations(instant).watchers() if instant is not None else None
-    if observed:
-        note = f"declared awaiting-ci; watcher observed ({observed})"
-    elif attested:
-        note = f"declared awaiting-ci; watcher ATTESTED, not observable: {attested}"
+    kind, watcher = _watcher_of(pane, sessions, instant)
+    if kind == WATCHER_OBSERVED:
+        note = f"declared awaiting-ci; watcher observed ({watcher})"
+    elif kind == WATCHER_ATTESTED:
+        note = f"declared awaiting-ci; watcher ATTESTED, not observable: {watcher}"
     else:
         note = "declared awaiting-ci; NO WATCHER OBSERVABLE on the pane"
     age = _declared_age_s(instant, now if now is not None else time.time())
