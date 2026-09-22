@@ -771,6 +771,20 @@ class TestTheProposalQueueHasALifecycle(RoadmapCase):
         self.rm.apply(newer)
         self.assertEqual(["superseded"], [c["closed_as"] for c in self.rm.closed()])
 
+    def test_rows_written_before_note_existed_are_consumed_and_superseded(self):
+        """Final review: `Proposal(**d)` defaults `note`, so an old row without the key never equalled its
+        `asdict()` — apply landed the status, consumed nothing and superseded nothing (7 such rows sit in the
+        live quanton inbox)."""
+        rows = self.three()
+        data = json.loads(self.rm.proposals_path.read_text())
+        for row in data["pending"]:
+            row.pop("note")
+        self.rm.proposals_path.write_text(json.dumps(data))
+        self.rm.apply(self.rm.proposals()[-1])
+        self.assertEqual([], self.rm.proposals(), "an old-shape row was applied and left pending")
+        self.assertEqual([rows[2]], self.rm.applied())
+        self.assertEqual(["superseded", "superseded"], [c["closed_as"] for c in self.rm.closed()])
+
     def test_report_marks_superseded_rows_and_keeps_the_parseable_phrase(self):
         rows = self.three()
         pending = self.rows(PENDING_PROPOSAL)
@@ -794,6 +808,16 @@ class TestTheProposalQueueHasALifecycle(RoadmapCase):
         self.assertEqual(ATTENTION, row.severity)
         self.assertIn("fleet withdraw", row.clears_when)
         self.assertIn("1 against a terminal milestone", self.rows(POPULATION)[0].detail)
+
+    def test_a_row_superseded_by_a_stale_row_does_not_promise_a_plain_apply(self):
+        self.rm.add(ms("t", status="done"))
+        with mock.patch("fleet.roadmap._now", side_effect=["2026-09-22T00:00:00Z", "2026-09-22T00:00:01Z"]):
+            self.rm.propose(self.worker, "t", "running", ["evidence/a.log"])
+            self.rm.propose(self.worker, "t", "awaiting-ci", ["evidence/b.log"])
+        older, newer = self.rows(PENDING_PROPOSAL)
+        self.assertTrue(older.detail.startswith("SUPERSEDED"))
+        self.assertIn("no plain apply will close", older.clears_when)
+        self.assertTrue(newer.detail.startswith("STALE: "))
 
     def test_applied_is_read_only(self):
         """RV-28: B01 added `applied()` for harvest's guard as a READ accessor; it must stay one."""

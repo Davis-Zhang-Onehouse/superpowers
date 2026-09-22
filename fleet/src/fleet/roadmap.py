@@ -191,7 +191,7 @@ def _check_evidence(evidence, milestone: str) -> list:
     return [str(e) for e in items]
 
 
-def _last_index(rows: list, row) -> int:
+def last_index(rows: list, row) -> int:
     """Where `row` sits in `rows`, counting from the END. Two byte-identical rows (a propose repeated inside
     one second) are one report sent twice; cutting at the LAST copy makes the earlier copy superseded rather
     than leaving it pending after its twin was applied. `select`, `_consume` and harvest's count all cut here."""
@@ -240,6 +240,12 @@ class Roadmap:
         #: `B02`. Additive, so no schema bump: every inbox written before `closed` existed has no such key,
         #: and it reads as "nothing closed yet" rather than as a file this build refuses.
         data.setdefault("closed", [])
+        #: `B02` (final review). A row written before `note` existed has no such key, and `Proposal(**d)`
+        #: fills in `note=""`, so `asdict(proposal)` no longer equals the stored dict: `_consume` could not
+        #: find the row it had just applied, left it pending and superseded nothing. The live quanton inbox
+        #: holds 7 such pending rows. Normalised here, the one place every reader and writer loads from.
+        for row in data["pending"] + data["applied"]:
+            row.setdefault("note", "")
         return data
 
     def _save(self, path: Path, data: dict) -> None:
@@ -287,6 +293,10 @@ class Roadmap:
 
         The reason is REQUIRED. `dropped` and `done` are both terminal and read alike months later; a
         milestone that left the population with no recorded why is a decision nobody can reconstruct.
+
+        `B02`: it also closes the milestone's pending proposals as `retired`, after the roadmap write. If the
+        inbox cannot be read (e.g. a schema mismatch) the milestone is already dropped and the error names
+        the inbox; the rows stay pending and `fleet withdraw` closes them once it is readable.
         """
         reason = " ".join(str(reason or "").split())
         if not reason:
@@ -620,7 +630,7 @@ class Roadmap:
             body = asdict(proposal)
             pending = data["pending"]
             if body in pending:
-                at = _last_index(pending, body)
+                at = last_index(pending, body)
                 earlier = [r for r in pending[:at] if r["milestone"] == body["milestone"]]
                 del pending[at]
                 data["applied"].append(body)
@@ -641,7 +651,7 @@ class Roadmap:
                 "is nothing to apply or withdraw. `apply` applies a worker's proposal; it does not invent a "
                 "status.")
         chosen = _one_at(rows, at, milestone, self.proposals_path)[0] if at is not None else rows[-1]
-        cut = _last_index(rows, chosen)
+        cut = last_index(rows, chosen)
         return (Proposal(**chosen), [Proposal(**r) for r in rows[:cut]],
                 [Proposal(**r) for r in rows[cut + 1:]])
 
@@ -695,6 +705,10 @@ class Roadmap:
         #: unchanged, because coordinator tooling parses it.
         newest = {p.milestone: p for p in pending}
         entries = {d["id"]: d for d in self._load()["milestones"]}
+        #: Milestones whose newest row `apply` would refuse: their superseded rows cannot be closed by a plain
+        #: apply, so their remedy must not promise one.
+        stale_newest = {m for m, p in newest.items()
+                        if m in entries and self._terminal_refusal(entries[m], p, reopen=False)}
         superseded = stale = 0
         for p in pending:
             base = (f"{_proposer(p.instant)} proposes {p.milestone} -> {p.status} at {p.at} with "
@@ -707,7 +721,6 @@ class Roadmap:
             #: meant to improve.
             note = f'"{p.note}" — ' if p.note else ""
             entry = entries.get(p.milestone)
-            refusal = entry is not None and self._terminal_refusal(entry, p, reopen=False)
             withdraw = (f"`fleet withdraw --instant {self.instant} --milestone {p.milestone} --at {p.at} "
                         f"--reason <why>`")
             if newest[p.milestone] is not p:
@@ -716,10 +729,12 @@ class Roadmap:
                     kind=PENDING_PROPOSAL, subject=p.milestone,
                     detail=(f"SUPERSEDED by the row at {newest[p.milestone].at}: " + note + base),
                     severity=INFO,
-                    clears_when=(f"closed as superseded when a newer row for {p.milestone} is applied; "
+                    clears_when=(f"the newer row is STALE, so no plain apply will close this one; {withdraw} "
+                                 f"closes it" if p.milestone in stale_newest else
+                                 f"closed as superseded when a newer row for {p.milestone} is applied; "
                                  f"{withdraw} closes it now"),
                     clears_who=COORDINATOR))
-            elif refusal:
+            elif p.milestone in stale_newest:
                 stale += 1
                 rows.append(Row(
                     kind=PENDING_PROPOSAL, subject=p.milestone,

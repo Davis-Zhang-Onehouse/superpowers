@@ -1168,9 +1168,6 @@ OUTWARD_CALL_SITES = {
         "deletes a convenience copy and not a record. Owner-write is restored first because a cut ends in "
         "`chmod -R a-w` and rmtree cannot delete a read-only tree — the same mistake QI-7 left in the "
         "verification worktrees, one directory over"),
-    ("roadmap", "_consume"): (
-        "list.remove of a dict from the in-memory `data['pending']` list — an element, not a path. Nothing "
-        "is deleted; the row moves to `applied` and the lists are written back through atomic_write"),
     ("roadmap", "_close"): (
         "`B02`. list.remove of a dict from the in-memory `inbox['pending']` list — an element, not a path. "
         "Nothing is deleted: the same row is appended to `closed` with why, and the caller writes both "

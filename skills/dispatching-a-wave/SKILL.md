@@ -38,7 +38,7 @@ does **not** emit a row for a milestone that is ready. The count is interpolated
 English:
 
 ```
-population  <instant>  info  examined 3 milestone(s) of which 2 ready, 0 pending proposal(s), from <path>
+population  <instant>  info  examined 3 milestone(s) of which 2 ready, 0 pending proposal(s) (0 superseded, 0 against a terminal milestone), from <path>
 ```
 
 So the one thing you are about to act on is the one thing you must parse out of a sentence — against the
