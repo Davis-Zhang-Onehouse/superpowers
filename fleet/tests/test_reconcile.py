@@ -871,3 +871,17 @@ class TestNeedsAHumanUsesKnownFacts(unittest.TestCase):
 
         self.assertEqual(subject.state, IDLE, f"{subject.state}: {subject.note!r}")
         self.assertIn("NO WATCHER OBSERVABLE", subject.note)
+
+    def test_the_disregard_note_states_the_fact_and_predicts_nothing(self):
+        """`RV-43`. The note is appended to whatever state the ordinary detector chose, so a prediction in
+        it can be false: a busy pane is RUNNING and `elif busy` precedes the idle check, so that worker
+        never ages into IDLE at all. A note that says something the state does not is the family this
+        bucket exists to close, one sentence over."""
+        self.ci_worker("busyunwatched-07300543", "dt-busyunwatched", 5243, pane=BUSY_PANE)
+
+        subject = self.subjects()["busyunwatched-07300543"]
+
+        self.assertEqual(subject.state, RUNNING, f"{subject.state}: {subject.note!r}")
+        self.assertIn("disregarded", subject.note)
+        self.assertNotIn("ages into IDLE", subject.note,
+                         "the note predicts a future this state cannot reach")
