@@ -815,10 +815,12 @@ class TestAttachmentIsCollected(unittest.TestCase):
                          "the probe must ask the layer's own server, like every other tmux call")
         self.assertIn("list-clients", seen[0])
 
-    def test_read_only_and_control_mode_clients_are_not_a_human_at_the_pane(self):
+    def test_read_only_and_control_mode_clients_are_observers_not_interactive_input(self):
         """`RV-28`, measured: `attach -r` and `-C` clients count in `#{session_attached}`, and a read-only
-        client's keystroke — which tmux drops before the pane — still moves `#{session_activity}`. Neither can
-        answer the modal, so neither is a human at the pane; their input does not count either."""
+        client's keystroke — which tmux drops before the pane — still moves `#{session_activity}`. Neither shows
+        input fleet can see (a read-only client cannot type into the pane; a control-mode client can, but its
+        `#{client_activity}` does not move — `RV-36`), so neither counts as an interactive client or supplies
+        the last-input time; both are counted as observers."""
         got, _ = self.ask(0, self.row(ro=1, act=1700000999) + self.row(cm=1, act=1700000998)
                           + self.row(act=1700000100))
         self.assertEqual(got, (1, 1700000100, 2))
