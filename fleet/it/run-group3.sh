@@ -987,7 +987,12 @@ k_main_narrative() {            # K1 K2 K3 K4 K5 K7 — one compaction, in its r
   fi
 
   # --- K5: TWO INDEPENDENT RULES. The cap reports ROOM and the dispatch is STILL refused. ---
-  fleet declare --instant "$child" --phase awaiting-ci > "$out/k5-declare.out" 2>&1
+  #: `B06`. The declaration has to be one the board BELIEVES: a claim with no watcher observed on the pane
+  #: and none recorded at the claim is disregarded by `reconcile`, so it frees no cap and K5 would be
+  #: asserting the wrong thing about the wrong rule. This compaction's pane is the harness stub, which
+  #: renders no status line, so the watcher is attested. (§F's F2/F2b own the "backed vs unbacked" pair.)
+  fleet declare --instant "$child" --phase awaiting-ci --watcher 'cron 0,30 * * * * gh-run-poll' \
+    > "$out/k5-declare.out" 2>&1
   fleet dispatch --dry-run --profile "$P_WORKER" --title "k5 probe" --base 00000000 --porcelain \
     > "$out/k5-dryrun.out" 2>&1
   local capline exline
