@@ -45,6 +45,21 @@ def ms(mid, status="blocked", deps=(), evidence=(), owner=None):
                      deps=list(deps), evidence=list(evidence), owner=owner)
 
 
+#: `B03`. Every artifact the worker in these cases cites. `propose` now refuses an item that does not resolve
+#: against the proposer, so the fixture holds the files it names — the gate is exercised, never bypassed.
+#: The typo'd paths `TestEvidenceResolves` needs to be refused are deliberately absent.
+CITED = ("evidence/0.log", "evidence/1.log", "evidence/2.log", "evidence/02-acceptance/ci.log",
+         "evidence/02-acceptance/m1.log", "evidence/INDEX.md", "evidence/a.log", "evidence/again.log",
+         "evidence/b.log", "evidence/back.log", "evidence/k.log", "evidence/k2.log", "evidence/late.log",
+         "evidence/m1.log", "evidence/o.log", "evidence/x", "evidence/x.log", "evidence/y", "evidence/y.log")
+
+
+def cite(instant: pathlib.Path, items=CITED) -> None:
+    for rel in items:
+        (instant / rel).parent.mkdir(parents=True, exist_ok=True)
+        (instant / rel).write_text(f"{rel}\n")
+
+
 class RoadmapCase(unittest.TestCase):
     def setUp(self):
         self.tasks = pathlib.Path(tempfile.mkdtemp())
@@ -52,6 +67,7 @@ class RoadmapCase(unittest.TestCase):
         self.instant.mkdir()
         self.worker = self.tasks / WORKER
         self.worker.mkdir()
+        cite(self.worker)
         self.rm = Roadmap(self.instant)
 
     def fresh(self, name="00000000-07300500-inflight-append-otherEffort"):
@@ -176,7 +192,9 @@ class TestSingleWriter(RoadmapCase):
 
         self.assertEqual(applied.status, "done")
         self.assertEqual(Roadmap(self.instant).milestone("m1").status, "done")
-        self.assertIn("evidence/02-acceptance/ci.log", Roadmap(self.instant).milestone("m1").evidence,
+        #: `B03`: it lands ANCHORED at the proposer, because a relative string on a milestone has no proposer.
+        self.assertIn(str(self.worker / "evidence/02-acceptance/ci.log"),
+                      Roadmap(self.instant).milestone("m1").evidence,
                       "the evidence that justified the status change lands with it")
         self.assertEqual(self.rm.proposals(), [],
                          "an applied proposal stops being pending, so it cannot be applied twice")
@@ -317,16 +335,19 @@ class TestProposalCitesTheCurrentFolder(unittest.TestCase):
     def tearDown(self):
         shutil.rmtree(self.tmp, ignore_errors=True)
 
-    def _row(self):
+    def _row(self, then=None):
+        """`then` runs AFTER the proposal: the worker proposes while it exists (`B03`), then moves."""
         r = Roadmap(self.coord)
         r.add(Milestone(id="m1", title="a milestone", status="blocked", deps=[], evidence=[]))
+        cite(self.worker, ["evidence/INDEX.md"])
         r.propose(self.worker, "m1", "done", ["evidence/INDEX.md"])
+        if then is not None:
+            then()
         return [row for row in r.report() if row.kind == PENDING_PROPOSAL][0]
 
     def test_the_row_follows_the_workers_rename(self):
         renamed = self.tmp / "00000000-07310400-complete-append-w"
-        self.worker.rename(renamed)
-        detail = self._row().detail
+        detail = self._row(then=lambda: self.worker.rename(renamed)).detail
         self.assertIn("-complete-append-w", detail,
                       "the row must cite the folder that exists, not the one recorded at propose time")
         self.assertNotIn("-inflight-append-w ", detail + " ")
@@ -336,8 +357,7 @@ class TestProposalCitesTheCurrentFolder(unittest.TestCase):
                       "resolution must be a no-op when nothing moved")
 
     def test_a_vanished_proposer_is_named_AND_flagged(self):
-        shutil.rmtree(self.worker)
-        detail = self._row().detail
+        detail = self._row(then=lambda: shutil.rmtree(self.worker)).detail
         self.assertIn("-inflight-append-w", detail, "the recorded path is still shown")
         self.assertIn("no longer on disk", detail,
                       "a resolver that silently substitutes its input is worse than one that admits it failed")
@@ -717,7 +737,7 @@ class TestTheProposalQueueHasALifecycle(RoadmapCase):
         rows = self.three()
         applied = self.rm.apply(self.rm.proposals()[-1])
         self.assertEqual("running", applied.status)
-        self.assertEqual(["evidence/2.log"], applied.evidence,
+        self.assertEqual([str(self.worker / "evidence/2.log")], applied.evidence,
                          "a superseded row's evidence landed on the milestone (i28(c))")
         self.assertEqual([], self.rm.proposals())
         self.assertEqual([rows[2]], self.rm.applied())
@@ -884,3 +904,165 @@ class TestTheProposalQueueHasALifecycle(RoadmapCase):
         self.rm.applied()
         self.assertEqual(before, (self.rm.proposals_path.read_bytes(),
                                   self.rm.proposals_path.stat().st_mtime_ns))
+
+
+class TestEvidenceResolves(RoadmapCase):
+    """`B03`. A proposal's evidence is a location. `propose` refused nothing but an empty list, so a typo'd
+    path was accepted and `apply` copied it onto the milestone (i21(b)); an absolute `-inflight-` path was
+    stored verbatim and dangled one rename later (i21(a)); and the view printed only a count."""
+
+    DONE = WORKER.replace("-inflight-", "-complete-")
+
+    def setUp(self):
+        super().setUp()
+        (self.worker / "evidence").mkdir(exist_ok=True)
+        self.proof = self.worker / "evidence" / "proof.log"
+        self.proof.write_text("the artifact\n")
+        self.rm.add(ms("k1", status="running"))
+
+    def complete(self):
+        return self.worker.rename(self.tasks / self.DONE)
+
+    def inbox(self):
+        return json.loads(self.rm.proposals_path.read_text())
+
+    def test_propose_refuses_a_typo_and_writes_nothing(self):
+        for typo in ("evidence/nope-typo.log", str(self.worker / "evidence" / "also-nope.log")):
+            with self.subTest(typo=typo):
+                with self.assertRaises(BadInput) as caught:
+                    self.rm.propose(self.worker, "k1", "running", [typo])
+                self.assertIn(typo, str(caught.exception))
+                self.assertEqual([], self.rm.proposals())
+
+    def test_propose_stores_an_absolute_self_path_relative(self):
+        p = self.rm.propose(self.worker, "k1", "running", [str(self.proof), "https://example.com/pr/1"])
+        self.assertEqual(["evidence/proof.log", "https://example.com/pr/1"], p.evidence)
+        self.assertEqual(["evidence/proof.log", "https://example.com/pr/1"], self.inbox()["pending"][0]["evidence"])
+
+    def test_apply_after_the_rename_stores_a_path_that_resolves(self):
+        p = self.rm.propose(self.worker, "k1", "done", ["evidence/proof.log"])
+        done = self.complete()
+        milestone = self.rm.apply(p)
+        self.assertEqual([str(done / "evidence" / "proof.log")], milestone.evidence)
+        self.assertTrue(pathlib.Path(milestone.evidence[0]).is_file())
+
+    def test_apply_refuses_a_row_whose_evidence_no_longer_resolves(self):
+        p = self.rm.propose(self.worker, "k1", "done", ["evidence/proof.log"])
+        self.proof.unlink()
+        before = self.rm.path.read_bytes()
+        self.assertIn("evidence/proof.log", self.rm.apply_refusal(p))
+        with self.assertRaises(BadInput) as caught:
+            self.rm.apply(p)
+        self.assertIn("evidence/proof.log", str(caught.exception))
+        self.assertIn("fleet withdraw", str(caught.exception))
+        self.assertEqual(before, self.rm.path.read_bytes(), "a refused apply writes nothing")
+        self.assertEqual([p], self.rm.proposals(), "the row stays pending")
+
+    def test_a_hand_built_row_with_a_typo_is_refused_at_apply(self):
+        """The gate is not only on the polite path: `apply` re-checks a row nobody `propose`d."""
+        forged = Proposal(instant=str(self.worker), milestone="k1", status="done",
+                          evidence=["evidence/never.log"], at="2026-09-22T00:00:00Z")
+        with self.assertRaises(BadInput):
+            self.rm.apply(forged)
+
+    def test_a_url_passes_propose_and_apply_untouched(self):
+        url = "https://app.clickup.com/t/86e2zdgqu"
+        self.assertEqual([url], self.rm.apply(self.rm.propose(self.worker, "k1", "done", [url])).evidence)
+
+    def test_an_absolute_path_into_a_renamed_instant_still_applies(self):
+        stale = str(self.proof)
+        coordinator_row = self.rm.propose(self.instant, "k1", "done", [stale])
+        done = self.complete()
+        self.assertEqual([str(done / "evidence" / "proof.log")], self.rm.apply(coordinator_row).evidence)
+
+    def test_the_same_file_cited_before_and_after_the_rename_lands_once(self):
+        self.rm.apply(self.rm.propose(self.worker, "k1", "running", ["evidence/proof.log"]))
+        done = self.complete()
+        self.rm.apply(self.rm.propose(done, "k1", "done", ["evidence/proof.log"]))
+        self.assertEqual(1, len(self.rm.milestone("k1").evidence))
+
+    def test_the_view_prints_each_proposed_item_as_it_resolves_now(self):
+        self.rm.propose(self.worker, "k1", "running", ["evidence/proof.log"])
+        done = self.complete()
+        [row] = self.rows(PENDING_PROPOSAL)
+        self.assertIn("proposes k1 -> running at ", row.detail, "the parsed phrase is unchanged")
+        self.assertIn("with 1 evidence item(s) (evidence/proof.log)", row.detail)
+        self.assertEqual(str(done / "evidence" / "proof.log"), row.evidence)
+
+    def test_the_view_marks_a_row_whose_evidence_dangles(self):
+        self.rm.propose(self.worker, "k1", "done", ["evidence/proof.log"])
+        self.proof.unlink()
+        [row] = self.rows(PENDING_PROPOSAL)
+        self.assertTrue(row.detail.startswith("DANGLING EVIDENCE: 1 of 1 item(s)"), row.detail)
+        self.assertEqual(ATTENTION, row.severity)
+        self.assertIn("fleet withdraw", row.clears_when)
+        self.assertIn("(does not resolve)", row.evidence)
+
+    def test_a_milestone_row_carries_its_evidence_re_resolved(self):
+        self.rm.apply(self.rm.propose(self.worker, "k1", "done", ["evidence/proof.log"]))
+        done = self.complete()
+        [row] = [r for r in self.rows(NOT_READY) if r.subject == "k1"]
+        self.assertEqual(str(done / "evidence" / "proof.log"), row.evidence)
+
+    def test_a_legacy_relative_milestone_item_resolves_against_its_owner(self):
+        """Every milestone written before B03 holds relative strings; its owner is the only anchor."""
+        self.rm.add(ms("legacy", status="done", evidence=["evidence/proof.log"], owner=str(self.worker)))
+        self.rm.add(ms("orphan", status="done", evidence=["evidence/proof.log"]))
+        done = self.complete()
+        rows = {r.subject: r for r in self.rows(NOT_READY)}
+        self.assertEqual(str(done / "evidence" / "proof.log"), rows["legacy"].evidence)
+        self.assertEqual("evidence/proof.log (does not resolve)", rows["orphan"].evidence)
+
+    def test_an_ambiguous_proposer_is_named_on_the_row_not_raised(self):
+        """Two folders sharing the proposer's stable key: the view says so instead of dying on the exception."""
+        self.rm.propose(self.worker, "k1", "running", ["evidence/proof.log"])
+        done = self.complete()
+        shutil.copytree(done, self.tasks / WORKER.replace("-inflight-", "-abort-"))
+        [row] = self.rows(PENDING_PROPOSAL)
+        self.assertIn("(ambiguous:", row.detail)
+        self.assertTrue(row.detail.startswith("DANGLING EVIDENCE:"), row.detail)
+
+    def test_apply_names_the_terminal_refusal_before_the_evidence_one_like_its_dry_run(self):
+        self.rm.add(ms("t", status="done"))
+        row = self.rm.propose(self.worker, "t", "running", ["evidence/proof.log"])
+        self.proof.unlink()
+        dry = self.rm.apply_refusal(row)
+        with self.assertRaises(BadInput) as caught:
+            self.rm.apply(row)
+        self.assertIn("terminal", dry)
+        self.assertEqual(dry, str(caught.exception))
+
+    def test_a_legacy_relative_item_for_the_same_file_is_upgraded_to_the_anchored_one(self):
+        """RV-20. A pre-B03 relative string naming the file a new row cites used to SWALLOW the anchored item
+        (dedup by location found it and skipped), so the unanchored string survived and dangled once `owner`
+        changed. The legacy entry is now upgraded in place."""
+        self.rm.add(ms("legacy", status="running", evidence=["evidence/proof.log"], owner=str(self.worker)))
+        milestone = self.rm.apply(self.rm.propose(self.worker, "legacy", "done", ["evidence/proof.log"]))
+        self.assertEqual([str(self.proof)], milestone.evidence)
+
+    def test_a_legacy_relative_item_for_another_file_is_left_as_written(self):
+        cite(self.worker, ["evidence/other.log"])
+        self.rm.add(ms("legacy", status="running", evidence=["evidence/other.log"], owner=str(self.worker)))
+        milestone = self.rm.apply(self.rm.propose(self.worker, "legacy", "done", ["evidence/proof.log"]))
+        self.assertEqual(["evidence/other.log", str(self.proof)], milestone.evidence)
+
+    def test_a_same_named_legacy_item_at_another_owner_is_a_different_location_and_is_kept(self):
+        other = self.tasks / "00000000-07300401-inflight-append-otherOwner"
+        cite(other, ["evidence/proof.log"])
+        self.rm.add(ms("legacy", status="running", evidence=["evidence/proof.log"], owner=str(other)))
+        milestone = self.rm.apply(self.rm.propose(self.worker, "legacy", "done", ["evidence/proof.log"]))
+        self.assertEqual(["evidence/proof.log", str(self.proof)], milestone.evidence)
+
+    def test_an_absolute_item_stored_while_inflight_is_re_anchored_by_the_next_apply(self):
+        """RV-21. An apply while the proposer is still `-inflight-` stores an `-inflight-` path; a raw reader of
+        roadmap.json would see it dangle after `complete`. The next apply re-anchors it where it is now; an
+        absolute item that no longer resolves anywhere, and a URL, are left exactly as written."""
+        url, gone = "https://example.com/pr/1", str(self.tasks / "nowhere" / "gone.log")
+        self.rm.add(ms("k2", status="running", evidence=[url, gone]))
+        self.rm.apply(self.rm.propose(self.worker, "k2", "running", ["evidence/proof.log"]))
+        self.assertEqual([url, gone, str(self.proof)], self.rm.milestone("k2").evidence)
+        done = self.complete()
+        cite(done, ["evidence/final.log"])
+        milestone = self.rm.apply(self.rm.propose(done, "k2", "done", ["evidence/final.log"]))
+        self.assertEqual([url, gone, str(done / "evidence" / "proof.log"), str(done / "evidence" / "final.log")],
+                         milestone.evidence)

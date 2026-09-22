@@ -374,6 +374,8 @@ PY
   #: `SI-55`. `seed-delivered` compares what was sent against the seed the instant carries, so this row
   #: needs both to exist — every mutating row in `verb_args` runs for real under `--dry-run`.
   mkdir -p "$INSTP/.fleet"
+  # `B03`: the `propose` row cites `e1`, and propose (dry run too) admits only evidence that resolves.
+  printf 'e1\n' > "$INSTP/e1"
   printf 'seed for %s\n' "$INST" > "$INSTP/.fleet/seed.txt"
   cp "$INSTP/.fleet/seed.txt" "$EV/l7-delivered.txt"
   export TODO STALE_BASE
@@ -611,6 +613,8 @@ PY
   #: `SI-55`. See the identical note in §L: the row is driven for real under `--dry-run`, so the rendered
   #: seed and the delivered text both have to be there.
   mkdir -p "$INSTP/.fleet"
+  # `B03`: the `propose` row cites `e1`, and propose (dry run too) admits only evidence that resolves.
+  printf 'e1\n' > "$INSTP/e1"
   printf 'seed for %s\n' "$INST" > "$INSTP/.fleet/seed.txt"
   cp "$INSTP/.fleet/seed.txt" "$EV/m5-delivered.txt"
   export INSTP TODO

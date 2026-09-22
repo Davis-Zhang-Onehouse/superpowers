@@ -44,10 +44,11 @@ from fleet import (EXIT_ATTENTION, EXIT_BAD_INPUT, EXIT_CODES, EXIT_NO_CAPACITY,
                    EXIT_REFUSED)
 from fleet.runtime import LaunchSettings
 from fleet import cli
+from fleet import render
 from tests import hermetic_environment
 from fleet import seedcheck
 from fleet.harvest import NO_ISSUES_FILED, REGISTER_NAME, UNREADABLE, VACUOUS, Harvest
-from fleet.identity import InstantName
+from fleet.identity import InstantName, resolve
 from fleet.layout import validate as layout_validate
 from fleet.pool import Pool
 from fleet.release import CANDIDATE, RELEASED, Releases, Version
@@ -200,6 +201,18 @@ def snapshot(root: pathlib.Path) -> dict:
         stat = path.stat()
         out[str(path)] = (path.is_dir(), stat.st_mtime_ns, stat.st_size if path.is_file() else 0)
     return out
+
+
+def cite(instant, *items) -> None:
+    """`B03`. Create the artifacts a proposal is about to cite: `propose` admits only evidence that resolves
+    against the proposer, so a fixture holds what it names — the gate is exercised, never bypassed."""
+    #: Through the rename: a stale `-inflight-` path must not be re-created as a second folder beside the
+    #: `-complete-` one (two folders sharing a stable key resolve to nothing).
+    folder = resolve(pathlib.Path(instant)) or pathlib.Path(instant)
+    for item in items:
+        path = folder / item
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(f"{item}\n")
 
 
 class FakeRunner:
@@ -471,6 +484,10 @@ class Fleet:
         path.mkdir()
         (path / "HANDOFF.md").write_text(handoff)
         (path / "RUNBOOK.md").write_text(runbook)
+        #: `B03`: a real instant is created with an evidence index, and it is the artifact most proposals in
+        #: this file cite — `propose` now admits only evidence that resolves against the proposer.
+        (path / "evidence").mkdir()
+        (path / "evidence" / "INDEX.md").write_text("# evidence index\n")
         todo_id, tmux = f"{name}-{curr}", f"dt-{name}"
         self.store.write(Record(
             todo_id=todo_id, child_instant=str(path), base_instant=base, slot=slot or "", tmux=tmux,
@@ -517,6 +534,10 @@ class Fleet:
         roadmap = Roadmap(path)
         roadmap.add(Milestone(id="M1", title="land the cli", status="blocked", deps=[],
                               evidence=[], owner="the worker"))
+        #: `B03`: `propose` admits only evidence that resolves against the proposer, so the fixture holds the
+        #: artifact it cites (the verb-matrix `propose` row cites the same one).
+        (path / "evidence" / "02-acceptance").mkdir(parents=True, exist_ok=True)
+        (path / "evidence" / "02-acceptance" / "verify-acs.sh").write_text("#!/bin/sh\n")
         roadmap.propose(path, "M1", "running", ["evidence/02-acceptance/verify-acs.sh"])
         return roadmap
 
@@ -2782,6 +2803,7 @@ class TestApplyChoosesOneRow(CliCase):
         stamps = [f"2026-09-22T00:00:0{i}Z" for i in range(3)]
         with mock.patch("fleet.roadmap._now", side_effect=stamps):
             for i, s in enumerate(("running", "awaiting-ci", "running")):
+                cite(worker, f"evidence/{i}.log")
                 code, _, err = fleet.run(["propose", "--instant", str(worker), "--to", str(coordinator),
                                           "--milestone", milestone_id, "--status", s,
                                           "--evidence", f"evidence/{i}.log"])
@@ -2801,7 +2823,9 @@ class TestApplyChoosesOneRow(CliCase):
         self.assertEqual(EXIT_OK, code, err)
         self.assertEqual(1, len(self.lines(out, "applied")), out)
         self.assertEqual(2, len(self.lines(out, "superseded")), out)
-        self.assertEqual(["evidence/2.log"], Roadmap(coordinator).milestone("m7").evidence)
+        #: `B03`: stored ANCHORED where the worker's file is, so it names a file that opens.
+        [landed] = Roadmap(coordinator).milestone("m7").evidence
+        self.assertTrue(landed.endswith("/evidence/2.log") and pathlib.Path(landed).is_file(), landed)
         self.assertEqual([], [p for p in Roadmap(coordinator).proposals() if p.milestone == "m7"])
         self.assertEqual([(stamps[0], "superseded"), (stamps[1], "superseded")],
                          [(c["at"], c["closed_as"]) for c in Roadmap(coordinator).closed()
@@ -2920,7 +2944,9 @@ class TestApplyChoosesOneRow(CliCase):
 
         #: Task 3 review: re-opened and retired AGAIN, the count is this retire's rows, not every retire's.
         roadmap = Roadmap(coordinator)
+        cite(coordinator, "evidence/back.log")
         roadmap.apply(roadmap.propose(coordinator, "m7", "running", ["evidence/back.log"]), reopen=True)
+        cite(coordinator, "evidence/again.log")
         roadmap.propose(coordinator, "m7", "running", ["evidence/again.log"])
         code, out, err = fleet.run(argv)
         self.assertEqual(EXIT_OK, code, err)
@@ -3389,6 +3415,25 @@ class TestTheDispatchMilestoneJoin(CliCase):
         self.assertIn("apply 1 proposal(s)", row[0], f"the dry run counted the wrong inbox: {row[0]}")
         self.assertEqual("blocked", Roadmap(coordinator).milestone("M9").status, "a dry run moved the roadmap")
 
+    def test_harvest_refuses_a_report_whose_evidence_no_longer_resolves_and_changes_nothing(self):
+        """`B03` D-5. `apply` now refuses a row whose evidence does not resolve; harvest applies in a loop
+        after its gate, so it must ask FIRST, or a refusal mid-loop part-applies the close-out."""
+        fleet = self.loaded()
+        coordinator, todo, child, renamed = self._reported_and_finished(fleet, "done", title="dangles")
+        (renamed / "evidence" / "INDEX.md").unlink()        # the artifact the report cites, gone since
+
+        for dry in ([], ["--dry-run"]):
+            with self.subTest(dry_run=bool(dry)):
+                code, out, err = fleet.run(["harvest", "--id", todo, "--porcelain"] + dry)
+                refused = [line for line in out.splitlines() if line.startswith("harvest-refused\t")]
+                self.assertTrue(refused, f"harvest closed a worker whose report cannot be applied: {out} {err}")
+                self.assertIn("evidence/INDEX.md", refused[0])
+                self.assertIn("do not resolve", refused[0])
+                self.assertEqual("blocked", Roadmap(coordinator).milestone("M9").status)
+                self.assertEqual(1, len([p for p in Roadmap(coordinator).proposals() if p.instant == child]),
+                                 "the report must stay pending for the coordinator")
+                self.assertIsNone(fleet.store.read(todo).harvested_at, "the record was stamped anyway")
+
     def test_harvest_gives_back_the_claim_on_a_milestone_it_leaves_unfinished(self):
         """B01's second member (re-measure `NEW-2`). A harvested worker whose last report was not terminal
         left `owner` at its `-inflight-` path, so every later dispatch onto that milestone was refused as
@@ -3478,6 +3523,7 @@ class TestTheDispatchMilestoneJoin(CliCase):
         #: `B02`. The stale row must ARRIVE after the landing. A row that was pending when a newer row for
         #: the same milestone was applied is closed as superseded by that apply and never reaches harvest
         #: (next test); the one harvest must hold back is a report the worker sent after M9 finished.
+        cite(child, "evidence/late.log")
         roadmap.propose(child, "M9", "running", ["evidence/late.log"])
 
         code, out, err = fleet.run(["harvest", "--id", todo, "--porcelain"])
@@ -3501,6 +3547,7 @@ class TestTheDispatchMilestoneJoin(CliCase):
         todo = [line.split("\t")[1] for line in out.splitlines() if line.startswith("todo_id\t")][0]
         with mock.patch("fleet.roadmap._now", side_effect=[f"2026-09-22T00:00:0{i}Z" for i in range(9)]):
             for i, status in enumerate(statuses):
+                cite(child, f"evidence/{i}.log")
                 code, _, err = fleet.run(["propose", "--instant", child, "--milestone", "M9",
                                           "--status", status, "--evidence", f"evidence/{i}.log"])
                 self.assertEqual(0, code, err)
@@ -3523,7 +3570,9 @@ class TestTheDispatchMilestoneJoin(CliCase):
 
         self.assertIn("harvested\t", out, f"{out} {err}")
         milestone = Roadmap(coordinator).milestone("M9")
-        self.assertEqual(("done", ["evidence/2.log"]), (milestone.status, milestone.evidence),
+        #: `B03`: the evidence is stored anchored at the worker's CURRENT (-complete-) folder.
+        self.assertEqual(("done", [str(resolve(pathlib.Path(child)) / "evidence" / "2.log")]),
+                         (milestone.status, milestone.evidence),
                          "a superseded report's evidence landed through harvest")
         self.assertEqual([("running", "superseded"), ("awaiting-ci", "superseded")],
                          [(c["status"], c["closed_as"]) for c in Roadmap(coordinator).closed()
@@ -3539,7 +3588,9 @@ class TestTheDispatchMilestoneJoin(CliCase):
         roadmap.apply(roadmap.propose(coordinator, "M9", "done", ["evidence/INDEX.md"]))
         #: that coordinator apply superseded the worker's two rows; re-send them after the landing
         with mock.patch("fleet.roadmap._now", side_effect=["2026-09-22T00:01:00Z", "2026-09-22T00:01:01Z"]):
+            cite(child, "evidence/late.log")
             roadmap.propose(child, "M9", "running", ["evidence/late.log"])
+            cite(child, "evidence/final.log")
             roadmap.propose(child, "M9", "done", ["evidence/final.log"])
 
         code, out, err = fleet.run(["harvest", "--id", todo, "--porcelain"])
@@ -3554,6 +3605,7 @@ class TestTheDispatchMilestoneJoin(CliCase):
         coordinator, todo, child, _ = self._reported_and_finished(fleet, "done")
         roadmap = Roadmap(coordinator)
         roadmap.apply([p for p in roadmap.proposals() if p.instant == child][-1])
+        cite(child, "evidence/late.log")
         roadmap.propose(child, "M9", "running", ["evidence/late.log"])
 
         code, out, err = fleet.run(["harvest", "--id", todo, "--porcelain"])
@@ -3570,6 +3622,7 @@ class TestTheDispatchMilestoneJoin(CliCase):
         fleet = self.loaded()
         coordinator, todo, child, _ = self._reported_and_finished(fleet, "awaiting-ci")
         roadmap = Roadmap(coordinator)
+        cite(coordinator, "evidence/rescoped.log")
         roadmap.apply(roadmap.propose(coordinator, "M9", "blocked", ["evidence/rescoped.log"]))
 
         code, out, err = fleet.run(["harvest", "--id", todo, "--porcelain"])
@@ -3580,6 +3633,7 @@ class TestTheDispatchMilestoneJoin(CliCase):
         fleet = self.loaded()
         coordinator, todo, child, _ = self._reported_and_finished(fleet, "running")
         roadmap = Roadmap(coordinator)
+        cite(coordinator, "evidence/rescoped.log")
         roadmap.apply(roadmap.propose(coordinator, "M9", "blocked", ["evidence/rescoped.log"]))
 
         code, out, err = fleet.run(["harvest", "--id", todo, "--porcelain"])
@@ -5827,3 +5881,86 @@ class TestReadSurfaceStatesItsPopulation(CliCase):
         ready = [(r["subject"], r["title"], r["owner"]) for r in rows if r["kind"] == "ready"]
         self.assertEqual([("m1", "first", "")], ready, out)
 
+
+class TestEvidenceIsALocation(CliCase):
+    """`B03` at the verbs. `propose` accepted a never-existing path with exit 0, `apply` copied it onto the
+    milestone with exit 0, an absolute `-inflight-` path dangled after the proposer's rename, and `fleet
+    roadmap` printed evidence only as a count. RED on the base: the B03 instant's
+    `evidence/01-red/repro-base-ef655dfa.txt`."""
+
+    def setUp(self):
+        super().setUp()
+        self.fleet = self.loaded()
+        self.coordinator = self.fleet.paths["readyWorker"]
+        Roadmap(self.coordinator).add(Milestone(id="k1", title="evidence", status="running", deps=[],
+                                                evidence=[]))
+        self.worker = self.fleet.worker("cites", slot="ws4", live=False)
+        (self.worker / "evidence").mkdir(exist_ok=True)
+        (self.worker / "evidence" / "proof.log").write_text("the artifact\n")
+
+    def propose(self, *evidence, dry=False):
+        argv = ["propose", "--instant", str(self.worker), "--to", str(self.coordinator), "--milestone", "k1",
+                "--status", "done", "--porcelain"] + (["--dry-run"] if dry else [])
+        for item in evidence:
+            argv += ["--evidence", item]
+        return self.fleet.run(argv)
+
+    def pending(self):
+        return [p for p in Roadmap(self.coordinator).proposals() if p.milestone == "k1"]
+
+    def test_a_typo_is_refused_at_propose_in_the_dry_run_too(self):
+        for dry in (True, False):
+            for typo in ("evidence/nope-typo.log", str(self.worker / "evidence" / "also-nope.log")):
+                with self.subTest(dry_run=dry, typo=typo):
+                    code, out, err = self.propose(typo, dry=dry)
+                    self.assertEqual(EXIT_BAD_INPUT, code, out)
+                    self.assertIn(typo, err)
+                    self.assertEqual([], self.pending())
+
+    def test_the_dry_run_refuses_empty_evidence_like_the_real_run(self):
+        """Final review Minor-3: the dry run judged `admit` alone and skipped the empty-evidence gate."""
+        for dry in (True, False):
+            with self.subTest(dry_run=dry):
+                code, out, err = self.propose("", dry=dry)
+                self.assertEqual(EXIT_BAD_INPUT, code, out)
+                self.assertIn("needs at least one evidence path", err)
+
+    def test_an_absolute_self_path_survives_the_rename_through_roadmap_and_apply(self):
+        code, out, err = self.propose(str(self.worker / "evidence" / "proof.log"), dry=True)
+        self.assertEqual(EXIT_OK, code, err)
+        self.assertIn("evidence\tevidence/proof.log", out, "the dry run prints the form it would store")
+        code, out, err = self.propose(str(self.worker / "evidence" / "proof.log"))
+        self.assertEqual(EXIT_OK, code, err)
+        self.assertIn("evidence\tevidence/proof.log", out, "stored relative, and the verb says so")
+        done = self.worker.rename(self.worker.with_name(self.worker.name.replace("-inflight-", "-complete-")))
+
+        code, out, err = self.fleet.run(["roadmap", "--instant", str(self.coordinator), "--porcelain"])
+        rows = [dict(zip(render.ROADMAP_COLUMNS, line.split("\t"))) for line in out.splitlines()]
+        [row] = [r for r in rows if r["kind"] == "pending-proposal" and r["subject"] == "k1"]
+        self.assertIn("with 1 evidence item(s) (evidence/proof.log)", row["detail"])
+        self.assertTrue(pathlib.Path(row["evidence"]).is_file(), row)
+
+        code, out, err = self.fleet.run(["apply", "--instant", str(self.coordinator), "--milestone", "k1",
+                                         "--porcelain"])
+        self.assertEqual(EXIT_OK, code, err)
+        self.assertEqual([str(done / "evidence" / "proof.log")], Roadmap(self.coordinator).milestone("k1").evidence)
+
+    def test_apply_refuses_a_row_whose_evidence_was_deleted_in_the_dry_run_too(self):
+        self.assertEqual(EXIT_OK, self.propose("evidence/proof.log")[0])
+        (self.worker / "evidence" / "proof.log").unlink()
+        for dry in (["--dry-run"], []):
+            with self.subTest(dry_run=bool(dry)):
+                code, out, err = self.fleet.run(["apply", "--instant", str(self.coordinator), "--milestone",
+                                                 "k1", "--porcelain"] + dry)
+                self.assertEqual(EXIT_BAD_INPUT, code, out)
+                self.assertIn("evidence/proof.log", err)
+                self.assertIn("fleet withdraw", err)
+                self.assertEqual("running", Roadmap(self.coordinator).milestone("k1").status)
+                self.assertEqual(1, len(self.pending()))
+
+    def test_a_url_is_evidence_nobody_here_can_stat(self):
+        url = "https://app.clickup.com/t/86e2zdgqu"
+        self.assertEqual(EXIT_OK, self.propose(url)[0])
+        code, out, err = self.fleet.run(["apply", "--instant", str(self.coordinator), "--milestone", "k1"])
+        self.assertEqual(EXIT_OK, code, err)
+        self.assertEqual([url], Roadmap(self.coordinator).milestone("k1").evidence)

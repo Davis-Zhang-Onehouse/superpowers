@@ -87,9 +87,10 @@ from fleet.release_verify import (EXEMPT, EXEMPT_ROSTER, FULL_ROSTER, GATE_ROSTE
                                   write_exemption, write_verdict)
 from fleet.review import Finding, Review, exit_code_for, receive_advisory
 from fleet import origin as origin_mod
+from fleet import evidence as evidence_mod
 from fleet.origin import Origin
 from fleet.roadmap import (ATTENTION, COORDINATOR, RETIRED, SUPERSEDED, TERMINAL, Milestone,
-                           Proposal, Roadmap, last_index)
+                           Proposal, Roadmap, _check_evidence, last_index)
 from fleet.session import (TMUX_SOCKET_ENV, SessionLayer, default_probes,
                            plain as pane_plain)
 from fleet.store import Declarations, Record, Store
@@ -2668,10 +2669,13 @@ def _do_propose(ctx: Ctx, parsed: Parsed) -> int:
                           f"proposing about {milestone!r}. Reported, not refused — it may be deliberate.")
     extra = [("dispatched-for", dispatched_for)] if dispatched_for else []
     if ctx.dry_run:
+        #: `B03`. The dry run judges the evidence the way the real run does — an item that does not resolve
+        #: against the proposer is refused here too — and prints the form that would be stored.
         _emit(ctx, "propose", [("dry-run", "no proposal was written"), ("milestone", milestone),
                                ("status", status), ("proposer", str(proposer)),
                                ("roadmap", str(destination)), ("destination-chosen", chosen),
-                               ("evidence", ", ".join(evidence))] + extra)
+                               ("evidence", ", ".join(evidence_mod.admit(
+                                   _check_evidence(evidence, milestone), proposer)))] + extra)
         return EXIT_OK
     proposal = roadmap.propose(proposer, milestone, status, evidence, note=parsed.get("note") or "")
     _emit(ctx, "propose", [("milestone", proposal.milestone), ("status", proposal.status),
@@ -3335,6 +3339,18 @@ def _proposed_by(child: Path, proposal) -> bool:
     return resolve(Path(proposal.instant)) == child
 
 
+def _harvest_evidence_refusal(ctx: Ctx, child: Path) -> str:
+    """`B03` D-5. Why harvest must not apply this worker's rows — each row it WOULD apply whose evidence no
+    longer resolves (`Roadmap.evidence_refusal`) — else "". Held rows are not asked: harvest leaves them
+    pending for the coordinator anyway."""
+    roadmap, mine, _, _ = _harvest_inbox(ctx, child)
+    #: RV-24. A check, then the loop that applies: a file deleted in between makes a later `apply` in that
+    #: loop refuse after earlier rows landed. The window is the loop's own duration and the worker is not
+    #: closed by it (the refusal aborts before the session kill); the refused row stays pending, so a re-run
+    #: of harvest refuses the same way — with this pre-check's message — until the worker re-proposes.
+    return " ".join(r for r in (roadmap.evidence_refusal(p) for p in mine) if r)
+
+
 def _harvest_inbox(ctx: Ctx, child: Path):
     """-> (the roadmap `propose` delivered this worker's reports to, the proposals it wrote there that
     harvest will apply, the ones it holds back, the worker's origin).  `B01`.
@@ -3463,6 +3479,17 @@ def _do_harvest(ctx: Ctx, parsed: Parsed) -> int:
                              "works once the folder is -complete- (the coordinator may run it on the "
                              "worker's behalf, citing the worker's evidence); `fleet abort` only applies "
                              "while the folder is still -inflight-"),
+                clears_who="the dispatched instant, or the coordinator on its behalf"))
+        elif refused := _harvest_evidence_refusal(ctx, child):
+            #: `B03` D-5. Asked BEFORE anything is applied, in the dry run too: `apply` refuses a row whose
+            #: evidence no longer resolves, and harvest applies in a loop, so a refusal mid-loop would leave
+            #: the close-out half done. The worker is not closed while its report cannot be applied.
+            rows.append(Row(
+                kind="harvest-refused", subject=record.todo_id, severity=VIOLATION, detail=refused,
+                clears_when=("the worker (or the coordinator on its behalf) re-proposes citing evidence that "
+                             "resolves — relative to the worker's own folder — then harvest again. `fleet "
+                             "withdraw` closes the row instead only when it is residue: withdrawing a "
+                             "worker's only report leaves it unreported, which harvest also refuses"),
                 clears_who="the dispatched instant, or the coordinator on its behalf"))
         elif ctx.dry_run:
             roadmap, mine, held, recorded = _harvest_inbox(ctx, child)
