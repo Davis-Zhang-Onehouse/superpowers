@@ -632,6 +632,19 @@ class TestTheProposalQueueHasALifecycle(RoadmapCase):
             return [self.rm.propose(self.worker, mid, status, [f"evidence/{i}.log"])
                     for i, status in enumerate(("running", "awaiting-ci", "running"))]
 
+    def test_a_row_sent_twice_in_one_second_leaves_no_twin_pending(self):
+        """Task 3 review: two byte-identical rows are one report sent twice. Cutting at the FIRST copy applied
+        one and left its twin pending forever; the cut is at the last copy, so the earlier one is superseded."""
+        self.rm.add(ms("m1"))
+        with mock.patch("fleet.roadmap._now", return_value="2026-09-22T00:00:00Z"):
+            twins = [self.rm.propose(self.worker, "m1", "done", ["evidence/x.log"]) for _ in range(2)]
+        chosen, earlier, newer = self.rm.select("m1")
+        self.assertEqual((1, 0), (len(earlier), len(newer)))
+        self.rm.apply(chosen)
+        self.assertEqual([], self.rm.proposals(), "the twin of an applied row is still pending")
+        self.assertEqual([twins[0]], self.rm.applied())
+        self.assertEqual(["superseded"], [c["closed_as"] for c in self.rm.closed()])
+
     def test_a_stamp_that_names_several_rows_selects_none(self):
         """`at` is not unique (one-second resolution). A selector that silently picked one of two rows
         would be choosing for the coordinator; it refuses and names them instead."""

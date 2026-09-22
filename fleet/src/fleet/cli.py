@@ -89,7 +89,7 @@ from fleet.review import Finding, Review, exit_code_for, receive_advisory
 from fleet import origin as origin_mod
 from fleet.origin import Origin
 from fleet.roadmap import (ATTENTION, COORDINATOR, RETIRED, SUPERSEDED, TERMINAL, Milestone,
-                           Proposal, Roadmap)
+                           Proposal, Roadmap, _last_index)
 from fleet.session import (TMUX_SOCKET_ENV, SessionLayer, default_probes,
                            plain as pane_plain)
 from fleet.store import Declarations, Record, Store
@@ -2463,7 +2463,7 @@ def _do_milestone(ctx: Ctx, parsed: Parsed) -> int:
     #: in three IT fixture matrices (`II-4`). It writes exactly `dropped`, only onto a milestone that has
     #: not finished, and only with a reason — see `Roadmap.retire`.
     if parsed.on("retire"):
-        if not parsed.get("reason"):
+        if not " ".join(str(parsed.get("reason") or "").split()):
             raise BadInput(
                 f"`--retire` needs `--reason`. `dropped` and `done` are both terminal and look alike to "
                 f"a later reader, so a milestone that left the population without a recorded why is a "
@@ -2483,11 +2483,14 @@ def _do_milestone(ctx: Ctx, parsed: Parsed) -> int:
                                      ("would-close", f"{doomed} pending proposal(s) for {parsed.get('id')}, "
                                                      f"as retired")])
             return EXIT_OK
+        def retired_rows():
+            return len([c for c in roadmap.closed() if c["milestone"] == target and c["closed_as"] == RETIRED])
+        #: Counted as the difference in what `retire` RECORDED, not from a read of `pending` before it: a
+        #: milestone re-opened with `apply --reopen` can be retired a second time, and the first retire's
+        #: rows are not this call's.
+        already = retired_rows()
         retired = roadmap.retire(target, parsed.get("reason"))
-        #: Counted from what `retire` recorded under its lock, not from a read before it: ids are permanent
-        #: and a milestone is retired at most once, so these are exactly the rows this call closed.
-        doomed = len([c for c in roadmap.closed()
-                      if c["milestone"] == retired.id and c["closed_as"] == RETIRED])
+        doomed = retired_rows() - already
         #: S3 / I-24a. Retiring frees the ROW, not the id: on a live effort `m8` could not be re-raised
         #: and became `m9`, then `m12`->`m15`, `m13`->`m16`, `m14`->`m17`. That permanence is correct —
         #: `OBS-14`, append-only registers, and a roadmap full of cross-references that depend on an id
@@ -3267,9 +3270,10 @@ def _unreported_to_coordinator(ctx: Ctx, child: Path):
         check's to diagnose;
       * that milestone is NOT terminal at the coordinator — if it already reads done or dropped, the report
         arrived or the work was written off, and either way nothing is being lost;
-      * and this worker's LAST report for it — its last pending row, else its last applied one — is
-        absent or only progress (`running`). A pending final word is about to be applied by `harvest`
-        itself; an applied one was already acted on by the coordinator (`B01`).
+      * and this worker's LAST report for it — its last pending row, else the newest of its applied and
+        superseded ones (`B02`: a superseded row arrived and was decided on) — is absent or only progress
+        (`running`). A pending final word is about to be applied by `harvest` itself; an applied or
+        superseded one was already acted on by the coordinator (`B01`).
 
     So the refusal fires only when the FINAL report exists nowhere — no report at all, or a last report
     that is only progress (`running`). It is a refusal rather than a warning because
@@ -3291,9 +3295,9 @@ def _unreported_to_coordinator(ctx: Ctx, child: Path):
     if milestone.status in TERMINAL:
         return None
     #: `B01`. The worker's LAST WORD, however it reached the coordinator: its last pending row if it has
-    #: one (harvest applies pending rows in order, so that is the status it would leave), else its last
-    #: applied row (the status an apply already left — list order is apply order, which is what
-    #: `roadmap.json` shows). Only THIS worker's rows: one another instant wrote proves nothing about this one.
+    #: one (harvest applies the worker's last row per milestone, so that is the status it would leave),
+    #: else its last applied row (the status an apply already left — list order is apply order, which is
+    #: what `roadmap.json` shows). Only THIS worker's rows: one another instant wrote proves nothing about this one.
     #: Refused when there is none, or when it is `running`, the one status that is only ever progress. So the
     #: answer depends neither on whether the coordinator applied first (`harvesting-an-instant` applies
     #: first) nor on harvest's own earlier apply (a retry after a crash in J9's window), and a mid-flight
@@ -3383,7 +3387,7 @@ def _superseded_by(roadmap: Roadmap, rows: list) -> int:
     count = 0
     for row in rows:
         if row in pending:
-            cut = pending.index(row)
+            cut = _last_index(pending, row)
             count += sum(1 for p in pending[:cut] if p.milestone == row.milestone)
     return count
 

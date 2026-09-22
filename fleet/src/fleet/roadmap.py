@@ -191,6 +191,13 @@ def _check_evidence(evidence, milestone: str) -> list:
     return [str(e) for e in items]
 
 
+def _last_index(rows: list, row) -> int:
+    """Where `row` sits in `rows`, counting from the END. Two byte-identical rows (a propose repeated inside
+    one second) are one report sent twice; cutting at the LAST copy makes the earlier copy superseded rather
+    than leaving it pending after its twin was applied. `select`, `_consume` and harvest's count all cut here."""
+    return len(rows) - 1 - rows[::-1].index(row)
+
+
 def _one_at(rows: list, at: str, milestone: str, where) -> list:
     """`B02`'s row selector: the ONE pending row (dict) for `milestone` stamped `at`. Zero or several
     matches are refused by name — `at` has one-second resolution, so two rows can share it."""
@@ -613,9 +620,9 @@ class Roadmap:
             body = asdict(proposal)
             pending = data["pending"]
             if body in pending:
-                at = pending.index(body)
+                at = _last_index(pending, body)
                 earlier = [r for r in pending[:at] if r["milestone"] == body["milestone"]]
-                pending.remove(body)
+                del pending[at]
                 data["applied"].append(body)
                 if earlier:
                     self._close(data, earlier, SUPERSEDED,
@@ -634,7 +641,7 @@ class Roadmap:
                 "is nothing to apply or withdraw. `apply` applies a worker's proposal; it does not invent a "
                 "status.")
         chosen = _one_at(rows, at, milestone, self.proposals_path)[0] if at is not None else rows[-1]
-        cut = rows.index(chosen)
+        cut = _last_index(rows, chosen)
         return (Proposal(**chosen), [Proposal(**r) for r in rows[:cut]],
                 [Proposal(**r) for r in rows[cut + 1:]])
 

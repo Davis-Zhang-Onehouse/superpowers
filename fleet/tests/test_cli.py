@@ -2921,6 +2921,18 @@ class TestApplyChoosesOneRow(CliCase):
         code, out, err = fleet.run(argv + ["--dry-run"])
         self.assertEqual(EXIT_BAD_INPUT, code, "the dry run must refuse what the real retire refuses")
 
+        #: Task 3 review: re-opened and retired AGAIN, the count is this retire's rows, not every retire's.
+        roadmap = Roadmap(coordinator)
+        roadmap.apply(roadmap.propose(coordinator, "m7", "running", ["evidence/back.log"]), reopen=True)
+        roadmap.propose(coordinator, "m7", "running", ["evidence/again.log"])
+        code, out, err = fleet.run(argv)
+        self.assertEqual(EXIT_OK, code, err)
+        self.assertIn("1 pending proposal(s)", out, "the second retire counted the first retire's rows")
+        code, _, err = fleet.run(["milestone", "--instant", str(coordinator), "--id", "m7", "--retire",
+                                  "--reason", "   ", "--dry-run"])
+        self.assertEqual(EXIT_BAD_INPUT, code, "a blank reason passed the dry run the real run refuses")
+        self.assertIn("needs `--reason`", err)
+
 
 class TestProposeTakesTwoInstants(CliCase):
     """`SI-23`. `propose` has a PROPOSER and a DESTINATION roadmap, and this handler passed the same value
