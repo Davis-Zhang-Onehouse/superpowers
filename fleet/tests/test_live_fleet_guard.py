@@ -41,7 +41,7 @@ class LiveFleetGuardCase(unittest.TestCase):
         """`default_context` looks `resolve_home` up by name at call time, `_releases` does the same for
         `resolve_releases`, and every marker read goes through `root.load` — wrapped anywhere else, the
         guard would watch a name nobody calls."""
-        for seam in (root_mod.load, cli.resolve_home, cli.resolve_releases):
+        for seam in (root_mod.load, cli.resolve_home, cli.resolve_instants, cli.resolve_releases):
             self.assertTrue(getattr(seam, "live_fleet_guard", False), f"{seam!r} is not the guard")
 
     def test_it_fires_on_a_live_root(self):
@@ -71,6 +71,22 @@ class LiveFleetGuardCase(unittest.TestCase):
             with self.assertRaises(LiveFleetReached):
                 self._promote("--root", str(self.root))
 
+    def _promote_with_ambient_instants(self):
+        """A private store named by `FLEET_HOME` beside an INHERITED `FLEET_INSTANTS` — the shape of every
+        dispatched session, whose `FLEET_INSTANTS` is the operator's live effort tree."""
+        with hermetic_environment(self.tmp / "instants", home=self.home):
+            os.environ["FLEET_HOME"] = str(self.tmp / "store")
+            return cli.main(["release-promote", "--version", "0.1.0", "--releases", str(self.releases)],
+                            stdout=io.StringIO(), stderr=io.StringIO())
+
+    def test_it_fires_on_a_live_instants_tree(self):
+        with mock.patch.object(tests, "LIVE_INSTANTS", frozenset({(self.tmp / "instants").resolve()})):
+            with self.assertRaises(LiveFleetReached):
+                self._promote_with_ambient_instants()
+
+    def test_it_is_silent_on_a_fixture_s_own_instants_tree(self):
+        self.assertEqual(self._promote_with_ambient_instants(), 4)
+
     def test_it_is_silent_on_a_fixture_s_own_root(self):
         """The same call with nothing marked live: the verb answers (a refusal — there is no release),
         so the guard is not what decides the outcome of a hermetic test."""
@@ -80,12 +96,14 @@ class LiveFleetGuardCase(unittest.TestCase):
         """The walk from the cwd under `$HOME`, plus what the environment names."""
         cwd = self.root / "deep" / "slot"
         cwd.mkdir(parents=True)
-        roots, stores, releases = tests._live_destinations(
+        roots, stores, releases, instants = tests._live_destinations(
             {"HOME": str(self.home), "FLEET_HOME": str(self.tmp / "h"),
-             "FLEET_RELEASES": str(self.tmp / "r")}, cwd)
+             "FLEET_RELEASES": str(self.tmp / "r"), "FLEET_INSTANTS": str(self.tmp / "i")}, cwd)
         self.assertEqual(roots, {self.root.resolve()})
         self.assertEqual(stores, {self.root.resolve() / ".fleet", (self.tmp / "h").resolve()})
         self.assertEqual(releases, {self.root.resolve() / "fleet-releases", (self.tmp / "r").resolve()})
+        self.assertEqual(instants, {self.root.resolve() / ".fleet" / "instants",
+                                    (self.tmp / "h").resolve() / "instants", (self.tmp / "i").resolve()})
 
     def test_a_symlinked_store_or_release_area_is_compared_by_its_target(self):
         """The migration case `root.find` documents: a root's `.fleet` reached through a symlink. Every
@@ -94,7 +112,7 @@ class LiveFleetGuardCase(unittest.TestCase):
         (self.tmp / "real-releases").mkdir()
         (self.root / ".fleet").symlink_to(self.tmp / "real-store")
         (self.root / "fleet-releases").symlink_to(self.tmp / "real-releases")
-        _, stores, releases = tests._live_destinations({"HOME": str(self.home)}, self.root)
+        _, stores, releases, _ = tests._live_destinations({"HOME": str(self.home)}, self.root)
         self.assertEqual(stores, {(self.tmp / "real-store").resolve()})
         self.assertEqual(releases, {(self.tmp / "real-releases").resolve()})
 
@@ -103,7 +121,7 @@ class LiveFleetGuardCase(unittest.TestCase):
         suite from an export under `/tmp` could never reach a root, and could never pass a test that
         needed one."""
         self.assertEqual(tests._live_destinations({"HOME": str(self.home)}, self.tmp),
-                         (frozenset(), frozenset(), frozenset()))
+                         (frozenset(), frozenset(), frozenset(), frozenset()))
 
 
 if __name__ == "__main__":
