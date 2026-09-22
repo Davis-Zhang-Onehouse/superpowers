@@ -1,5 +1,50 @@
 # fleet — changelog
 
+## fleet/v0.6.4 — 2026-09-22T15:41:27Z
+Cut from b3e4074 on `live` (upstream base snapshot/2026-09-22-152849). 35 commit(s) since fleet/v0.6.3.
+
+Every release ships the whole repository — all skills, `commands/`, `hooks/` and the plugin manifest, not only `fleet/`.
+Payload: fleet (5 files), skills (41 files), hooks (1 file), plugin-manifests (1 file), scripts (3 files), tests (11 files), docs (10 files), other (5 files).
+Skills changed: brainstorming, diagnosing-superpowers, executing-plans, releasing-fleet, requesting-code-review, subagent-driven-development, systematic-debugging, test-driven-development, using-superpowers, writing-plans, writing-skills.
+
+> fleet/v0.6.3 is no longer an ancestor of `live` — an upstream rebase rewrote the commits between. This delta was computed by patch-id, not by ancestry.
+
+- 5bf4e78 Release v6.4.1: diagnosing-superpowers, Native plan execution, OpenCode 2.0 and Muse support (#2338)
+- 3dbdf8d the four fleet skills, each carrying tests that prove its factual claims
+- 2710152 fleet v0.3.8
+- 8c1ba35 fleet v0.3.9
+- 2e021ff fleet v0.3.10
+- 8c6eea2 fleet v0.3.11
+- 4aa3c52 fleet v0.3.12
+- e0fbfd9 fleet v0.3.13
+- 65d188a fleet v0.3.14
+- 48feb9f fleet v0.3.15
+- aecbd66 fleet v0.3.16
+- d980ae4 fleet v0.3.17
+- 501c408 fleet v0.3.18
+- f540b3d fleet v0.4.0
+- 6ff9f30 fleet v0.5.0
+- 0ce3842 fleet v0.5.1
+- c11b436 fleet v0.5.2
+- 7851651 fleet v0.5.3
+- 6a667ad fleet v0.5.4
+- 69d51b8 fleet v0.5.5
+- 79bf9b6 fleet v0.5.6
+- 1b27369 fleet v0.5.7
+- 7b56daa fleet v0.5.8
+- 5c8a818 fleet v0.5.9
+- b4fa570 fleet v0.5.10
+- 21a817c fleet v0.5.11
+- 1d3f8b7 fleet v0.5.12
+- fd8c22e fleet v0.6.0
+- d12c28f fleet v0.6.1
+- 37eded5 fleet v0.6.2
+- 5ea8ef4 fleet it: keep the release gate green and out of the live store (B18a)
+- ea77e52 fleet it: A1e reads symlinked/slashed stores, sorts for comm; preflight seam slash-safe
+- 6a5aa9d fleet it: lint-clean IT_ENV_UNNAMED; A1e watches the whole store to depth 4
+- adf9073 fleet v0.6.3
+- 22d8b4b fleet release_scope: CUT_MANIFESTS names upstream 6.4.1's .muse-plugin manifests
+
 ## fleet/v0.6.3 — 2026-09-22T07:18:59Z
 Cut from 6128a59 on `live` (upstream base snapshot/2026-08-17-221146). 26 commit(s) since fleet/v0.6.2.
 
