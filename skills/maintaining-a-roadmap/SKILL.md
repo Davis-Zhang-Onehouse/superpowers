@@ -105,7 +105,8 @@ entry, and in the dispatch note — three places, because the failure is silent.
 ## 5. Retire with a reason the successor needs
 
 A superseded row is retired, not left to rot: once its dependencies land it derives ready forever, and a
-phantom ready row is worse than no row.
+phantom ready row is worse than no row. Retiring also closes the milestone's pending proposals (recorded in
+the inbox as `retired`, never applied) — `milestone --retire` says how many.
 
 **The reason is not a courtesy field.** Write what the superseding row must not lose. The good retirement
 reasons in a mature roadmap read like handover notes — *"superseded by X: the title carried the cost
