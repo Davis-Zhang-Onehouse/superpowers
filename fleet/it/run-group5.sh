@@ -391,6 +391,7 @@ PY
       unpark)    echo "--instant $INSTP --dry-run" ;;
       propose)   echo "--instant $INSTP --milestone M1 --status done --evidence e1 --dry-run" ;;
       apply)     echo "--instant $INSTP --milestone M1 --dry-run" ;;
+      withdraw)  echo "--instant $INSTP --milestone M1 --reason matrix --dry-run" ;;
       review)    echo "--instant $INSTP --dry-run" ;;
       complete)  echo "--instant $INSTP --dry-run" ;;
       abort)     echo "--instant $INSTP --reason l7reason --dry-run" ;;
@@ -634,6 +635,7 @@ PY
       unpark)    echo "--instant $INSTP --dry-run" ;;
       propose)   echo "--instant $INSTP --milestone M1 --status done --evidence e1 --dry-run" ;;
       apply)     echo "--instant $INSTP --milestone M1 --dry-run" ;;
+      withdraw)  echo "--instant $INSTP --milestone M1 --reason matrix --dry-run" ;;
       review)    echo "--instant $INSTP --dry-run" ;;
       complete)  echo "--instant $INSTP --dry-run" ;;
       abort)     echo "--instant $INSTP --reason mreason --dry-run" ;;
@@ -978,13 +980,14 @@ HERMETIC_SITES = {(f"{m}.py", fn) for (m, fn) in OUTWARD_CALL_SITES}
 SEAMS = {(f"{m}.py", fn) for (m, fn) in SPAWN_SEAMS}
 DELETERS = {"rmtree", "remove", "removedirs", "unlink", "rmdir"}
 #: Every delete-shaped call in the package, read and accounted for. `pool` deletes its own bookkeeping
-#: under `<FLEET_HOME>`; `roadmap._consume` calls `list.remove` on a python list and touches no file.
+#: under `<FLEET_HOME>`; `roadmap._close` calls `list.remove` on a python list and touches no file.
 #: A new, moved or renamed site fails this case rather than being absorbed.
 DELETE_ALLOWLIST = {
     ("pool.py", "unenroll", "unlink"),      # <home>/pool/enrolled/<slot>.json
     ("pool.py", "release", "unlink"),       # <home>/pool/leases/<slot>/lease.json and leftovers
     ("pool.py", "release", "rmdir"),        # <home>/pool/leases/<slot>
-    ("roadmap.py", "_consume", "remove"),   # list.remove(body) — not a filesystem call
+    ("roadmap.py", "_close", "remove"),     # B02: list.remove(row) from inbox["pending"], the row then
+                                            # appended to `closed` — not a filesystem call
     ("release.py", "prune", "rmtree"),      # a release directory beyond the 10-release ceiling, under
                                             # $FLEET_RELEASES, named `fleet-v<semver>` by this package and
                                             # chosen by semver order. Never the DEPLOYED one. The tag
@@ -1012,7 +1015,7 @@ DELETE_ALLOWLIST = {
                                                 # alternative leaves `current` absent — measured at 238160
                                                 # sightings by a concurrent reader over 300 flips.
 }
-NOT_A_FILE_DELETE = {("roadmap.py", "_consume", "remove")}
+NOT_A_FILE_DELETE = {("roadmap.py", "_close", "remove")}
 
 def owner_of(tree):
     """The chain of enclosing functions for every node. A class name is not who makes a call, and a

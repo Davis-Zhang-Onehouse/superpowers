@@ -100,7 +100,11 @@ fleet propose --instant "$INSTANT" --milestone <m> --status awaiting-ci --eviden
 ```
 
 `running` → `awaiting-ci` → `done`. No `--to` is needed — the destination is a fact in `origin.json`, written
-by the dispatcher. Evidence is mandatory: an empty list is refused at the producer for all three shapes of
+by the dispatcher. Each report supersedes your earlier ones for that milestone: the coordinator's `apply`
+lands only the newest, and a superseded report's evidence never reaches the milestone — so your final
+report cites everything the claim rests on (an `evidence/INDEX.md` that indexes it is the usual shape). A report you sent by mistake can be taken back with `fleet withdraw --instant
+<coordinator> --milestone <m> --at <its stamp> --reason "<why>"`, where `<coordinator>` is the path `fleet
+brief`'s `destination` row names and `fleet roadmap --instant <coordinator>` prints each row's stamp. Evidence is mandatory: an empty list is refused at the producer for all three shapes of
 empty, because a proposal with no evidence is a claim rather than a report.
 <!-- v2-cite: evidence-is-mandatory H4 -->
 When the work waits on CI rather than on you, say so: `fleet declare --instant "$INSTANT" --phase awaiting-ci` is the

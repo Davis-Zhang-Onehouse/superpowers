@@ -100,7 +100,8 @@ Mutating. Each has `--dry-run`.
 | `fleet resume` | adopt an existing conforming instant; evaluates NO admission rule |
 | `fleet milestone` | the coordinator puts a milestone ON the roadmap — the only way work becomes dispatchable; `--retire` drops one, `--disown` releases a claim stranded by an instant that is gone |
 | `fleet propose` | the worker's status proposal; never a roadmap write |
-| `fleet apply` | the coordinator applies a proposal; the single writer of a status |
+| `fleet apply` | the coordinator applies a proposal; the single writer of a status. Lands the NEWEST pending row for the milestone (`--at <stamp>` picks one) and closes the earlier ones as superseded; refuses to move a done/dropped milestone unless `--reopen` |
+| `fleet withdraw` | close pending proposals without applying them (`--at` for one row, `--reason` required); writes the inbox, never the roadmap |
 | `fleet declare` | declare a phase, and print what the consumer now reads; `awaiting-ci` is REFUSED unless a watcher is armed |
 | `fleet park` / `fleet unpark` | record or clear a parked decision as structured state |
 | `fleet review` | record a structured round and report the gate |
