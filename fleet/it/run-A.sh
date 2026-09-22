@@ -375,26 +375,39 @@ a1_real_store_untouched() {
 # its mtime. Attribution rather than a whole-store manifest, because the inherited store is usually a LIVE
 # one that other workers write all the time: a content+mtime diff of it would charge their churn to §A.
 # Nothing but this harness writes `$IT_ROOT` into a record or `golden`. Read-only: `grep -l` and `stat`.
+#: Each store is resolved (`pwd -P`) before `find`: `find` does not descend a start path that is a SYMLINK
+#: (`~/.fleet -> davis_root/.fleet` on this box), and a trailing slash makes `-path "$st/records/*"` match
+#: nothing — either way before and after are both empty and the case would pass over a store it never read.
+#: The number of candidate files examined goes to `$OUT/A1e-examined.txt` so that is visible, not silent.
+#: Whole lines are sorted under `LC_ALL=C`, because `comm` below needs exactly that order.
 a1_inherited_attributable() {
-  local st
-  while IFS= read -r st; do
+  local st examined=0
+  { while IFS= read -r st; do
     [ -n "$st" ] && [ -d "$st" ] || continue
+    st="$(cd "$st" && pwd -P)" || continue
+    examined=$((examined + $(find "$st" -maxdepth 2 -type f \( -path "$st/records/*" -o -path "$st/golden" \
+                                  -o -path "$st/harvest/*" \) | grep -c .)))
     find "$st" -maxdepth 2 -type f \( -path "$st/records/*" -o -path "$st/golden" -o -path "$st/harvest/*" \) \
-         -exec grep -lF "$IT_ROOT" {} + 2>/dev/null | sort | while IFS= read -r f; do
+         -exec grep -lF "$IT_ROOT" {} + 2>/dev/null | while IFS= read -r f; do
       printf '%s %s\n' "$(stat -c '%Y' "$f" 2>/dev/null)" "$f"
     done
   done <<<"$A_INHERITED_STORES"
+    printf '%s\n' "$examined" > "$OUT/A1e-examined.txt"; } | LC_ALL=C sort
 }
 
 #: `A1e` — the escape `A1c` cannot see: a probe verb resolving the CALLER's root and writing ITS store.
 a1_inherited_store_untouched() {
   a1_inherited_attributable > "$OUT/A1e-inherited-after.txt"
-  local new; new="$(comm -13 "$OUT/A1e-inherited-before.txt" "$OUT/A1e-inherited-after.txt")"
+  local new; new="$(LC_ALL=C comm -13 "$OUT/A1e-inherited-before.txt" "$OUT/A1e-inherited-after.txt")"
+  local examined; examined="$(cat "$OUT/A1e-examined.txt" 2>/dev/null || echo 0)"
   printf '%s\n' "$A_INHERITED_STORES" > "$OUT/A1e-inherited-stores.txt"
   if [ -z "$A_INHERITED_STORES" ]; then
     a_pass A1e "$OUT/A1e-inherited-stores.txt" "$(sq "no FLEET_ROOT or FLEET_HOME was inherited by this run, so there was no caller store for an A1 probe to escape into; the watched population is empty and says so")"
   elif [ -z "$new" ]; then
-    a_pass A1e "$OUT/A1e-inherited-after.txt" "$(sq "no file naming this harness tree appeared or changed in the store(s) the caller's FLEET_ROOT/FLEET_HOME name ($(printf '%s' "$A_INHERITED_STORES" | scrub | tr '\n' ' ')) across the whole A1 probe — no probe verb resolved the inherited root")"
+    #: Worded as narrowly as the check. It sees writes that CARRY this harness tree's path (records, harvest,
+    #: golden); a probe whose argv names no harness path (`runtime --set`, `reap`, `init --name`) could write
+    #: the inherited store without this case noticing. `A1b` — every verb refused — is the real protection.
+    a_pass A1e "$OUT/A1e-inherited-after.txt" "$(sq "no file naming this harness tree appeared or changed in the store(s) the caller's FLEET_ROOT/FLEET_HOME name ($(printf '%s' "$A_INHERITED_STORES" | scrub | tr '\n' ' ')) across the whole A1 probe; $examined candidate file(s) under records/, harvest/ and golden were examined. This sees only writes carrying the harness path — A1b is what shows no verb resolved the inherited root")"
   else
     printf '%s\n' "$new" > "$OUT/A1e-escaped.txt"
     a_fail A1e "$OUT/A1e-escaped.txt" "$(sq "$(printf '%s\n' "$new" | grep -c .) file(s) naming this harness tree were written into a store the CALLER's environment names during the A1 probe: $(printf '%s' "$new" | awk '{print $2}' | scrub | tr '\n' ' ')— a probe verb resolved the inherited root (FLEET_ROOT is root tier 4) instead of refusing, and wrote that root's store")"
