@@ -16,11 +16,14 @@
 #                                                     RETRACTED remedy (narrow BLOCKED to park.json) would hide
 #   AT5  a quiet pane, a human ATTACHED            -> RUNNING: attachment alone makes nothing actionable
 #   AT6  `status` reports the attachment as evidence
-#   AT7  the banner counts exactly the two detached BLOCKED workers
+#   AT7  the banner counts exactly the three BLOCKED workers nobody interactive is attached to
+#   AT8  a dialog with only a READ-ONLY client attached (`attach -r`) -> counted: that client cannot answer the
+#        modal, and tmux still counts it in #{session_attached} and moves #{session_activity} on its dropped
+#        keystrokes (RV-28)
 #   AT0  fixture control: tmux itself reports 1 client on every attached session and 0 on every other, or
 #        every verdict above is about something else
 #
-# On the base before B24, AT1 and AT3 FAIL (both `attention`) and AT7 reads `4 needs you`.
+# On the base before B24, AT1 and AT3 FAIL (both `attention`) and AT7 reads `5 needs you`.
 set -uo pipefail
 IT_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]:-$0}")" && pwd)"
 # shellcheck disable=SC1091
@@ -49,13 +52,13 @@ bash "$IT_ROOT/bin/source-pin.sh" before "$OUT" || exit 2
 PATH="$IT_ROOT/bin:$PATH"; export PATH          # the stand-in `claude`: a dispatch here launches no model
 
 if ! command -v script >/dev/null 2>&1; then
-  for c in AT0 AT1 AT2 AT3 AT4 AT5 AT6 AT7; do it_skip "$c" "" 'util-linux `script` is not installed, so no client can be attached'; done
+  for c in AT0 AT1 AT2 AT3 AT4 AT5 AT6 AT7 AT8; do it_skip "$c" "" 'util-linux `script` is not installed, so no client can be attached'; done
   it_assert_isolation AT-leave; exit "$IT_FAILED"
 fi
 
 COORD="$(fleet init --base 00000000 --name "coordat$$" --porcelain 2>"$OUT/init.err" | awk -F'\t' '$1=="path"{print $2; exit}')"
 cp -r "$INSTANT/tests/fixtures/profiles/workerCompliant" "$OUT/profile"
-{ for n in 1 2 3 4 5; do
+{ for n in 1 2 3 4 5 6; do
     ( mkdir -p "$OUT/slots/s$n" && cd "$OUT/slots/s$n" && git init -q . && git commit -q --allow-empty -m base ) &&
     fleet enroll --slot "$OUT/slots/s$n" --porcelain || exit 1
   done
@@ -67,7 +70,7 @@ printf 'wrote target/fleet.jar\ndone\n\n\342\235\257 also re-run the rebase chec
 printf 'Which of these should I keep?\n  1. Drop it\n  2. Keep it and carry the note\n\nEnter to select \302\267 Tab/Arrow keys to navigate \302\267 Esc to cancel\n' > "$OUT/dialog.txt"
 printf 'compiled 42 files\nwrote target/fleet.jar\ndone\n' > "$OUT/quiet.txt"
 
-# dispatch <tag> -> ID, TMUXS. Five independent scenarios on one store, so every dispatch past the cap overrides.
+# dispatch <tag> -> ID, TMUXS. Six independent scenarios on one store, so every dispatch past the cap overrides.
 dispatch() {
   fleet dispatch --profile "$OUT/profile" --title "$1" --base 00000000 --optype append --from "$COORD" \
         --override "AT: independent scenarios on one private store" --porcelain > "$OUT/$1-dispatch.out" 2>&1
@@ -83,10 +86,11 @@ frame() {
 }
 # attach: a REAL client on the session. stdin is a FIFO this shell holds open: /dev/zero would TYPE (NULs move
 # #{session_activity}), /dev/null would end `script` at EOF. $TMUX unset: attaching from inside a pane is nesting.
+# `attach -r` for a read-only client.
 attach() {
   local fifo="$OUT/$TMUXS.client.in" fd
   mkfifo "$fifo"; exec {fd}<>"$fifo"
-  env -u TMUX SHELL=/bin/sh setsid script -qfc "tmux -L $IT_TMUX_SOCKET attach -t =$TMUXS" /dev/null \
+  env -u TMUX SHELL=/bin/sh setsid script -qfc "tmux -L $IT_TMUX_SOCKET attach ${1:-} -t =$TMUXS" /dev/null \
       < "$fifo" > "$OUT/$TMUXS.client.tty" 2>&1 &
   CLIENTS+=("$!")
   for _ in 1 2 3 4 5 6 7 8 9 10; do
@@ -114,13 +118,16 @@ dispatch atStuck;    T4="$TMUXS"; frame "$OUT/dialog.txt";         observe AT4
 AT4=("$STATE" "$SEV" "$NOTE" "$RCS")
 dispatch atQuiet;    T5="$TMUXS"; frame "$OUT/quiet.txt";  attach; observe AT5
 AT5=("$STATE" "$SEV" "$NOTE" "$RCS")
+dispatch atReadOnly; T6="$TMUXS"; frame "$OUT/dialog.txt"; attach -r; observe AT8
+AT8=("$STATE" "$SEV" "$NOTE" "$RCS")
+it_tmux list-clients -t "=$T6" -F '#{client_readonly}' > "$OUT/AT8-clients.out" 2>&1
 fleet board > "$OUT/banner.out" 2>&1; banner_rc=$?
 it_tmux list-sessions -F '#{session_name} #{session_attached}' > "$OUT/AT0-attached.out" 2>&1
 
 # ---- AT0: the fixture is the state it claims -------------------------------------------------------------
-want="$(printf '%s 1\n%s 0\n%s 1\n%s 0\n%s 1\n' "$T1" "$T2" "$T3" "$T4" "$T5" | sort)"
-if [ "$(sort "$OUT/AT0-attached.out")" = "$want" ]; then
-  it_pass AT0 "fleet/it/AT/out/AT0-attached.out" 'fixture control: tmux reports one client on each attached session and none on the others'
+want="$(printf '%s 1\n%s 0\n%s 1\n%s 0\n%s 1\n%s 1\n' "$T1" "$T2" "$T3" "$T4" "$T5" "$T6" | sort)"
+if [ "$(sort "$OUT/AT0-attached.out")" = "$want" ] && [ "$(cat "$OUT/AT8-clients.out")" = 1 ]; then
+  it_pass AT0 "fleet/it/AT/out/AT0-attached.out" 'fixture control: tmux reports one client on each attached session and none on the others, and the AT8 client is read-only'
 else it_fail AT0 "fleet/it/AT/out/AT0-attached.out" "tmux did not report the attachment the fixture built: $(tr '\n' ';' < "$OUT/AT0-attached.out")"; fi
 
 # verdict <case> <want-state> <want-sev> <note-must-contain|-> <note-must-not-contain|-> <array...>
@@ -138,6 +145,7 @@ verdict AT2 BLOCKED attention -                     'attached' "${AT2[@]}" 'the 
 verdict AT3 BLOCKED info      'a human is attached' -          "${AT3[@]}" 'a dialog in front of an attached human is theirs to answer'
 verdict AT4 BLOCKED attention -                     'attached' "${AT4[@]}" 'the same dialog with nobody attached is a stuck worker and is counted'
 verdict AT5 RUNNING info      -                     -          "${AT5[@]}" 'attachment alone makes nothing actionable'
+verdict AT8 BLOCKED attention -                     'a human is attached' "${AT8[@]}" 'a dialog with only a read-only client attached is still a stuck worker'
 
 # ---- AT6: the fact is evidence on `status`, for any consumer that must not type into an occupied pane ------
 att="$(awk -F'\t' '$1=="evidence.attached"{print $2}' "$OUT/AT1-status.tsv")"
@@ -146,9 +154,9 @@ if [[ "$att" == "1 client, last input "* ]] && [ "$att2" = "no client" ]; then
   it_pass AT6 "fleet/it/AT/out/AT1-status.tsv" "status carries the attachment: attached=[$att], detached=[$att2]"
 else it_fail AT6 "fleet/it/AT/out/AT1-status.tsv" "status evidence.attached: attached=[$att] detached=[$att2]"; fi
 
-# ---- AT7: the banner counts exactly the two detached BLOCKED workers ---------------------------------------
-if [ "$banner_rc" = 0 ] && grep -q '5 holding a slot · 2 needs you' "$OUT/banner.out"; then
-  it_pass AT7 "fleet/it/AT/out/banner.out" 'banner: 5 holding a slot · 2 needs you'
+# ---- AT7: the banner counts exactly the three BLOCKED workers no interactive client is at ------------------
+if [ "$banner_rc" = 0 ] && grep -q '6 holding a slot · 3 needs you' "$OUT/banner.out"; then
+  it_pass AT7 "fleet/it/AT/out/banner.out" 'banner: 6 holding a slot · 3 needs you'
 else it_fail AT7 "fleet/it/AT/out/banner.out" "board rc=$banner_rc; $(grep -o '[0-9]* holding a slot · [0-9]* needs you' "$OUT/banner.out")"; fi
 
 at_cleanup; CLIENTS=()
