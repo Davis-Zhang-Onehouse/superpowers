@@ -1031,3 +1031,24 @@ class TestEvidenceResolves(RoadmapCase):
             self.rm.apply(row)
         self.assertIn("terminal", dry)
         self.assertEqual(dry, str(caught.exception))
+
+    def test_a_legacy_relative_item_for_the_same_file_is_upgraded_to_the_anchored_one(self):
+        """RV-20. A pre-B03 relative string naming the file a new row cites used to SWALLOW the anchored item
+        (dedup by location found it and skipped), so the unanchored string survived and dangled once `owner`
+        changed. The legacy entry is now upgraded in place."""
+        self.rm.add(ms("legacy", status="running", evidence=["evidence/proof.log"], owner=str(self.worker)))
+        milestone = self.rm.apply(self.rm.propose(self.worker, "legacy", "done", ["evidence/proof.log"]))
+        self.assertEqual([str(self.proof)], milestone.evidence)
+
+    def test_a_legacy_relative_item_for_another_file_is_left_as_written(self):
+        cite(self.worker, ["evidence/other.log"])
+        self.rm.add(ms("legacy", status="running", evidence=["evidence/other.log"], owner=str(self.worker)))
+        milestone = self.rm.apply(self.rm.propose(self.worker, "legacy", "done", ["evidence/proof.log"]))
+        self.assertEqual(["evidence/other.log", str(self.proof)], milestone.evidence)
+
+    def test_a_same_named_legacy_item_at_another_owner_is_a_different_location_and_is_kept(self):
+        other = self.tasks / "00000000-07300401-inflight-append-otherOwner"
+        cite(other, ["evidence/proof.log"])
+        self.rm.add(ms("legacy", status="running", evidence=["evidence/proof.log"], owner=str(other)))
+        milestone = self.rm.apply(self.rm.propose(self.worker, "legacy", "done", ["evidence/proof.log"]))
+        self.assertEqual(["evidence/proof.log", str(self.proof)], milestone.evidence)
