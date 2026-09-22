@@ -1168,8 +1168,12 @@ OUTWARD_CALL_SITES = {
         "`chmod -R a-w` and rmtree cannot delete a read-only tree — the same mistake QI-7 left in the "
         "verification worktrees, one directory over"),
     ("roadmap", "_consume"): (
-        "list.remove of a dict from a LOCAL list built by `list(data['pending'])` — an in-memory element, "
-        "not a path. Nothing is deleted; the list is then written back through atomic_write"),
+        "list.remove of a dict from the in-memory `data['pending']` list — an element, not a path. Nothing "
+        "is deleted; the row moves to `applied` and the lists are written back through atomic_write"),
+    ("roadmap", "_close"): (
+        "`B02`. list.remove of a dict from the in-memory `inbox['pending']` list — an element, not a path. "
+        "Nothing is deleted: the same row is appended to `closed` with why, and the caller writes both "
+        "lists back through atomic_write"),
     # --- the three subprocess seams, enumerated (FI-27a) --------------------------------------------
     ("cli", "_default_runner"): "spawn seam: the command runner every handler is handed, injected in tests",
     ("session", "default_probes"): "spawn seam: pgrep and tmux, injected in tests as `Probes`",
@@ -3307,10 +3311,13 @@ class TestTheDispatchMilestoneJoin(CliCase):
         `harvesting-an-instant` step 2 exists to catch exactly that by hand. Harvest must not be the way
         round it: the row stays pending for the coordinator, and the harvest says so."""
         fleet = self.loaded()
-        coordinator, todo, child, _ = self._reported_and_finished(fleet, "running")
+        coordinator, todo, child, _ = self._reported_and_finished(fleet, "done")
         roadmap = Roadmap(coordinator)
-        landed = roadmap.propose(coordinator, "M9", "done", ["evidence/INDEX.md"])
-        roadmap.apply(landed)                         # landed by another route while the row sat pending
+        roadmap.apply([p for p in roadmap.proposals() if p.instant == child][-1])   # M9 landed
+        #: `B02`. The stale row must ARRIVE after the landing. A row that was pending when a newer row for
+        #: the same milestone was applied is closed as superseded by that apply and never reaches harvest
+        #: (next test); the one harvest must hold back is a report the worker sent after M9 finished.
+        roadmap.propose(child, "M9", "running", ["evidence/late.log"])
 
         code, out, err = fleet.run(["harvest", "--id", todo, "--porcelain"])
 
@@ -3323,6 +3330,25 @@ class TestTheDispatchMilestoneJoin(CliCase):
         held = [line for line in out.splitlines() if line.startswith("harvest-held\t")]
         self.assertTrue(held, f"harvest held a row back without saying so: {out}")
         self.assertIn("attention", held[0])
+
+    def test_a_row_pending_when_the_milestone_landed_is_superseded_not_held(self):
+        """`B02`. The worker's `running` sat pending while the coordinator applied a NEWER `done` for M9:
+        that apply closes the older row as superseded, so it is neither applied by harvest (no un-landing)
+        nor left pending as residue nobody can clear — it is recorded, with what superseded it."""
+        fleet = self.loaded()
+        coordinator, todo, child, _ = self._reported_and_finished(fleet, "running")
+        roadmap = Roadmap(coordinator)
+        landed = roadmap.propose(coordinator, "M9", "done", ["evidence/INDEX.md"])
+        roadmap.apply(landed)
+
+        code, out, err = fleet.run(["harvest", "--id", todo, "--porcelain"])
+
+        self.assertIn("harvested\t", out, f"{out} {err}")
+        self.assertEqual("done", Roadmap(coordinator).milestone("M9").status)
+        self.assertEqual([], [p for p in Roadmap(coordinator).proposals() if p.instant == child])
+        superseded = [c for c in Roadmap(coordinator).closed() if c["instant"] == child]
+        self.assertEqual([("running", "superseded", landed.at)],
+                         [(c["status"], c["closed_as"], c["superseded_by"]["at"]) for c in superseded])
 
     def test_harvest_after_the_coordinator_applied_first_still_closes_and_gives_back_the_claim(self):
         """`harvesting-an-instant`'s documented sequence APPLIES first and harvests second. Measured by the
