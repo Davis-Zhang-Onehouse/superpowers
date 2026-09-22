@@ -81,6 +81,11 @@ to write it off. `fleet abort` does not help here; it only takes an `-inflight-`
 handed off at `awaiting-ci` is closed out, and its milestone stays undispatchable until you move the status
 — that part is your call, not harvest's.
 
+**Harvest also refuses a report whose evidence no longer resolves** — a cited file deleted since, or a folder
+moved — because `apply` would refuse the row and closing the worker would strand its report. `fleet roadmap`
+marks such a row `DANGLING EVIDENCE:` before you get there. The remedy is a re-propose citing paths that
+resolve (relative to the worker's own folder), or `fleet withdraw` if the report is residue.
+
 ## Never close on one pane sample
 
 Require **three consecutive** non-wait samples from `fleet pane-guard`, and check attachment separately.

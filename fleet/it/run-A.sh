@@ -197,6 +197,8 @@ if not road.milestones():
 print("milestones:", [m.id for m in road.milestones()])
 PY
   A1_INST="$A1_INST" python3 "$PY_DIR/a1seed.py" >> "$OUT/A1-fixture.out" 2>&1
+  # `B03`: the `propose` row cites `a1evidence`; propose admits only evidence that resolves against the proposer.
+  printf 'a1\n' > "$A1_INST/a1evidence"
   #: `complete` needs a passed review gate to reach its ok path; seeded here so its A1 probe is a real
   #: attempt to rename an instant and not a gate refusal in disguise.
   timeout 60 python3 -m fleet.cli review --home "$d/ctlhome" --instants-dir "$d/inst" \

@@ -359,6 +359,11 @@ H11="$OUT/h11"; mkdir -p "$H11"
   fleet milestone --instant "$COORD" --id q1 --title "three reports" --porcelain
   fleet milestone --instant "$COORD" --id q2 --title "retired with rows" --porcelain
   fleet milestone --instant "$COORD" --id q3 --title "landed" --status done --evidence evidence/INDEX.md --porcelain
+  # `B03`: `propose` admits only evidence that resolves against the proposer, so the worker holds each file
+  # it cites (the "typo" in e2's name is B02's story about superseded rows, not a missing file), and `apply`
+# stores the landed item ANCHORED at the worker's folder, which the state check below expects.
+  mkdir -p "$WORKER/evidence"
+  for f in e0 e1 e2-typo q2 late; do printf '%s\n' "$f" > "$WORKER/evidence/$f.log"; done
   for pair in "running:evidence/e0.log" "awaiting-ci:evidence/e1.log" "running:evidence/e2-typo.log"; do
     fleet propose --instant "$WORKER" --to "$COORD" --milestone q1 --status "${pair%%:*}" \
           --evidence "${pair#*:}" --porcelain; sleep 1.1       # distinct `at` stamps
@@ -386,7 +391,7 @@ PY
 cat "$H11/apply-q1.out" "$H11/state.txt"
 h11_applied=$(grep -c '^applied' "$H11/apply-q1.out"); h11_super=$(grep -c '^superseded' "$H11/apply-q1.out")
 if [ "$h11_apply" = 0 ] && [ "$h11_applied" = 1 ] && [ "$h11_super" = 2 ] \
-   && grep -qF "q1: running ['evidence/e2-typo.log']" "$H11/state.txt" \
+   && grep -qF "q1: running ['$WORKER/evidence/e2-typo.log']" "$H11/state.txt" \
    && [ "$h11_retire" = 0 ] && [ "$h11_late" = 2 ] && grep -qF "q3: done" "$H11/state.txt" \
    && [ "$h11_wd" = 0 ] && [ "$h11_untouched" = 1 ] && [ "$h11_closed_count" = 1 ] \
    && grep -qF "pending q-rows: []" "$H11/state.txt" \
