@@ -15,7 +15,8 @@
 #
 # TE1-TE3 prove A reads as empty AND is usable (a real dispatch starts a session on it, and the record reads
 # once that session is gone); TE4-TE5 prove B reads as empty and that a dispatch onto it is refused WITH A
-# ROUTE; TE6 is the control that the fixtures are the states they claim to be.
+# ROUTE; TE6 is the control that the fixtures are the states they claim to be; TE7 runs harvest's observation
+# tick in both states.
 set -uo pipefail
 IT_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]:-$0}")" && pwd)"
 # shellcheck disable=SC1091
@@ -58,6 +59,8 @@ done
 observe() {                      # observe <tag> [status-id] -> board (+ status), rc captured before anything else runs
   fleet board > "$OUT/$1-board.out" 2>&1; echo "$?" > "$OUT/$1-board.rc"
   if [ -n "${2:-}" ]; then fleet status --id "$2" > "$OUT/$1-status.out" 2>&1; echo "$?" > "$OUT/$1-status.rc"; fi
+  # harvest with no --id is the observation tick alone — the tail that used to die after a committed harvest
+  fleet harvest > "$OUT/$1-harvest.out" 2>&1; echo "$?" > "$OUT/$1-harvest.rc"
 }
 
 # ---- state A -----------------------------------------------------------------------------------------------
@@ -127,6 +130,13 @@ else
     it_fail TE5 "fleet/it/TE/out/B-dispatch.out" "dispatch rc=$b_d; new-session route present: $(grep -c 'tmux refused to start' "$OUT/B-dispatch.out"); leases unchanged (cmp rc): $leases_same"
   fi
 fi
+
+# ---- TE7: harvest's observation tick reads both states (its exit code can carry unrelated standing rows) --
+if [ -f "$OUT/A2-harvest.out" ] && ! grep -q 'Cannot inspect tmux' "$OUT/A2-harvest.out" &&
+   { [ ! -f "$OUT/B-harvest.out" ] || ! grep -q 'Cannot inspect tmux' "$OUT/B-harvest.out"; } &&
+   grep -q 'population' "$OUT/A2-harvest.out"; then
+  it_pass TE7 "fleet/it/TE/out/A2-harvest.out" "harvest's observation tick completes on both states (rc A2=$(cat "$OUT/A2-harvest.rc") B=$(cat "$OUT/B-harvest.rc" 2>/dev/null || echo skipped))"
+else it_fail TE7 "fleet/it/TE/out/A2-harvest.out" "harvest's tick died on the tmux server (rc A2=$(cat "$OUT/A2-harvest.rc"))"; fi
 
 # ---- TE6: the fixtures are the states they claim, or every verdict above is about something else ----------
 if [ "$a_lp" = 1 ] && grep -qx 'no current target' "$OUT/A-list-panes.out" && [ "$a_ls" = 0 ] &&
