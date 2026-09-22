@@ -3174,6 +3174,270 @@ class TestTheDispatchMilestoneJoin(CliCase):
         self.assertNotIn("this instant was dispatched for milestone", out,
                          f"the unreported-work guard fired even though the report had arrived: {out}")
 
+    # ---- and harvest applies the report it was waiting for (B01) -----------------------------------
+
+    def _reported_and_finished(self, fleet, status, title="joined"):
+        """Dispatch onto M9, propose `status` with NO `--to` (so it lands at the coordinator), finish.
+        -> (coordinator, todo, the child's pre-rename path, the child's path now)."""
+        coordinator = self._coordinator_with(fleet)
+        code, out, err = self._dispatch(fleet, coordinator, milestone="M9", title=title)
+        self.assertEqual(0, code, err)
+        child = [line.split("\t")[1] for line in out.splitlines() if line.startswith("instant\t")][0]
+        todo = [line.split("\t")[1] for line in out.splitlines() if line.startswith("todo_id\t")][0]
+        code, out, err = fleet.run(["propose", "--instant", child, "--milestone", "M9", "--status", status,
+                                    "--evidence", "evidence/INDEX.md"])
+        self.assertEqual(0, code, err)
+        renamed = self._finished(fleet, pathlib.Path(child))
+        return coordinator, todo, child, renamed
+
+    def test_harvest_applies_the_workers_report_from_the_coordinators_inbox(self):
+        """B01, THE regression test. `propose` routes a dispatched worker's report to the COORDINATOR
+        (`SI-27`), and `harvest` read `Roadmap(child).proposals()` — the worker's own inbox, empty by
+        construction. Measured before the fix: `delta applied (none pending)`, the coordinator's inbox still
+        pending, M9 still `blocked`, while the session was killed and the slot released."""
+        fleet = self.loaded()
+        coordinator, todo, child, _ = self._reported_and_finished(fleet, "done")
+        bystanders = [p for p in Roadmap(coordinator).proposals() if p.instant != child]
+        self.assertTrue(bystanders, "the fixture's own pending proposal is the scope control; it is gone")
+
+        code, out, err = fleet.run(["harvest", "--id", todo, "--porcelain"])
+
+        harvested = [line for line in out.splitlines() if line.startswith("harvested\t")]
+        self.assertTrue(harvested, f"harvest did not harvest: {out} {err}")
+        self.assertEqual("done", Roadmap(coordinator).milestone("M9").status,
+                         f"harvest closed the worker and the coordinator's roadmap never moved: {harvested}")
+        self.assertEqual([], [p for p in Roadmap(coordinator).proposals() if p.instant == child],
+                         "the worker's report is still pending at the coordinator after its harvest")
+        self.assertNotIn("none pending", harvested[0], "the row says nothing was applied")
+        self.assertIn("M9", harvested[0], "the row must name what it applied")
+        self.assertEqual(bystanders, [p for p in Roadmap(coordinator).proposals() if p.instant != child],
+                         "harvesting ONE worker applied proposals another instant wrote")
+
+    def test_harvest_dry_run_counts_the_rows_a_real_run_would_apply(self):
+        fleet = self.loaded()
+        coordinator, todo, _, _ = self._reported_and_finished(fleet, "done")
+
+        code, out, err = fleet.run(["harvest", "--id", todo, "--dry-run", "--porcelain"])
+
+        row = [line for line in out.splitlines() if line.startswith("would-harvest\t")]
+        self.assertTrue(row, f"{out} {err}")
+        self.assertIn("apply 1 proposal(s)", row[0], f"the dry run counted the wrong inbox: {row[0]}")
+        self.assertEqual("blocked", Roadmap(coordinator).milestone("M9").status, "a dry run moved the roadmap")
+
+    def test_harvest_gives_back_the_claim_on_a_milestone_it_leaves_unfinished(self):
+        """B01's second member (re-measure `NEW-2`). A harvested worker whose last report was not terminal
+        left `owner` at its `-inflight-` path, so every later dispatch onto that milestone was refused as
+        "already claimed" — by an instant that no longer exists, and whose suggested remedy (`abort` it)
+        cannot run on a harvested folder.
+
+        `blocked` is the status that makes it bite: a worker that could not finish reports its milestone
+        back to a PENDING status, and only the stale owner then stands between it and the next dispatch."""
+        fleet = self.loaded()
+        coordinator, todo, _, _ = self._reported_and_finished(fleet, "blocked")
+
+        code, out, err = fleet.run(["harvest", "--id", todo, "--porcelain"])
+
+        self.assertIn("harvested\t", out, f"{out} {err}")
+        milestone = Roadmap(coordinator).milestone("M9")
+        self.assertIsNone(milestone.owner,
+                          "a harvested worker still holds the claim on a milestone it did not finish")
+        self.assertTrue(milestone.disowned_reason, "the release must say why the claim was given back")
+        self.assertIn("claim on M9 given back", out, "the harvested row must report the release")
+        code, out, err = self._dispatch(fleet, coordinator, milestone="M9", title="secondOne",
+                                        extra=["--cap", "8"])
+        self.assertEqual(0, code, f"M9 could not be dispatched again after its worker was harvested: {err}")
+
+    def test_an_in_flight_milestone_is_no_longer_held_by_a_harvested_worker(self):
+        """`awaiting-ci` still blocks a dispatch on its own ("already in flight") — that is the status the
+        worker handed off at, and changing it is the coordinator's call. What changes is WHO the roadmap says
+        holds it: the coordinator, not a closed instant."""
+        fleet = self.loaded()
+        coordinator, todo, _, _ = self._reported_and_finished(fleet, "awaiting-ci")
+
+        fleet.run(["harvest", "--id", todo, "--porcelain"])
+
+        milestone = Roadmap(coordinator).milestone("M9")
+        self.assertEqual("awaiting-ci", milestone.status, "the report was not applied")
+        self.assertIsNone(milestone.owner, "a harvested worker still holds an in-flight milestone")
+
+    def test_a_worker_whose_last_report_is_running_is_refused_however_it_reached_the_coordinator(self):
+        """Third delta review: judged on the applied side only, a PENDING `running` with no final word was
+        harvested — applied, claim released, milestone `running` and unowned, the outcome lost silently; on the
+        base that row at least stayed visible in the inbox and the stale owner kept the milestone loud. The
+        guard's answer must not depend on who applied first, nor change across harvest's own apply (a retry)."""
+        fleet = self.loaded()
+        coordinator, todo, child, _ = self._reported_and_finished(fleet, "running")
+
+        code, out, err = fleet.run(["harvest", "--id", todo, "--porcelain"])
+
+        self.assertIn("harvest-refused", out,
+                      f"a worker whose last word was `running` (pending) was harvested: {out}")
+        self.assertIn("other than", out, "the remedy must say a `running` re-report will not clear it")
+        #: A refusal changes NOTHING: the report stays pending and visible, the milestone and the claim as
+        #: they were — which is the property that made this case loud on the base.
+        roadmap = Roadmap(coordinator)
+        self.assertEqual(["running"], [p.status for p in roadmap.proposals() if p.instant == child])
+        self.assertEqual("blocked", roadmap.milestone("M9").status)
+        self.assertEqual(child, roadmap.milestone("M9").owner, "a refused harvest released the claim")
+
+    def test_harvest_dry_run_previews_the_claim_it_would_give_back_and_changes_nothing(self):
+        fleet = self.loaded()
+        coordinator, todo, child, _ = self._reported_and_finished(fleet, "blocked")
+
+        code, out, err = fleet.run(["harvest", "--id", todo, "--dry-run", "--porcelain"])
+
+        row = [line for line in out.splitlines() if line.startswith("would-harvest\t")]
+        self.assertTrue(row, f"{out} {err}")
+        self.assertIn("give back the claim on M9", row[0],
+                      f"the dry run hides a change the real run makes: {row[0]}")
+        self.assertEqual(child, Roadmap(coordinator).milestone("M9").owner, "a dry run released a claim")
+
+    def test_harvest_keeps_the_owner_of_a_milestone_it_finished(self):
+        """The other side of the release: a DONE milestone keeps the record of who did it."""
+        fleet = self.loaded()
+        coordinator, todo, child, _ = self._reported_and_finished(fleet, "done")
+
+        fleet.run(["harvest", "--id", todo, "--porcelain"])
+
+        self.assertEqual(child, Roadmap(coordinator).milestone("M9").owner)
+
+    def test_harvest_never_un_lands_a_finished_milestone_it_leaves_that_row_pending(self):
+        """Before B01 harvest applied nothing, so it could not do this. After it, a stale row of the worker's
+        would move a `done` milestone backwards at exit 0 — `apply` does not compare statuses (`SI-48`), and
+        `harvesting-an-instant` step 2 exists to catch exactly that by hand. Harvest must not be the way
+        round it: the row stays pending for the coordinator, and the harvest says so."""
+        fleet = self.loaded()
+        coordinator, todo, child, _ = self._reported_and_finished(fleet, "running")
+        roadmap = Roadmap(coordinator)
+        landed = roadmap.propose(coordinator, "M9", "done", ["evidence/INDEX.md"])
+        roadmap.apply(landed)                         # landed by another route while the row sat pending
+
+        code, out, err = fleet.run(["harvest", "--id", todo, "--porcelain"])
+
+        self.assertIn("harvested\t", out, f"{out} {err}")
+        self.assertEqual("done", Roadmap(coordinator).milestone("M9").status,
+                         "harvest un-landed a finished milestone by applying a stale row")
+        self.assertEqual(["running"], [p.status for p in Roadmap(coordinator).proposals()
+                                       if p.instant == child],
+                         "the held-back row must stay PENDING for the coordinator, not be dropped")
+        held = [line for line in out.splitlines() if line.startswith("harvest-held\t")]
+        self.assertTrue(held, f"harvest held a row back without saying so: {out}")
+        self.assertIn("attention", held[0])
+
+    def test_harvest_after_the_coordinator_applied_first_still_closes_and_gives_back_the_claim(self):
+        """`harvesting-an-instant`'s documented sequence APPLIES first and harvests second. Measured by the
+        PR review: after an apply-first of a non-terminal report the unreported-work guard saw no PENDING row
+        from this worker and refused the harvest as "never reported" — so the claim release could only run
+        off the documented path, and a harvest killed between its own apply and its stamp (J9's window) could
+        never be retried. A row this worker wrote that was already APPLIED is proof the report arrived."""
+        fleet = self.loaded()
+        coordinator, todo, child, _ = self._reported_and_finished(fleet, "blocked")
+        code, out, err = fleet.run(["apply", "--instant", str(coordinator), "--milestone", "M9"])
+        self.assertEqual(0, code, err)
+
+        code, out, err = fleet.run(["harvest", "--id", todo, "--porcelain"])
+
+        self.assertNotIn("harvest-refused", out,
+                         f"harvest refused a worker whose report the coordinator had already applied: {out}")
+        self.assertIn("harvested\t", out, f"{out} {err}")
+        self.assertIsNone(Roadmap(coordinator).milestone("M9").owner,
+                          "after apply-first, the harvested worker still holds the claim")
+        code, out, err = self._dispatch(fleet, coordinator, milestone="M9", title="secondOne",
+                                        extra=["--cap", "8"])
+        self.assertEqual(0, code, f"M9 could not be dispatched again: {err}")
+
+    def test_an_applied_progress_report_is_not_the_workers_final_report(self):
+        """Measured by the delta review of the apply-first fix: the worker reports `running` mid-flight (as
+        `working-as-a-dispatched-instant` tells it to), the coordinator applies it, the worker finishes with no
+        final report — and counting ANY applied row let the harvest through, leaving M9 `running`, unowned,
+        with the outcome lost. An applied IN-FLIGHT row is progress, not an outcome; the guard must refuse, as
+        it did before applied rows were counted."""
+        fleet = self.loaded()
+        coordinator, todo, _, _ = self._reported_and_finished(fleet, "running")
+        code, out, err = fleet.run(["apply", "--instant", str(coordinator), "--milestone", "M9"])
+        self.assertEqual(0, code, err)
+
+        code, out, err = fleet.run(["harvest", "--id", todo, "--porcelain"])
+
+        self.assertIn("harvest-refused", out,
+                      f"a mid-flight progress report let a worker with no final report be harvested: {out}")
+
+    def test_apply_first_of_an_awaiting_ci_handoff_closes_out(self):
+        """`working-as-a-dispatched-instant` teaches `running` -> `awaiting-ci` -> `done`, and a worker whose
+        work waits on CI hands off at `awaiting-ci`. Applied first by the coordinator, that report arrived —
+        the second delta review measured the harvest refusing it."""
+        fleet = self.loaded()
+        coordinator, todo, _, _ = self._reported_and_finished(fleet, "awaiting-ci")
+        fleet.run(["apply", "--instant", str(coordinator), "--milestone", "M9"])
+
+        code, out, err = fleet.run(["harvest", "--id", todo, "--porcelain"])
+
+        self.assertNotIn("harvest-refused", out, f"an applied awaiting-ci handoff was refused: {out}")
+        self.assertIn("harvested\t", out, f"{out} {err}")
+        self.assertEqual("awaiting-ci", Roadmap(coordinator).milestone("M9").status)
+
+    def test_a_stale_applied_outcome_does_not_mask_a_later_progress_report(self):
+        """`blocked` (applied), then the worker resumes and reports `running` (applied), then finishes with no
+        final word. Its LATEST report is progress; an earlier outcome must not stand in for the final one."""
+        fleet = self.loaded()
+        coordinator, todo, child, renamed = self._reported_and_finished(fleet, "blocked")
+        fleet.run(["apply", "--instant", str(coordinator), "--milestone", "M9"])
+        roadmap = Roadmap(coordinator)
+        #: Proposed from the worker's recorded (pre-rename) path, exactly as its own `propose` recorded it.
+        roadmap.apply(roadmap.propose(pathlib.Path(child), "M9", "running", ["evidence/INDEX.md"]))
+
+        code, out, err = fleet.run(["harvest", "--id", todo, "--porcelain"])
+
+        self.assertIn("harvest-refused", out,
+                      f"a stale applied `blocked` let a worker whose last word was `running` be harvested: {out}")
+
+    def test_harvest_dry_run_after_apply_first_previews_the_claim_release(self):
+        fleet = self.loaded()
+        coordinator, todo, child, _ = self._reported_and_finished(fleet, "blocked")
+        fleet.run(["apply", "--instant", str(coordinator), "--milestone", "M9"])
+
+        code, out, err = fleet.run(["harvest", "--id", todo, "--dry-run", "--porcelain"])
+
+        row = [line for line in out.splitlines() if line.startswith("would-harvest\t")]
+        self.assertTrue(row, f"{out} {err}")
+        self.assertIn("apply 0 proposal(s)", row[0])
+        self.assertIn("give back the claim on M9", row[0], f"apply-first dry run hides the release: {row[0]}")
+        self.assertEqual(child, Roadmap(coordinator).milestone("M9").owner, "a dry run released a claim")
+
+    def test_an_applied_row_another_instant_wrote_does_not_count_as_this_workers_report(self):
+        fleet = self.loaded()
+        coordinator = self._coordinator_with(fleet)
+        code, out, err = self._dispatch(fleet, coordinator, milestone="M9")
+        self.assertEqual(0, code, err)
+        child = [line.split("\t")[1] for line in out.splitlines() if line.startswith("instant\t")][0]
+        todo = [line.split("\t")[1] for line in out.splitlines() if line.startswith("todo_id\t")][0]
+        roadmap = Roadmap(coordinator)
+        roadmap.apply(roadmap.propose(coordinator, "M9", "running", ["evidence/INDEX.md"]))
+        self._finished(fleet, pathlib.Path(child))
+
+        code, out, err = fleet.run(["harvest", "--id", todo, "--porcelain"])
+
+        self.assertIn("harvest-refused", out,
+                      f"an APPLIED row the coordinator wrote let a worker that never reported be harvested: {out}")
+
+    def test_another_instants_row_does_not_silence_the_unreported_work_guard(self):
+        """The guard's premise is "a pending proposal means harvest is about to apply it". Harvest applies
+        only THIS worker's rows, so a row somebody else wrote about the same milestone proves nothing about
+        whether this worker reported."""
+        fleet = self.loaded()
+        coordinator = self._coordinator_with(fleet)
+        code, out, err = self._dispatch(fleet, coordinator, milestone="M9")
+        self.assertEqual(0, code, err)
+        child = [line.split("\t")[1] for line in out.splitlines() if line.startswith("instant\t")][0]
+        todo = [line.split("\t")[1] for line in out.splitlines() if line.startswith("todo_id\t")][0]
+        Roadmap(coordinator).propose(coordinator, "M9", "running", ["evidence/INDEX.md"])
+        self._finished(fleet, pathlib.Path(child))
+
+        code, out, err = fleet.run(["harvest", "--id", todo, "--porcelain"])
+
+        self.assertIn("harvest-refused", out,
+                      f"a row the COORDINATOR wrote let a worker that never reported be harvested: {out}")
+
 class PositionedGit:
     """A git runner that can express each of `base_check`'s four positions.  `SI-32`.
 
