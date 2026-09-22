@@ -33,8 +33,18 @@ _URL = re.compile(r"^[A-Za-z][A-Za-z0-9+.-]*://")
 DOES_NOT_RESOLVE = "(does not resolve)"
 
 
+#: RV-22. `file://` names a path on this box: it is judged as that path, so a typo spelled as one is refused.
+_FILE_URL = "file://"
+
+
 def is_url(item) -> bool:
-    return bool(_URL.match(str(item)))
+    return bool(_URL.match(str(item))) and not str(item).startswith(_FILE_URL)
+
+
+def _plain(item) -> str:
+    """The item with a `file://` prefix stripped — the path it names."""
+    item = str(item)
+    return item[len(_FILE_URL):] if item.startswith(_FILE_URL) else item
 
 
 def _folder(instant):
@@ -74,7 +84,7 @@ def locate(item, anchor):
     `-inflight-` path is fine). A URL has no location here and returns None — ask `is_url` first."""
     if is_url(item):
         return None
-    path = Path(str(item))
+    path = Path(_plain(item))
     if not path.is_absolute():
         folder = _folder(anchor)
         if folder is None:
@@ -112,7 +122,7 @@ def admit(items, proposer) -> list:
     that dangles one rename later (`i21(a)`)."""
     folder = _folder(proposer)
     stored, missing = [], []
-    for item in (str(e) for e in items):
+    for item in (_plain(e) for e in items):
         if is_url(item):
             stored.append(item)
             continue
