@@ -33,8 +33,8 @@ it what to do.
 
 ## Step 1 — the ready set is a column read
 
-`fleet roadmap --porcelain` emits one row per milestone — `ready`, `not-ready` or `pending-proposal` — and a
-closing `population` row. Every milestone row carries the milestone's `title` ($7) and `owner` ($8) as
+`fleet roadmap --porcelain` emits exactly one `ready` or `not-ready` row per milestone, one `pending-proposal`
+row per waiting proposal, and a closing `population` row. Every milestone row carries the milestone's `title` ($7) and `owner` ($8) as
 fields, so the dispatchable set is:
 
 ```bash
@@ -48,6 +48,10 @@ Do not drop the `$8==""` half. A `ready` row whose `owner` is set is already cla
 readiness is derived from dependencies alone and never reads the claim, so a dispatched milestone stays
 `ready` until its worker's `running` proposal is applied. (Before `SI-47` was fixed the ready set had no
 rows at all and had to be rebuilt from `.fleet/roadmap.json` by hand; do not reach for that file now.)
+
+A claim outlives an instant that finished or died without landing the milestone (`abort` releases it; other
+exits do not). A `ready` row whose `owner` is on no `fleet board` row is stranded, not in flight: release it
+with `fleet milestone --instant "$INSTANT" --id <m> --disown --reason "<why>"` and it becomes dispatchable.
 
 ## Step 2 — the base comes from the manifest, then from the remote
 

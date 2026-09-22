@@ -844,10 +844,10 @@ d_sigkill_case() {                # d_sigkill_case <case> <trigger> <iters>
         #: `board` would report the SI-7 leak as unnamed, which is wrong, and only `leases` would miss the
         #: stale-lease subject. The row records what each one said.
         d_run "$CD/leases.out" leases --porcelain
-        leases_view="$(awk -F'\t' 'NR==1{print $2}' "$CD/leases.out")"
+        leases_view="$(awk -F'\t' '$2!="population"{print $2; exit}' "$CD/leases.out")"   # first SLOT row (B04)
         [ -z "$leases_view" ] && leases_view=empty
         d_run "$CD/board.out" board --porcelain
-        board_row="$(awk -F'\t' 'NR==1{print $2}' "$CD/board.out")"
+        board_row="$(awk -F'\t' '$2!="population"{print $2; exit}' "$CD/board.out")"   # first SUBJECT row (B04)
         [ -z "$board_row" ] && board_row=empty
         case "$leases_view$board_row" in
           *interrupted*|*held*|*stale-lease*) named_n=$((named_n + 1)) ;;
