@@ -351,8 +351,8 @@ to `release-verify`'s ~45-minute run except `release-gate.sh`, which launches it
 state that already exists.
 
 - **`scripts/release-preflight.sh [--reap]`** — reports what makes this a bad moment to cut: this root's
-  live `dt-` sessions and every other root's (through the environment's own **derived**
-  `FLEET_TMUX_SOCKET`, never a bare `-L fleet`), any `board` subject still `COMPLETE` and holding a slot,
+  live `dt-` sessions (through the environment's own **derived** `FLEET_TMUX_SOCKET`, never a bare
+  `-L fleet`) and every other root's — sockets `fleet-*` and a legacy literal `fleet`, each with its count —, any `board` subject still `COMPLETE` and holding a slot,
   the 03:30 UTC sync-cron window, and orphaned `.fleet-v*.tmp` verify worktrees. Advisory (`WARN:`, exit
   0) except one hard refusal (exit 2) when `FLEET_TMUX_SOCKET` is unset or literally `fleet` — a broken
   environment must not read as a quiet box. `--reap` deletes only the worktrees it just classified
