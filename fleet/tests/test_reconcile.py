@@ -959,7 +959,8 @@ class TestNeedsAHumanUsesKnownFacts(unittest.TestCase):
 class TestAnAttachedHumanIsNotAStuckWorker(unittest.TestCase):
     """`B24` (x2 `G-4`, `FI-9`). `BLOCKED` is actionable, and a pane showing unsubmitted text or a dialog
     reads the same whether a worker is stuck there or a HUMAN is attached and mid-sentence. Those demand
-    opposite responses, and tmux knows which it is (`#{session_attached}`); fleet never asked.
+    opposite responses, and tmux knows which it is (which clients are attached, and when each last gave input);
+    fleet never asked. It now asks per client (`list-clients`, RV-28).
 
     The state stays BLOCKED — the row still says what the pane shows (no new state, B16's fence), and the
     reporter's retracted remedy (narrow BLOCKED to `park.json`) is not taken: a worker at a permission modal
