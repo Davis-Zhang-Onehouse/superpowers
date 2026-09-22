@@ -158,6 +158,14 @@ supervision; that assumption is what created this hazard in the first place.
 without a decision, so `PARKED` is an actionable state and the banner counts it. Two other facts reach you the
 same way: a pane at an operator dialog (what `pane-guard` answers `15` for) and a live worker whose instant
 folder has gone missing both render `BLOCKED` with a note saying which. Answer the question, or the row stays.
+The one `BLOCKED` row the count leaves out is a pane-level one (a dialog, or text sitting unsubmitted in the
+box) with a human attached to that session who has typed into it recently: the note says *"a human is
+attached … not counted as needing you"*, because the person it is waiting on is already there. Only an
+interactive client counts: a read-only (`attach -r`) client cannot type into the pane, and a control-mode client
+(iTerm2's `-CC`) can, but its tmux `client_activity` does not move when it does, so neither can show that somebody typed recently —
+such a row stays counted and its note says a client is attached. A client left attached with no input past the
+idle threshold is counted again, and so is one fleet could not ask about.
+`fleet status` shows the attachment as `evidence.attached` on every live worker.
 
 **Act on `attention`, report `info`.** Every checker row carries a severity. A finished milestone and a
 legitimately empty population are `info`. Treating them as alarms is how a green board comes to read as red

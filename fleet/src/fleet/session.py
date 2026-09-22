@@ -36,6 +36,7 @@ isolation claim in the module whose job IS isolating the environment is worse th
 (`FI-27a`). The seams are enumerable on purpose — that is what makes "injected everywhere else" a
 fact a reader can check rather than a promise.
 """
+import math
 import re
 from dataclasses import dataclass
 from pathlib import Path
@@ -99,6 +100,21 @@ class Probes:
     session_servers: Optional[Callable[[str], list]] = None
     send_literal: Optional[Callable[[str, str], None]] = None
     submit: Optional[Callable[[str], None]] = None
+    #: `B24` (x2 `G-4`). `(interactive_clients, last_input_epoch)` for one session — from tmux's per-client
+    #: `#{client_readonly}`, `#{client_control_mode}` and `#{client_activity}` — or `None` when it could not
+    #: be observed. Defaulted like `pane_pid`, so every
+    #: hand-built `Probes` keeps working and reads as NOT MEASURED rather than as "nobody attached".
+    attachment: Optional[Callable[[str], Optional[tuple]]] = None
+
+
+@dataclass(frozen=True)
+class Attachment:
+    """`B24`. INTERACTIVE clients attached to a session and the epoch of the last input one of them gave it,
+    plus `observers`: clients that are read-only or control-mode (`RV-36`) — attached, so somebody may be
+    there, but showing no input fleet can see."""
+    clients: int
+    last_input: float
+    observers: int = 0
 
 
 #: tmux's exact-match marker. A BARE target is resolved by PREFIX: with only `itfleet-N-pre-ab` alive,
@@ -195,6 +211,49 @@ class SessionLayer:
             if session.name == name:
                 return True
         return bool(self.probes.has_session(name))
+
+    def attachment(self, name: str) -> Optional[Attachment]:
+        """Whether a HUMAN is at this session: its attached-client count and when a client last gave it
+        input — or `None` when that could not be observed (no probe, no name, tmux did not answer).
+
+        `B24` (x2 `G-4`). `BLOCKED` could not tell a worker stuck at a modal from a human attached and
+        mid-sentence, because this fact was never collected. "Clients" means INTERACTIVE clients (`RV-28`); a
+        read-only or control-mode client is an OBSERVER (`RV-36`): somebody may be there — a control-mode client
+        can `send-keys`, which is how iTerm2 `-CC` types — but its `#{client_activity}` does not move when it
+        does, so it can never show that a human was at the pane recently. An actuator must treat observers as
+        occupied too. It is deliberately returned RAW and tri-state, because its two consumers fail safe in
+        OPPOSITE directions:
+
+        - the attention count (`reconcile`) treats `None` as "not a human" — it keeps counting, which is
+          what it did before this fact existed, so a tmux hiccup cannot hide a stuck worker;
+        - anything that TYPES into a pane (a nudge, `B12`) must treat `None` as "occupied": "I could not
+          tell whether somebody is sitting there" has to mean leave it alone.
+
+        `last_input` moves on an interactive client's attach and keystroke, and NOT on `send-keys`,
+        `paste-buffer`, pane output, resize or SIGWINCH (B24 instant, `evidence/20-red/`), so neither fleet's
+        own delivery nor a busy pane can make a session look attended.
+        """
+        if not name or self.probes.attachment is None:
+            return None
+        answer = self.probes.attachment(name)
+        if answer is None:
+            return None
+        #: `RV-29`. The probe is an injectable field and this runs inside `reconcile`, so an answer of the
+        #: wrong shape is NOT MEASURED rather than an exception that takes the whole board down with it.
+        #: `RV-35`: and a non-finite number is not a measurement either — `inf`/`nan` pass `float()` (or
+        #: overflow `int()`) here and would crash the age arithmetic in `reconcile` instead.
+        #: The two-count form `(clients, last_input)` predates `observers` (`RV-36`) and reads as none.
+        try:
+            clients, last_input, *rest = answer
+            if len(rest) > 1:
+                return None
+            observers = int(rest[0]) if rest else 0
+            clients, last_input = int(clients), float(last_input)
+        except (TypeError, ValueError, OverflowError):
+            return None
+        if not math.isfinite(last_input):
+            return None
+        return Attachment(clients=clients, last_input=last_input, observers=observers)
 
     # --- pane --------------------------------------------------------------------------------
 
@@ -576,6 +635,45 @@ def default_probes(process_name: str = "claude", tmux_socket=_FROM_ENV, *,
                 found.append(candidate)
         return found
 
+    def attachment(name: str):
+        """`(interactive_clients, last_input_epoch, observers)` for the session named EXACTLY `name`, or None
+        when unobserved. No client at all is `(0, 0, 0)`; `observers` counts read-only and control-mode clients.
+
+        Read per CLIENT (`RV-28`), because `#{session_attached}` counts read-only (`attach -r`) and
+        control-mode (`-C`) clients, and a read-only client's keystroke — dropped before it reaches the pane —
+        still moves `#{session_activity}`. A read-only client cannot type into the pane; a control-mode client
+        can (`send-keys`), but its `#{client_activity}` does NOT move when it does (`RV-36`,
+        `evidence/20-red/tmux-control-mode-client-probe.txt`). Neither can show a human typed recently, so only
+        interactive clients count and last input is the newest `#{client_activity}` among them; the others are
+        returned as `observers`, never dropped, because "nobody attached" would be false. On tmux 3.2a that moves
+        on the client's attach and its own keystroke, not on pane output, resize or SIGWINCH (B24 instant,
+        `evidence/20-red/tmux-client-activity-probe.txt`).
+
+        `list-clients -t =<name>`: tmux resolves the EXACT session and fails (rc=1, `can't find session` or
+        `no server running`) when it cannot, so "not measured" never reads as "no client"
+        (`evidence/20-red/list-clients-target-probe.txt`). Not `display-message`, which exits 0 with an
+        empty format for a missing session (`display-message-missing-session.txt`) — `FI-7`'s falsy default.
+        """
+        done = run(tmux + ["list-clients", "-t", exact_session_target(name), "-F",
+                           "#{client_session}\t#{client_readonly}\t#{client_control_mode}\t#{client_activity}"])
+        if done.returncode != 0:
+            return None
+        clients, last_input, observers = 0, 0, 0
+        for line in (done.stdout or "").splitlines():
+            parts = line.split("\t")
+            if len(parts) != 4 or parts[1] not in ("0", "1") or parts[2] not in ("0", "1"):
+                return None
+            try:
+                activity = int(parts[3])
+            except ValueError:
+                return None
+            if parts[1] == "0" and parts[2] == "0":
+                clients += 1
+                last_input = max(last_input, activity)
+            else:
+                observers += 1
+        return clients, last_input, observers
+
     def send_literal(name, text):
         import uuid
         buffer_name = 'fleet-' + uuid.uuid4().hex
@@ -600,4 +698,5 @@ def default_probes(process_name: str = "claude", tmux_socket=_FROM_ENV, *,
                   has_session=has_session,
                   start_session=start_session,
                   kill_session=kill_session,
-                  pane_pid=pane_pid)
+                  pane_pid=pane_pid,
+                  attachment=attachment)
