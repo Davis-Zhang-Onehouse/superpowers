@@ -11,6 +11,7 @@ a suite can describe a fleet without owning one. Nothing here starts a process, 
 """
 import calendar
 import json
+import os
 import pathlib
 import tempfile
 import time
@@ -18,8 +19,8 @@ import unittest
 from dataclasses import fields as dataclass_fields
 
 from fleet.pool import Pool
-from fleet.reconcile import (COMPLETE, DEAD, KINDS, STALE_WAIT_S, STATES, UNREACHABLE, Subject,
-                             _awaiting_note, reconcile)
+from fleet.reconcile import (COMPLETE, DEAD, IDLE, KINDS, RUNNING, STALE_WAIT_S, STATES,
+                             UNREACHABLE, Subject, _awaiting_note, needs_a_human, reconcile)
 from fleet.session import LiveSession, Probes, SessionLayer
 from fleet.store import Declarations, Record, Store
 
@@ -123,6 +124,20 @@ class SyntheticFleet:
         self.procs.append(LiveSession(pid=pid, cwd=self.slots_dir / slot, name=tmux))
         self.panes[tmux] = pane
         self.tmux_live.add(tmux)
+
+    def age(self, todo_id, seconds):
+        """Make an instant look untouched for `seconds`. `_idle_for` reads the instant directory, its
+        direct children and `.fleet/*` — so all three are aged, and aged LAST, because writing a
+        declaration refreshes the mtime of the file it writes."""
+        instant = self.paths[todo_id]
+        old = time.time() - seconds
+        paths = [instant]
+        for child in instant.iterdir():
+            paths.append(child)
+            if child.name == ".fleet" and child.is_dir():
+                paths.extend(child.iterdir())
+        for path in paths:
+            os.utime(path, (old, old))
 
     def _build(self):
         # 1. Dead but recorded: a record, a lease, an `-inflight-` folder, and no process anywhere.
@@ -525,3 +540,74 @@ class TestAwaitingCiNote(unittest.TestCase):
         sessions = _FakeWatcherSessions({"... 1 monitor ...": "1 monitor"})
         note = _awaiting_note("... 1 monitor ...", sessions, self.instant, now=time.time())
         self.assertNotIn("STALE-WAIT", note)
+
+
+class TestTheIdleStateIsProduced(unittest.TestCase):
+    """`G-10`. `FI-14` made `IDLE` actionable; nothing drove `reconcile` TO it.
+
+    `test_render.test_a_stalled_worker_is_counted_as_needing_a_human` hand-builds a subject already
+    labelled `IDLE` and asserts the view, so it passes whether or not the producer can ever emit one.
+    Measured by mutation: `_live_state`'s threshold branch made dead (`elif False and ...`) left all 2009
+    tests green, while dropping `IDLE` from `ACTIONABLE_STATES` is killed in `test_render`. The harness
+    could kill; it never looked at the producer. These cases drive the real join through a worker whose
+    instant has been quiet past `idle_after_s`.
+    """
+
+    def setUp(self):
+        self.fleet = SyntheticFleet()
+
+    def subjects(self, idle_after_s=1800):
+        return {s.identity: s for s in reconcile(
+            self.fleet.store, self.fleet.pool, self.fleet.sessions,
+            self.fleet.instants, idle_after_s=idle_after_s)}
+
+    def quiet_worker(self, todo_id, tmux, pid, pane=QUIET_PANE):
+        stamp = todo_id.split("-")[1]
+        self.fleet.dispatch(todo_id, f"00000000-{stamp}-inflight-append-{todo_id.split('-')[0]}",
+                            "ws9", tmux)
+        self.fleet.launch(tmux, pid, "ws9", pane)
+
+    def test_a_worker_quiet_past_the_threshold_is_produced_as_idle(self):
+        self.quiet_worker("stalled-07300401", "dt-stalled", 5101)
+        self.fleet.age("stalled-07300401", 2700)
+
+        subject = self.subjects()["stalled-07300401"]
+
+        self.assertEqual(subject.state, IDLE,
+                         f"a live worker with a quiet pane, untouched for 2700s against a 1800s "
+                         f"threshold, is not IDLE: {subject.state} / {subject.note!r}")
+        self.assertIn("1800", subject.note, "the IDLE note does not name the threshold it crossed")
+        self.assertTrue(needs_a_human(subject),
+                        "a stalled worker is not in the population a human is asked to act on")
+
+    def test_a_worker_inside_the_threshold_is_running(self):
+        """The control: the same worker, the same pane, touched recently. Without it, "IDLE" above is
+        equally consistent with a producer that calls every quiet pane IDLE."""
+        self.quiet_worker("fresh-07300402", "dt-fresh", 5102)
+        self.fleet.age("fresh-07300402", 60)
+
+        subject = self.subjects()["fresh-07300402"]
+
+        self.assertEqual(subject.state, RUNNING,
+                         f"a worker touched 60s ago was reported {subject.state}: {subject.note!r}")
+        self.assertFalse(needs_a_human(subject), "a progressing worker needs nobody")
+
+    def test_a_busy_pane_is_never_idle_however_old_the_instant(self):
+        """A pane still offering a way to interrupt is progressing, whatever the filesystem says."""
+        self.quiet_worker("busy-07300403", "dt-busy", 5103, pane=BUSY_PANE)
+        self.fleet.age("busy-07300403", 999999)
+
+        subject = self.subjects()["busy-07300403"]
+
+        self.assertEqual(subject.state, RUNNING,
+                         f"a busy pane was reported {subject.state} because its files are old")
+
+    def test_the_threshold_is_the_parameter_not_a_constant(self):
+        """A case that only ever tests 2700-vs-1800 cannot tell `idle_after_s` from a hard-coded 1800."""
+        self.quiet_worker("edge-07300404", "dt-edge", 5104)
+        self.fleet.age("edge-07300404", 600)
+
+        self.assertEqual(self.subjects(idle_after_s=300)["edge-07300404"].state, IDLE,
+                         "600s quiet against a 300s threshold is not IDLE")
+        self.assertEqual(self.subjects(idle_after_s=1800)["edge-07300404"].state, RUNNING,
+                         "600s quiet against an 1800s threshold was reported IDLE")
