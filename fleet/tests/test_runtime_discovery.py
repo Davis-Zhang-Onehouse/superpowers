@@ -112,11 +112,13 @@ class EmptyOrExitingTmuxServerTests(unittest.TestCase):
     def test_no_current_target_with_sessions_listed_is_not_read_as_empty(self):
         """The string alone is not the fact: if sessions DO exist and list-panes still cannot answer, refuse.
 
-        A GUARD, and it passes on the base too (the base refused every such shape); it pins that the fix
-        did not buy state A by reading every `no current target` as empty."""
-        with patch('subprocess.run', self.fake((1, '', 'no current target'), sessions=(0, 'w1\n', ''))):
-            with self.assertRaisesRegex(FleetError, 'no current target.*listing 1 session'):
+        A GUARD on behaviour: the base refused here too (it refused every such shape), and only the message
+        assertions below are new. It pins that the fix did not buy state A by reading every `no current
+        target` as empty — and that the refusal does not blame a held client for a server with sessions."""
+        with patch('subprocess.run', self.fake((1, '', 'no current target'), sessions=(0, 'w 1\nw2\n', ''))):
+            with self.assertRaisesRegex(FleetError, 'no current target.*listing 2 session') as raised:
                 default_probes(both_runtimes=True, tmux_socket='priv').list_processes()
+        self.assertNotIn('ps -o pid,stat,args', str(raised.exception))
 
     def test_no_current_target_with_list_sessions_failing_otherwise_names_both_answers(self):
         with patch('subprocess.run', self.fake((1, '', 'no current target'), sessions=(1, '', 'weird'))):
