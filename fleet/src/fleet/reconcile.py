@@ -423,9 +423,13 @@ def _live_state(phase, parked, pane, sessions, instant, idle_after_s, capture_fa
         #: against the cap, and it ages into IDLE once nothing has moved. Disregarded rather than cleaned
         #: up, because this module never writes (property 2), and a stale claim stops lying without a sweep.
         #: The phase stays visible in `evidence.declared_phase`.
+        #: `RV-43`. States what IS, and predicts nothing. The first wording promised the worker "ages into
+        #: IDLE like any other" — false whenever the chosen state is RUNNING on a busy pane (`elif busy`
+        #: precedes the idle check) or BLOCKED on a dialog. A note that says something its own state does
+        #: not is exactly the defect family this bucket closes.
         disregarded = (f"declared {PHASE_AWAITING_CI}; NO WATCHER OBSERVABLE on the pane and none recorded "
-                       f"at the claim, so the declaration is disregarded: this worker counts against the "
-                       f"WIP cap and ages into IDLE like any other")
+                       f"at the claim, so the declaration is disregarded and the ordinary detector decides "
+                       f"this row — which means the worker counts against the WIP cap again")
         note = f"{note}; {disregarded}" if note else disregarded
 
     if parked:

@@ -146,8 +146,8 @@ identically** — the distinction lives on `fleet brief --instant <worker>`, and
 
 A claim with **nothing observed on the pane and nothing recorded on the declaration** — a legacy
 declaration, or one the gate let through ungated — is no longer an `AWAITING-CI` row at all: `reconcile`
-disregards it, so the worker counts against the cap again and ages into `IDLE` like any other. The note says
-so. Writing `declare.json` by hand therefore buys nothing.
+disregards it, so the worker counts against the cap again and the ordinary detector decides the row — a quiet
+one ages into `IDLE`. The note says so. Writing `declare.json` by hand therefore buys nothing.
 
 So the row buys you less than it appears to. It does **not** promise the watcher is still alive, that it
 watches the right run, or that an attestation was true. A row sitting in `awaiting-ci` far longer than its CI
