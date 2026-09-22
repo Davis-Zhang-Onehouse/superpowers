@@ -219,7 +219,9 @@ fleet complete --instant "$INSTANT"
 `review` gates `complete`, and with no round on file the gate answers UNDECIDABLE rather than NOT-READY —
 nothing has been judged yet. The rename `complete` performs **is** the state transition, the one signal no
 document you write can produce. Proposing first is not politeness either: `harvest` declines to close out a
-worker whose report never reached the coordinator.
+worker whose report never reached the coordinator — and **a last report of `running` counts as no report**.
+Your final word is `done`, `awaiting-ci` if the work now waits on CI, or `blocked` with a `--note` saying why
+if you stop short; never leave `running` as the last thing you proposed.
 <!-- v2-cite: report-reaches-coordinator H10 -->
 
 ### Finishing is five steps, and the last one is not the rename
