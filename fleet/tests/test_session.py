@@ -772,3 +772,124 @@ class TestExtendedColourIsNotDim(unittest.TestCase):
         row = f"\x1b[39m{CARET}{NBSP}\x1b[38mtyped after a malformed introducer"
         self.assertEqual(self.sessions.unsubmitted(pane("output", row, LIVE_FOOTER)),
                          "typed after a malformed introducer")
+
+
+class TestAttachmentIsCollected(unittest.TestCase):
+    """`B24` (x2 `G-4`). Whether a HUMAN is at a session, read per CLIENT (`RV-28`): an interactive client —
+    not read-only (`attach -r`), not control-mode (`-C`) — and the last input any of them gave
+    (`#{client_activity}`, moved by that client's attach or keystroke and NOT by pane output, resize, SIGWINCH,
+    `send-keys` or `paste-buffer`: B24 instant `evidence/20-red/tmux-client-activity-probe.txt`,
+    `tmux-activity-probe.txt`). fleet collected none of it.
+
+    The fact is TRI-STATE and the probe must be able to say it could not look: the attention counter and
+    a future actuator (B12) fail safe in OPPOSITE directions, so "unknown" may not be pre-decided as either.
+    """
+
+    FORMAT_ROW = "{session}\t{ro}\t{cm}\t{act}\n"
+
+    def probes_answering(self, rc, stdout):
+        seen = []
+        real = subprocess.run
+
+        def spy(argv, *args, **kwargs):
+            seen.append(list(argv))
+            return subprocess.CompletedProcess(argv, rc, stdout, "")
+
+        subprocess.run = spy
+        return default_probes(tmux_socket="itfleet-selftest-attach"), seen, lambda: setattr(subprocess, "run", real)
+
+    def ask(self, rc, stdout, name="dt-w"):
+        probes, seen, restore = self.probes_answering(rc, stdout)
+        try:
+            return probes.attachment(name), seen
+        finally:
+            restore()
+
+    def row(self, ro=0, cm=0, act=1700000000, session="dt-w"):
+        return self.FORMAT_ROW.format(session=session, ro=ro, cm=cm, act=act)
+
+    def test_interactive_clients_are_counted_with_their_latest_input(self):
+        got, seen = self.ask(0, self.row(act=1700000100) + self.row(act=1700000123))
+        self.assertEqual(got, (2, 1700000123, 0))
+        self.assertEqual(seen[0][:3], ["tmux", "-L", "itfleet-selftest-attach"],
+                         "the probe must ask the layer's own server, like every other tmux call")
+        self.assertIn("list-clients", seen[0])
+
+    def test_read_only_and_control_mode_clients_are_observers_not_interactive_input(self):
+        """`RV-28`, measured: `attach -r` and `-C` clients count in `#{session_attached}`, and a read-only
+        client's keystroke — which tmux drops before the pane — still moves `#{session_activity}`. Neither shows
+        input fleet can see (a read-only client cannot type into the pane; a control-mode client can, but its
+        `#{client_activity}` does not move — `RV-36`), so neither counts as an interactive client or supplies
+        the last-input time; both are counted as observers."""
+        got, _ = self.ask(0, self.row(ro=1, act=1700000999) + self.row(cm=1, act=1700000998)
+                          + self.row(act=1700000100))
+        self.assertEqual(got, (1, 1700000100, 2))
+
+    def test_non_interactive_clients_are_reported_as_OBSERVERS_not_as_nobody(self):
+        """`RV-36`, measured (`evidence/20-red/tmux-control-mode-client-probe.txt`): a control-mode client CAN put
+        keys into the pane (`send-keys`, which is how iTerm2 `-CC` types for a human) and its `client_activity`
+        does NOT move when it does. So a human may be there with no visible recency. They are not "a human who
+        typed recently" (the count keeps them counted), and they are not "nobody" either: an actuator (B12) must
+        see that somebody is attached."""
+        got, _ = self.ask(0, self.row(ro=1) + self.row(cm=1))
+        self.assertEqual(got, (0, 0, 2))
+
+    def test_a_session_with_no_client_is_zero_clients_not_unknown(self):
+        """`list-clients -t =<name>` exits 0 with no rows for a live session nobody is attached to."""
+        got, _ = self.ask(0, "")
+        self.assertEqual(got, (0, 0, 0))
+
+    def test_the_target_is_EXACT(self):
+        """`FI-23`'s hazard in a new place: a bare `-t dt-w` would resolve to `dt-wide` by prefix."""
+        _, seen = self.ask(0, "")
+        argv = seen[0]
+        self.assertEqual(argv[argv.index("-t") + 1], "=dt-w")
+
+    def test_a_failed_list_is_NOT_MEASURED(self):
+        """rc=1 is both `can't find session` and `no server running` — tmux could not answer for it."""
+        got, _ = self.ask(1, "")
+        self.assertIsNone(got, "tmux could not answer, and that must not read as 'nobody attached'")
+
+    def test_an_unparsable_row_is_NOT_MEASURED(self):
+        got, _ = self.ask(0, "dt-w\tmaybe\t0\tsoon\n")
+        self.assertIsNone(got)
+
+    def test_a_malformed_probe_answer_is_NOT_MEASURED_not_a_crash(self):
+        """`RV-29`. `Probes.attachment` is an injectable field, and `SessionLayer.attachment` runs inside
+        `reconcile`: an odd answer that raised here would take down `board`, `status` and `reconcile` at once."""
+        #: `RV-35`: non-finite numbers pass `int`/`float` or overflow them, then crash the age arithmetic in
+        #: `reconcile` — the guard has to reject them at the layer, not only the shapes that raise here.
+        for odd in ((1, 2, 3, 4), ("many", 1700000000), (1, "soon"), "1 1700000000", 7,
+                    (float("inf"), 0), (1, float("nan")), (1, "nan"), (1, float("-inf")), (1, float("inf"))):
+            with self.subTest(answer=odd):
+                s = SessionLayer(Probes(list_processes=lambda: [], capture_pane=lambda n: "",
+                                        has_session=lambda n: True, start_session=lambda n, c, m: None,
+                                        kill_session=lambda n: None, attachment=lambda n, a=odd: a))
+                self.assertIsNone(s.attachment("dt-w"))
+
+    def test_the_layer_carries_the_observer_count_and_accepts_the_two_count_form(self):
+        def layer_answering(answer):
+            return SessionLayer(Probes(list_processes=lambda: [], capture_pane=lambda n: "",
+                                       has_session=lambda n: True, start_session=lambda n, c, m: None,
+                                       kill_session=lambda n: None, attachment=lambda n: answer))
+        self.assertEqual(layer_answering((0, 0, 2)).attachment("dt-w").observers, 2)
+        self.assertEqual(layer_answering((1, 1700000000)).attachment("dt-w").observers, 0)
+
+    def test_the_layer_says_None_when_no_probe_was_supplied(self):
+        s, _, _ = layer()
+        self.assertIsNone(s.attachment("dt-w"))
+        self.assertIsNone(s.attachment(""))
+
+    def test_against_real_tmux_a_detached_session_and_a_missing_one(self):
+        """Why the target and not `display-message`: `display -p -t =nosuch:` exits 0 with an EMPTY format
+        (`evidence/20-red/display-message-missing-session.txt`), which would parse as 'detached'."""
+        tmux = ["tmux", "-L", SELFTEST_TMUX_SOCKET]
+        name = f"itfleet-selftest-att-{os.getpid()}-{uuid.uuid4().hex[:6]}"
+        subprocess.run(tmux + ["new-session", "-d", "-s", name, "sleep 60"], capture_output=True)
+        try:
+            probes = default_probes(tmux_socket=SELFTEST_TMUX_SOCKET)
+            self.assertEqual(probes.attachment(name), (0, 0, 0),
+                             "a live session with no client must read as zero clients, not as not measured")
+            self.assertIsNone(probes.attachment(name + "x"))
+        finally:
+            subprocess.run(tmux + ["kill-session", "-t", exact_session_target(name)], capture_output=True)

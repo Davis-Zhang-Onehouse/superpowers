@@ -72,6 +72,9 @@ RUNNERS=(
   #: Default roster for the same reason: seconds, one private server. It guards B26 — an empty or exiting
   #: tmux server used to kill board/status/dispatch/fleet-view with `Cannot inspect tmux server`.
   "TE:bash $IT_ROOT/run-TE.sh"
+  #: Default roster, same reason: seconds, one private server, five real attached/detached panes. It guards
+  #: B24 — the board counting a human who is attached and typing as a worker waiting on one.
+  "AT:bash $IT_ROOT/run-AT.sh"
   "rmw:bash $IT_ROOT/run-rmw.sh 8"
   "K:bash $IT_ROOT/run-group3.sh K"
   "group5:bash $IT_ROOT/run-group5.sh L M N"
