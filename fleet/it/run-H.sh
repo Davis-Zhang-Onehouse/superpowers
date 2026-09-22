@@ -360,8 +360,8 @@ H11="$OUT/h11"; mkdir -p "$H11"
   fleet milestone --instant "$COORD" --id q2 --title "retired with rows" --porcelain
   fleet milestone --instant "$COORD" --id q3 --title "landed" --status done --evidence evidence/INDEX.md --porcelain
   # `B03`: `propose` admits only evidence that resolves against the proposer, so the worker holds each file
-  # it cites (the "typo" in e2's name is B02's story about superseded rows, not a missing file), and `apply`
-# stores the landed item ANCHORED at the worker's folder, which the state check below expects.
+    # it cites (the "typo" in e2's name is B02's story about superseded rows, not a missing file), and `apply`
+  # stores the landed item ANCHORED at the worker's folder, which the state check below expects.
   mkdir -p "$WORKER/evidence"
   for f in e0 e1 e2-typo q2 late; do printf '%s\n' "$f" > "$WORKER/evidence/$f.log"; done
   for pair in "running:evidence/e0.log" "awaiting-ci:evidence/e1.log" "running:evidence/e2-typo.log"; do
@@ -401,6 +401,48 @@ if [ "$h11_apply" = 0 ] && [ "$h11_applied" = 1 ] && [ "$h11_super" = 2 ] \
 else
   it_fail H11 "fleet/it/H/out/h11/state.txt" \
     "apply rc=$h11_apply applied=$h11_applied superseded=$h11_super retire rc=$h11_retire proposals-closed=1?$h11_closed_count late-apply rc=$h11_late (want 2) withdraw rc=$h11_wd roadmap-untouched-by-withdraw=$h11_untouched — see the directory"
+fi
+
+# ==================================================================================================
+# H12 — `B03`: a proposal's evidence is a location. On the base `propose` accepted a path that never existed
+# (rc=0), stored an absolute `-inflight-` self-path verbatim, `apply` copied it onto the milestone after the
+# proposer's rename (rc=0, dangling), and `fleet roadmap` printed evidence only as a count.
+# ==================================================================================================
+H12="$OUT/h12"; mkdir -p "$H12"
+EW="$(h_init "evw$TAG")"
+mkdir -p "$EW/evidence"; printf 'the artifact\n' > "$EW/evidence/proof.log"; printf 'soon gone\n' > "$EW/evidence/gone.log"
+fleet milestone --instant "$COORD" --id ev1 --title "evidence resolves" --porcelain > "$H12/seed.txt" 2>&1
+fleet milestone --instant "$COORD" --id ev2 --title "evidence dangles" --porcelain >> "$H12/seed.txt" 2>&1
+fleet propose --instant "$EW" --to "$COORD" --milestone ev1 --status done --evidence evidence/nope-typo.log \
+      --porcelain > "$H12/typo.out" 2>&1; h12_typo=$?
+fleet propose --instant "$EW" --to "$COORD" --milestone ev1 --status done --evidence "$EW/evidence/proof.log" \
+      --porcelain > "$H12/abs.out" 2>&1; h12_abs=$?
+fleet propose --instant "$EW" --to "$COORD" --milestone ev2 --status done --evidence evidence/gone.log \
+      --porcelain > "$H12/gone.out" 2>&1; h12_gone=$?
+EW_DONE="${EW/-inflight-/-complete-}"; mv "$EW" "$EW_DONE"          # the worker's completion rename
+rm -f "$EW_DONE/evidence/gone.log"                                  # an artifact deleted after it was cited
+fleet roadmap --instant "$COORD" --porcelain > "$H12/roadmap.out" 2>&1
+h12_col="$(awk -F'\t' '$1=="pending-proposal" && $2=="ev1"{print $9}' "$H12/roadmap.out")"
+fleet apply --instant "$COORD" --milestone ev1 --porcelain > "$H12/apply-ev1.out" 2>&1; h12_apply=$?
+fleet apply --instant "$COORD" --milestone ev2 --porcelain > "$H12/apply-ev2.out" 2>&1; h12_dangle=$?
+py "$COORD" > "$H12/state.txt" 2>&1 <<'PY2'
+import pathlib, sys
+from fleet.roadmap import Roadmap
+rm = Roadmap(pathlib.Path(sys.argv[1]))
+print("ev1:", rm.milestone("ev1").status, [(e, pathlib.Path(e).is_file()) for e in rm.milestone("ev1").evidence])
+print("ev2:", rm.milestone("ev2").status, "pending:", len([p for p in rm.proposals() if p.milestone == "ev2"]))
+PY2
+cat "$H12/state.txt"
+if [ "$h12_typo" = 2 ] && [ "$h12_abs" = 0 ] && grep -qP '^evidence\tevidence/proof\.log$' "$H12/abs.out" \
+   && [ "$h12_gone" = 0 ] && [ "$h12_col" = "$EW_DONE/evidence/proof.log" ] && [ -f "$h12_col" ] \
+   && [ "$h12_apply" = 0 ] && grep -qF "ev1: done [('$EW_DONE/evidence/proof.log', True)]" "$H12/state.txt" \
+   && [ "$h12_dangle" = 2 ] && grep -q "do not resolve" "$H12/apply-ev2.out" \
+   && grep -qF "ev2: blocked pending: 1" "$H12/state.txt"; then
+  it_pass H12 "fleet/it/H/out/h12/state.txt" \
+    "a typo'd evidence path was refused at propose (exit 2); an absolute self-path was stored relative, and after the proposer's -inflight- -> -complete- rename \`fleet roadmap\` printed it (\$9) at a path that opens and \`apply\` stored it anchored there; a row whose artifact was deleted after citing was refused by \`apply\` (exit 2) and left pending"
+else
+  it_fail H12 "fleet/it/H/out/h12/state.txt" \
+    "typo rc=$h12_typo (want 2) abs rc=$h12_abs gone rc=$h12_gone column='$h12_col' apply rc=$h12_apply dangling-apply rc=$h12_dangle (want 2) — see the directory"
 fi
 
 it_assert_isolation H-leave

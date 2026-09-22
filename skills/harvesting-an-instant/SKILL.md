@@ -84,7 +84,9 @@ handed off at `awaiting-ci` is closed out, and its milestone stays undispatchabl
 **Harvest also refuses a report whose evidence no longer resolves** — a cited file deleted since, or a folder
 moved — because `apply` would refuse the row and closing the worker would strand its report. `fleet roadmap`
 marks such a row `DANGLING EVIDENCE:` before you get there. The remedy is a re-propose citing paths that
-resolve (relative to the worker's own folder), or `fleet withdraw` if the report is residue.
+resolve (relative to the worker's own folder), or `fleet withdraw` if the report is residue. (The `apply`
+half is IT case H12; harvest's pre-check is pinned by the hermetic suite.)
+<!-- v2-cite: evidence-resolves-at-propose-and-apply H12 -->
 
 ## Never close on one pane sample
 

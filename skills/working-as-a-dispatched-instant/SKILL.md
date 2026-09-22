@@ -111,7 +111,10 @@ empty, because a proposal with no evidence is a claim rather than a report.
 cwd, which is the slot — an absolute path must exist, and a URL is accepted as-is. A typo'd path is refused
 (exit 2, naming where it was looked for), and an absolute path into your own folder is stored relative so
 it survives your `-complete-` rename. The coordinator re-checks at `apply`: a file you delete after citing
-it makes your report unappliable, and `harvest` refuses to close you until you re-propose.
+it makes your report unappliable, and `harvest` refuses to close you until you re-propose (that last
+refusal is pinned by the hermetic suite, not yet by an IT case).
+<!-- v2-cite: evidence-resolves-at-propose-and-apply H12 -->
+
 When the work waits on CI rather than on you, say so: `fleet declare --instant "$INSTANT" --phase awaiting-ci` is the
 phase the WIP cap excludes, so declaring it frees the coordinator to dispatch the next milestone.
 
