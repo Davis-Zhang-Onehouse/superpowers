@@ -41,10 +41,21 @@ LABEL_MIN_LEN = 3
 #: `SI-27` added `milestone` as a COLUMN rather than folding it into `note`: the north star is that
 #: nothing machine-consumed is parsed out of prose, and "which milestone is this worker on" is the
 #: question a coordinator asks a script.
+#:
+#: `B04`: columns are only ever APPENDED. Every awk recipe in the skills and the IT runners reads by
+#: position, so `LEASE_COLUMNS` gained `note` and `ROADMAP_COLUMNS` gained `title` and `owner` at the end.
 BOARD_COLUMNS = ("identity", "kind", "state", "label", "slot", "milestone", "note")
 STATUS_COLUMNS = ("field", "value")
-LEASE_COLUMNS = ("slot", "lease", "todo_id", "owner", "tmux", "claimed_at", "path")
-ROADMAP_COLUMNS = ("kind", "subject", "severity", "detail", "clears_when", "clears_who")
+LEASE_COLUMNS = ("slot", "lease", "todo_id", "owner", "tmux", "claimed_at", "path", "note")
+ROADMAP_COLUMNS = ("kind", "subject", "severity", "detail", "clears_when", "clears_who", "title", "owner")
+#: The human roadmap keeps its six columns: `owner` is an absolute instant path and would push the detail —
+#: the part a person reads — off the screen. A ready row names its title and claim in `detail` instead.
+ROADMAP_HUMAN_COLUMNS = ROADMAP_COLUMNS[:6]
+
+#: `B04` i22(b). The kind of the LAST row of `board` and `leases` porcelain: what was examined, even when
+#: nothing was found. Those two printed zero bytes on an empty population, so a wrong `FLEET_HOME`, an empty
+#: fleet and a silent failure were indistinguishable to a script. Same word as every checker verb's row.
+POPULATION = "population"
 
 #: Shown in a human column that has no value. The machine form keeps the field empty — a placeholder is
 #: for a reader, and a consumer that has to strip it is a consumer that will forget to.
@@ -156,19 +167,28 @@ def _board_cells(subjects) -> list:
     return cells
 
 
-def board(subjects, porcelain: bool = False) -> str:
+def board(subjects, porcelain: bool = False, scope: str = None) -> str:
     """Every subject holding a slot, and nothing else (FD-4).
 
     The hidden population is counted in the human banner: `N not holding a slot`. It is not an alarm and
     not a row — it is the scope, stated, so that a small board cannot be mistaken for a broken one.
+
+    `B04`: and the machine form states it too, as a last `population` row naming `scope` (where the
+    subjects were read from). It used to state it only to a human, so `--porcelain` on an empty store was
+    zero bytes — the one consumer that cannot ask a follow-up got no scope at all. The row has no `state`,
+    so no state filter can match it.
     """
     subjects = list(subjects)
     held = _slot_holders(subjects)
     cells = _board_cells(held)
-    if porcelain:
-        return _tsv(cells, BOARD_COLUMNS)
-    banner = (f"fleet: {len(held)} holding a slot · {len(_needs_a_human(held))} needs you · "
+    counts = (f"{len(held)} holding a slot · {len(_needs_a_human(held))} needs you · "
               f"{len(subjects) - len(held)} not holding a slot (not shown, FD-4)")
+    if porcelain:
+        where = scope or "(the subjects supplied by the caller)"
+        cells.append({"identity": where, "kind": POPULATION,
+                      "note": f"examined {len(subjects)} subject(s) from {where}: {counts}"})
+        return _tsv(cells, BOARD_COLUMNS)
+    banner = f"fleet: {counts}"
     return banner + "\n" + _columns(cells, ("label", "identity", "state", "slot", "milestone",
                                                  "note"))
 
@@ -245,13 +265,17 @@ def leases(pool_state, porcelain: bool = False) -> str:
             "claimed_at": getattr(lease, "claimed_at", "") if lease else "",
             "path": str(getattr(lease, "path", "")) if lease else "",
         })
-    if porcelain:
-        return _tsv(cells, LEASE_COLUMNS)
     held = sum(1 for c in cells if c["lease"] == "held")
     stuck = sum(1 for c in cells if c["lease"] == "interrupted")
-    banner = (f"slots: {len(cells)} enrolled · {held} held · {len(cells) - held - stuck} free"
+    counts = (f"{len(cells)} enrolled · {held} held · {len(cells) - held - stuck} free"
               + (f" · {stuck} INTERRUPTED (no lease body; `reap` clears them)" if stuck else ""))
-    return banner + "\n" + _columns(cells, LEASE_COLUMNS)
+    if porcelain:
+        #: `B04`: the scope, as the last row — see `board`. The slot column names the pool that was read.
+        where = str(getattr(pool_state, "root", "") or "(the slots supplied by the caller)")
+        cells.append({"slot": where, "lease": POPULATION, "note": f"examined {where}: {counts}"})
+        return _tsv(cells, LEASE_COLUMNS)
+    banner = f"slots: {counts}"
+    return banner + "\n" + _columns(cells, LEASE_COLUMNS[:-1])
 
 
 # --- the roadmap -----------------------------------------------------------------------------------
@@ -268,9 +292,12 @@ def roadmap_view(roadmap, porcelain: bool = False) -> str:
         "detail": row.detail,
         "clears_when": row.clears_when or "",
         "clears_who": row.clears_who or "",
+        "title": getattr(row, "title", None) or "",
+        "owner": getattr(row, "owner", None) or "",
     } for row in rows]
     if porcelain:
         return _tsv(cells, ROADMAP_COLUMNS)
     attention = sum(1 for c in cells if c["severity"] == "attention")
-    banner = f"roadmap: {len(cells)} row(s) · {attention} needing attention"
-    return banner + "\n" + _columns(cells, ROADMAP_COLUMNS)
+    ready = sum(1 for c in cells if c["kind"] == "ready")
+    banner = f"roadmap: {len(cells)} row(s) · {ready} ready · {attention} needing attention"
+    return banner + "\n" + _columns(cells, ROADMAP_HUMAN_COLUMNS)
