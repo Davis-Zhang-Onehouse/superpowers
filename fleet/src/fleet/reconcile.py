@@ -390,8 +390,13 @@ def _state_of(rec, folder_state, live, phase, parked, pane, sessions, instant, i
         # what "a renamed instant is followed" means. `abort` is terminal too: W2-21's fix reached
         # inflight and complete and never abort, and abort is legal.
         return COMPLETE, f"the instant folder is `-{folder_state}-`; the work is over", False
-    if live and rec.runtime == 'codex' and sessions.observe(rec.tmux).state in ('unknown', 'dialog'):
-        return BLOCKED, 'Codex input is modal or unrecognized; inspect before acting', True
+    observed = sessions.observe(rec.tmux).state if (live and rec.runtime == 'codex') else None
+    if observed in ('unknown', 'dialog'):
+        #: `RV-25`. Only a dialog fleet SAW is on the pane for an attached human to answer. `unknown` is
+        #: also what a FAILED capture observes as (`SessionLayer.observe`), and an unrecognised frame is
+        #: not known to be in front of anyone — excusing either would be `FI-7`'s permissive default.
+        return BLOCKED, 'Codex input is modal or unrecognized; inspect before acting', observed == 'dialog'
+
     if not live:
         if slot_holder is not None:
             # Alive by the probe that does not need tmux. Say what is missing rather than inventing a
