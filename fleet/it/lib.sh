@@ -115,6 +115,7 @@ export DUMMY
 # no verb today — stripped so a future reader of it cannot reopen this. FLEET_TMUX_SOCKET is deliberately NOT
 # here: inside a section it is the section's PRIVATE server, and removing it would point a probe that fails
 # to refuse at the default server instead.
+# shellcheck disable=SC2034  # used by run-A.sh after lib.sh is sourced
 IT_ENV_UNNAMED=(-u FLEET_HOME -u FLEET_INSTANTS -u FLEET_ROOT -u FLEET_INSTANT -u FLEET_RELEASES)
 
 it_section() {            # it_section <name> -> own FLEET_HOME, own slots, own tmux prefix, own tmux SERVER
