@@ -41,7 +41,8 @@ for s in s1 s2 s3; do
     || { echo "enrolment of $s failed — every assertion below would be vacuous" >&2; exit 2; }
 done
 fleet leases --porcelain > "$OUT/leases-baseline.tsv" 2>/dev/null
-if [ "$(grep -c 'free' "$OUT/leases-baseline.tsv")" -ne 3 ]; then
+# By COLUMN: the `population` row (`B04`) says "3 free" in prose, so a bare grep would count it too.
+if [ "$(awk -F'\t' '$2=="free"' "$OUT/leases-baseline.tsv" | grep -c .)" -ne 3 ]; then
   echo "baseline is not three free slots; refusing to measure" >&2; exit 2
 fi
 

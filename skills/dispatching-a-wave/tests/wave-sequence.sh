@@ -8,9 +8,9 @@
 # On a PRIVATE tmux socket, and `dispatch` is --dry-run: a real dispatch launches a claude session, which
 # this suite has no business doing. What is under test is the ORDER and the derivations.
 #
-# ONE ASSERTION HERE IS INVERTED, and it is marked. It asserts that SI-47 is still open — that no roadmap
-# row names a ready milestone. When SI-47 is fixed this suite FAILS, and that failure is the signal to
-# update SKILL.md step 1 and mark SI-47 closed. Do not "repair" it by loosening the assertion.
+# Step 1 is a column read since SI-47 was closed (`B04`): this suite used to carry an INVERTED assertion
+# pinning SI-47 open, which fired when the fix landed. It now asserts the documented recipe — ready rows,
+# with the claim in the owner column — returns exactly the dispatchable set.
 set -uo pipefail
 HERE="$(cd "$(dirname "$0")" && pwd)"
 REPO="$(cd "$HERE/../../.." && pwd)"
@@ -44,16 +44,11 @@ I="$("$FLEET" init --name waveCoord --base 00000000 --optype append --porcelain 
 blocked="$("$FLEET" roadmap --instant "$I" --porcelain 2>/dev/null | awk -F'\t' '$1=="not-ready" && $2=="m3"' | wc -l)"
 check "derived readiness names m3's unlanded dep" 1 "$blocked"
 
-# INVERTED — asserts SI-47 is still open. See the header before changing this.
-named="$("$FLEET" roadmap --instant "$I" --porcelain 2>/dev/null | awk -F'\t' '$2=="m1"' | wc -l)"
-if [ "$named" != "0" ]; then
-  note "SI-47 IS FIXED: a roadmap row now names ready milestone m1."
-  note "  -> update skills/dispatching-a-wave/SKILL.md step 1 to read the row directly,"
-  note "  -> mark SI-47 closed in docs/superpowers/fleet-infra-backlog.md, then update this assertion."
-  fails=$((fails+1))
-else
-  note "ok   SI-47 still open: no roadmap row names a ready milestone"
-fi
+# Routine step 1, the recipe SKILL.md prints: `ready` rows with an empty owner ($8), named with their title ($7).
+dispatchable="$("$FLEET" roadmap --instant "$I" --porcelain 2>/dev/null \
+                | awk -F'\t' '$1=="ready" && $8==""{print $2 "=" $7}' | sort | tr '\n' ' ')"
+check "the ready rows name exactly the dispatchable set, with titles" \
+      "m1=wave member one m2=wave member two " "$dispatchable"
 
 # Routine step 3. The cap comes from the guard, not from a formula.
 "$FLEET" dispatch --profile "$PROFILE" --title waveOne --base 00000000 --optype append \

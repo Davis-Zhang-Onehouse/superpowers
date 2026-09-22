@@ -2504,8 +2504,8 @@ def _do_milestone(ctx: Ctx, parsed: Parsed) -> int:
             ("proposals-closed", f"{doomed} pending proposal(s) for {retired.id} closed as retired — kept in "
                                  f"the inbox's closed list, never applied"),
             ("dispatchable", "no — a retired milestone leaves the ready population, which is the point: "
-                             "once its deps land a superseded one is derived READY forever and no report "
-                             "prints ready rows"),
+                             "once its deps land a superseded one is derived READY forever, and `roadmap` "
+                             "prints a `ready` row for it as dispatchable work"),
             ("id-permanence", f"{retired.id!r} is retired PERMANENTLY, not freed for reuse — raising this "
                               f"work again with `fleet milestone` takes a NEW id, because a register full "
                               f"of cross-references needs {retired.id!r} to keep meaning this one thing")])
@@ -3556,7 +3556,7 @@ def _do_harvest(ctx: Ctx, parsed: Parsed) -> int:
 
 
 def _do_board(ctx: Ctx, parsed: Parsed) -> int:
-    _write(ctx, render.board(ctx.subjects(), porcelain=ctx.porcelain))
+    _write(ctx, render.board(ctx.subjects(), porcelain=ctx.porcelain, scope=str(ctx.home)))
     return EXIT_OK
 
 
@@ -5770,8 +5770,8 @@ def checker_verbs(verbs: dict = None) -> tuple:
     `OBS-49` is a check whose scope narrowed silently and therefore read as a pass.
 
     This used to be `columns == ROW_COLUMNS` over `PORCELAIN_COLUMNS`, which classified `roadmap` correctly
-    **by accident**: `render.ROADMAP_COLUMNS` is a different tuple object that happens to hold the same six
-    names. `OBS-44`: a property that holds because two things share a value is not a property — add a
+    **by accident**: `render.ROADMAP_COLUMNS` was a different tuple object that happened to hold the same six
+    names (it has since grown `title` and `owner`, `B04`, which is exactly the drift this guards). `OBS-44`: a property that holds because two things share a value is not a property — add a
     column to either tuple and a checker silently stops being one, taking §9's population rule with it.
     The table is a parameter so the derivation can be exercised over a verb table this module does not
     export; a classification nobody can probe is a classification nobody can falsify (`FI-19c`).

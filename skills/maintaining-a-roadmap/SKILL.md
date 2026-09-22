@@ -57,11 +57,11 @@ Do not maintain a `ready` flag by hand. A stored copy of a fact the dependencies
 moment a dependency slips — and it drifts silently, because both the flag and the dependency look right in
 isolation.
 
-**Know what the derived view will and will not show you.** It emits a row for every milestone that is
-*not* ready, plus a population row, plus pending proposals. **It emits no row for a milestone that is
-ready** — the ready count appears only inside the population row's prose. That is `SI-47`. Reconstruct the
-ready set explicitly rather than assuming a quiet roadmap means no work is available; a roadmap with
-twenty dispatchable rows and no blockers prints almost nothing.
+**Know what the derived view shows you.** It emits a row for every milestone — `ready` when its deps have
+landed, `not-ready` with the blocker named otherwise — plus pending proposals and a closing population row.
+Each milestone row carries `title` and `owner` as columns 7 and 8: a `ready` row with an empty owner is
+dispatchable, one with an owner is already claimed. (Until `SI-47` was fixed ready milestones had no row and
+a quiet roadmap could hide twenty dispatchable ones; a roadmap now prints its ready work.)
 
 ## 3. Three kinds of row
 
@@ -134,6 +134,6 @@ silently accumulated.
 | "The worker delivered roughly what the title said" | "Roughly" is where the drift lives. Re-run the width test before applying `done`. |
 | "I'll add the dep later" | There is no amend. Retire and re-raise, or accept a silent constraint. |
 | "PRIORITIES says it's next, so dispatch it" | Ranking never overrides a derived blocker. |
-| "The roadmap is quiet, so there's nothing ready" | It prints blockers, not opportunities. Reconstruct the ready set. |
+| "The population row says 2 ready, so two can go" | Its count includes claimed milestones. Read the `ready` rows and their `owner` column. |
 | "It's superseded, just drop it" | The reason is where the successor learns what it must keep. |
 | "This is a question, I'll note it in ISSUES" | A question that is not a row is not dispatchable. |
