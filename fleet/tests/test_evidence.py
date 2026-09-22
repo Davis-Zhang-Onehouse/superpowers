@@ -159,6 +159,21 @@ class TestThroughTheRename(EvidenceCase):
         (self.worker / "evidence" / "proof.log").unlink()
         self.assertEqual(["evidence/proof.log"], evidence.dangling(["evidence/proof.log"], self.worker))
 
+    @unittest.skipIf(os.geteuid() == 0, "root reads a mode-000 directory anyway")
+    def test_an_unreadable_directory_reads_as_not_resolving_not_a_traceback(self):
+        """RV-25. `exists()`/`iterdir()` raise PermissionError under a directory this user cannot read, which
+        would take down `fleet roadmap` and every refusal that names an item."""
+        locked = self.tasks / "locked"
+        (locked / "00000000-07300402-complete-append-deep").mkdir(parents=True)
+        stale = str(locked / "00000000-07300402-inflight-append-deep" / "x.log")
+        locked.chmod(0)
+        self.addCleanup(locked.chmod, 0o755)
+        self.assertIsNone(evidence.locate(stale, None))
+        self.assertIsNone(evidence.locate("x.log", locked / "00000000-07300402-inflight-append-deep"))
+        self.assertEqual([stale], evidence.dangling([stale], None))
+        with self.assertRaises(BadInput):
+            evidence.admit([stale], self.worker)
+
     def test_two_folders_sharing_a_stable_key_resolve_to_nothing_not_a_traceback(self):
         done = self.complete()
         shutil.copytree(done, self.tasks / "00000000-07300400-abort-append-workerOne")

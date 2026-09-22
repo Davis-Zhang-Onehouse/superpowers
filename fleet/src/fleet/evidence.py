@@ -54,7 +54,8 @@ def _folder(instant):
         return None
     try:
         return resolve(Path(instant))
-    except AmbiguousId:
+    except (AmbiguousId, OSError):
+        #: RV-25. OSError: a directory this user cannot read is not a location either.
         return None
 
 
@@ -93,7 +94,12 @@ def locate(item, anchor):
     #: Normalised first, so `a/../a/x` and `a/x` are one location and no `..` (with the proposer's folder name in
     #: front of it) survives into an anchored item; then walked, so a RELATIVE item's own instant components
     #: follow a rename exactly as an absolute item's do.
-    return _through_rename(Path(os.path.normpath(path)))
+    try:
+        return _through_rename(Path(os.path.normpath(path)))
+    except OSError:
+        #: RV-25. An unreadable directory on the way reads as "does not resolve", never a traceback out of
+        #: `fleet roadmap` or out of a refusal that names the item.
+        return None
 
 
 def dangling(items, anchor) -> list:
