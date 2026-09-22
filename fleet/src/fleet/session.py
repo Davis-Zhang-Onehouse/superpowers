@@ -350,6 +350,7 @@ def default_probes(process_name: str = "claude", tmux_socket=_FROM_ENV, *,
     `None` is "the default server" and is not re-read from an inherited variable.
     """
     import os
+    import shlex
     import subprocess
 
     if tmux_socket is _FROM_ENV:
@@ -389,6 +390,9 @@ def default_probes(process_name: str = "claude", tmux_socket=_FROM_ENV, *,
                   f"are gone; `ps -o pid,stat,args -C tmux` names it (state T is stopped), and resuming "
                   f"or ending that client lets the server exit")
 
+    def _no_server(error: str) -> bool:
+        return error.startswith("no server running on ") or error.endswith("(No such file or directory)")
+
     def pane_owners() -> dict:
         """pane pid -> tmux session name, for attributing a process to its session.
 
@@ -400,26 +404,33 @@ def default_probes(process_name: str = "claude", tmux_socket=_FROM_ENV, *,
         * a live server with ZERO sessions: `list-panes -a` still needs a current session and answers
           `no current target`. Not trusted as a string — `list-sessions` must positively list nothing;
         * a server that is exiting while a stopped client holds it: every command answers `server exited
-          unexpectedly`, and `kill-server` has already destroyed its sessions.
+          unexpectedly`, and `kill-server` has already destroyed its sessions. Also confirmed by a second
+          command, so one crashed call does not read a live fleet as empty.
         """
         argv = tmux + ["list-panes", "-a", "-F", "#{pane_pid} #{session_name}"]
         done = run(argv)
         owners = {}
         if done.returncode != 0:
             error = done.stderr.strip()
-            if (error.startswith("no server running on ") or
-                    error.endswith("(No such file or directory)") or
-                    error == "server exited unexpectedly"):
+            if _no_server(error):
                 return owners
-            if error == "no current target":
+            confirm = ""
+            if error in ("no current target", "server exited unexpectedly"):
+                # Neither string is trusted alone: a second, different command must agree that there is
+                # no session — rc=0 with zero rows (A), or no server answering it either (B).
                 listed = run(tmux + ["list-sessions", "-F", "#{session_name}"])
+                answer = listed.stderr.strip()
                 if listed.returncode == 0 and not listed.stdout.strip():
                     return owners
+                if listed.returncode != 0 and (_no_server(answer) or answer == "server exited unexpectedly"):
+                    return owners
+                confirm = (f"; `{shlex.join(tmux + ['list-sessions'])}` then exited {listed.returncode}"
+                           + (f": {answer}" if answer else f" listing {len(listed.stdout.split())} session(s)"))
+            route = f" ({held_route})" if confirm else ""
             raise FleetError(
-                f"Cannot inspect tmux server on {where}: `{' '.join(argv[:-2])}` exited {done.returncode}: "
-                f"{error or 'no message'} · clears when: `{' '.join(tmux)} list-sessions` answers — a "
-                f"server that lists its sessions, or no server at all ({held_route}) · clears who: the "
-                f"operator")
+                f"Cannot inspect tmux server on {where}: `{shlex.join(argv[:-2])}` exited {done.returncode}: "
+                f"{error or 'no message'}{confirm} · clears when: `{shlex.join(tmux + ['list-panes', '-a'])}` "
+                f"answers, or no server runs on that socket{route} · clears who: the operator")
         for line in done.stdout.splitlines():
             parts = line.split(None, 1)
             if len(parts) == 2 and parts[0].isdigit():
