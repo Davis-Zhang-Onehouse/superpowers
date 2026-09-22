@@ -19,7 +19,7 @@ import unittest
 from dataclasses import fields as dataclass_fields
 
 from fleet.pool import Pool
-from fleet.reconcile import (COMPLETE, DEAD, IDLE, KINDS, RUNNING, STALE_WAIT_S, STATES,
+from fleet.reconcile import (BLOCKED, COMPLETE, DEAD, IDLE, KINDS, RUNNING, STALE_WAIT_S, STATES,
                              UNREACHABLE, Subject, _awaiting_note, needs_a_human, reconcile)
 from fleet.session import LiveSession, Probes, SessionLayer
 from fleet.store import Declarations, Record, Store
@@ -628,3 +628,81 @@ class TestTheIdleStateIsProduced(unittest.TestCase):
                          f"a parked worker quiet for 2700s was reported {subject.state}: {subject.note!r}")
         self.assertIn(PARK_BLOCKED_Q, subject.note, "the standing park was dropped from the IDLE note")
         self.assertTrue(needs_a_human(subject), "a stalled parked worker is not asked of a human")
+
+
+#: `FI-55`/`i51(b)`. The exact frame `pane-guard` answered `15 awaiting-operator` for while `board` and `status`
+#: said RUNNING with an empty note (re-measure `scenC` C7): an `AskUserQuestion` selection, no caret row, no
+#: interrupt hint. `unsubmitted` is None and `busy` is False here, which is the whole defect.
+DIALOG_PANE = "\n".join(["Which of these should I keep?",
+                         "  1. Drop it",
+                         "  2. Keep it and carry the note",
+                         "",
+                         "Enter to select · Tab/Arrow keys to navigate · Esc to cancel",
+                         ""])
+
+
+class TestNeedsAHumanUsesKnownFacts(unittest.TestCase):
+    """`B06`. Attention is decided in one place, and that place consulted fewer facts than the package had
+    already computed. Each case drives the real join through `SyntheticFleet`, as `TestTheIdleStateIsProduced`
+    does. A hand-built Subject would pass whether or not the producer can ever emit the state.
+
+    Every positive case has a control beside it: the same worker with the one fact removed. Without the
+    control, a new branch that fires on everything would pass.
+    """
+
+    def setUp(self):
+        self.fleet = SyntheticFleet()
+
+    def subjects(self, idle_after_s=1800):
+        return {s.identity: s for s in reconcile(
+            self.fleet.store, self.fleet.pool, self.fleet.sessions,
+            self.fleet.instants, idle_after_s=idle_after_s)}
+
+    def worker(self, todo_id, tmux, pid, pane=QUIET_PANE):
+        # ws9 is the fixture's only unleased slot; each case builds its own fleet and takes it once.
+        stamp = todo_id.split("-")[1]
+        self.fleet.dispatch(todo_id, f"00000000-{stamp}-inflight-append-{todo_id.split('-')[0]}",
+                            "ws9", tmux)
+        self.fleet.launch(tmux, pid, "ws9", pane)
+        return self.fleet.paths[todo_id]
+
+    # --- fact 1: an operator dialog on the pane (`sessions.asking`, pane-guard 15) --------------------
+
+    def test_a_pane_showing_an_operator_dialog_is_blocked(self):
+        self.worker("asking-07300501", "dt-asking", 5201, pane=DIALOG_PANE)
+
+        subject = self.subjects()["asking-07300501"]
+
+        self.assertEqual(subject.state, BLOCKED,
+                         f"a pane pane-guard calls awaiting-operator (15) was reported {subject.state}: "
+                         f"{subject.note!r}")
+        self.assertIn("dialog", subject.note, "the note does not say what the human is being asked for")
+        self.assertTrue(needs_a_human(subject), "a worker blocked on a dialog is not asked of a human")
+
+    def test_a_quiet_pane_with_no_dialog_is_running(self):
+        """The control: same worker, same freshness, the dialog row gone."""
+        self.worker("quietctl-07300502", "dt-quietctl", 5202)
+
+        subject = self.subjects()["quietctl-07300502"]
+
+        self.assertEqual(subject.state, RUNNING, f"{subject.state}: {subject.note!r}")
+        self.assertFalse(needs_a_human(subject))
+
+    def test_a_busy_pane_outranks_a_dialog_hint_in_its_tail(self):
+        """pane-guard's ordering: busy before asking. A live turn keeps its stronger answer."""
+        self.worker("busydlg-07300503", "dt-busydlg", 5203,
+                    pane=DIALOG_PANE + "\n".join(["Thinking...", "  esc to interrupt"]))
+
+        subject = self.subjects()["busydlg-07300503"]
+
+        self.assertEqual(subject.state, RUNNING, f"{subject.state}: {subject.note!r}")
+
+    def test_a_dialog_is_not_masked_by_a_standing_park(self):
+        """OBS-7: an actionable state is never replaced by a standing declaration; the park is appended."""
+        path = self.worker("dlgpark-07300504", "dt-dlgpark", 5204, pane=DIALOG_PANE)
+        Declarations(path).park(PARK_BLOCKED_Q)
+
+        subject = self.subjects()["dlgpark-07300504"]
+
+        self.assertEqual(subject.state, BLOCKED, f"{subject.state}: {subject.note!r}")
+        self.assertIn(PARK_BLOCKED_Q, subject.note)

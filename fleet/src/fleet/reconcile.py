@@ -363,7 +363,15 @@ def _state_of(rec, folder_state, live, phase, parked, pane, sessions, instant, i
 def _live_state(phase, parked, pane, sessions, instant, idle_after_s):
     waiting = sessions.unsubmitted(pane)
     busy = sessions.busy(pane)
-    if waiting and not busy:
+    if not busy and sessions.asking(pane):
+        #: `B06`/`FI-55`. `pane-guard` has answered `15 awaiting-operator` for this frame since `I-16`, and
+        #: this join still said RUNNING with an empty note: an `AskUserQuestion` selection carries no caret
+        #: row, so `unsubmitted` is None, and nothing else here asked. It is the same predicate in the same
+        #: order `cli._do_pane_guard` uses (busy, then asking, then unsubmitted), so the guard and the board
+        #: cannot disagree about one frame. Waiting will not clear a dialog, and only an answer will.
+        state, note = BLOCKED, ("the pane is showing an operator dialog (a selection question, a trust "
+                                "screen or an approval prompt) and nothing moves until a human answers it")
+    elif waiting and not busy:
         # A pane holding text nobody submitted needs a keystroke: a modal, or a swallowed submit. Text
         # queued while the agent is still working is not blocked — it is queued, and it will be sent.
         state, note = BLOCKED, f"the pane is waiting on a human: {waiting!r}"
