@@ -85,7 +85,15 @@ KINDS = (KIND_WORKER, KIND_UNKNOWN, KIND_STALE_LEASE)
 #: `W2-14`/`OBS-57` recorded: a banner that cries for attention on a session nobody can answer trains
 #: people to ignore the banner. That is the same failure this fix is curing, so widening past what a
 #: human can actually DO would trade one silence for one more thing to tune out.
-ACTIONABLE_STATES = (BLOCKED, IDLE)
+#:
+#: `PARKED` added for `B06` (x2 `G-11`; prior art 4933291, on a branch that was never deployed). `fleet
+#: park --question` is a child saying "I cannot proceed without a decision", and an empty question is refused,
+#: so a park always asks somebody something. Excluded, a parked child rendered its question on the board
+#: beside `0 needs you`, and it surfaced only by timing out into `IDLE` after 30 minutes, which turns a
+#: question into a stall. The remedy is an answer, which a human can give, so this stays inside "what a
+#: human can actually DO". A parked worker whose pane is still busy is not PARKED at all (`OBS-3`, in
+#: `_live_state`), so this does not make progressing work shout.
+ACTIONABLE_STATES = (BLOCKED, IDLE, PARKED)
 
 
 def needs_a_human(subject) -> bool:
