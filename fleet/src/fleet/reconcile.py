@@ -357,6 +357,16 @@ def _state_of(rec, folder_state, live, phase, parked, pane, sessions, instant, i
         asked = getattr(sessions, "socket", "") or "the default server"
         return DEAD, (f"launched at {rec.launched_at} and no session is alive on tmux server {asked!r}: "
                       "the work stopped without renaming its folder")
+    if instant is None and rec.child_instant:
+        #: `B06`, re-measure `scenD` D3. The record names an instant and nothing on disk answers for it,
+        #: while the session is live. Every verb this worker would run to report or finish (`brief`,
+        #: `seed-check`, `propose`, `complete`) refuses with rc=2, so it cannot get out on its own. Before
+        #: this branch it was RUNNING with an empty note forever, because `_idle_for(None)` is 0 and so it
+        #: never even aged into IDLE. Gated on `child_instant`: a record that never named a folder has
+        #: lost nothing.
+        return BLOCKED, (f"the instant folder this record names, {rec.child_instant}, is not on disk "
+                         f"(deleted, or moved outside {Path(rec.child_instant).parent}); the session is "
+                         f"live, and every fleet verb it would run to report or finish refuses")
     return _live_state(phase, parked, pane, sessions, instant, idle_after_s)
 
 
