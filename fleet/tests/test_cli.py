@@ -3326,6 +3326,35 @@ class TestTheDispatchMilestoneJoin(CliCase):
                                         extra=["--cap", "8"])
         self.assertEqual(0, code, f"M9 could not be dispatched again: {err}")
 
+    def test_an_applied_progress_report_is_not_the_workers_final_report(self):
+        """Measured by the delta review of the apply-first fix: the worker reports `running` mid-flight (as
+        `working-as-a-dispatched-instant` tells it to), the coordinator applies it, the worker finishes with no
+        final report — and counting ANY applied row let the harvest through, leaving M9 `running`, unowned,
+        with the outcome lost. An applied IN-FLIGHT row is progress, not an outcome; the guard must refuse, as
+        it did before applied rows were counted."""
+        fleet = self.loaded()
+        coordinator, todo, _, _ = self._reported_and_finished(fleet, "running")
+        code, out, err = fleet.run(["apply", "--instant", str(coordinator), "--milestone", "M9"])
+        self.assertEqual(0, code, err)
+
+        code, out, err = fleet.run(["harvest", "--id", todo, "--porcelain"])
+
+        self.assertIn("harvest-refused", out,
+                      f"a mid-flight progress report let a worker with no final report be harvested: {out}")
+
+    def test_harvest_dry_run_after_apply_first_previews_the_claim_release(self):
+        fleet = self.loaded()
+        coordinator, todo, child, _ = self._reported_and_finished(fleet, "blocked")
+        fleet.run(["apply", "--instant", str(coordinator), "--milestone", "M9"])
+
+        code, out, err = fleet.run(["harvest", "--id", todo, "--dry-run", "--porcelain"])
+
+        row = [line for line in out.splitlines() if line.startswith("would-harvest\t")]
+        self.assertTrue(row, f"{out} {err}")
+        self.assertIn("apply 0 proposal(s)", row[0])
+        self.assertIn("give back the claim on M9", row[0], f"apply-first dry run hides the release: {row[0]}")
+        self.assertEqual(child, Roadmap(coordinator).milestone("M9").owner, "a dry run released a claim")
+
     def test_an_applied_row_another_instant_wrote_does_not_count_as_this_workers_report(self):
         fleet = self.loaded()
         coordinator = self._coordinator_with(fleet)
