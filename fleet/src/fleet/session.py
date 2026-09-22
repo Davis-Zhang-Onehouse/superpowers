@@ -231,8 +231,13 @@ class SessionLayer:
         answer = self.probes.attachment(name)
         if answer is None:
             return None
-        clients, last_input = answer
-        return Attachment(clients=int(clients), last_input=float(last_input))
+        #: `RV-29`. The probe is an injectable field and this runs inside `reconcile`, so an answer of the
+        #: wrong shape is NOT MEASURED rather than an exception that takes the whole board down with it.
+        try:
+            clients, last_input = answer
+            return Attachment(clients=int(clients), last_input=float(last_input))
+        except (TypeError, ValueError):
+            return None
 
     # --- pane --------------------------------------------------------------------------------
 
