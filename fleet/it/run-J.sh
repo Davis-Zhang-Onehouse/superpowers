@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# §J — Completion and the harvest transaction. COMPLETE: J1-J9.
+# §J — Completion and the harvest transaction. COMPLETE: J1-J10.
 #
 # These four were picked because each is a LIVE-SAFETY property the hermetic suite structurally cannot reach —
 # every probe there is injected, so none of it exercises a real session, a real pane or a real kill:
@@ -14,6 +14,9 @@
 #       second is `FI-9`: text sitting unsubmitted gets concatenated with a rate-limit retry and sent.
 #   J9  `SIGKILL` mid-harvest leaves fully-before or fully-after — never a released slot with an unstamped
 #       record, which leaks cap capacity invisibly (`SI-21`'s failure mode, arrived at by crash).
+#   J10 the COORDINATOR form of J2 (`B01`): a worker dispatched `--from` a coordinator reports through
+#       origin.json, and harvest must apply that report from the coordinator's inbox — only that worker's
+#       rows — and give back the claim on a milestone it leaves unfinished.
 #
 # J1 is subsumed: J2 cannot be reached without running the whole lifecycle, so the lifecycle is the setup.
 # J3/J4/J5/J6 stay NOT-RUN and the section-level row says so.
@@ -84,7 +87,8 @@ for s in ws1 ws2 ws3 ws4 ws5 ws6 ws7 ws8 ws9 ws10 ws11 ws12; do fleet enroll --s
 #      The worker proposes on its OWN roadmap here, which is the standalone form: with no `--from` there is
 #      no `origin.json`, so `propose` stays local and `harvest` is the thing that applies it — which is what
 #      makes "proposal applied" one of the five. The coordinator form (a worker reporting UP, and harvest
-#      REFUSING to bury an unreported one) is `H10` and `SI-27`'s guard.
+#      REFUSING to bury an unreported one) is `H10` and `SI-27`'s guard; harvest APPLYING a reported one from
+#      the coordinator's inbox is `J10`.
 # ==================================================================================================
 fleet dispatch --profile "$OUT/profile" --title "fullLifecycle" --base 00000000 --optype append \
       --porcelain > "$OUT/J2-dispatch.out" 2>&1
@@ -566,6 +570,114 @@ if [ "$j6_dead" = 1 ] && [ "$j6_slot_free" = 1 ] && [ "$j6_instant_alive" = 1 ];
 else
   it_fail J6 "fleet/it/J/out/j6/reap.tsv" \
     "status_DEAD=$j6_dead slot_freed=$j6_slot_free instant_survived=$j6_instant_alive"
+fi
+
+# ==================================================================================================
+# J10 — HARVEST APPLIES A DISPATCHED WORKER'S REPORT WHERE `propose` DELIVERED IT.  (`B01`)
+#
+#       J2 is the standalone form: no `--from`, so `propose` stays local and harvest applies the worker's
+#       own inbox. Every real worker is the OTHER form — dispatched `--from` a coordinator, so `propose`
+#       routes through `origin.json` to the COORDINATOR's inbox (`SI-27`) — and harvest kept reading the
+#       worker's own, empty by construction. Measured before the fix: `delta applied (none pending)`, the
+#       rows still pending at the coordinator, the milestones still `blocked`, the slots released anyway.
+#
+#       Two workers and one bystander row, asserted from the coordinator's side:
+#         jdone  reports done    -> applied, consumed, and the owner KEPT (the record of who did it)
+#         jstuck reports blocked -> applied, consumed, and the claim GIVEN BACK, so the milestone can be
+#                                   dispatched again (before the fix: "already claimed" by a harvested
+#                                   instant, whose printed remedy — `abort` it — cannot run on a closed folder)
+#         a row the COORDINATOR wrote about a third milestone is still pending: harvesting one worker must
+#         not apply anybody else's report.
+# ==================================================================================================
+J10="$OUT/j10"; mkdir -p "$J10"
+{
+  fleet init --base 00000000 --name jCoord --porcelain
+} > "$J10/init.out" 2>&1
+JCOORD="$(awk -F'\t' '$1=="path"{print $2; exit}' "$J10/init.out")"
+j10_setup=0
+if [ -n "$JCOORD" ] && [ -d "$JCOORD" ]; then
+  j10_setup=1
+  {
+    for m in jm-done jm-stuck jm-other; do
+      fleet milestone --instant "$JCOORD" --id "$m" --title "case $m" --porcelain || j10_setup=0
+    done
+    mkdir -p "$JCOORD/evidence"; printf 'x\n' > "$JCOORD/evidence/INDEX.md"
+    fleet propose --instant "$JCOORD" --milestone jm-other --status running --evidence evidence/INDEX.md \
+          --porcelain || j10_setup=0
+  } > "$J10/coord.out" 2>&1
+fi
+j10_worker() {                    # j10_worker <title> <milestone> <status> -> echoes "<todo> <child>"
+  local title="$1" m="$2" status="$3" d child todo
+  d="$J10/$title"; mkdir -p "$d"
+  fleet dispatch --profile "$OUT/profile" --title "$title" --base 00000000 --optype append \
+        --from "$JCOORD" --milestone "$m" --cap 12 --porcelain > "$d/dispatch.out" 2>&1
+  child="$(awk -F'\t' '$1=="instant"{print $2}' "$d/dispatch.out")"
+  todo="$(awk -F'\t' '$1=="todo_id"{print $2}' "$d/dispatch.out")"
+  [ -n "$child" ] && [ -d "$child" ] || return 1
+  {
+    fleet review --instant "$child" --scope all --verdict READY \
+          --finding "J10-1:Minor:applied:evidence/INDEX.md:reported:none" --porcelain
+    fleet propose --instant "$child" --milestone "$m" --status "$status" --evidence evidence/INDEX.md \
+          --porcelain
+    fleet complete --instant "$child" --porcelain
+  } > "$d/lifecycle.out" 2>&1
+  printf '%s %s\n' "$todo" "$child"
+}
+J10D="$( [ "$j10_setup" = 1 ] && j10_worker jDone jm-done done )"
+J10S="$( [ "$j10_setup" = 1 ] && j10_worker jStuck jm-stuck blocked )"
+if [ "$j10_setup" != 1 ] || [ -z "$J10D" ] || [ -z "$J10S" ]; then
+  it_fail J10 "fleet/it/J/out/j10" \
+    "the fixture did not build (setup=$j10_setup done-worker='$J10D' stuck-worker='$J10S'), so nothing here is a verdict about harvest: $(head -2 "$J10/init.out" "$J10/coord.out" 2>/dev/null | tr '\n' ' ')"
+else
+  # The pre-image: both reports are PENDING at the coordinator and neither milestone has moved, so the
+  # assertions below can only pass if harvest itself applied them.
+  j10_state() {
+    python3 - "$JCOORD" "${J10D#* }" "${J10S#* }" <<'PY'
+import pathlib, sys
+from fleet.identity import resolve
+from fleet.roadmap import Roadmap
+coord = pathlib.Path(sys.argv[1])
+children = {pathlib.Path(p).name.split("-", 4)[4]: pathlib.Path(p) for p in sys.argv[2:]}
+rm = Roadmap(coord)
+for m in ("jm-done", "jm-stuck", "jm-other"):
+    ms = rm.milestone(m)
+    owner = pathlib.Path(ms.owner).name.split("-", 4)[4] if ms.owner else None
+    print(f"{m}\tstatus={ms.status}\towner={owner}")
+for p in rm.proposals():
+    print(f"pending\t{p.milestone}\t{p.status}\tby={pathlib.Path(p.instant).name.split('-', 4)[4]}")
+PY
+  }
+  j10_state > "$J10/before.txt" 2>&1
+  fleet harvest --id "${J10D%% *}" --porcelain > "$J10/harvest-done.tsv" 2>&1
+  fleet harvest --id "${J10S%% *}" --porcelain > "$J10/harvest-stuck.tsv" 2>&1
+  j10_state > "$J10/after.txt" 2>&1
+  fleet dispatch --profile "$OUT/profile" --title "jAgain" --base 00000000 --optype append \
+        --from "$JCOORD" --milestone jm-stuck --cap 12 --porcelain > "$J10/redispatch.out" 2>&1
+  j10_redispatch_rc=$?
+
+  j10_pre=0
+  grep -qP '^pending\tjm-done\tdone\tby=jdone$' "$J10/before.txt" \
+    && grep -qP '^pending\tjm-stuck\tblocked\tby=jstuck$' "$J10/before.txt" \
+    && grep -qP '^jm-done\tstatus=blocked\towner=jdone$' "$J10/before.txt" && j10_pre=1
+  j10_committed=0
+  grep -qP '^harvested\t' "$J10/harvest-done.tsv" && grep -qP '^harvested\t' "$J10/harvest-stuck.tsv" \
+    && j10_committed=1
+  j10_done_applied=0;  grep -qP '^jm-done\tstatus=done\towner=jdone$' "$J10/after.txt" && j10_done_applied=1
+  j10_stuck_freed=0;   grep -qP '^jm-stuck\tstatus=blocked\towner=None$' "$J10/after.txt" && j10_stuck_freed=1
+  j10_consumed=1;      grep -qP '^pending\tjm-(done|stuck)\t' "$J10/after.txt" && j10_consumed=0
+  j10_bystander=0;     grep -qP '^pending\tjm-other\trunning\tby=jcoord$' "$J10/after.txt" && j10_bystander=1
+  j10_again=0;         [ "$j10_redispatch_rc" = 0 ] && j10_again=1
+  j10_all="$j10_committed$j10_done_applied$j10_stuck_freed$j10_consumed$j10_bystander$j10_again"
+  if [ "$j10_pre" = 1 ] && [ "$j10_all" = "111111" ]; then
+    it_pass J10 "fleet/it/J/out/j10/after.txt" \
+      "harvest applied each dispatched worker's report from the COORDINATOR's inbox, where \`propose\` delivered it through origin.json, against a measured pre-image (both rows pending there, jm-done still blocked): jm-done -> done with its owner kept, jm-stuck -> blocked with its claim GIVEN BACK and dispatchable again (exit 0), both rows consumed, and the coordinator's own jm-other row still pending — harvesting one worker applies that worker's report and nobody else's. Before B01 the same run printed 'delta applied (none pending)' and left every row pending"
+  elif [ "$j10_pre" != 1 ]; then
+    it_fail J10 "fleet/it/J/out/j10/before.txt" \
+      "the PRE-IMAGE was not the one this case needs (both reports pending at the coordinator, jm-done blocked and owned), so nothing after it could distinguish a harvest that applied them: $(tr '\n' ' ' < "$J10/before.txt")"
+  else
+    it_fail J10 "fleet/it/J/out/j10/after.txt" \
+      "committed=$j10_committed done_applied=$j10_done_applied stuck_claim_freed=$j10_stuck_freed consumed=$j10_consumed bystander_untouched=$j10_bystander redispatch_ok=$j10_again :: $(tr '\n' ' ' < "$J10/after.txt")"
+  fi
 fi
 
 it_assert_isolation J-leave
