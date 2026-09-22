@@ -10,6 +10,7 @@ A test that passes because of what the person running it exported is not measuri
 """
 import contextlib
 import os
+import pathlib
 from unittest import mock
 
 #: Every variable `cli` reads. Cleared as a SET rather than one at a time: the failure this file exists
@@ -45,3 +46,100 @@ def hermetic_environment(instants, home=None):
         if home is not None:
             os.environ["HOME"] = str(home)
         yield
+
+
+# --- the live-fleet guard --------------------------------------------------------------------------
+#
+# `hermetic_environment` is opt-in, and opting out cost nothing you could see: `PromoteGateCase` drove
+# `cli.main` with no root named and passed ONLY because the suite happened to run inside the operator's
+# fleet root — where it read that root's marker, its store and its tmux server — while the same nine tests
+# failed from an export under `/tmp`, so P-1 (`it/bin/assert-head-green.sh`) was RED at every tree
+# (FB-30/FB-35/FB-40). A test that passes because of where it was started is measuring the box.
+#
+# So the suite now refuses to reach the fleet the PROCESS could reach on its own. Those destinations are
+# captured once, when this package is imported — which `unittest discover` does while importing the test
+# modules, before any test runs — from the real `$HOME`, the real cwd and the real environment. Any test
+# that then resolves one of them fails with `LiveFleetReached`, inside a root and outside one alike.
+# An `AssertionError` on purpose: `cli.main` turns `FleetError` and `OSError` into exit codes, and a
+# guard a handler can swallow would be one more control that cannot fail.
+
+
+class LiveFleetReached(AssertionError):
+    """A test resolved a fleet destination it did not create."""
+
+
+def _resolved(path):
+    try:
+        return pathlib.Path(path).expanduser().resolve()
+    except (OSError, RuntimeError):
+        return None
+
+
+def _live_destinations(environ, cwd):
+    """`(roots, stores, release_areas)` this process reaches with nothing named: the marker the walk
+    finds from `cwd` under `$HOME`, and whatever `FLEET_ROOT` / `FLEET_HOME` / `FLEET_RELEASES` name."""
+    from fleet import root as root_mod
+
+    roots = set()
+    try:
+        found = root_mod.find(cwd, environ.get("HOME") or pathlib.Path.home())
+    except Exception:                                   # an unreadable tree is not a live fleet
+        found = None
+    for candidate in (found, environ.get("FLEET_ROOT")):
+        if candidate:
+            roots.add(_resolved(candidate))
+    roots.discard(None)
+    stores = {r / ".fleet" for r in roots}
+    releases = {r / "fleet-releases" for r in roots}
+    if environ.get("FLEET_HOME"):
+        stores.add(_resolved(environ["FLEET_HOME"]))
+    if environ.get("FLEET_RELEASES"):
+        releases.add(_resolved(environ["FLEET_RELEASES"]))
+    return frozenset(roots), frozenset(stores - {None}), frozenset(releases - {None})
+
+
+LIVE_ROOTS, LIVE_STORES, LIVE_RELEASES = _live_destinations(dict(os.environ), pathlib.Path.cwd())
+
+
+def _refuse(kind, path, how):
+    raise LiveFleetReached(
+        f"this test resolved the {kind} {path} through {how}. That is a fleet this test process could reach "
+        f"without the test creating it — the operator's, when the suite runs inside a fleet root or from a "
+        f"dispatched session. Name a private one: `hermetic_environment(instants, home=<tmp>)` and a "
+        f"`--root`/`--home` the fixture wrote.")
+
+
+def _install_live_fleet_guard():
+    from fleet import cli, root as root_mod
+
+    if getattr(root_mod.load, "live_fleet_guard", False):
+        return
+    real_load = root_mod.load
+    real_context = cli.default_context
+    real_releases = cli.resolve_releases
+
+    def load(root_dir):
+        if _resolved(root_dir) in LIVE_ROOTS:
+            _refuse("fleet root", root_dir, "its .fleet-root marker")
+        return real_load(root_dir)
+
+    def default_context(parsed, out, err):
+        ctx = real_context(parsed, out, err)
+        if ctx.home is not None and _resolved(ctx.home) in LIVE_STORES:
+            _refuse("store", ctx.home, f"`{parsed.verb}`'s context")
+        return ctx
+
+    def resolve_releases(parsed, environ, cwd):
+        rel = real_releases(parsed, environ, cwd)
+        if _resolved(rel.root) in LIVE_RELEASES:
+            _refuse("release area", rel.root, f"`{parsed.verb}`'s release resolution")
+        return rel
+
+    for wrapper in (load, default_context, resolve_releases):
+        wrapper.live_fleet_guard = True
+    root_mod.load = load
+    cli.default_context = default_context
+    cli.resolve_releases = resolve_releases
+
+
+_install_live_fleet_guard()
