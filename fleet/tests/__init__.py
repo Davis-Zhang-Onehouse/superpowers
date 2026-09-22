@@ -76,8 +76,11 @@ def _resolved(path):
 
 
 def _live_destinations(environ, cwd):
-    """`(roots, stores, release_areas)` this process reaches with nothing named: the marker the walk
-    finds from `cwd` under `$HOME`, and whatever `FLEET_ROOT` / `FLEET_HOME` / `FLEET_RELEASES` name."""
+    """`(roots, stores, release_areas, instants_dirs)` this process reaches with nothing named: the
+    marker the walk finds from `cwd` under `$HOME`, whatever `FLEET_ROOT` / `FLEET_HOME` /
+    `FLEET_RELEASES` / `FLEET_INSTANTS` name, and each live store's derived `instants/`. The last is
+    where `dispatch` and `init` CREATE folders — a dispatched session exports the operator's effort
+    tree as `FLEET_INSTANTS`, so it is the one destination here a stray test would write into."""
     from fleet import root as root_mod
 
     roots = set()
@@ -95,10 +98,16 @@ def _live_destinations(environ, cwd):
         stores.add(_resolved(environ["FLEET_HOME"]))
     if environ.get("FLEET_RELEASES"):
         releases.add(_resolved(environ["FLEET_RELEASES"]))
-    return frozenset(roots), frozenset(stores - {None}), frozenset(releases - {None})
+    stores.discard(None)
+    instants = {store / "instants" for store in stores}
+    if environ.get("FLEET_INSTANTS"):
+        instants.add(_resolved(environ["FLEET_INSTANTS"]))
+    return (frozenset(roots), frozenset(stores), frozenset(releases - {None}),
+            frozenset(instants - {None}))
 
 
-LIVE_ROOTS, LIVE_STORES, LIVE_RELEASES = _live_destinations(dict(os.environ), pathlib.Path.cwd())
+LIVE_ROOTS, LIVE_STORES, LIVE_RELEASES, LIVE_INSTANTS = _live_destinations(dict(os.environ),
+                                                                             pathlib.Path.cwd())
 
 
 def _refuse(kind, path, how):
@@ -116,6 +125,7 @@ def _install_live_fleet_guard():
         return
     real_load = root_mod.load
     real_home = cli.resolve_home
+    real_instants = cli.resolve_instants
     real_releases = cli.resolve_releases
 
     def load(root_dir):
@@ -131,16 +141,23 @@ def _install_live_fleet_guard():
             _refuse("store", home, f"`{parsed.verb}`'s {source}")
         return home, source
 
+    def resolve_instants(parsed, environ, cwd):
+        instants = real_instants(parsed, environ, cwd)
+        if _resolved(instants) in LIVE_INSTANTS:
+            _refuse("instants directory", instants, f"`{parsed.verb}`'s instants resolution")
+        return instants
+
     def resolve_releases(parsed, environ, cwd):
         rel = real_releases(parsed, environ, cwd)
         if _resolved(rel.root) in LIVE_RELEASES:
             _refuse("release area", rel.root, f"`{parsed.verb}`'s release resolution")
         return rel
 
-    for wrapper in (load, resolve_home, resolve_releases):
+    for wrapper in (load, resolve_home, resolve_instants, resolve_releases):
         wrapper.live_fleet_guard = True
     root_mod.load = load
     cli.resolve_home = resolve_home
+    cli.resolve_instants = resolve_instants
     cli.resolve_releases = resolve_releases
 
 
