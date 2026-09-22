@@ -3211,12 +3211,12 @@ def _unreported_to_coordinator(ctx: Ctx, child: Path):
         check's to diagnose;
       * that milestone is NOT terminal at the coordinator — if it already reads done or dropped, the report
         arrived or the work was written off, and either way nothing is being lost;
-      * and no proposal for it BY THIS WORKER is pending there, and the worker's latest APPLIED one is
-        absent or only progress (`running`) — a pending one means the report DID arrive and is merely
-        unapplied, which `harvest` itself is about to do; an applied non-progress one means the coordinator
-        already acted on the worker's final word (`B01`).
+      * and this worker's LAST report for it — its last pending row, else its last applied one — is
+        absent or only progress (`running`). A pending final word is about to be applied by `harvest`
+        itself; an applied one was already acted on by the coordinator (`B01`).
 
-    So the refusal fires only when the report exists nowhere. It is a refusal rather than a warning because
+    So the refusal fires only when the FINAL report exists nowhere — no report at all, or a last report
+    that is only progress (`running`). It is a refusal rather than a warning because
     `harvest` is the step that makes the loss unrecoverable: after it the slot is gone, the session is dead
     and the record is stamped.
     """
@@ -3234,29 +3234,28 @@ def _unreported_to_coordinator(ctx: Ctx, child: Path):
         return None
     if milestone.status in TERMINAL:
         return None
-    #: `B01`. Only THIS worker's rows count: `harvest` applies nothing else (`_harvest_inbox`), so a row
-    #: another instant wrote about the same milestone proves nothing about whether this one reported.
-    #: PENDING, any status — what this guard has always accepted: `harvest` is about to apply it.
-    #: Or already APPLIED: `harvesting-an-instant` applies first and harvests second, and a harvest killed
-    #: between its own apply and its stamp is retried — in both the report arrived and was consumed. Only the
-    #: worker's LATEST applied row is judged, and it counts unless it is `running`: a mid-flight progress
-    #: report the coordinator acted on is not the worker's final word, and an earlier applied outcome must
-    #: not stand in for a later progress row (both measured in review). `awaiting-ci` counts — it is the
-    #: handoff in the worker skill's own `running` -> `awaiting-ci` -> `done`.
+    #: `B01`. The worker's LAST WORD, however it reached the coordinator: its last pending row if it has
+    #: one (harvest applies pending rows in order, so that is the status it would leave), else its last
+    #: applied row (the status an apply already left — list order is apply order, which is what
+    #: `roadmap.json` shows). Only THIS worker's rows: one another instant wrote proves nothing about this one.
+    #: Refused when there is none, or when it is `running`, the one status that is only ever progress. So the
+    #: answer depends neither on whether the coordinator applied first (`harvesting-an-instant` applies
+    #: first) nor on harvest's own earlier apply (a retry after a crash in J9's window), and a mid-flight
+    #: progress report never stands in for the final one — three cases measured in review.
     #: Pending is read before applied deliberately: a concurrent `apply` moves a row from the first list to
     #: the second, so this order sees it in one of them.
-    def mine(rows):
+    def by_this_worker(rows):
         return [p for p in rows if p.milestone == recorded.milestone and _proposed_by(child, p)]
-    if mine(roadmap.proposals()):
+    last = (by_this_worker(roadmap.proposals()) or by_this_worker(roadmap.applied()) or [None])[-1]
+    if last is not None and last.status != IN_PROGRESS:
         return None
-    applied = mine(roadmap.applied())
-    if applied and max(enumerate(applied), key=lambda pair: (pair[1].at, pair[0]))[1].status != IN_PROGRESS:
-        return None
+    reported = ("NO report from this instant pending or applied" if last is None else
+                f"this instant's last report says {IN_PROGRESS!r} ({last.at}), which is progress, not a "
+                f"final word")
     return (f"this instant was dispatched for milestone {recorded.milestone!r} on {coordinator}, and that "
-            f"milestone still reads status={milestone.status!r} there with NO report from this instant "
-            f"pending, and its latest applied report (if any) was only progress ({IN_PROGRESS!r}). "
-            f"Harvesting now would kill the session, release the slot and stamp the record while the "
-            f"project-level roadmap never learns what happened — and after that the loss is unrecoverable.")
+            f"milestone still reads status={milestone.status!r} there with {reported}. Harvesting now "
+            f"would kill the session, release the slot and stamp the record while the project-level roadmap "
+            f"never learns what happened — and after that the loss is unrecoverable.")
 
 
 def _proposed_by(child: Path, proposal) -> bool:
@@ -3364,11 +3363,13 @@ def _do_harvest(ctx: Ctx, parsed: Parsed) -> int:
         elif unreported:
             rows.append(Row(
                 kind="harvest-refused", subject=record.todo_id, severity=VIOLATION, detail=unreported,
-                clears_when=("the worker's final status reaches the coordinator — `fleet propose "
-                             "--instant <this> --milestone <m> --status <s> --evidence <path>`, which "
-                             "routes there by default and still works once the folder is -complete- (the "
-                             "coordinator may run it on the worker's behalf, citing the worker's evidence). "
-                             "`fleet abort` only applies while the folder is still -inflight-"),
+                clears_when=("a final status other than `running` reaches the coordinator — `fleet "
+                             "propose --instant <this> --milestone <m> --status <s> --evidence <path>` "
+                             "with s=done or awaiting-ci for finished work, blocked or ready to return it "
+                             "to the queue, dropped to write it off. It routes there by default and still "
+                             "works once the folder is -complete- (the coordinator may run it on the "
+                             "worker's behalf, citing the worker's evidence); `fleet abort` only applies "
+                             "while the folder is still -inflight-"),
                 clears_who="the dispatched instant, or the coordinator on its behalf"))
         elif ctx.dry_run:
             roadmap, mine, held, recorded = _harvest_inbox(ctx, child)

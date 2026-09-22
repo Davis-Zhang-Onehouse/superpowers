@@ -3248,17 +3248,31 @@ class TestTheDispatchMilestoneJoin(CliCase):
         self.assertEqual(0, code, f"M9 could not be dispatched again after its worker was harvested: {err}")
 
     def test_an_in_flight_milestone_is_no_longer_held_by_a_harvested_worker(self):
-        """`running` still blocks a dispatch on its own ("already in flight") — that is the status the
-        worker reported, and changing it is the coordinator's call. What changes is WHO the roadmap says
+        """`awaiting-ci` still blocks a dispatch on its own ("already in flight") — that is the status the
+        worker handed off at, and changing it is the coordinator's call. What changes is WHO the roadmap says
         holds it: the coordinator, not a closed instant."""
         fleet = self.loaded()
-        coordinator, todo, _, _ = self._reported_and_finished(fleet, "running")
+        coordinator, todo, _, _ = self._reported_and_finished(fleet, "awaiting-ci")
 
         fleet.run(["harvest", "--id", todo, "--porcelain"])
 
         milestone = Roadmap(coordinator).milestone("M9")
-        self.assertEqual("running", milestone.status, "the report was not applied")
+        self.assertEqual("awaiting-ci", milestone.status, "the report was not applied")
         self.assertIsNone(milestone.owner, "a harvested worker still holds an in-flight milestone")
+
+    def test_a_worker_whose_last_report_is_running_is_refused_however_it_reached_the_coordinator(self):
+        """Third delta review: judged on the applied side only, a PENDING `running` with no final word was
+        harvested — applied, claim released, milestone `running` and unowned, the outcome lost silently; on the
+        base that row at least stayed visible in the inbox and the stale owner kept the milestone loud. The
+        guard's answer must not depend on who applied first, nor change across harvest's own apply (a retry)."""
+        fleet = self.loaded()
+        coordinator, todo, _, _ = self._reported_and_finished(fleet, "running")
+
+        code, out, err = fleet.run(["harvest", "--id", todo, "--porcelain"])
+
+        self.assertIn("harvest-refused", out,
+                      f"a worker whose last word was `running` (pending) was harvested: {out}")
+        self.assertIn("other than", out, "the remedy must say a `running` re-report will not clear it")
 
     def test_harvest_dry_run_previews_the_claim_it_would_give_back_and_changes_nothing(self):
         fleet = self.loaded()
