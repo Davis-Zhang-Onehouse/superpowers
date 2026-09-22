@@ -70,8 +70,8 @@ CUT_STAMPED = "fleet/src/fleet/__init__.py"
 #: `test_release_payload` asserts the two agree, so the duplication cannot drift in silence.
 CUT_MANIFESTS = ("package.json", ".claude-plugin/plugin.json", ".cursor-plugin/plugin.json",
                  ".codex-plugin/plugin.json", ".kimi-plugin/plugin.json", ".devin-plugin/plugin.json",
-                 ".hermes-plugin/plugin.yaml",
-                 ".claude-plugin/marketplace.json", "gemini-extension.json")
+                 ".hermes-plugin/plugin.yaml", ".muse-plugin/plugin.json",
+                 ".claude-plugin/marketplace.json", ".muse-plugin/marketplace.json", "gemini-extension.json")
 
 #: `__version__ = "X.Y.Z"`, however it is spaced or quoted. Matched rather than parsed, because the only
 #: thing that must be recognised is the line `release-cut` rewrites with `re.sub`.
