@@ -2466,10 +2466,15 @@ def _do_milestone(ctx: Ctx, parsed: Parsed) -> int:
                 f"`--retire` needs `--reason`. `dropped` and `done` are both terminal and look alike to "
                 f"a later reader, so a milestone that left the population without a recorded why is a "
                 f"decision nobody can reconstruct.")
+        #: `B02`. Retiring closes the milestone's pending proposals (`Roadmap.retire`); said, with the count,
+        #: because a report leaving the inbox silently is the loss the `closed` list exists to prevent.
+        doomed = len([p for p in roadmap.proposals() if p.milestone == parsed.get("id")])
         if ctx.dry_run:
             _emit(ctx, "milestone", [("dry-run", "the roadmap was not written"),
                                      ("would-retire", parsed.get("id")),
-                                     ("reason", parsed.get("reason"))])
+                                     ("reason", parsed.get("reason")),
+                                     ("would-close", f"{doomed} pending proposal(s) for {parsed.get('id')}, "
+                                                     f"as retired")])
             return EXIT_OK
         retired = roadmap.retire(parsed.get("id"), parsed.get("reason"))
         #: S3 / I-24a. Retiring frees the ROW, not the id: on a live effort `m8` could not be re-raised
@@ -2482,6 +2487,8 @@ def _do_milestone(ctx: Ctx, parsed: Parsed) -> int:
         _emit(ctx, "milestone", [
             ("milestone", retired.id), ("status", retired.status),
             ("retired-reason", retired.retired_reason),
+            ("proposals-closed", f"{doomed} pending proposal(s) for {retired.id} closed as retired — kept in "
+                                 f"the inbox's closed list, never applied"),
             ("dispatchable", "no — a retired milestone leaves the ready population, which is the point: "
                              "once its deps land a superseded one is derived READY forever and no report "
                              "prints ready rows"),
@@ -2703,31 +2710,66 @@ def _live_session_warning(ctx: Ctx, proposal) -> str:
             f"applied.")
 
 
+def _row_named(p) -> str:
+    return f"{p.milestone} -> {p.status} at {p.at} ({p.instant})"
+
+
 def _do_apply(ctx: Ctx, parsed: Parsed) -> int:
-    """The COORDINATOR's verb and the only path that changes a milestone status."""
+    """The COORDINATOR's verb and the only path that changes a milestone status.
+
+    `B02`. It lands ONE row: the newest pending row for the milestone, or the one `--at` names. It used to
+    apply every pending row in file order, so the last row's status won and the milestone's evidence became
+    the union of every superseded report — including a typo'd path the worker had already corrected. The
+    earlier rows are closed as superseded (recorded in the inbox, never deleted); later rows stay pending.
+    A row that would move a TERMINAL milestone is refused unless `--reopen`, in the dry run too, because
+    residue is what used to resurrect a retired milestone."""
     child = _instant(ctx, parsed)
     roadmap = Roadmap(child)
     milestone = parsed.get("milestone")
-    pending = [proposal for proposal in roadmap.proposals() if proposal.milestone == milestone]
-    if not pending:
-        raise BadInput(
-            f"no pending proposal names milestone {milestone!r} in {roadmap.proposals_path}. `apply` "
-            "applies a worker's proposal; it does not invent a status.")
+    reopen = parsed.on("reopen")
+    chosen, earlier, newer = roadmap.select(milestone, parsed.get("at"))
+    refusal = roadmap.apply_refusal(chosen, reopen=reopen)
+    if refusal:
+        raise BadInput(refusal)
+    left = ([("pending-left", f"{len(newer)} newer row(s) for {milestone} stay pending — "
+                              + "; ".join(_row_named(p) for p in newer))] if newer else [])
     if ctx.dry_run:
-        rows = [("dry-run", "the roadmap was not written")]
-        rows += [("would-apply", f"{p.milestone} -> {p.status} ({p.instant})") for p in pending]
-        _emit(ctx, "apply", rows)
+        rows = [("dry-run", "the roadmap was not written"), ("would-apply", _row_named(chosen))]
+        rows += [("would-supersede", _row_named(p)) for p in earlier]
+        _emit(ctx, "apply", rows + left)
         return EXIT_OK
-    rows = []
-    for proposal in pending:
-        applied = roadmap.apply(proposal)
-        rows.append(("applied", f"{applied.id} -> {applied.status}"))
-        rows.append(("evidence", ", ".join(applied.evidence)))
-        #: Reported, never refused (`I-10`) — the exit code below is untouched by this branch on purpose.
-        warning = _live_session_warning(ctx, proposal)
-        if warning:
-            rows.append(("warning", warning))
+    applied = roadmap.apply(chosen, reopen=reopen)
+    rows = [("applied", f"{applied.id} -> {applied.status}"), ("evidence", ", ".join(applied.evidence))]
+    rows += [("superseded", _row_named(p)) for p in earlier]
+    rows += left
+    #: Reported, never refused (`I-10`) — the exit code below is untouched by this branch on purpose.
+    warning = _live_session_warning(ctx, chosen)
+    if warning:
+        rows.append(("warning", warning))
     _emit(ctx, "apply", rows)
+    return EXIT_OK
+
+
+def _do_withdraw(ctx: Ctx, parsed: Parsed) -> int:
+    """`B02`. Close pending proposals WITHOUT applying them — every row for the milestone, or the one `--at`
+    names. There was no way to do this: a worker that corrected a report, or a coordinator holding residue
+    for a milestone finished another way, could only add rows or apply them. Writes the inbox only; the
+    roadmap is never opened for writing, so a withdrawn report moves nothing, as it never had."""
+    child = _instant(ctx, parsed)
+    roadmap = Roadmap(child)
+    milestone, at, reason = parsed.get("milestone"), parsed.get("at"), parsed.get("reason")
+    if ctx.dry_run:
+        if not " ".join(str(reason or "").split()):
+            raise BadInput("`withdraw` needs a --reason; a report that left the inbox with no recorded why "
+                           "cannot be told apart from one that was lost")
+        chosen, earlier, newer = roadmap.select(milestone, at)
+        rows = [chosen] if at is not None else earlier + [chosen] + newer
+        _emit(ctx, "withdraw", [("dry-run", "the inbox was not written")]
+              + [("would-withdraw", _row_named(p)) for p in rows])
+        return EXIT_OK
+    closed = roadmap.withdraw(milestone, reason, at=at)
+    _emit(ctx, "withdraw", [("withdrawn", _row_named(p)) for p in closed]
+          + [("reason", " ".join(str(reason).split()))])
     return EXIT_OK
 
 
@@ -5415,6 +5457,17 @@ VERBS = {spec.name: spec for spec in (
     _verb("apply", _do_apply, False, "the COORDINATOR applies a proposal; the single writer", (
         Flag("--instant", True, True, "the instant holding the roadmap"),
         Flag("--milestone", True, True, "the milestone id"),
+        #: `B02`. The newest pending row is applied by default and earlier ones close as superseded.
+        Flag("--at", True, False, "apply the ONE pending row with this `at` stamp instead of the newest"),
+        Flag("--reopen", False, False,
+             "allow moving a TERMINAL (done/dropped) milestone to another status; clears retired_reason"),
+    )),
+    _verb("withdraw", _do_withdraw, False,
+          "close pending proposals without applying them; the inbox only, never the roadmap", (
+        Flag("--instant", True, True, "the instant holding the roadmap (whose inbox the rows are in)"),
+        Flag("--milestone", True, True, "the milestone id"),
+        Flag("--at", True, False, "withdraw only the ONE pending row with this `at` stamp"),
+        Flag("--reason", True, True, "why; recorded with every row it closes"),
     )),
     _verb("review", _do_review, False, "record a structured round and report the gate", checker=True,
           flags=(
@@ -5619,6 +5672,7 @@ PORCELAIN_COLUMNS = {
     "milestone": KV_COLUMNS,
     "propose": KV_COLUMNS,
     "apply": KV_COLUMNS,
+    "withdraw": KV_COLUMNS,
     "complete": KV_COLUMNS,
     "abort": KV_COLUMNS,
     "close": KV_COLUMNS,

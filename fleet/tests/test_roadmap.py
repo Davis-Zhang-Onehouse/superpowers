@@ -702,6 +702,16 @@ class TestTheProposalQueueHasALifecycle(RoadmapCase):
         self.assertEqual("running", moved.status)
         self.assertEqual("", moved.retired_reason, "a reopened milestone still says why it was retired")
 
+    def test_reopen_moves_a_done_milestone_and_a_dropped_row_keeps_the_reason(self):
+        self.rm.add(ms("d", status="done"))
+        self.assertEqual("running", self.rm.apply(
+            self.rm.propose(self.worker, "d", "running", ["evidence/again.log"]), reopen=True).status)
+        self.rm.add(ms("k"))
+        self.rm.retire("k", "written off")
+        kept = self.rm.apply(self.rm.propose(self.worker, "k", "dropped", ["evidence/k.log"]), reopen=True)
+        self.assertEqual(("dropped", "written off"), (kept.status, kept.retired_reason),
+                         "a milestone that stays dropped still carries why it was retired")
+
     def test_withdraw_closes_rows_and_never_touches_the_roadmap(self):
         rows = self.three()
         before = (self.rm.path.read_bytes(), self.rm.path.stat().st_mtime_ns)

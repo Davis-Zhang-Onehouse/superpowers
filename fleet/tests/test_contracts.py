@@ -356,6 +356,7 @@ class Loaded(unittest.TestCase):
             "propose": ["--instant", ready, "--milestone", "M1", "--status", "done",
                         "--evidence", "evidence/x.sh"],
             "apply": ["--instant", ready, "--milestone", "M1"],
+            "withdraw": ["--instant", ready, "--milestone", "M1", "--reason", "the contract withdraws it"],
             "review": ["--instant", ready, "--scope", "all", "--verdict", "READY"],
             "complete": ["--instant", ready],
             "harvest": ["--id", fleet.ids["harvestable"]],

@@ -622,6 +622,22 @@ class Roadmap:
                                 f"a newer row for {body['milestone']} was applied", by=body)
                 self._save(self.proposals_path, data)
 
+    def select(self, milestone: str, at: str = None):
+        """`B02`'s selector: -> (the row `apply` would land, the earlier rows it would supersede, the later
+        rows it would leave pending), all `Proposal`s for `milestone`. The newest row unless `at` names
+        one; refused when nothing is pending or `at` does not name exactly one row. A read — `apply` makes
+        the same cut under its lock (`_consume`), so a dry run and the real run agree."""
+        rows = [r for r in self._load_proposals()["pending"] if r["milestone"] == milestone]
+        if not rows:
+            raise BadInput(
+                f"no pending proposal names milestone {milestone!r} in {self.proposals_path}, so there "
+                "is nothing to apply or withdraw. `apply` applies a worker's proposal; it does not invent a "
+                "status.")
+        chosen = _one_at(rows, at, milestone, self.proposals_path)[0] if at is not None else rows[-1]
+        cut = rows.index(chosen)
+        return (Proposal(**chosen), [Proposal(**r) for r in rows[:cut]],
+                [Proposal(**r) for r in rows[cut + 1:]])
+
     def withdraw(self, milestone: str, reason: str, at: str = None) -> list:
         """`B02`. Close pending rows for `milestone` WITHOUT applying them — all of them, or the one whose
         `at` is given — and return them. Writes `proposals.json` and nothing else: a withdrawn row never
@@ -693,7 +709,7 @@ class Roadmap:
                     kind=PENDING_PROPOSAL, subject=p.milestone,
                     detail=(f"SUPERSEDED by the row at {newest[p.milestone].at}: " + note + base),
                     severity=INFO,
-                    clears_when=(f"`fleet apply` closes it as superseded when it applies the newer row; "
+                    clears_when=(f"closed as superseded when a newer row for {p.milestone} is applied; "
                                  f"{withdraw} closes it now"),
                     clears_who=COORDINATOR))
             elif refusal:
