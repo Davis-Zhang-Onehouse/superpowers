@@ -391,6 +391,7 @@ PY
       unpark)    echo "--instant $INSTP --dry-run" ;;
       propose)   echo "--instant $INSTP --milestone M1 --status done --evidence e1 --dry-run" ;;
       apply)     echo "--instant $INSTP --milestone M1 --dry-run" ;;
+      withdraw)  echo "--instant $INSTP --milestone M1 --reason matrix --dry-run" ;;
       review)    echo "--instant $INSTP --dry-run" ;;
       complete)  echo "--instant $INSTP --dry-run" ;;
       abort)     echo "--instant $INSTP --reason l7reason --dry-run" ;;
@@ -634,6 +635,7 @@ PY
       unpark)    echo "--instant $INSTP --dry-run" ;;
       propose)   echo "--instant $INSTP --milestone M1 --status done --evidence e1 --dry-run" ;;
       apply)     echo "--instant $INSTP --milestone M1 --dry-run" ;;
+      withdraw)  echo "--instant $INSTP --milestone M1 --reason matrix --dry-run" ;;
       review)    echo "--instant $INSTP --dry-run" ;;
       complete)  echo "--instant $INSTP --dry-run" ;;
       abort)     echo "--instant $INSTP --reason mreason --dry-run" ;;
