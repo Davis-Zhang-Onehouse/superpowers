@@ -13,6 +13,7 @@ import calendar
 import json
 import os
 import pathlib
+import shutil
 import tempfile
 import time
 import unittest
@@ -706,3 +707,32 @@ class TestNeedsAHumanUsesKnownFacts(unittest.TestCase):
 
         self.assertEqual(subject.state, BLOCKED, f"{subject.state}: {subject.note!r}")
         self.assertIn(PARK_BLOCKED_Q, subject.note)
+
+    # --- fact 2: the instant folder the record names is gone, and the session is live ----------------
+
+    def test_a_live_worker_whose_instant_folder_is_gone_is_blocked(self):
+        """re-measure `scenD` D3: folder deleted; `seed-check`/`brief` rc=2; `board`/`status` RUNNING with
+        an empty note. Every verb the worker would run to report or finish refuses, so it cannot get out
+        on its own, and `_idle_for(None)` is 0, so it would never even age into IDLE."""
+        path = self.worker("gone-07300511", "dt-gone", 5211)
+        shutil.rmtree(path)
+
+        subject = self.subjects()["gone-07300511"]
+
+        self.assertEqual(subject.state, BLOCKED,
+                         f"a live worker with no instant folder was reported {subject.state}: "
+                         f"{subject.note!r}")
+        self.assertIn(path.name, subject.note, "the note does not name the folder that is gone")
+        self.assertTrue(needs_a_human(subject))
+
+    def test_a_folder_gone_with_no_session_stays_dead(self):
+        """Scope control. A record with no live session is DEAD, and DEAD needs a reap, not a keystroke
+        (W2-14/OBS-57). The missing folder does not reopen that."""
+        path = self.fleet.dispatch("gonedead-07300512", "00000000-07300512-inflight-append-gonedead",
+                                   "ws9", "dt-gonedead")
+        shutil.rmtree(path)
+
+        subject = self.subjects()["gonedead-07300512"]
+
+        self.assertEqual(subject.state, DEAD, f"{subject.state}: {subject.note!r}")
+        self.assertFalse(needs_a_human(subject))
