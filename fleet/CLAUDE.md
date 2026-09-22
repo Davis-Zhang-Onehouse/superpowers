@@ -37,8 +37,8 @@ Run this before every commit. It is fast and it is the only tier that will catch
 seconds rather than minutes.
 
 **A test that reaches the fleet you are standing in fails.** `tests/__init__.py` records, before any test
-runs, the root the marker walk finds from your cwd and whatever `FLEET_ROOT`/`FLEET_HOME`/`FLEET_RELEASES`
-name, and raises `LiveFleetReached` if a test resolves one of them. A test that drives `cli.main` names its
+runs, the root the marker walk finds from your cwd, whatever `FLEET_ROOT`/`FLEET_HOME`/`FLEET_RELEASES`/
+`FLEET_INSTANTS` name, and each such store's `instants/`. It raises `LiveFleetReached` if a test resolves one of them. A test that drives `cli.main` names its
 own: `hermetic_environment(instants, home=<tmp>)` plus a `--root`/`--home` the fixture wrote. Before this,
 nine promote cases passed inside `davis_root` by reading the live root and failed from any `/tmp` export,
 so `assert-head-green.sh` was RED at every tree (FB-35).
