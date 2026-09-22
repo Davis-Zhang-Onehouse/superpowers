@@ -20,7 +20,7 @@ import unittest
 from dataclasses import fields as dataclass_fields
 
 from fleet.pool import Pool
-from fleet.reconcile import (BLOCKED, COMPLETE, DEAD, IDLE, KINDS, RUNNING, STALE_WAIT_S, STATES,
+from fleet.reconcile import (BLOCKED, COMPLETE, DEAD, IDLE, KINDS, PARKED, RUNNING, STALE_WAIT_S, STATES,
                              UNREACHABLE, Subject, _awaiting_note, needs_a_human, reconcile)
 from fleet.session import LiveSession, Probes, SessionLayer
 from fleet.store import Declarations, Record, Store
@@ -735,4 +735,31 @@ class TestNeedsAHumanUsesKnownFacts(unittest.TestCase):
         subject = self.subjects()["gonedead-07300512"]
 
         self.assertEqual(subject.state, DEAD, f"{subject.state}: {subject.note!r}")
+        self.assertFalse(needs_a_human(subject))
+
+    # --- fact 3: a parked question ------------------------------------------------------------------
+
+    def test_a_parked_question_asks_for_a_human(self):
+        """x2 `G-11`: a child that parked a question rendered PARKED with the question, and the banner said
+        `0 needs you`. `park --question ""` is refused, so a park always asks somebody something. Before
+        this change it surfaced only by timing out into IDLE after 30 minutes, which turns a question into
+        a stall."""
+        path = self.worker("asks-07300521", "dt-asks", 5221)
+        Declarations(path).park(PARK_BLOCKED_Q)
+
+        subject = self.subjects()["asks-07300521"]
+
+        self.assertEqual(subject.state, PARKED, f"{subject.state}: {subject.note!r}")
+        self.assertIn(PARK_BLOCKED_Q, subject.note)
+        self.assertTrue(needs_a_human(subject),
+                        "a child blocked on a parked question is not in the population asked of a human")
+
+    def test_a_parked_worker_still_progressing_needs_nobody(self):
+        """The control, and OBS-3's carve-out: "a parked note while still working is just a note"."""
+        path = self.worker("parkbusy-07300522", "dt-parkbusy", 5222, pane=BUSY_PANE)
+        Declarations(path).park(PARK_BUSY_Q)
+
+        subject = self.subjects()["parkbusy-07300522"]
+
+        self.assertEqual(subject.state, RUNNING, f"{subject.state}: {subject.note!r}")
         self.assertFalse(needs_a_human(subject))
