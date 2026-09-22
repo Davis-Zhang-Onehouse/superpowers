@@ -1,5 +1,39 @@
 # fleet — changelog
 
+## fleet/v0.6.3 — 2026-09-22T07:18:59Z
+Cut from 6128a59 on `live` (upstream base snapshot/2026-08-17-221146). 26 commit(s) since fleet/v0.6.2.
+
+Every release ships the whole repository — all skills, `commands/`, `hooks/` and the plugin manifest, not only `fleet/`.
+Payload: fleet (21 files), skills (10 files), scripts (2 files), docs (5 files).
+Skills changed: coordinating-instants, dispatching-a-wave, harvesting-an-instant, maintaining-a-roadmap, using-fleet, working-as-a-dispatched-instant.
+
+- 091c4ce docs: add Fleet bootstrap and first-coordinator quickstart
+- d4ede12 docs: publish Fleet introduction and workflow visuals
+- 7f48e7c harvest: apply the worker's report from the coordinator's inbox, and give back its claim
+- b65fb94 harvesting-an-instant: a released claim does not by itself make an in-flight milestone dispatchable
+- d1eb400 harvest: a report the coordinator already applied counts as arrived; dry run previews the claim release
+- 976d477 harvest guard: an applied row counts only when it carries an outcome, not mid-flight progress
+- e004074 harvest guard: judge the worker's LATEST applied report, and count everything but `running`
+- 14ae5a7 harvest guard: judge the worker's last word however it arrived; refuse only `running`
+- 7fa68c2 skills + test: a last `running` counts as no report; propose on the worker's behalf AS the worker
+- c40edb3 harvesting-an-instant: keep the status list attached to its colon; the as-the-worker note becomes a parenthetical
+- 7cde9f6 roadmap: the proposal queue gets its exits — newest-wins apply, superseded/withdrawn/retired, terminal guard
+- 7b7415d cli: apply picks one row (--at, --reopen); withdraw verb; retire reports the rows it closed
+- fdfbd99 harvest: apply the worker's last report per milestone; earlier rows close as superseded
+- 0f7f537 queue: cut at the last copy of a twice-sent row; retire counts only its own rows
+- 12dc271 skills + IT: teach the proposal queue's lifecycle; H11
+- 6b5878f B02 review fixes: old no-note rows consumed; run-A recipe; SI-48 trap becomes a guarantee
+- 0dc7fd3 IT M9: the declared delete site is roadmap._close now; worker skill names where the coordinator path comes from
+- 85b3aeb B26: an empty or exiting tmux server is an empty population, not a dead fleet
+- e542cdf B26 review fixes: confirm the exiting shape too, route only where it applies
+- 37b4725 B26 review round 2: route only for a session-less server, count sessions by line, honest guard docstring, TE5 failure note names its cause
+- 3f79724 IT TE7: harvest's observation tick is exercised in both server states
+- 7e81e16 B04: the read surface names ready milestones and states its population
+- 7ec7c3a B04 review round 1: population-aware first-row reads in run-D, footer-only view assertions, exact row-per-milestone wording, stranded-claim guidance, claimed case pinned in wave-sequence, unclaimed count in the roadmap banner
+- 3e69173 B04 review round 2: stranded-claim rule joins the board's milestone column and excludes pending reports; population count read from the ready rows; docstring widths
+- 1047bee fleet: a test drives reconcile to IDLE (G-10)
+- 877cf8f fleet: the IDLE producer test covers a parked worker and ages .fleet/* for a reason
+
 ## fleet/v0.6.2 — 2026-09-15T22:22:02Z
 Cut from becc426 on `live` (upstream base snapshot/2026-08-17-221146). 22 commit(s) since fleet/v0.6.1.
 
