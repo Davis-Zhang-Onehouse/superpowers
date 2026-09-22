@@ -50,8 +50,11 @@ readiness is derived from dependencies alone and never reads the claim, so a dis
 rows at all and had to be rebuilt from `.fleet/roadmap.json` by hand; do not reach for that file now.)
 
 A claim outlives an instant that finished or died without landing the milestone (`abort` releases it; other
-exits do not). A `ready` row whose `owner` is on no `fleet board` row is stranded, not in flight: release it
-with `fleet milestone --instant "$INSTANT" --id <m> --disown --reason "<why>"` and it becomes dispatchable.
+exits do not). A claimed `ready` row is **stranded** only when BOTH hold: no `fleet board --porcelain` row carries
+that milestone in its `milestone` column (`$6`; the board has no instant-path column, so never match `$8`
+against it), AND the roadmap has no `pending-proposal` row for it. A harvested worker whose `done` report is
+still pending is not stranded — `fleet apply` it. Only a truly stranded claim is released with
+`fleet milestone --instant "$INSTANT" --id <m> --disown --reason "<why>"`, after which it is dispatchable.
 
 ## Step 2 — the base comes from the manifest, then from the remote
 
