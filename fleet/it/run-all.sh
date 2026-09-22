@@ -69,6 +69,9 @@ RUNNERS=(
   #: and left a finished worker unclosable except by `--force`. A control that only runs under `--full`
   #: is a control that is mostly not running.
   "i7:bash $IT_ROOT/run-i7.sh"
+  #: Default roster for the same reason: seconds, one private server. It guards B26 — an empty or exiting
+  #: tmux server used to kill board/status/dispatch/fleet-view with `Cannot inspect tmux server`.
+  "TE:bash $IT_ROOT/run-TE.sh"
   "rmw:bash $IT_ROOT/run-rmw.sh 8"
   "K:bash $IT_ROOT/run-group3.sh K"
   "group5:bash $IT_ROOT/run-group5.sh L M N"
