@@ -5792,3 +5792,38 @@ class TestPaneGuardFollowsTheRecordToo(CliCase):
         code, out, err = fleet.run(["pane-guard", "--id", fleet.ids["guardedGone"], "--porcelain"])
         rows = dict(line.split("\t")[:2] for line in out.splitlines() if "\t" in line)
         self.assertEqual(rows.get("verdict"), "unknown-pane", out)
+
+
+class TestReadSurfaceStatesItsPopulation(CliCase):
+    """`B04` at the verbs. On an empty store `board --porcelain` and `leases --porcelain` printed zero bytes
+    and exited 0, and `roadmap --porcelain` named no ready milestone. Measured on the base in
+    `evidence/10-red/red-base.txt` of the B04 instant."""
+
+    def test_empty_board_and_leases_still_print_a_population_row(self):
+        fleet = self.fleet(slots=0)
+        for verb, kind_column in (("board", "kind"), ("leases", "lease")):
+            with self.subTest(verb=verb):
+                code, out, err = fleet.run([verb, "--porcelain"])
+                self.assertEqual(EXIT_OK, code, err)
+                rows = [line.split("\t") for line in out.splitlines()]
+                columns = cli.PORCELAIN_COLUMNS[verb]
+                self.assertEqual(1, len(rows), out)
+                self.assertEqual(len(columns), len(rows[0]), rows[0])
+                self.assertEqual("population", rows[0][columns.index(kind_column)])
+                self.assertIn(str(fleet.home), out, "the population row does not name the store it read")
+
+    def test_roadmap_names_each_ready_milestone_with_title_and_owner(self):
+        fleet = self.fleet()
+        coordinator = fleet.worker("coordRM", slot="ws1", live=False)
+        Roadmap(coordinator).add(Milestone(id="m1", title="first", status="ready", deps=[], evidence=[]))
+        Roadmap(coordinator).add(Milestone(id="m2", title="second", status="blocked", deps=["m1"],
+                                           evidence=[]))
+        code, out, err = fleet.run(["roadmap", "--instant", str(coordinator), "--porcelain"])
+        self.assertEqual(EXIT_OK, code, err)
+        columns = cli.PORCELAIN_COLUMNS["roadmap"]
+        rows = [dict(zip(columns, line.split("\t"))) for line in out.splitlines()]
+        for row in rows:
+            self.assertEqual(len(columns), len(row), row)
+        ready = [(r["subject"], r["title"], r["owner"]) for r in rows if r["kind"] == "ready"]
+        self.assertEqual([("m1", "first", "")], ready, out)
+

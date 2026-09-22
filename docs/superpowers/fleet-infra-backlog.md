@@ -223,7 +223,11 @@ because the marker is detectable, or because a check between render and seed ref
 
 ## SI-47 — the dispatchable frontier is not enumerable; `roadmap` prints every row EXCEPT the ready ones
 
-**Status:** OPEN. **Blocks:** `dispatching-a-wave` (its first step is "which rows are ready?").
+**Status:** CLOSED by B04 (2026-09-22, branch `fix/b04-read-surface-names-ready`): `report()` emits a `ready`
+row (severity `info`) for every milestone whose deps have landed, and every milestone row carries `title` and
+`owner` as appended porcelain columns 7 and 8, so the dispatchable set is `$1=="ready" && $8==""` — decisions 1–3
+below, taken as preferred. `dispatching-a-wave/tests/wave-sequence.sh`'s inverted assertion is flipped to assert
+that recipe. Was: OPEN. **Blocks:** `dispatching-a-wave` (its first step is "which rows are ready?").
 
 **Measured 2026-09-05** against a scratch store (`FLEET_HOME`/`FLEET_INSTANTS` under a scratchpad), with
 three milestones raised: `m1` ready, `m2` ready, `m3` blocked on `m1`.

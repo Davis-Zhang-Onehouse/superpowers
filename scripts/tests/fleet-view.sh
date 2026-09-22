@@ -13,6 +13,9 @@ FLEET="$REPO/bin/fleet"
 TMP="$(mktemp -d)"
 trap 'rm -rf "$TMP"' EXIT
 export FLEET_HOME="$TMP/home" FLEET_INSTANTS="$TMP/instants" FLEET_VIEW_WIDTH=100
+# The view reads `$FLEET_BIN` first, and a dispatched session inherits one pointing at the SHARED live tree —
+# so without this the view under test read a different `fleet` than the porcelain it is compared against.
+export FLEET_BIN="$FLEET"
 mkdir -p "$FLEET_HOME" "$FLEET_INSTANTS" "$TMP/slots/wsA" "$TMP/slots/wsB"
 
 fails=0
@@ -48,12 +51,24 @@ PY
 while IFS=$'\t' read -r ident kind state rest; do
   [ -n "${ident:-}" ] || continue
   v="$(FLEET_VIEW_WIDTH=200 python3 "$VIEW" board --wide 2>/dev/null)"
+  # `B04`: the trailing `population` row is the SCOPE (identity = the store read), not a subject; it has no
+  # state, and `read` collapses its empty tab fields, so only its identity is checked — it must reach the view.
+  if [ "$kind" = population ]; then
+    # Not the identity: the view's header already prints the store path, so that would pass with no footer.
+    printf '%s' "$v" | grep -q -- "examined [0-9]* subject(s)" \
+      || { note "FAIL the board's population row does not reach the view as a footer"; fails=1; }
+    continue
+  fi
   printf '%s' "$v" | grep -q -- "$ident" \
     || { note "FAIL subject $ident is in porcelain but not in the view"; fails=1; }
   printf '%s' "$v" | grep -q -- "$state" \
     || { note "FAIL state $state for $ident is in porcelain but not in the view"; fails=1; }
 done < <("$FLEET" board --porcelain 2>/dev/null)
 note "ok   every subject and state in porcelain appears in the view"
+# …and the leases view carries its population footer too (`B04`): the pool that was read, with its counts.
+FLEET_VIEW_WIDTH=200 python3 "$VIEW" leases 2>/dev/null | grep -q -- "2 enrolled · 1 held · 1 free" \
+  && note "ok   the leases population row reaches the view as a footer" \
+  || { note "FAIL the leases population row does not reach the view"; fails=1; }
 
 # --- the view must never mutate anything -------------------------------------------------------------
 before="$(find "$FLEET_HOME" "$FLEET_INSTANTS" -type f -printf '%p %s %T@\n' 2>/dev/null | sort)"

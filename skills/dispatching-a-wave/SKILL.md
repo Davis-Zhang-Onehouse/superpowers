@@ -23,7 +23,7 @@ it what to do.
 
 | # | Step | Why it is not optional |
 |---|---|---|
-| 1 | **Re-derive the ready set and state it out loud.** | No verb enumerates it. See below. |
+| 1 | **Read the ready set off the roadmap's `ready` rows and state it out loud.** | A set you named is auditable; a set you had in mind is not. See below. |
 | 2 | **Take the base from the chain manifest, then confirm it on the remote.** | `fleet` checks that the slot *arrives* at the sha; nothing checks that it was the right sha. |
 | 3 | **Ask the guard for the cap. Never compute it.** | The guard counts records; you would be counting your recollection. |
 | 4 | **Declare the surface each worker will touch, or sequence them.** | Two workers on one file is a real event, not a hypothetical. |
@@ -31,26 +31,30 @@ it what to do.
 | 6 | **Verify the launched process carried the right environment.** | A worker can come up attributed to somebody else. |
 | 7 | **Write briefs one milestone ahead, never two.** | A brief written early decays faster than it is consumed. |
 
-## Step 1 — the ready set is not printed anywhere
+## Step 1 — the ready set is a column read
 
-`fleet roadmap --porcelain` emits `not-ready` rows, `pending-proposal` rows, and one `population` row. It
-does **not** emit a row for a milestone that is ready. The count is interpolated into the population row's
-English:
+`fleet roadmap --porcelain` emits exactly one `ready` or `not-ready` row per milestone, one `pending-proposal`
+row per waiting proposal, and a closing `population` row. Every milestone row carries the milestone's `title` ($7) and `owner` ($8) as
+fields, so the dispatchable set is:
 
+```bash
+fleet roadmap --instant "$INSTANT" --porcelain | awk -F'\t' '$1=="ready" && $8==""{print $2 "\t" $7}'
 ```
-population  <instant>  info  examined 3 milestone(s) of which 2 ready, 0 pending proposal(s) (0 superseded, 0 against a terminal milestone), from <path>
-```
 
-So the one thing you are about to act on is the one thing you must parse out of a sentence — against the
-standing rule that you read columns and never prose. This is `SI-47`.
+**Write that set down before dispatching any of it.** A set you named is auditable; a set you had in mind
+while dispatching is not.
 
-Until it is fixed, derive the set explicitly and **write it down before dispatching any of it**: read the
-roadmap file, subtract every row whose dependencies have not landed, subtract every row already claimed by
-an inflight instant, and state the remainder. A set you named is auditable; a set you had in mind while
-dispatching is not.
+Do not drop the `$8==""` half. A `ready` row whose `owner` is set is already claimed by the instant it names —
+readiness is derived from dependencies alone and never reads the claim, so a dispatched milestone stays
+`ready` until its worker's `running` proposal is applied. (Before `SI-47` was fixed the ready set had no
+rows at all and had to be rebuilt from `.fleet/roadmap.json` by hand; do not reach for that file now.)
 
-Do not skip the "already claimed" half. A ready row with a live claim is not dispatchable, and the two
-facts live in different places — the roadmap knows readiness, `fleet board` knows claims.
+A claim outlives an instant that finished or died without landing the milestone (`abort` releases it; other
+exits do not). A claimed `ready` row is **stranded** only when BOTH hold: no `fleet board --porcelain` row carries
+that milestone in its `milestone` column (`$6`; the board has no instant-path column, so never match `$8`
+against it), AND the roadmap has no `pending-proposal` row for it. A harvested worker whose `done` report is
+still pending is not stranded — `fleet apply` it. Only a truly stranded claim is released with
+`fleet milestone --instant "$INSTANT" --id <m> --disown --reason "<why>"`, after which it is dispatchable.
 
 ## Step 2 — the base comes from the manifest, then from the remote
 
@@ -164,6 +168,6 @@ did. Then a claim that turns out wrong is attributable to a measurement rather t
 | "I'll fix the charter right after it boots" | Dispatch starts the worker immediately. Complete the scope before dispatch. |
 | "These two milestones are unrelated" | Seven files once said otherwise. Declare the surface; do not assume it. |
 | "The profile lints clean" | Nothing lints a profile from the command line. That claim is not re-derivable today. |
-| "The roadmap says two are ready" | It says a *number*, in prose. Name the rows before you dispatch them. |
+| "The roadmap says two are ready" | Count the `ready` rows with an empty owner and name them before you dispatch them; the population row's number includes claimed ones. |
 | "The base is in my HANDOFF table" | That table is narrative. The manifest is state, and the remote is truth. |
 | "I have three slots free, so I can run three" | Free slots are capacity, not throughput. The cap admits workers you may not be able to absorb. |

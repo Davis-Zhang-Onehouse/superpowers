@@ -293,9 +293,10 @@ def view_board(wide):
     #: `.fleet-root` above it now refuses rather than reading a shared store.
     if rc != 0:
         return ["  " + line for line in (err or "fleet refused and said nothing").splitlines()], ""
+    rows, scope = _split_population(rows, "kind")
     rows = _collapse(rows)
     if not rows:
-        return ["  (no subjects)"], err
+        return ["  (no subjects)"] + scope, err
     entries = []
     for r in rows:
         state = r.get("state", "")
@@ -314,15 +315,26 @@ def view_board(wide):
                 note += "  →  no tmux server on this box has that session; the work may be running outside tmux."
         entries.append({"state": state, "subject": r.get("identity", ""), "style": style, "glyph": glyph,
                         "meta": [r.get("slot", ""), r.get("milestone", "")], "note": note})
-    return blocks(entries), err
+    return blocks(entries) + scope, err
+
+
+def _split_population(rows, kind_column):
+    """`B04`: `board` and `leases` porcelain end with a `population` row naming what was examined. It is the
+    scope, not a subject or a slot, so it is laid out as a dim footer line rather than as one more row —
+    printed verbatim, because this view computes nothing."""
+    kept = [r for r in rows if r.get(kind_column) != "population"]
+    scope = [DIM("  " + line) for r in rows if r.get(kind_column) == "population"
+             for line in wrap(r.get("note", ""), width() - 4, 2)]
+    return kept, scope
 
 
 def view_leases(wide):
     rows, err, rc = run("leases")
     if rc != 0:
         return ["  " + line for line in (err or "fleet refused and said nothing").splitlines()], ""
+    rows, scope = _split_population(rows, "lease")
     if not rows:
-        return ["  (no slots enrolled)"], err
+        return ["  (no slots enrolled)"] + scope, err
     body = []
     for r in rows:
         held = r.get("lease") == "held"
@@ -335,7 +347,7 @@ def view_leases(wide):
     # The path is dropped unless asked for: it is the one column that cannot be usefully truncated, and a
     # path cut mid-directory is worse than no path -- it looks copy-pasteable and is not.
     return table(body, ("slot", "lease", "holder", "session", "since"),
-                 "path" if wide else None, wide), err
+                 "path" if wide else None, wide) + scope, err
 
 
 def view_roadmap(wide, extra):

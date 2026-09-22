@@ -76,6 +76,9 @@ esac
 case " $notready " in
   *" m2 "*) note "READINESS: m2's dep m1 has LANDED, so m2 must not be not-ready; got '$notready'"; fails=1 ;;
 esac
+# …and the positive half, which the skill's Decide phase reads (`B04`): m2 IS a ready row, unclaimed.
+ready="$("$FLEET" roadmap --instant "$C" --porcelain | awk -F'\t' '$1=="ready" && $8==""{print $2}' | tr '\n' ' ')"
+[ "$ready" = "m2 " ] || { note "READINESS: the Decide recipe must name exactly m2 as dispatchable; got '$ready'"; fails=1; }
 
 # ---- Dispatch: refused onto a not-ready milestone, admissible onto a ready one --------------------
 step dispatch-unready 4 "$FLEET" dispatch --profile "$PROFILE" --title tail --base 00000000 \
@@ -90,6 +93,8 @@ after="$("$FLEET" roadmap --instant "$C" --porcelain | awk -F'\t' '$1=="not-read
 case " $after " in
   *" m3 "*) note "RECOMPUTE: m3 is still not-ready after its dep landed; not-ready is '$after'"; fails=1 ;;
 esac
+after_ready="$("$FLEET" roadmap --instant "$C" --porcelain | awk -F'\t' '$1=="ready"{print $2}' | tr '\n' ' ')"
+[ "$after_ready" = "m3 " ] || { note "RECOMPUTE: m3 must now be a ready row; ready is '$after_ready'"; fails=1; }
 
 # ---- Escalate, and clear ---------------------------------------------------------------------------
 step park   0 "$FLEET" park --instant "$C" --question "which baseline is the ruler?"
