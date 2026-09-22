@@ -99,8 +99,9 @@ class Probes:
     session_servers: Optional[Callable[[str], list]] = None
     send_literal: Optional[Callable[[str, str], None]] = None
     submit: Optional[Callable[[str], None]] = None
-    #: `B24` (x2 `G-4`). `(clients, last_input_epoch)` for one session — tmux's `#{session_attached}` and
-    #: `#{session_activity}` — or `None` when it could not be observed. Defaulted like `pane_pid`, so every
+    #: `B24` (x2 `G-4`). `(interactive_clients, last_input_epoch)` for one session — from tmux's per-client
+    #: `#{client_readonly}`, `#{client_control_mode}` and `#{client_activity}` — or `None` when it could not
+    #: be observed. Defaulted like `pane_pid`, so every
     #: hand-built `Probes` keeps working and reads as NOT MEASURED rather than as "nobody attached".
     attachment: Optional[Callable[[str], Optional[tuple]]] = None
 
@@ -212,7 +213,8 @@ class SessionLayer:
         input — or `None` when that could not be observed (no probe, no name, tmux did not answer).
 
         `B24` (x2 `G-4`). `BLOCKED` could not tell a worker stuck at a modal from a human attached and
-        mid-sentence, because this fact was never collected. It is deliberately returned RAW and
+        mid-sentence, because this fact was never collected. "Clients" means INTERACTIVE clients: a read-only
+        or control-mode client cannot answer anything, so it is not counted (`RV-28`). It is deliberately returned RAW and
         tri-state, because its two consumers fail safe in OPPOSITE directions:
 
         - the attention count (`reconcile`) treats `None` as "not a human" — it keeps counting, which is
@@ -220,9 +222,9 @@ class SessionLayer:
         - anything that TYPES into a pane (a nudge, `B12`) must treat `None` as "occupied": "I could not
           tell whether somebody is sitting there" has to mean leave it alone.
 
-        `last_input` moves on an attach and on a client's keystroke, and NOT on `send-keys` or
-        `paste-buffer` (`evidence/20-red/tmux-activity-probe.txt` in the B24 instant), so fleet's own
-        delivery can never make a pane look attended.
+        `last_input` moves on an interactive client's attach and keystroke, and NOT on `send-keys`,
+        `paste-buffer`, pane output, resize or SIGWINCH (B24 instant, `evidence/20-red/`), so neither fleet's
+        own delivery nor a busy pane can make a session look attended.
         """
         if not name or self.probes.attachment is None:
             return None
@@ -613,26 +615,38 @@ def default_probes(process_name: str = "claude", tmux_socket=_FROM_ENV, *,
         return found
 
     def attachment(name: str):
-        """`(clients, last_input_epoch)` for the session named EXACTLY `name`, or None when unobserved.
+        """`(interactive_clients, last_input_epoch)` for the session named EXACTLY `name`, or None when
+        unobserved. No interactive client is `(0, 0)`.
 
-        `list-sessions` and an exact name match, NOT `display-message -t =name:`: on tmux 3.2a that exits 0
-        with an EMPTY format for a session that does not exist (B24 instant,
-        `evidence/20-red/display-message-missing-session.txt`), which would parse as "nobody attached" —
-        `FI-7`'s falsy-default lie again. A missing row, a non-zero exit and an unparsable row are all
-        None: not measured.
+        Read per CLIENT (`RV-28`), because `#{session_attached}` counts read-only (`attach -r`) and
+        control-mode (`-C`) clients, and a read-only client's keystroke — dropped before it reaches the pane —
+        still moves `#{session_activity}`. Neither kind of client can answer a modal, so only clients that are
+        neither count, and last input is the newest `#{client_activity}` among them. On tmux 3.2a that moves
+        on the client's attach and its own keystroke, not on pane output, resize or SIGWINCH (B24 instant,
+        `evidence/20-red/tmux-client-activity-probe.txt`).
+
+        `list-clients -t =<name>`: tmux resolves the EXACT session and fails (rc=1, `can't find session` or
+        `no server running`) when it cannot, so "not measured" never reads as "no client"
+        (`evidence/20-red/list-clients-target-probe.txt`). Not `display-message`, which exits 0 with an
+        empty format for a missing session (`display-message-missing-session.txt`) — `FI-7`'s falsy default.
         """
-        done = run(tmux + ["list-sessions", "-F",
-                           "#{session_name}\t#{session_attached}\t#{session_activity}"])
+        done = run(tmux + ["list-clients", "-t", exact_session_target(name), "-F",
+                           "#{client_session}\t#{client_readonly}\t#{client_control_mode}\t#{client_activity}"])
         if done.returncode != 0:
             return None
+        clients, last_input = 0, 0
         for line in (done.stdout or "").splitlines():
             parts = line.split("\t")
-            if len(parts) == 3 and parts[0] == name:
-                try:
-                    return int(parts[1]), int(parts[2])
-                except ValueError:
-                    return None
-        return None
+            if len(parts) != 4 or parts[1] not in ("0", "1") or parts[2] not in ("0", "1"):
+                return None
+            try:
+                activity = int(parts[3])
+            except ValueError:
+                return None
+            if parts[1] == "0" and parts[2] == "0":
+                clients += 1
+                last_input = max(last_input, activity)
+        return clients, last_input
 
     def send_literal(name, text):
         import uuid
