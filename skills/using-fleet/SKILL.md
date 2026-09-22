@@ -272,7 +272,10 @@ fleet roadmap --instant . --porcelain | awk -F'\t' '$1=="not-ready"{print $2, $4
 `clears_when`, `clears_who`; `roadmap` appends `title` and `owner`, filled on every row about a milestone
 (empty on a proposal whose milestone is not on the roadmap), then `evidence` (`$9`): each item the milestone
 or proposal cites, re-resolved through the `-inflight-`→`-complete-` rename to where it is today, comma-joined,
-an item that does not resolve suffixed `(does not resolve)`. Every milestone gets exactly one `ready` row (its
+an item that does not resolve suffixed `(does not resolve)`. `propose` refuses (exit 2) an evidence item that
+does not resolve NOW — a relative path means the proposer's instant folder, an absolute one must exist, a URL
+passes as-is — and `apply` refuses a row whose items stopped resolving.
+<!-- v2-cite: evidence-resolves-at-propose-and-apply H12 --> Every milestone gets exactly one `ready` row (its
 deps have landed — `owner` empty means dispatchable, non-empty means already claimed) or one `not-ready` row
 (the `detail` names the blocker), plus one `pending-proposal` row per proposal waiting on it. Act on
 `severity=violation`; report `severity=info`. A finished milestone, a ready one and a legitimately empty
