@@ -850,7 +850,10 @@ class TestAttachmentIsCollected(unittest.TestCase):
     def test_a_malformed_probe_answer_is_NOT_MEASURED_not_a_crash(self):
         """`RV-29`. `Probes.attachment` is an injectable field, and `SessionLayer.attachment` runs inside
         `reconcile`: an odd answer that raised here would take down `board`, `status` and `reconcile` at once."""
-        for odd in ((1, 2, 3), ("many", 1700000000), (1, "soon"), "1 1700000000", 7):
+        #: `RV-35`: non-finite numbers pass `int`/`float` or overflow them, then crash the age arithmetic in
+        #: `reconcile` — the guard has to reject them at the layer, not only the shapes that raise here.
+        for odd in ((1, 2, 3, 4), ("many", 1700000000), (1, "soon"), "1 1700000000", 7,
+                    (float("inf"), 0), (1, float("nan")), (1, "nan"), (1, float("-inf")), (1, float("inf"))):
             with self.subTest(answer=odd):
                 s = SessionLayer(Probes(list_processes=lambda: [], capture_pane=lambda n: "",
                                         has_session=lambda n: True, start_session=lambda n, c, m: None,

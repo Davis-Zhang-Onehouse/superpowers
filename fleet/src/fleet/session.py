@@ -36,6 +36,7 @@ isolation claim in the module whose job IS isolating the environment is worse th
 (`FI-27a`). The seams are enumerable on purpose — that is what makes "injected everywhere else" a
 fact a reader can check rather than a promise.
 """
+import math
 import re
 from dataclasses import dataclass
 from pathlib import Path
@@ -233,11 +234,16 @@ class SessionLayer:
             return None
         #: `RV-29`. The probe is an injectable field and this runs inside `reconcile`, so an answer of the
         #: wrong shape is NOT MEASURED rather than an exception that takes the whole board down with it.
+        #: `RV-35`: and a non-finite number is not a measurement either — `inf`/`nan` pass `float()` (or
+        #: overflow `int()`) here and would crash the age arithmetic in `reconcile` instead.
         try:
             clients, last_input = answer
-            return Attachment(clients=int(clients), last_input=float(last_input))
-        except (TypeError, ValueError):
+            clients, last_input = int(clients), float(last_input)
+        except (TypeError, ValueError, OverflowError):
             return None
+        if not math.isfinite(last_input):
+            return None
+        return Attachment(clients=clients, last_input=last_input)
 
     # --- pane --------------------------------------------------------------------------------
 
