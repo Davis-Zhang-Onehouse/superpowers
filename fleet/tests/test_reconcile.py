@@ -929,3 +929,18 @@ class TestNeedsAHumanUsesKnownFacts(unittest.TestCase):
         self.assertEqual(subject.state, BLOCKED,
                          f"a busy pane hid a missing instant folder: {subject.state} / {subject.note!r}")
         self.assertIn(path.name, subject.note)
+
+    def test_a_record_that_never_named_a_folder_is_untouched(self):
+        """`RV-46`. The missing-folder branch is gated on `rec.child_instant`, and nothing pinned that gate:
+        without it, a record that never named a folder would be reported BLOCKED with an empty folder name
+        interpolated into the note. `dispatch` always writes the field, so this is a defensive gate — and a
+        defensive gate with no case is indistinguishable from a dead one."""
+        self.fleet.store.write(_record(todo_id="nofolder-07300546", child_instant="", slot="",
+                                       tmux="dt-nofolder"))
+        self.fleet.launch("dt-nofolder", 5246, "ws9", QUIET_PANE)
+
+        subject = self.subjects()["nofolder-07300546"]
+
+        self.assertEqual(subject.state, RUNNING,
+                         f"a record with no recorded folder was reported {subject.state}: {subject.note!r}")
+        self.assertEqual(subject.note, "", f"an empty folder name reached the note: {subject.note!r}")
