@@ -1046,6 +1046,10 @@ class TestAnAttachedHumanIsNotAStuckWorker(unittest.TestCase):
 
         self.assertEqual(subject.state, BLOCKED)
         self.assertTrue(needs_a_human(subject))
+        #: `RV-27`. None is also a probe that was never supplied, or a session tmux has no row for; the note
+        #: states what is known and no cause it cannot know (`RV-43`'s family).
+        self.assertIn("could not be observed", subject.note)
+        self.assertNotIn("tmux did not answer", subject.note)
 
     def test_attachment_alone_makes_nothing_actionable_or_blocked(self):
         self.worker("watched-07300607", "dt-watched", 5307, QUIET_PANE, attached=(2, time.time()))
