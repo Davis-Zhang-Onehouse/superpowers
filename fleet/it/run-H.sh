@@ -360,7 +360,7 @@ H11="$OUT/h11"; mkdir -p "$H11"
   fleet milestone --instant "$COORD" --id q2 --title "retired with rows" --porcelain
   fleet milestone --instant "$COORD" --id q3 --title "landed" --status done --evidence evidence/INDEX.md --porcelain
   # `B03`: `propose` admits only evidence that resolves against the proposer, so the worker holds each file
-    # it cites (the "typo" in e2's name is B02's story about superseded rows, not a missing file), and `apply`
+  # it cites (the "typo" in e2's name is B02's story about superseded rows, not a missing file), and `apply`
   # stores the landed item ANCHORED at the worker's folder, which the state check below expects.
   mkdir -p "$WORKER/evidence"
   for f in e0 e1 e2-typo q2 late; do printf '%s\n' "$f" > "$WORKER/evidence/$f.log"; done
