@@ -89,7 +89,7 @@ from fleet.review import Finding, Review, exit_code_for, receive_advisory
 from fleet import origin as origin_mod
 from fleet.origin import Origin
 from fleet.roadmap import (ATTENTION, COORDINATOR, RETIRED, SUPERSEDED, TERMINAL, Milestone,
-                           Proposal, Roadmap, _last_index)
+                           Proposal, Roadmap, last_index)
 from fleet.session import (TMUX_SOCKET_ENV, SessionLayer, default_probes,
                            plain as pane_plain)
 from fleet.store import Declarations, Record, Store
@@ -3361,9 +3361,10 @@ def _harvest_inbox(ctx: Ctx, child: Path):
             destination = child
     roadmap = Roadmap(destination)
     mine = [p for p in roadmap.proposals() if _proposed_by(child, p)]
-    #: Held back, never applied: a row that would move a TERMINAL milestone somewhere else. `apply` does not
-    #: compare the incoming status with the current one (`SI-48`), so applying it here would make closing a
-    #: worker a silent way to un-land a milestone. It stays PENDING in the inbox for the coordinator.
+    #: Held back, never applied: a row that would move a TERMINAL milestone somewhere else. `apply` now
+    #: refuses such a row itself (`B02`, closing `SI-48`), so applying it here would abort the close-out
+    #: part-way; filtering first keeps harvest a transaction. It stays PENDING in the inbox for the
+    #: coordinator, who withdraws it or applies it with `--reopen`.
     #: Judged against the status BEFORE anything is applied: a worker's own ordered rows over a milestone
     #: that was not finished are its report, and are applied as written.
     current = {m.id: m.status for m in roadmap.milestones()}
@@ -3387,7 +3388,7 @@ def _superseded_by(roadmap: Roadmap, rows: list) -> int:
     count = 0
     for row in rows:
         if row in pending:
-            cut = _last_index(pending, row)
+            cut = last_index(pending, row)
             count += sum(1 for p in pending[:cut] if p.milestone == row.milestone)
     return count
 
