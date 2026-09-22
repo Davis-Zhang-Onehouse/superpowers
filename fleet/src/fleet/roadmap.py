@@ -660,6 +660,14 @@ class Roadmap:
                     #: file cited while `-inflight-` and again after `-complete-` lands once. A legacy
                     #: RELATIVE entry for the same file is UPGRADED to the anchored form rather than kept
                     #: (RV-20): kept, it stays readable only while `owner` still names its proposer.
+                    #: RV-21. Every absolute item already on the milestone is re-anchored where it is NOW, so
+                    #: one applied while its instant was `-inflight-` does not stay a dead path for a raw
+                    #: reader of roadmap.json. One that resolves nowhere is left exactly as written.
+                    for i, e in enumerate(d["evidence"]):
+                        if Path(e).is_absolute():
+                            found = evidence_mod.locate(e, None)
+                            if found is not None:
+                                d["evidence"][i] = str(found)
                     seen = {str(evidence_mod.locate(e, d.get("owner")) or e): i
                             for i, e in enumerate(d["evidence"])}
                     for item in evidence:

@@ -1052,3 +1052,17 @@ class TestEvidenceResolves(RoadmapCase):
         self.rm.add(ms("legacy", status="running", evidence=["evidence/proof.log"], owner=str(other)))
         milestone = self.rm.apply(self.rm.propose(self.worker, "legacy", "done", ["evidence/proof.log"]))
         self.assertEqual(["evidence/proof.log", str(self.proof)], milestone.evidence)
+
+    def test_an_absolute_item_stored_while_inflight_is_re_anchored_by_the_next_apply(self):
+        """RV-21. An apply while the proposer is still `-inflight-` stores an `-inflight-` path; a raw reader of
+        roadmap.json would see it dangle after `complete`. The next apply re-anchors it where it is now; an
+        absolute item that no longer resolves anywhere, and a URL, are left exactly as written."""
+        url, gone = "https://example.com/pr/1", str(self.tasks / "nowhere" / "gone.log")
+        self.rm.add(ms("k2", status="running", evidence=[url, gone]))
+        self.rm.apply(self.rm.propose(self.worker, "k2", "running", ["evidence/proof.log"]))
+        self.assertEqual([url, gone, str(self.proof)], self.rm.milestone("k2").evidence)
+        done = self.complete()
+        cite(done, ["evidence/final.log"])
+        milestone = self.rm.apply(self.rm.propose(done, "k2", "done", ["evidence/final.log"]))
+        self.assertEqual([url, gone, str(done / "evidence" / "proof.log"), str(done / "evidence" / "final.log")],
+                         milestone.evidence)
