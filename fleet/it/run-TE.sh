@@ -34,7 +34,7 @@ CLIENT_PID=""
 te_cleanup() {
   if [ -n "$CLIENT_PID" ]; then kill -CONT "$CLIENT_PID" 2>/dev/null; kill "$CLIENT_PID" 2>/dev/null; fi
   tmux -L "$IT_TMUX_SOCKET" kill-server 2>/dev/null
-  exec 9>&- 2>/dev/null
+  { exec 9>&-; } 2>/dev/null   # braced: a bare `exec … 2>/dev/null` would silence this shell for good
   # A server that exits by kill-server leaves its socket file behind, and every stale file costs each later
   # `session_servers` probe one `has-session`. Ours only.
   rm -f "${TMUX_TMPDIR:-/tmp}/tmux-$(id -u)/$IT_TMUX_SOCKET"
@@ -61,6 +61,8 @@ observe() {                      # observe <tag> [status-id] -> board (+ status)
 }
 
 # ---- state A -----------------------------------------------------------------------------------------------
+# A server left on this socket by an aborted earlier run would ignore `-f` and neither state would be built.
+it_tmux kill-server 2>/dev/null
 printf 'set -g exit-empty off\n' > "$OUT/empty.conf"
 it_tmux -f "$OUT/empty.conf" new-session -d -s itfleet-TE-x 'sleep 600'
 it_tmux kill-session -t =itfleet-TE-x
@@ -73,8 +75,8 @@ else it_fail TE1 "fleet/it/TE/out/A-board.out" "board rc=$(cat "$OUT/A-board.rc"
 
 fleet dispatch --profile "$OUT/profile" --title "teWorkerA" --base 00000000 --optype append \
       --from "$COORD" --milestone te1 --porcelain > "$OUT/A-dispatch.out" 2>&1; a_d=$?
-it_tmux list-sessions -F '#{session_name}' > "$OUT/A-sessions-after.out" 2>&1
-if [ "$a_d" = 0 ] && [ -s "$OUT/A-sessions-after.out" ]; then
+it_tmux list-sessions -F '#{session_name}' > "$OUT/A-sessions-after.out" 2>"$OUT/A-sessions-after.err"
+if [ "$a_d" = 0 ] && grep -qx 'dt-teworkera' "$OUT/A-sessions-after.out"; then
   it_pass TE2 "fleet/it/TE/out/A-dispatch.out" 'dispatch onto the empty live server succeeds and its session is on that server'
 else it_fail TE2 "fleet/it/TE/out/A-dispatch.out" "dispatch rc=$a_d on the empty live server"; fi
 A_ID="teworkera"                 # the record identity is `<slug>-<stamp>`; status takes a unique substring
@@ -117,8 +119,9 @@ else
   fleet dispatch --profile "$OUT/profile" --title "teWorkerB" --base 00000000 --optype append \
         --from "$COORD" --milestone te2 --cap 5 --porcelain > "$OUT/B-dispatch.out" 2>&1; b_d=$?
   fleet leases --porcelain > "$OUT/B-leases-after.out" 2>&1
-  if [ "$b_d" != 0 ] && grep -q 'clears when:' "$OUT/B-dispatch.out" && grep -q 'ps -o pid,stat,args -C tmux' "$OUT/B-dispatch.out"; then
-    it_pass TE5 "fleet/it/TE/out/B-dispatch.out" "dispatch onto the exiting server is refused (rc=$b_d) and names the route"
+  if [ "$b_d" != 0 ] && grep -q "tmux refused to start 'dt-teworkerb': server exited unexpectedly · clears when:" "$OUT/B-dispatch.out" &&
+     grep -q 'ps -o pid,stat,args -C tmux' "$OUT/B-dispatch.out" && cmp -s "$OUT/B-leases-before.out" "$OUT/B-leases-after.out"; then
+    it_pass TE5 "fleet/it/TE/out/B-dispatch.out" "dispatch onto the exiting server is refused at new-session (rc=$b_d), names the route, and gives its lease back"
   else it_fail TE5 "fleet/it/TE/out/B-dispatch.out" "dispatch rc=$b_d without a route"; fi
 fi
 

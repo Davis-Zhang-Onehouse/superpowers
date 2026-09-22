@@ -7,7 +7,7 @@ import tempfile
 import unittest
 from unittest.mock import patch
 
-from fleet.errors import FleetError
+from fleet.errors import BadInput, FleetError
 from fleet.session import default_probes
 from fleet.peers import classify, from_live_sessions
 
@@ -110,14 +110,30 @@ class EmptyOrExitingTmuxServerTests(unittest.TestCase):
         self.assertIn(['tmux', '-L', 'priv', 'list-sessions', '-F', '#{session_name}'], calls)
 
     def test_no_current_target_with_sessions_listed_is_not_read_as_empty(self):
-        """The string alone is not the fact: if sessions DO exist and list-panes still cannot answer, refuse."""
+        """The string alone is not the fact: if sessions DO exist and list-panes still cannot answer, refuse.
+
+        A GUARD, and it passes on the base too (the base refused every such shape); it pins that the fix
+        did not buy state A by reading every `no current target` as empty."""
         with patch('subprocess.run', self.fake((1, '', 'no current target'), sessions=(0, 'w1\n', ''))):
-            with self.assertRaisesRegex(FleetError, 'no current target'):
+            with self.assertRaisesRegex(FleetError, 'no current target.*listing 1 session'):
+                default_probes(both_runtimes=True, tmux_socket='priv').list_processes()
+
+    def test_no_current_target_with_list_sessions_failing_otherwise_names_both_answers(self):
+        with patch('subprocess.run', self.fake((1, '', 'no current target'), sessions=(1, '', 'weird'))):
+            with self.assertRaisesRegex(FleetError, 'no current target.*list-sessions` then exited 1: weird'):
                 default_probes(both_runtimes=True, tmux_socket='priv').list_processes()
 
     def test_a_server_that_is_exiting_under_the_call_is_an_empty_population(self):
-        with patch('subprocess.run', self.fake((1, '', 'server exited unexpectedly\n'))):
-            self.assertEqual(default_probes(both_runtimes=True, tmux_socket='priv').list_processes(), [])
+        for answer in ('server exited unexpectedly\n', 'no server running on /tmp/tmux-1000/priv\n'):
+            with patch('subprocess.run', self.fake((1, '', 'server exited unexpectedly\n'), sessions=(1, '', answer))):
+                self.assertEqual(default_probes(both_runtimes=True, tmux_socket='priv').list_processes(), [])
+
+    def test_one_lost_call_to_a_server_that_still_lists_sessions_is_not_read_as_empty(self):
+        """`server exited unexpectedly` is tmux's generic lost-the-server message: a server that answers the
+        confirming call with sessions is alive, and reading it as empty would mark every worker DEAD."""
+        with patch('subprocess.run', self.fake((1, '', 'server exited unexpectedly'), sessions=(0, 'w1\n', ''))):
+            with self.assertRaisesRegex(FleetError, 'server exited unexpectedly'):
+                default_probes(both_runtimes=True, tmux_socket='priv').list_processes()
 
     def test_the_refusal_names_the_socket_the_command_the_stderr_and_what_clears_it(self):
         error = 'error connecting to /tmp/tmux-1000/priv (Operation not permitted)'
@@ -125,9 +141,11 @@ class EmptyOrExitingTmuxServerTests(unittest.TestCase):
             with self.assertRaises(FleetError) as raised:
                 default_probes(both_runtimes=True, tmux_socket='priv').list_processes()
         message = str(raised.exception)
-        for needle in ("socket 'priv'", 'tmux -L priv list-panes -a', 'Operation not permitted',
-                       'clears when:', 'tmux -L priv list-sessions', 'clears who:'):
+        for needle in ("socket 'priv'", '`tmux -L priv list-panes -a` exited 1', 'Operation not permitted',
+                       'clears when:', 'clears who:'):
             self.assertIn(needle, message)
+        # A permission failure is not a held client, so the refusal does not send the reader after one.
+        self.assertNotIn('ps -o pid,stat,args', message)
 
     def test_the_default_server_is_named_as_such_in_the_refusal(self):
         with patch('subprocess.run', self.fake((1, '', 'boom'))):
@@ -138,7 +156,7 @@ class EmptyOrExitingTmuxServerTests(unittest.TestCase):
         def run(argv, **kw):
             return subprocess.CompletedProcess(argv, 1, '', 'server exited unexpectedly\n')
         with patch('subprocess.run', run):
-            with self.assertRaises(Exception) as raised:
+            with self.assertRaises(BadInput) as raised:
                 default_probes(tmux_socket='priv').start_session('w', Path('/'), 'true')
         message = str(raised.exception)
         for needle in ('server exited unexpectedly', 'clears when:', 'ps -o pid,stat,args -C tmux', 'clears who:'):
@@ -155,13 +173,14 @@ class EmptyTmuxServerAgainstRealTmux(unittest.TestCase):
         config = Path(self.directory.name) / 'tmux.conf'
         config.write_text('set -g exit-empty off\n')
         tmux = ['tmux', '-L', self.socket]
-        subprocess.run(tmux + ['-f', str(config), 'new-session', '-d', '-s', 'x', 'sleep 60'], check=True)
-        subprocess.run(tmux + ['kill-session', '-t', '=x'], check=True)
-        # Cleanups run last-in first-out: kill the server, THEN remove the socket file it leaves behind.
+        # Registered BEFORE the server exists: an `exit-empty off` server left behind by a failed setUp would
+        # never exit. Cleanups run last-in first-out: kill the server, THEN remove the socket file it leaves.
         path = Path(os.environ.get('TMUX_TMPDIR') or '/tmp') / f'tmux-{os.getuid()}' / self.socket
         self.addCleanup(lambda: path.unlink(missing_ok=True))
         self.addCleanup(subprocess.run, tmux + ['kill-server'], capture_output=True)
         self.addCleanup(self.directory.cleanup)
+        subprocess.run(tmux + ['-f', str(config), 'new-session', '-d', '-s', 'x', 'sleep 60'], check=True)
+        subprocess.run(tmux + ['kill-session', '-t', '=x'], check=True)
 
     def test_the_fixture_is_really_an_empty_live_server(self):
         panes = subprocess.run(['tmux', '-L', self.socket, 'list-panes', '-a'], capture_output=True, text=True)
