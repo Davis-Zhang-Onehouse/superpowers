@@ -50,6 +50,18 @@ class TestUrl(EvidenceCase):
 
 
 class TestAdmit(EvidenceCase):
+    def test_a_file_url_is_a_path_not_a_url(self):
+        """RV-22. `file://` names a path on this box, so it is judged like one: a typo'd one is refused, a real
+        one is admitted in its stored path form. Every other scheme is still a URL nobody here can stat."""
+        self.assertFalse(evidence.is_url("file:///no/such/thing"))
+        with self.assertRaises(BadInput):
+            evidence.admit(["file:///no/such/thing"], self.worker)
+        self.assertEqual(["evidence/proof.log"],
+                         evidence.admit([f"file://{self.worker}/evidence/proof.log"], self.worker))
+        self.assertEqual(self.worker / "evidence" / "proof.log",
+                         evidence.locate(f"file://{self.worker}/evidence/proof.log", None))
+        self.assertTrue(evidence.is_url("git+ssh://example/repo"))
+
     def test_a_relative_item_that_exists_is_stored_verbatim(self):
         self.assertEqual(["evidence/proof.log"], evidence.admit(["evidence/proof.log"], self.worker))
 
