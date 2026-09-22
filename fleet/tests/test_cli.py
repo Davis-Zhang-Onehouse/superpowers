@@ -3342,6 +3342,35 @@ class TestTheDispatchMilestoneJoin(CliCase):
         self.assertIn("harvest-refused", out,
                       f"a mid-flight progress report let a worker with no final report be harvested: {out}")
 
+    def test_apply_first_of_an_awaiting_ci_handoff_closes_out(self):
+        """`working-as-a-dispatched-instant` teaches `running` -> `awaiting-ci` -> `done`, and a worker whose
+        work waits on CI hands off at `awaiting-ci`. Applied first by the coordinator, that report arrived —
+        the second delta review measured the harvest refusing it."""
+        fleet = self.loaded()
+        coordinator, todo, _, _ = self._reported_and_finished(fleet, "awaiting-ci")
+        fleet.run(["apply", "--instant", str(coordinator), "--milestone", "M9"])
+
+        code, out, err = fleet.run(["harvest", "--id", todo, "--porcelain"])
+
+        self.assertNotIn("harvest-refused", out, f"an applied awaiting-ci handoff was refused: {out}")
+        self.assertIn("harvested\t", out, f"{out} {err}")
+        self.assertEqual("awaiting-ci", Roadmap(coordinator).milestone("M9").status)
+
+    def test_a_stale_applied_outcome_does_not_mask_a_later_progress_report(self):
+        """`blocked` (applied), then the worker resumes and reports `running` (applied), then finishes with no
+        final word. Its LATEST report is progress; an earlier outcome must not stand in for the final one."""
+        fleet = self.loaded()
+        coordinator, todo, child, renamed = self._reported_and_finished(fleet, "blocked")
+        fleet.run(["apply", "--instant", str(coordinator), "--milestone", "M9"])
+        roadmap = Roadmap(coordinator)
+        #: Proposed from the worker's recorded (pre-rename) path, exactly as its own `propose` recorded it.
+        roadmap.apply(roadmap.propose(pathlib.Path(child), "M9", "running", ["evidence/INDEX.md"]))
+
+        code, out, err = fleet.run(["harvest", "--id", todo, "--porcelain"])
+
+        self.assertIn("harvest-refused", out,
+                      f"a stale applied `blocked` let a worker whose last word was `running` be harvested: {out}")
+
     def test_harvest_dry_run_after_apply_first_previews_the_claim_release(self):
         fleet = self.loaded()
         coordinator, todo, child, _ = self._reported_and_finished(fleet, "blocked")
