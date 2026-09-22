@@ -4,7 +4,9 @@ Two files, one writer each, and that split IS the module:
 
   <instant>/.fleet/roadmap.json     the milestone registry  — written by `add`, `claim` and `apply`,
                                     i.e. by the COORDINATOR and by nobody else
-  <instant>/.fleet/proposals.json   the worker's inbox to the coordinator — written by `propose`
+  <instant>/.fleet/proposals.json   the worker's inbox to the coordinator — appended by `propose`; a row
+                                    leaves `pending` by being applied, superseded, withdrawn or retired
+                                    (`B02`), and every exit is recorded, never deleted
 
 Why the writers are separated by FILE and not by convention: *"I'll let the worker update the shared
 registry to save a step"* is a row on the STOP table, and a dispatch profile once instructed **every**
@@ -98,6 +100,10 @@ def _proposer(recorded) -> str:
 
 NOT_READY, PENDING_PROPOSAL, POPULATION = "not-ready", "pending-proposal", "population"
 
+#: `B02`. The ways a proposal leaves `pending` other than being applied. Each lands in the inbox's
+#: `closed` list with the reason, so a report is never lost — only decided.
+SUPERSEDED, WITHDRAWN, RETIRED = "superseded", "withdrawn", "retired"
+
 ATTENTION, INFO = "attention", "info"
 
 
@@ -185,6 +191,18 @@ def _check_evidence(evidence, milestone: str) -> list:
     return [str(e) for e in items]
 
 
+def _one_at(rows: list, at: str, milestone: str, where) -> list:
+    """`B02`'s row selector: the ONE pending row (dict) for `milestone` stamped `at`. Zero or several
+    matches are refused by name — `at` has one-second resolution, so two rows can share it."""
+    matches = [r for r in rows if r["at"] == at]
+    if len(matches) != 1:
+        stamps = ", ".join(f"{r['status']} at {r['at']}" for r in rows) or "none"
+        raise BadInput(f"--at {at} matches {len(matches)} pending row(s) for {milestone!r} in {where}, not "
+                       f"exactly one; the {len(rows)} pending: {stamps}. With no --at the newest row is "
+                       f"the one chosen.")
+    return matches
+
+
 class Roadmap:
     def __init__(self, instant: Path):
         self.instant = Path(instant)
@@ -210,8 +228,12 @@ class Roadmap:
         return self._read(self.path, {"schema_version": SCHEMA_VERSION, "milestones": []})
 
     def _load_proposals(self) -> dict:
-        return self._read(self.proposals_path,
-                          {"schema_version": SCHEMA_VERSION, "pending": [], "applied": []})
+        data = self._read(self.proposals_path,
+                          {"schema_version": SCHEMA_VERSION, "pending": [], "applied": [], "closed": []})
+        #: `B02`. Additive, so no schema bump: every inbox written before `closed` existed has no such key,
+        #: and it reads as "nothing closed yet" rather than as a file this build refuses.
+        data.setdefault("closed", [])
+        return data
 
     def _save(self, path: Path, data: dict) -> None:
         data["schema_version"] = SCHEMA_VERSION
@@ -278,6 +300,16 @@ class Roadmap:
                 entry["status"] = "dropped"
                 entry["retired_reason"] = reason
                 self._save(self.path, data)
+                #: `B02`. The milestone's pending rows describe work the coordinator just wrote off, and
+                #: `apply` now refuses to move a terminal milestone, so left pending they could never be
+                #: decided — "len(pending) is not a work count". Closed, with the retire reason. Inside the
+                #: roadmap lock, in apply's order (roadmap, then proposals).
+                with held_for_update(self.proposals_path):
+                    inbox = self._load_proposals()
+                    doomed = [r for r in inbox["pending"] if r["milestone"] == milestone_id]
+                    if doomed:
+                        self._close(inbox, doomed, RETIRED, reason)
+                        self._save(self.proposals_path, inbox)
                 return Milestone(**entry)
         raise BadInput(f"no milestone {milestone_id!r} in {self.path}, so there is nothing to retire")
 
@@ -494,11 +526,57 @@ class Roadmap:
         needs "did this worker's report ARRIVE", and a report the coordinator already applied arrived."""
         return [Proposal(**d) for d in self._load_proposals()["applied"]]
 
-    def apply(self, proposal: Proposal) -> Milestone:
+    def closed(self) -> list:
+        """`B02`. The proposals that left `pending` WITHOUT being applied, oldest first, as dicts: the
+        proposal's fields plus `closed_as` (superseded/withdrawn/retired), `closed_at`, `closed_reason`
+        and, for a superseded row, `superseded_by` = {instant, status, at}. Read-only."""
+        return [dict(d) for d in self._load_proposals()["closed"]]
+
+    @staticmethod
+    def _close(inbox: dict, rows: list, closed_as: str, reason: str, by: dict = None) -> None:
+        """Move `rows` (dicts, each in `inbox["pending"]`) to `closed`. The caller holds the lock and
+        saves. One helper for the three exits, so the recorded shape cannot drift between them."""
+        stamp = _now()
+        for row in rows:
+            inbox["pending"].remove(row)
+            entry = dict(row, closed_as=closed_as, closed_at=stamp, closed_reason=str(reason))
+            if by is not None:
+                entry["superseded_by"] = {"instant": by["instant"], "status": by["status"], "at": by["at"]}
+            inbox["closed"].append(entry)
+
+    def _terminal_refusal(self, entry: dict, proposal: Proposal, reopen: bool):
+        """The D-3 door, judged against a milestone entry the caller already loaded."""
+        current = entry["status"]
+        if reopen or current not in TERMINAL or proposal.status == current:
+            return None
+        return (f"milestone {proposal.milestone!r} is already {current}, which is terminal, and this row "
+                f"({proposal.status} at {proposal.at}) would move it back out — the same finished record "
+                f"`milestone --retire` refuses to rewrite"
+                + (f" (retired: {entry.get('retired_reason')})" if entry.get("retired_reason") else "")
+                + f". Refused, and the row stays pending. If it is residue, `fleet withdraw --instant "
+                f"{self.instant} --milestone {proposal.milestone} --at {proposal.at} --reason "
+                f"<why>` closes it; if re-opening the milestone is intended, apply it with `--reopen`.")
+
+    def apply_refusal(self, proposal: Proposal, reopen: bool = False):
+        """`B02`. Why `apply` would refuse this row, else None — the same judgement `apply` makes under its
+        lock, exposed so a dry run evaluates the gate the real run enforces."""
+        for entry in self._load()["milestones"]:
+            if entry["id"] == proposal.milestone:
+                return self._terminal_refusal(entry, proposal, reopen)
+        return f"no milestone {proposal.milestone!r} in {self.path}; refusing to invent one"
+
+    def apply(self, proposal: Proposal, reopen: bool = False) -> Milestone:
         """The COORDINATOR's verb and THE single writer of a milestone status.
 
         Validation happens here rather than only in `propose`, because a proposal can be hand-built or
-        replayed from a file: a gate that only guards the polite path is not a gate."""
+        replayed from a file: a gate that only guards the polite path is not a gate.
+
+        `B02`: it lands ONE row. Every EARLIER pending row for the same milestone is closed as superseded
+        by it (`_consume`) — its status and evidence were never decided on, and applying them in file order
+        is how a typo'd superseded path came to sit on a milestone. And it refuses to move a TERMINAL
+        milestone to a different status unless `reopen` — the door `retire` already keeps shut, so residue
+        can no longer resurrect a retired milestone. `reopen` out of `dropped` also clears
+        `retired_reason`, which would otherwise explain why a live milestone is not live."""
         status = _check_status(proposal.status)
         evidence = _check_evidence(proposal.evidence, proposal.milestone)
         # FI-30c. `_consume` is called INSIDE this lock and takes its own on `proposals_path` — a
@@ -508,6 +586,11 @@ class Roadmap:
             data = self._load()
             for d in data["milestones"]:
                 if d["id"] == proposal.milestone:
+                    refusal = self._terminal_refusal(d, proposal, reopen)
+                    if refusal:
+                        raise BadInput(refusal)
+                    if reopen and d["status"] == "dropped" and status != "dropped":
+                        d["retired_reason"] = ""
                     d["status"] = status
                     for item in evidence:
                         if item not in d["evidence"]:
@@ -519,16 +602,50 @@ class Roadmap:
 
     def _consume(self, proposal: Proposal) -> None:
         """An applied proposal leaves the pending inbox, so replaying the inbox cannot apply it twice and
-        `report()` stops asking the coordinator for something it has already done."""
+        `report()` stops asking the coordinator for something it has already done.
+
+        `B02`: so does every pending row for the same milestone that arrived BEFORE it — list order is
+        arrival order, because `propose` appends under this same lock — closed as superseded by it. Rows
+        that arrived after it are newer claims and stay pending. A hand-built proposal that is not in the
+        inbox supersedes nothing: there is no position to be newer than."""
         with held_for_update(self.proposals_path):        # FI-30c
             data = self._load_proposals()
             body = asdict(proposal)
-            pending = list(data["pending"])
+            pending = data["pending"]
             if body in pending:
+                at = pending.index(body)
+                earlier = [r for r in pending[:at] if r["milestone"] == body["milestone"]]
                 pending.remove(body)
-                data["pending"] = pending
                 data["applied"].append(body)
+                if earlier:
+                    self._close(data, earlier, SUPERSEDED,
+                                f"a newer row for {body['milestone']} was applied", by=body)
                 self._save(self.proposals_path, data)
+
+    def withdraw(self, milestone: str, reason: str, at: str = None) -> list:
+        """`B02`. Close pending rows for `milestone` WITHOUT applying them — all of them, or the one whose
+        `at` is given — and return them. Writes `proposals.json` and nothing else: a withdrawn row never
+        moved the roadmap, so withdrawing it cannot either.
+
+        Refused with no reason (a report that vanished with no recorded why is the loss this list exists to
+        prevent), for an unknown milestone, and when nothing matches. A stamp matching several rows selects
+        none: `at` has one-second resolution, and picking one of two would be choosing for the caller."""
+        reason = " ".join(str(reason or "").split())
+        if not reason:
+            raise BadInput(f"withdrawing a proposal for {milestone!r} needs a --reason; a report that left "
+                           f"the inbox with no recorded why cannot be told apart from one that was lost")
+        self.milestone(milestone)
+        with held_for_update(self.proposals_path):
+            data = self._load_proposals()
+            rows = [r for r in data["pending"] if r["milestone"] == milestone]
+            if at is not None:
+                rows = _one_at(rows, at, milestone, self.proposals_path)
+            if not rows:
+                raise BadInput(f"no pending proposal names milestone {milestone!r} in "
+                               f"{self.proposals_path}, so there is nothing to withdraw")
+            self._close(data, rows, WITHDRAWN, reason)
+            self._save(self.proposals_path, data)
+        return [Proposal(**r) for r in rows]
 
 
     # ------------------------------------------------------------------ the report
@@ -548,26 +665,59 @@ class Roadmap:
                             clears_when=clears_when, clears_who=clears_who))
 
         pending = self.proposals()
+        #: `B02` (i26(b-2)). Which row `apply` would land for each milestone — the last one to arrive — so
+        #: the others can SAY they are superseded instead of reading identically to the current one, and
+        #: which of those `apply` would refuse (D-3). Still one row per pending proposal: this marks rows,
+        #: it does not select them (B04 owns selection). The `proposes <id> -> <status> at <ts>` phrase is
+        #: unchanged, because coordinator tooling parses it.
+        newest = {p.milestone: p for p in pending}
+        entries = {d["id"]: d for d in self._load()["milestones"]}
+        superseded = stale = 0
         for p in pending:
-            rows.append(Row(
-                kind=PENDING_PROPOSAL, subject=p.milestone,
-                #: The note goes FIRST when there is one (`I-2`). It is the proposer's one line about
-                #: why this proposal exists, and a coordinator scanning an inbox reads the front of the
-                #: row. Omitted entirely when empty rather than rendered as `""` — every proposal
-                #: written before the field existed has none, and empty quotes on every existing row is
-                #: noise added to the view this was meant to improve.
-                detail=((f'"{p.note}" — ' if p.note else "")
-                        + f"{_proposer(p.instant)} proposes {p.milestone} -> {p.status} at {p.at} with "
-                        f"{len(p.evidence)} evidence item(s); the roadmap is UNCHANGED until the "
-                        "coordinator applies it"),
-                severity=ATTENTION,
-                clears_when="the coordinator applies the proposal (single writer)",
-                clears_who=COORDINATOR))
+            base = (f"{_proposer(p.instant)} proposes {p.milestone} -> {p.status} at {p.at} with "
+                    f"{len(p.evidence)} evidence item(s); the roadmap is UNCHANGED until the "
+                    "coordinator applies it")
+            #: The note goes FIRST when there is one (`I-2`). It is the proposer's one line about why this
+            #: proposal exists, and a coordinator scanning an inbox reads the front of the row. Omitted
+            #: entirely when empty rather than rendered as `""` — every proposal written before the field
+            #: existed has none, and empty quotes on every existing row is noise added to the view this was
+            #: meant to improve.
+            note = f'"{p.note}" — ' if p.note else ""
+            entry = entries.get(p.milestone)
+            refusal = entry is not None and self._terminal_refusal(entry, p, reopen=False)
+            withdraw = (f"`fleet withdraw --instant {self.instant} --milestone {p.milestone} --at {p.at} "
+                        f"--reason <why>`")
+            if newest[p.milestone] is not p:
+                superseded += 1
+                rows.append(Row(
+                    kind=PENDING_PROPOSAL, subject=p.milestone,
+                    detail=(f"SUPERSEDED by the row at {newest[p.milestone].at}: " + note + base),
+                    severity=INFO,
+                    clears_when=(f"`fleet apply` closes it as superseded when it applies the newer row; "
+                                 f"{withdraw} closes it now"),
+                    clears_who=COORDINATOR))
+            elif refusal:
+                stale += 1
+                rows.append(Row(
+                    kind=PENDING_PROPOSAL, subject=p.milestone,
+                    detail=(f"STALE: {p.milestone} is already {entry['status']}, and `apply` refuses to move "
+                            f"a terminal milestone without --reopen: " + note + base),
+                    severity=ATTENTION,
+                    clears_when=(f"{withdraw} if it is residue, or `fleet apply --instant {self.instant} "
+                                 f"--milestone {p.milestone} --reopen` if re-opening is intended"),
+                    clears_who=COORDINATOR))
+            else:
+                rows.append(Row(
+                    kind=PENDING_PROPOSAL, subject=p.milestone, detail=note + base,
+                    severity=ATTENTION,
+                    clears_when="the coordinator applies the proposal (single writer)",
+                    clears_who=COORDINATOR))
 
         milestones = self.milestones()
         rows.append(Row(
             kind=POPULATION, subject=str(self.instant),
             detail=(f"examined {len(milestones)} milestone(s) of which {len(self.ready())} ready, "
-                    f"{len(pending)} pending proposal(s), from {self.path}"),
+                    f"{len(pending)} pending proposal(s) ({superseded} superseded, {stale} against a "
+                    f"terminal milestone), from {self.path}"),
             severity=INFO))
         return rows

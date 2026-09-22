@@ -22,6 +22,7 @@ import pathlib
 import shutil
 import tempfile
 import unittest
+from unittest import mock
 
 from fleet.errors import BadInput
 from fleet.roadmap import (ATTENTION, INFO, LANDED, NOT_READY, PENDING_PROPOSAL,
@@ -614,3 +615,168 @@ class TestDisowningAClaim(RoadmapCase):
     def test_disown_still_refuses_a_milestone_that_is_not_on_the_roadmap(self):
         with self.assertRaises(BadInput):
             self.rm.disown("nosuch")
+
+
+class TestTheProposalQueueHasALifecycle(RoadmapCase):
+    """`B02`. A pending proposal had exactly one exit — being applied — and `apply` had exactly one mode —
+    apply them all. So a superseded row's status and evidence landed, nothing could withdraw a row, a
+    retired milestone kept its rows forever, and applying that residue resurrected the milestone (the live
+    quanton inbox: 9 of 14 pending rows on a done/dropped milestone). These cases pin the missing exits."""
+
+    def three(self, mid="m1"):
+        """Three rows one second apart: `at` has one-second resolution, so rows proposed in one second
+        share a stamp — the ambiguity case below covers that; everything else needs them distinct."""
+        self.rm.add(ms(mid))
+        stamps = [f"2026-09-22T00:00:0{i}Z" for i in range(3)]
+        with mock.patch("fleet.roadmap._now", side_effect=stamps):
+            return [self.rm.propose(self.worker, mid, status, [f"evidence/{i}.log"])
+                    for i, status in enumerate(("running", "awaiting-ci", "running"))]
+
+    def test_a_stamp_that_names_several_rows_selects_none(self):
+        """`at` is not unique (one-second resolution). A selector that silently picked one of two rows
+        would be choosing for the coordinator; it refuses and names them instead."""
+        self.rm.add(ms("m1"))
+        with mock.patch("fleet.roadmap._now", return_value="2026-09-22T00:00:00Z"):
+            rows = [self.rm.propose(self.worker, "m1", s, ["evidence/x.log"]) for s in ("running", "done")]
+        with self.assertRaises(BadInput) as caught:
+            self.rm.withdraw("m1", "which one?", at=rows[0].at)
+        self.assertIn("2 pending", str(caught.exception))
+        self.assertEqual(rows, self.rm.proposals())
+
+    def test_apply_lands_only_the_newest_row_and_closes_the_older_as_superseded(self):
+        rows = self.three()
+        applied = self.rm.apply(self.rm.proposals()[-1])
+        self.assertEqual("running", applied.status)
+        self.assertEqual(["evidence/2.log"], applied.evidence,
+                         "a superseded row's evidence landed on the milestone (i28(c))")
+        self.assertEqual([], self.rm.proposals())
+        self.assertEqual([rows[2]], self.rm.applied())
+        closed = self.rm.closed()
+        self.assertEqual(["superseded", "superseded"], [c["closed_as"] for c in closed])
+        self.assertEqual([rows[0].status, rows[1].status], [c["status"] for c in closed])
+        for entry in closed:
+            self.assertEqual(rows[2].at, entry["superseded_by"]["at"])
+            self.assertEqual(rows[2].status, entry["superseded_by"]["status"])
+            self.assertTrue(entry["closed_at"])
+
+    def test_applying_an_older_row_leaves_newer_rows_pending(self):
+        rows = self.three()
+        self.rm.apply(rows[1])
+        self.assertEqual([rows[2]], self.rm.proposals(), "a NEWER row is a newer claim; it stays pending")
+        self.assertEqual([rows[0].status], [c["status"] for c in self.rm.closed()])
+
+    def test_rows_for_another_milestone_are_never_superseded(self):
+        self.rm.add(ms("other"))
+        bystander = self.rm.propose(self.worker, "other", "running", ["evidence/o.log"])
+        rows = self.three()
+        self.rm.apply(rows[2])
+        self.assertEqual([bystander], self.rm.proposals())
+
+    def test_apply_refuses_to_move_a_terminal_milestone_and_changes_nothing(self):
+        for status in TERMINAL:
+            with self.subTest(status=status):
+                rm = self.fresh(f"00000000-0730070{TERMINAL.index(status)}-inflight-append-term{status}")
+                rm.add(ms("t", status=status))
+                row = rm.propose(self.worker, "t", "running", ["evidence/late.log"])
+                before = rm.path.read_bytes()
+                self.assertIsNotNone(rm.apply_refusal(row))
+                with self.assertRaises(BadInput) as caught:
+                    rm.apply(row)
+                self.assertIn("fleet withdraw", str(caught.exception))
+                self.assertIn("--reopen", str(caught.exception))
+                self.assertEqual(before, rm.path.read_bytes(), "a refused apply wrote the roadmap")
+                self.assertEqual([row], rm.proposals(), "a refused row must stay pending")
+
+    def test_the_same_status_onto_a_terminal_milestone_is_allowed(self):
+        self.rm.add(ms("t", status="done", evidence=["evidence/a.log"]))
+        row = self.rm.propose(self.worker, "t", "done", ["evidence/b.log"])
+        self.assertIsNone(self.rm.apply_refusal(row))
+        self.assertEqual("done", self.rm.apply(row).status)
+
+    def test_reopen_moves_a_retired_milestone_and_clears_its_retired_reason(self):
+        self.rm.add(ms("k2"))
+        self.rm.retire("k2", "written off")
+        row = self.rm.propose(self.worker, "k2", "running", ["evidence/back.log"])
+        self.assertIsNone(self.rm.apply_refusal(row, reopen=True))
+        moved = self.rm.apply(row, reopen=True)
+        self.assertEqual("running", moved.status)
+        self.assertEqual("", moved.retired_reason, "a reopened milestone still says why it was retired")
+
+    def test_withdraw_closes_rows_and_never_touches_the_roadmap(self):
+        rows = self.three()
+        before = (self.rm.path.read_bytes(), self.rm.path.stat().st_mtime_ns)
+        with self.assertRaises(BadInput):
+            self.rm.withdraw("m1", "   ")
+        with self.assertRaises(BadInput):
+            self.rm.withdraw("m1", "typo", at="1999-01-01T00:00:00Z")
+        with self.assertRaises(BadInput):
+            self.rm.withdraw("noSuchMilestone", "typo")
+        one = self.rm.withdraw("m1", "the typo'd path", at=rows[2].at)
+        self.assertEqual([rows[2]], one)
+        self.assertEqual(rows[:2], self.rm.proposals())
+        rest = self.rm.withdraw("m1", "residue")
+        self.assertEqual(rows[:2], rest)
+        self.assertEqual([], self.rm.proposals())
+        self.assertEqual(["withdrawn"] * 3, [c["closed_as"] for c in self.rm.closed()])
+        self.assertEqual(["the typo'd path", "residue", "residue"],
+                         [c["closed_reason"] for c in self.rm.closed()])
+        self.assertEqual(before, (self.rm.path.read_bytes(), self.rm.path.stat().st_mtime_ns),
+                         "withdraw wrote roadmap.json; it must only touch the inbox")
+        with self.assertRaises(BadInput):
+            self.rm.withdraw("m1", "nothing left")
+
+    def test_retire_closes_the_milestones_pending_rows_and_only_those(self):
+        self.rm.add(ms("k2"))
+        self.rm.add(ms("m1"))
+        kept = self.rm.propose(self.worker, "m1", "running", ["evidence/m1.log"])
+        for status in ("running", "awaiting-ci"):
+            self.rm.propose(self.worker, "k2", status, ["evidence/k2.log"])
+        self.rm.retire("k2", "done by another route")
+        self.assertEqual([kept], self.rm.proposals())
+        self.assertEqual([("k2", "retired", "done by another route")] * 2,
+                         [(c["milestone"], c["closed_as"], c["closed_reason"]) for c in self.rm.closed()])
+
+    def test_an_inbox_written_before_closed_existed_still_loads(self):
+        self.rm.add(ms("m1"))
+        row = self.rm.propose(self.worker, "m1", "running", ["evidence/x.log"])
+        data = json.loads(self.rm.proposals_path.read_text())
+        data.pop("closed", None)
+        self.rm.proposals_path.write_text(json.dumps(data))
+        self.assertEqual([row], self.rm.proposals())
+        self.assertEqual([], self.rm.closed())
+        newer = self.rm.propose(self.worker, "m1", "done", ["evidence/y.log"])
+        self.rm.apply(newer)
+        self.assertEqual(["superseded"], [c["closed_as"] for c in self.rm.closed()])
+
+    def test_report_marks_superseded_rows_and_keeps_the_parseable_phrase(self):
+        rows = self.three()
+        pending = self.rows(PENDING_PROPOSAL)
+        self.assertEqual(3, len(pending), "report must still emit one row per pending proposal (B04)")
+        for row in pending[:2]:
+            self.assertTrue(row.detail.startswith(f"SUPERSEDED by the row at {rows[2].at}"), row.detail)
+            self.assertEqual(INFO, row.severity)
+        self.assertEqual(ATTENTION, pending[2].severity)
+        self.assertNotIn("SUPERSEDED", pending[2].detail)
+        for row, proposal in zip(pending, rows):
+            self.assertIn(f"proposes m1 -> {proposal.status} at {proposal.at}", row.detail)
+        population = self.rows(POPULATION)[0]
+        self.assertIn("3 pending proposal(s)", population.detail)
+        self.assertIn("2 superseded", population.detail)
+
+    def test_report_marks_a_row_apply_would_refuse_as_stale(self):
+        self.rm.add(ms("t", status="done"))
+        self.rm.propose(self.worker, "t", "running", ["evidence/late.log"])
+        row = self.rows(PENDING_PROPOSAL)[0]
+        self.assertTrue(row.detail.startswith("STALE: t is already done"), row.detail)
+        self.assertEqual(ATTENTION, row.severity)
+        self.assertIn("fleet withdraw", row.clears_when)
+        self.assertIn("1 against a terminal milestone", self.rows(POPULATION)[0].detail)
+
+    def test_applied_is_read_only(self):
+        """RV-28: B01 added `applied()` for harvest's guard as a READ accessor; it must stay one."""
+        rows = self.three()
+        self.rm.apply(rows[2])
+        before = (self.rm.proposals_path.read_bytes(), self.rm.proposals_path.stat().st_mtime_ns)
+        self.rm.applied()
+        self.assertEqual(before, (self.rm.proposals_path.read_bytes(),
+                                  self.rm.proposals_path.stat().st_mtime_ns))
