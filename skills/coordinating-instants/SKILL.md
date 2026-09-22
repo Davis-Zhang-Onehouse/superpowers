@@ -162,7 +162,7 @@ The one `BLOCKED` row the count leaves out is a pane-level one (a dialog, or tex
 box) with a human attached to that session who has typed into it recently: the note says *"a human is
 attached … not counted as needing you"*, because the person it is waiting on is already there. Only an
 interactive client counts: a read-only (`attach -r`) client cannot type into the pane, and a control-mode client
-(iTerm2's `-CC`) can, but tmux keeps no input clock for it, so neither can show that somebody typed recently —
+(iTerm2's `-CC`) can, but its tmux `client_activity` does not move when it does, so neither can show that somebody typed recently —
 such a row stays counted and its note says a client is attached. A client left attached with no input past the
 idle threshold is counted again, and so is one fleet could not ask about.
 `fleet status` shows the attachment as `evidence.attached` on every live worker.

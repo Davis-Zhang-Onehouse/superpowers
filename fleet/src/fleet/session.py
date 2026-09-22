@@ -219,9 +219,10 @@ class SessionLayer:
         `B24` (x2 `G-4`). `BLOCKED` could not tell a worker stuck at a modal from a human attached and
         mid-sentence, because this fact was never collected. "Clients" means INTERACTIVE clients (`RV-28`); a
         read-only or control-mode client is an OBSERVER (`RV-36`): somebody may be there — a control-mode client
-        can `send-keys`, which is how iTerm2 `-CC` types — but tmux shows no input clock for it, so it can never
-        show that a human was at the pane recently. An actuator must treat observers as occupied too. It is deliberately returned RAW and
-        tri-state, because its two consumers fail safe in OPPOSITE directions:
+        can `send-keys`, which is how iTerm2 `-CC` types — but its `#{client_activity}` does not move when it
+        does, so it can never show that a human was at the pane recently. An actuator must treat observers as
+        occupied too. It is deliberately returned RAW and tri-state, because its two consumers fail safe in
+        OPPOSITE directions:
 
         - the attention count (`reconcile`) treats `None` as "not a human" — it keeps counting, which is
           what it did before this fact existed, so a tmux hiccup cannot hide a stuck worker;
