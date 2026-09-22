@@ -232,9 +232,12 @@ h9_rc=0
   fleet roadmap --instant "$COORD" --porcelain || h9_rc=1
 } > "$OUT/H9-carry.out" 2>&1
 h9_ready_after=0
-# The carried item is ready iff it no longer appears as a not-ready subject after its dep landed.
+# The carried item is ready iff, after its dep landed, it is no longer a not-ready subject AND it IS a `ready`
+# row. The positive half is `B04`: before it, ready milestones had no row, so this could only be proved by an
+# absence — which a roadmap that printed nothing at all would also have satisfied.
 grep -q '^not-ready.carried' "$OUT/H9-carry.out" && h9_step2=1 || h9_step2=0
-awk '/^== 4\./{seen=1} seen && /^not-ready\tcarried\t/{bad=1} END{exit bad?1:0}' "$OUT/H9-carry.out" \
+awk '/^== 4\./{seen=1} seen && /^not-ready\tcarried\t/{bad=1} seen && /^ready\tcarried\t/{good=1}
+     END{exit (bad || !good)?1:0}' "$OUT/H9-carry.out" \
   && h9_ready_after=1
 h9_added=0; grep -q '^added.carried' "$OUT/H9-carry.out" && h9_added=1
 if [ "$h9_rc" = 0 ] && [ "$h9_added" = 1 ] && [ "$h9_step2" = 1 ] && [ "$h9_ready_after" = 1 ]; then

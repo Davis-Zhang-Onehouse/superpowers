@@ -262,13 +262,25 @@ Every observation verb takes `--porcelain` and emits tab-separated fields whose 
 data, not a formatting accident:
 
 ```bash
+# what can be dispatched right now: ready, and nobody holds it ($7 title, $8 owner)
+fleet roadmap --instant . --porcelain | awk -F'\t' '$1=="ready" && $8==""{print $2, $7}'
+# what is waiting, and on what
 fleet roadmap --instant . --porcelain | awk -F'\t' '$1=="not-ready"{print $2, $4}'
 ```
 
 **Parse columns; never grep a sentence.** Checker verbs emit `kind`, `subject`, `severity`, `detail`,
-`clears_when`, `clears_who`. Act on `severity=violation`; report `severity=info`. A finished milestone and a
-legitimately empty population are `info`, and treating them as alarms is how a healthy board comes to read as
-red and then gets ignored.
+`clears_when`, `clears_who`; `roadmap` appends `title` and `owner`, filled on every row about a milestone.
+Every milestone is a row: `ready` (its deps have landed — `owner` empty means dispatchable, non-empty means
+already claimed), `not-ready` (the `detail` names the blocker), or `pending-proposal`. Act on
+`severity=violation`; report `severity=info`. A finished milestone, a ready one and a legitimately empty
+population are `info`, and treating them as alarms is how a healthy board comes to read as red and then gets
+ignored.
+
+**The last row of `board` and `leases` porcelain is `population`** — the store or pool that was read, with
+the same counts the human banner shows (`board`: `kind`=`population`, `identity`=the store; `leases`:
+`lease`=`population`, `slot`=the pool, counts in the appended `note` column). An empty fleet is therefore
+one row, never zero bytes, and a script can tell it from a wrong `FLEET_HOME`. Count subjects or slots by
+column (`$2=="held"`), never with `wc -l` over the whole output.
 
 ## `--dry-run`
 

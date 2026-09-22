@@ -682,7 +682,7 @@ d10b_child_path_is_a_live_instant() {
   held_slot="$(awk -F'\t' '$2=="held"{print $1}' "$CD/leases.out" | tr '\n' ' ')"
   slot_now="$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1]))["slot"])' "$CD/record-after.json")"
   d_run "$CD/board.out" board --porcelain
-  board_rows="$(grep -c . "$CD/board.out")"
+  board_rows="$(awk -F'\t' '$2!="population"' "$CD/board.out" | grep -c .)"   # subjects, not the scope row (B04)
   {
     printf 'second dispatch exit\t%s\n' "$rc2"
     printf 'charter sha before / after\t%s / %s\n' "$sha_before" "$sha_after"

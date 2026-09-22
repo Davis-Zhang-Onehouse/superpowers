@@ -1013,6 +1013,21 @@ class VerifyCase(unittest.TestCase):
         self.assertEqual(verdict_for(False, True, True), INCONCLUSIVE)
         self.assertEqual(verdict_for(True, False, True), INCONCLUSIVE)
 
+    def test_the_board_population_row_is_not_live_activity(self):
+        # `B04` gave `board --porcelain` a trailing `population` row whose counts include subjects that
+        # hold no slot. The before/after comparison is about slot-holding subjects, so that row must not
+        # enter it — and it must be dropped by KIND, with the schema read from `render`, not by position.
+        from fleet import render
+        from fleet.release_verify import live_subject_rows
+        self.assertEqual(render.BOARD_COLUMNS.index("kind"), 1)
+        subject = "a-07300301\tworker\tRUNNING\ta-0\tws1\tm1\t\n"
+        quiet = render.board([], porcelain=True, scope="/h").replace("0 subject", "3 subject")
+        busy = render.board([], porcelain=True, scope="/h").replace("0 subject", "9 subject")
+        self.assertNotEqual(quiet, busy)
+        self.assertEqual(live_subject_rows(subject + quiet), live_subject_rows(subject + busy))
+        self.assertEqual(live_subject_rows(subject + quiet), subject)
+        self.assertEqual(live_subject_rows(""), "")
+
     def test_activity_during_a_passing_run_is_still_green(self):
         # Without this, INCONCLUSIVE would swallow every busy-box run and nothing could ever promote.
         from fleet.release_verify import GREEN, verdict_for
