@@ -342,6 +342,59 @@ else
     "the join does not hold: rc=$h10_rc record=$h10_rec origin=$h10_orig owner=$h10_own status-untouched=$h10_stat double-dispatch-refused=$h10_dbl destination=$h10_dest reached-coordinator=$h10_land($before_pending->$after_pending, worker=$worker_pending) board=$h10_board"
 fi
 
+# ==================================================================================================
+# H11 — `B02`: the proposal queue has a lifecycle.
+#   * three reports for one milestone -> ONE apply lands the NEWEST; the two earlier rows close as superseded
+#     and their evidence (incl. a typo'd path the worker had corrected) never reaches the milestone;
+#   * `milestone --retire` closes the milestone's pending rows;
+#   * a late row cannot move a `done` milestone (exit 2), and `withdraw` clears it without touching the roadmap.
+# On the base: one apply printed three `applied` rows and unioned all three evidence paths, retire left both
+# rows pending, the late row un-landed the milestone at exit 0, and `withdraw` was not a verb.
+# ==================================================================================================
+H11="$OUT/h11"; mkdir -p "$H11"
+{
+  fleet milestone --instant "$COORD" --id q1 --title "three reports" --porcelain
+  fleet milestone --instant "$COORD" --id q2 --title "retired with rows" --porcelain
+  fleet milestone --instant "$COORD" --id q3 --title "landed" --status done --evidence evidence/INDEX.md --porcelain
+  for pair in "running:evidence/e0.log" "awaiting-ci:evidence/e1.log" "running:evidence/e2-typo.log"; do
+    fleet propose --instant "$WORKER" --to "$COORD" --milestone q1 --status "${pair%%:*}" \
+          --evidence "${pair#*:}" --porcelain; sleep 1.1       # distinct `at` stamps
+  done
+  fleet propose --instant "$WORKER" --to "$COORD" --milestone q2 --status running --evidence evidence/q2.log --porcelain
+  fleet propose --instant "$WORKER" --to "$COORD" --milestone q3 --status awaiting-ci --evidence evidence/late.log --porcelain
+} > "$H11/seed.txt" 2>&1
+fleet apply --instant "$COORD" --milestone q1 --porcelain > "$H11/apply-q1.out" 2>&1; h11_apply=$?
+fleet milestone --instant "$COORD" --id q2 --retire --reason "done by another route" --porcelain > "$H11/retire-q2.out" 2>&1; h11_retire=$?
+fleet apply --instant "$COORD" --milestone q3 --porcelain > "$H11/apply-q3.out" 2>&1; h11_late=$?
+h11_rm_before="$(sha256sum "$COORD/.fleet/roadmap.json" | cut -d' ' -f1) $(stat -c %Y.%y "$COORD/.fleet/roadmap.json")"
+fleet withdraw --instant "$COORD" --milestone q3 --reason "residue after landing" --porcelain > "$H11/withdraw-q3.out" 2>&1; h11_wd=$?
+h11_rm_after="$(sha256sum "$COORD/.fleet/roadmap.json" | cut -d' ' -f1) $(stat -c %Y.%y "$COORD/.fleet/roadmap.json")"
+[ "$h11_rm_before" = "$h11_rm_after" ] && h11_untouched=1 || h11_untouched=0
+h11_closed_count=$(grep -c $'^proposals-closed\t1 pending proposal' "$H11/retire-q2.out")
+py "$COORD" > "$H11/state.txt" 2>&1 <<'PY'
+import pathlib, sys
+from fleet.roadmap import Roadmap
+rm = Roadmap(pathlib.Path(sys.argv[1]))
+print("q1:", rm.milestone("q1").status, rm.milestone("q1").evidence)
+print("q3:", rm.milestone("q3").status)
+print("pending q-rows:", sorted(p.milestone for p in rm.proposals() if p.milestone.startswith("q")))
+print("closed:", sorted((c["milestone"], c["closed_as"]) for c in rm.closed()))
+PY
+cat "$H11/apply-q1.out" "$H11/state.txt"
+h11_applied=$(grep -c '^applied' "$H11/apply-q1.out"); h11_super=$(grep -c '^superseded' "$H11/apply-q1.out")
+if [ "$h11_apply" = 0 ] && [ "$h11_applied" = 1 ] && [ "$h11_super" = 2 ] \
+   && grep -qF "q1: running ['evidence/e2-typo.log']" "$H11/state.txt" \
+   && [ "$h11_retire" = 0 ] && [ "$h11_late" = 2 ] && grep -qF "q3: done" "$H11/state.txt" \
+   && [ "$h11_wd" = 0 ] && [ "$h11_untouched" = 1 ] && [ "$h11_closed_count" = 1 ] \
+   && grep -qF "pending q-rows: []" "$H11/state.txt" \
+   && grep -qF "closed: [('q1', 'superseded'), ('q1', 'superseded'), ('q2', 'retired'), ('q3', 'withdrawn')]" "$H11/state.txt"; then
+  it_pass H11 "fleet/it/H/out/h11/state.txt" \
+    "one apply landed only the newest of three reports (1 applied, 2 superseded; evidence = the newest's alone), retire closed its milestone's row, a late row could not move a done milestone (exit 2) and withdraw closed it — every row left pending by a recorded exit"
+else
+  it_fail H11 "fleet/it/H/out/h11/state.txt" \
+    "apply rc=$h11_apply applied=$h11_applied superseded=$h11_super retire rc=$h11_retire proposals-closed=1?$h11_closed_count late-apply rc=$h11_late (want 2) withdraw rc=$h11_wd roadmap-untouched-by-withdraw=$h11_untouched — see the directory"
+fi
+
 it_assert_isolation H-leave
 bash "$IT_ROOT/bin/source-pin.sh" after "$OUT" || { echo "CONTAMINATED — no verdict" >&2; exit 3; }
 sed -i "s|$INSTANT/||g" "$RESULTS"
