@@ -20,7 +20,7 @@ IT_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 . "$IT_ROOT/lib.sh"
 
 IT_FAILED=0
-it_own_cases 'F[0-9]+|ISOLATION-F-(enter|leave)'
+it_own_cases 'F[0-9]+[a-z]?|ISOLATION-F-(enter|leave)'
 
 it_section F
 OUT="$EV/out"; rm -rf "$OUT"; mkdir -p "$OUT"
@@ -109,7 +109,13 @@ fi
 # F2 — AND A REAL DECLARATION DOES.  Same worker, same prose still in place, one declaration added: the
 #      cap must now report room and the dispatch must succeed. This is what makes F3 non-vacuous.
 # ==================================================================================================
-fleet declare --instant "$W1" --phase AWAITING-CI --porcelain > "$OUT/F2-declare.out" 2>&1
+#: `B06`. A declaration with NOTHING behind it is DISREGARDED by `reconcile`, so it frees no cap — that is
+#: F2b below, the negative twin of this case. The declaration here names its watcher, which is what a real
+#: CI wait has: this worker's pane is the harness stub, so nothing observable is on its status line and the
+#: gate lets the claim through ungated. F2's claim is about a declaration versus prose, and it needs a
+#: declaration somebody would accept.
+fleet declare --instant "$W1" --phase AWAITING-CI --watcher 'cron 0,30 * * * * gh-run-poll' \
+      --porcelain > "$OUT/F2-declare.out" 2>&1
 f2_declare_rc=$?
 fleet dispatch --profile "$OUT/profile" --title "secondC" --base 00000000 --optype append \
       --porcelain > "$OUT/F2-dispatch.out" 2>&1
@@ -122,6 +128,35 @@ else
   it_fail F2 "fleet/it/F/out/F2-dispatch.out" \
     "a declaration did not free the cap: declare_rc=$f2_declare_rc dispatch_rc=$f2_rc instant='$W2'"
 fi
+
+# ==================================================================================================
+# F2b — AND A DECLARATION WITH NOTHING BEHIND IT DOES NOT.  `B06`: `awaiting-ci` is the one phase that
+#      outranks both `busy` and the idle threshold AND takes a worker out of the cap, so a claim with no
+#      watcher observed on the pane and none recorded at the claim is an exemption nothing backs. The
+#      declaration is written (the phase is stored and `brief` reports it) and `reconcile` disregards it.
+#      Pairs with F2 the way F3 does: same worker, same verb, one field different.
+# ==================================================================================================
+rm -f "$W1/.fleet/declare.json"
+fleet declare --instant "$W1" --phase AWAITING-CI --porcelain > "$OUT/F2b-declare.out" 2>&1
+f2b_declare_rc=$?
+fleet dispatch --profile "$OUT/profile" --title "secondD" --base 00000000 --optype append \
+      --porcelain > "$OUT/F2b-dispatch.out" 2>&1
+f2b_rc=$?
+f2b_state="$(fleet board --porcelain 2>/dev/null | awk -F'\t' -v n="$(basename "$W1")" '$0 ~ n {print $3; exit}')"
+f2b_disregarded=0
+grep -qi 'disregarded' <(fleet board --porcelain 2>/dev/null) && f2b_disregarded=1
+if [ "$f2b_declare_rc" = 0 ] && [ "$f2b_rc" != 0 ] && [ "$f2b_state" != "AWAITING-CI" ] \
+   && [ "$f2b_disregarded" = 1 ]; then
+  it_pass F2b "fleet/it/F/out/F2b-dispatch.out" \
+    "the SAME declaration with no watcher behind it did NOT free the cap: declare exit 0, the board reports $f2b_state with a note saying the declaration is disregarded, and the dispatch is still refused (exit $f2b_rc). F2 and F2b differ by one flag, so neither can be explained by the cap's state"
+else
+  it_fail F2b "fleet/it/F/out/F2b-dispatch.out" \
+    "declare_rc=$f2b_declare_rc dispatch_rc=$f2b_rc state='$f2b_state' disregarded=$f2b_disregarded"
+fi
+#: F2's exemption is restored for everything below, which was written against a freed cap.
+rm -f "$W1/.fleet/declare.json"
+fleet declare --instant "$W1" --phase AWAITING-CI --watcher 'cron 0,30 * * * * gh-run-poll' \
+      --porcelain > "$OUT/F2-redeclare.out" 2>&1
 
 # ==================================================================================================
 # F9 — `compaction-status` REPORTS THE FREEZE AND CHANGES NOTHING.  Zero delta over FLEET_HOME and the
