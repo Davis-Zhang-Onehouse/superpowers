@@ -101,6 +101,13 @@ A_REAL_FLEET="$HOME/.fleet"
 A_REAL_EXISTS_BEFORE="$([ -e "$A_REAL_FLEET" ] && echo yes || echo no)"
 it_manifest "$A_REAL_FLEET" > "$OUT/A1-real-fleet-before.manifest"
 
+#: The stores the CALLER's environment names, captured before `it_section` replaces FLEET_HOME. `A1c` watches
+#: `~/.fleet`, the pre-per-root fallback — but under per-root isolation a verb that fails to refuse writes the
+#: store of whatever root it RESOLVED, and a dispatched session exports `FLEET_ROOT`
+#: (`runtime_launch.prepare`). The 0.6.3 gate's A1 wrote the live root's `.fleet/golden` and a stray
+#: `a1subject-*` record while A1c read PASS (I-5 / FB-22). `A1e` watches these, read-only.
+A_INHERITED_STORES="$(printf '%s\n' "${FLEET_ROOT:+$FLEET_ROOT/.fleet}" "${FLEET_HOME:-}" | grep . | sort -u)"
+
 # --- A0 — the live-session baseline this run inherited ----------------------------------------------
 #
 #: Not a Plan 6 case. It exists because `it_assert_isolation` compares the live session set against a
@@ -151,7 +158,8 @@ a_run() {                 # a_run <logbase> <cmd...> -> A_RC, stdout $A_OUT, std
 }
 
 # ===================================================================================================
-# A1 — FLEET_HOME unset ⇒ every MUTATING verb refuses exit 2, and never falls back to ~/.fleet
+# A1 — no store named AND no root inherited ⇒ every MUTATING verb refuses exit 2, and never falls back
+#      (FLEET_HOME, FLEET_INSTANTS, FLEET_ROOT, FLEET_INSTANT and FLEET_RELEASES all stripped — `IT_ENV_UNNAMED`)
 # ===================================================================================================
 #
 # The probe is built so the fallback, if it fires, cannot reach the operator: each verb gets its own
@@ -276,7 +284,8 @@ a1_no_fallback() {
     fi
     local out rc created names_home
     # shellcheck disable=SC2086
-    out="$(cd "$A1_D/wd" && env -u FLEET_HOME -u FLEET_INSTANTS HOME="$fh" \
+    #: `IT_ENV_UNNAMED`, not `-u FLEET_HOME -u FLEET_INSTANTS`: a caller's FLEET_ROOT is a store named too.
+    out="$(cd "$A1_D/wd" && env "${IT_ENV_UNNAMED[@]}" HOME="$fh" \
            timeout 120 python3 -m fleet.cli "$v" $args 2>&1)"; rc=$?
     printf '%s\n' "$out" > "$OUT/A1-$v.out"
     created=no; [ -e "$fh/.fleet" ] && created=yes
@@ -331,7 +340,7 @@ a1_no_fallback() {
   #: in the first place.
   local probed=$((n - unmapped - exempt))
   if [ "$nonrefusing" = 0 ] && [ "$inconclusive" = 0 ]; then
-    a_pass A1b "$log" "$(sq "all $probed probed mutating verbs exited 2 with an attributable store refusal — either SI-15's 'writes to a store and no store was named' or, since per-root isolation, tier 6's 'could not tell which fleet it belongs to' — and NONE created \$HOME/.fleet. Matched on those two exact sentences rather than on the flag name --home, which every verb's usage block also prints on any parse error (II-10, 39 of 39 measured). $unmapped verb(s) had no argv recipe and are A1d's business, not this case's; $exempt verb(s) DECLARE they resolve no store and are excluded from the refusal count by that declaration, never by name:$exempt_list — they were still run, and still had to leave \$HOME/.fleet alone above")"
+    a_pass A1b "$log" "$(sq "with no store named AND no root inherited (IT_ENV_UNNAMED), all $probed probed mutating verbs exited 2 with an attributable store refusal — either SI-15's 'writes to a store and no store was named' or, since per-root isolation, tier 6's 'could not tell which fleet it belongs to' — and NONE created \$HOME/.fleet. Matched on those two exact sentences rather than on the flag name --home, which every verb's usage block also prints on any parse error (II-10, 39 of 39 measured). $unmapped verb(s) had no argv recipe and are A1d's business, not this case's; $exempt verb(s) DECLARE they resolve no store and are excluded from the refusal count by that declaration, never by name:$exempt_list — they were still run, and still had to leave \$HOME/.fleet alone above")"
   elif [ "$nonrefusing" = 0 ]; then
     a_fail A1b "$log" "$(sq "$attributed of $probed probed mutating verbs refused with exit 2 carrying the SI-15 store refusal; $inconclusive exited 2 for an unrelated reason ($inconc_list) so their refusal is NOT attributable to the missing home — the fallback is latent for them, not absent")"
   else
@@ -362,6 +371,53 @@ a1_real_store_untouched() {
   fi
 }
 
+# a1_inherited_attributable — every file in an inherited store whose CONTENT names this harness tree, with
+# its mtime. Attribution rather than a whole-store manifest, because the inherited store is usually a LIVE
+# one that other workers write all the time: a content+mtime diff of it would charge their churn to §A.
+# Nothing but this harness writes `$IT_ROOT` into a record or `golden`. Read-only: `grep -l` and `stat`.
+#: Each store is resolved (`pwd -P`) before `find`: `find` does not descend a start path that is a SYMLINK
+#: (`~/.fleet -> davis_root/.fleet` on this box), and a trailing slash makes `-path "$st/records/*"` match
+#: nothing — either way before and after are both empty and the case would pass over a store it never read.
+#: The number of candidate files examined goes to `$OUT/A1e-examined.txt` so that is visible, not silent.
+#: Whole lines are sorted under `LC_ALL=C`, because `comm` below needs exactly that order.
+a1_inherited_attributable() {
+  local st examined=0 it_phys
+  it_phys="$(cd "$IT_ROOT" && pwd -P)"
+  { while IFS= read -r st; do
+    [ -n "$st" ] && [ -d "$st" ] || continue
+    st="$(cd "$st" && pwd -P)" || continue
+    #: Every store file to depth 4 (records/, pool/enrolled/, pool/leases/<slot>/lease.json, harvest/seen/, golden)
+    #: except the instants tree, which is not store state. Both spellings of the harness root are matched: a
+    #: verb that `resolve()`s a path before storing it writes the physical one. Sub-second mtimes, so a
+    #: rewrite within the same second as the pre-image still reads as a change.
+    examined=$((examined + $(find "$st" -maxdepth 4 -path "$st/instants" -prune -o -type f -print | grep -c .)))
+    find "$st" -maxdepth 4 -path "$st/instants" -prune -o -type f -print0 \
+         | xargs -0 -r grep -lF -e "$IT_ROOT" -e "$it_phys" 2>/dev/null | while IFS= read -r f; do
+      printf '%s %s\n' "$(stat -c '%.Y' "$f" 2>/dev/null)" "$f"
+    done
+  done <<<"$A_INHERITED_STORES"
+    printf '%s\n' "$examined" > "$OUT/A1e-examined.txt"; } | LC_ALL=C sort
+}
+
+#: `A1e` — the escape `A1c` cannot see: a probe verb resolving the CALLER's root and writing ITS store.
+a1_inherited_store_untouched() {
+  a1_inherited_attributable > "$OUT/A1e-inherited-after.txt"
+  local new; new="$(LC_ALL=C comm -13 "$OUT/A1e-inherited-before.txt" "$OUT/A1e-inherited-after.txt")"
+  local examined; examined="$(cat "$OUT/A1e-examined.txt" 2>/dev/null || echo 0)"
+  printf '%s\n' "$A_INHERITED_STORES" > "$OUT/A1e-inherited-stores.txt"
+  if [ -z "$A_INHERITED_STORES" ]; then
+    a_pass A1e "$OUT/A1e-inherited-stores.txt" "$(sq "no FLEET_ROOT or FLEET_HOME was inherited by this run, so there was no caller store for an A1 probe to escape into; the watched population is empty and says so")"
+  elif [ -z "$new" ]; then
+    #: Worded as narrowly as the check. It sees writes that CARRY this harness tree's path (records, harvest,
+    #: golden); a probe whose argv names no harness path (`runtime --set`, `reap`, `init --name`) could write
+    #: the inherited store without this case noticing. `A1b` — every verb refused — is the real protection.
+    a_pass A1e "$OUT/A1e-inherited-after.txt" "$(sq "no file naming this harness tree appeared or changed in the store(s) the caller's FLEET_ROOT/FLEET_HOME name ($(printf '%s' "$A_INHERITED_STORES" | scrub | tr '\n' ' ')) across the whole A1 probe; $examined store file(s) to depth 4 (instants/ excluded) were examined. This sees only writes carrying the harness path — A1b is what shows no verb resolved the inherited root")"
+  else
+    printf '%s\n' "$new" > "$OUT/A1e-escaped.txt"
+    a_fail A1e "$OUT/A1e-escaped.txt" "$(sq "$(printf '%s\n' "$new" | grep -c .) file(s) naming this harness tree were written into a store the CALLER's environment names during the A1 probe: $(printf '%s' "$new" | awk '{print $2}' | scrub | tr '\n' ' ')— a probe verb resolved the inherited root (FLEET_ROOT is root tier 4) instead of refusing, and wrote that root's store")"
+  fi
+}
+
 # a1_detail <id>...  — what each NAMED sub-assertion asserts, and nothing about the others.
 #
 # `II-8`. The A1 aggregate used to recite all three descriptions whatever failed:
@@ -385,6 +441,7 @@ a1_detail() {
       #: A1d and re-create the exact misreading `II-8` exists to prevent — the control in
       #: bin/a1-detail-control.sh asserts the absence of the ids that passed, and it catches this.
       A1d) out="$out A1d (a mutating verb has no argv recipe, so it was never invoked)" ;;
+      A1e) out="$out A1e (a probe wrote the store the caller's FLEET_ROOT/FLEET_HOME names)" ;;
       *)   out="$out $id (no description registered — add one to a1_detail)" ;;
     esac
   done
@@ -392,15 +449,17 @@ a1_detail() {
 }
 
 a1() {
+  a1_inherited_attributable > "$OUT/A1e-inherited-before.txt"
   a1_no_fallback
   a1_real_store_untouched
-  local failed; failed="$(awk -F'\t' '$1 ~ /^A1[abcd]$/ && $2=="FAIL" {printf "%s ", $1}' "$RESULTS")"
+  a1_inherited_store_untouched
+  local failed; failed="$(awk -F'\t' '$1 ~ /^A1[abcde]$/ && $2=="FAIL" {printf "%s ", $1}' "$RESULTS")"
   local bad; bad="$(printf '%s' "$failed" | wc -w | tr -d ' ')"
   if [ "$bad" = 0 ]; then
-    a_pass A1 "$OUT/A1-per-verb.txt" "$(sq "FLEET_HOME unset ⇒ every mutating verb refuses exit 2 with the SI-15 store refusal, nothing falls back to ~/.fleet, the operator's store is untouched, and every mutating verb had an argv recipe so the population judged is the whole one (A1a+A1b+A1c+A1d)")"
+    a_pass A1 "$OUT/A1-per-verb.txt" "$(sq "no store named and no root inherited ⇒ every mutating verb refuses exit 2 with the SI-15 store refusal, nothing falls back to ~/.fleet, the operator's store is untouched, nothing escaped into the caller's inherited store (A1e), and every mutating verb had an argv recipe so the population judged is the whole one (A1a+A1b+A1c+A1d+A1e)")"
   else
     # shellcheck disable=SC2086
-    a_fail A1 "$OUT/A1-per-verb.txt" "$(sq "$bad of 4 sub-assertions failed:$(a1_detail $failed). The sub-assertions not named here PASSED — read this row as a list of failures, not as an index of the four")"
+    a_fail A1 "$OUT/A1-per-verb.txt" "$(sq "$bad of 5 sub-assertions failed:$(a1_detail $failed). The sub-assertions not named here PASSED — read this row as a list of failures, not as an index of the five")"
   fi
 }
 
@@ -493,11 +552,11 @@ a3() {
   local nfiles; nfiles="$(find "$A3_CO/fleet" -name '*.py' | wc -l | tr -d ' ')"
 
   #: cwd is $d/wd — NOT the checkout and NOT the instant — so nothing can be answered by '' on sys.path.
-  a_run A3-import env -u PYTHONPATH -u FLEET_HOME -u FLEET_INSTANTS PYTHONPATH="$A3_CO" \
+  a_run A3-import env -u PYTHONPATH "${IT_ENV_UNNAMED[@]}" PYTHONPATH="$A3_CO" \
         python3 -c 'import fleet, fleet.cli; print(fleet.__file__); print(fleet.cli.__file__)'
   local rc_i=$A_RC
   #: Run it from $d/wd. `cd` inside the subshell so the parent's cwd is untouched.
-  ( cd "$d/wd" && env -u PYTHONPATH -u FLEET_HOME -u FLEET_INSTANTS PYTHONPATH="$A3_CO" \
+  ( cd "$d/wd" && env -u PYTHONPATH "${IT_ENV_UNNAMED[@]}" PYTHONPATH="$A3_CO" \
     python3 -c 'import fleet, fleet.cli; print(fleet.__file__)' > "$OUT/A3-cwd-elsewhere.stdout" 2>&1 )
   local rc_c=$?
   local from_second=no

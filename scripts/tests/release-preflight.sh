@@ -225,6 +225,28 @@ rm -f "$TMP/bin6/rm"
 chmod -R u+w "$B_DIR" 2>/dev/null
 rm -rf "$A_DIR" "$B_DIR"
 
+# --- another root's server on a socket named literally `fleet` is REPORTED, not skipped ---------------
+# Release 0.6.3's I-1: the scan globbed `fleet-*` only, so the quanton root's server -- socket `fleet`, three
+# live dt- sessions -- never appeared and preflight read as a quiet box. The servers below are throwaway
+# ones this test starts on sockets under $TMP, reached through RELEASE_PREFLIGHT_TMUX_DIRS; no real server
+# is read or touched, and both are killed by socket PATH on exit.
+SOCKDIR="$TMP/tmux-sockets/"
+mkdir -p "$SOCKDIR"
+LEGACY="${SOCKDIR}fleet"; DERIVED="${SOCKDIR}fleet-rpother"
+trap 'tmux -S "$LEGACY" kill-server 2>/dev/null; tmux -S "$DERIVED" kill-server 2>/dev/null; rm -rf "$TMP"' EXIT
+tmux -S "$LEGACY" new-session -d -s dt-rp-legacy-one 'sleep 300'
+tmux -S "$LEGACY" new-session -d -s dt-rp-legacy-two 'sleep 300'
+tmux -S "$LEGACY" new-session -d -s not-a-dispatch 'sleep 300'
+tmux -S "$DERIVED" new-session -d -s plain 'sleep 300'
+out="$(RELEASE_PREFLIGHT_TMUX_DIRS="$SOCKDIR" bash "$SCRIPT" 2>&1)"; rc=$?
+check "a run that finds another root's live work still exits 0 (advisory)" "0" "$rc"
+printf '%s' "$out" | grep -qF "another root's socket ($LEGACY) has 2 live dt- session(s)" \
+  || { note "FAIL the server on a socket named literally 'fleet' was not reported with its 2 dt- sessions"; note "$out"; fails=1; }
+printf '%s' "$out" | grep -qF "socket $DERIVED: 0 live dt- session(s)" \
+  || { note "FAIL a fleet-* socket with no dt- session was not listed with its zero count"; note "$out"; fails=1; }
+tmux -S "$LEGACY" kill-server 2>/dev/null; tmux -S "$DERIVED" kill-server 2>/dev/null
+[ "$fails" = 0 ] && note "ok   the legacy 'fleet' socket is reported with its dt- count, and a quiet fleet-* socket is listed with 0"
+
 if [ "$fails" = 0 ]; then
   echo "PASS: release-preflight refuses (exit 2) only when FLEET_TMUX_SOCKET is unset or literally" \
        "'fleet' -- the environment fleet-env.sh guarantees can never be a real fleet socket -- reports" \
@@ -234,7 +256,8 @@ if [ "$fails" = 0 ]; then
        "access to a read-only §Q export before removing it, reports FAILED (exit non-zero) rather" \
        "than reaped: for a directory it did not actually manage to remove, refuses an orphan that is" \
        "itself a symlink BEFORE the chmod that would otherwise widen modes on an arbitrary tree outside" \
-       "the release area, and prunes worktree registrations only when every reap in the batch succeeded"
+       "the release area, prunes worktree registrations only when every reap in the batch succeeded," \
+       "and reports another root's server on a socket named literally 'fleet' as well as 'fleet-*'"
   exit 0
 fi
 echo FAIL
