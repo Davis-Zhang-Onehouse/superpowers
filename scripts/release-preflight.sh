@@ -51,6 +51,10 @@ count_dt_sessions() { # count_dt_sessions <socket-name> -- number of dt- (dispat
   tmux -L "$1" ls 2>/dev/null | grep -c '^dt-'
 }
 
+# Test seam, like FLEET above: the directories whose sockets section 2 scans. A test points it at a
+# directory holding a throwaway server it owns, so the scan is exercised without reading any real server.
+TMUX_SOCKET_DIRS="${RELEASE_PREFLIGHT_TMUX_DIRS:-/tmp/tmux-*/}"
+
 # --- 1. this root ----------------------------------------------------------------------------------
 n="$(count_dt_sessions "$FLEET_TMUX_SOCKET")"
 [ "$n" -gt 0 ] && warn "this root ($FLEET_TMUX_SOCKET) has $n live dt- session(s)"
@@ -60,13 +64,32 @@ n="$(count_dt_sessions "$FLEET_TMUX_SOCKET")"
 # Another root's socket showing live work is not an error and not this root's business to touch -- it is
 # an uncontrollable residual on a shared box, and refusing on it would make releases impossible here. It
 # is still worth a WARN: a human deciding whether "now" is a good moment wants to know the box is busy.
+#
+# BOTH names a root's server can have: `fleet-<name>` (derived per root) AND literally `fleet`. The refusal
+# above is about THIS shell's environment -- a bare `fleet` can never be the socket this root derives -- and
+# says nothing about what other roots on the box run. A root on an older installation, which predates the
+# per-root derivation, still serves its workers on `fleet`: on this box that was the quanton root with three
+# live `dt-` sessions, and a `fleet-*` glob reported a quiet box over them (release 0.6.3's I-1). So `fleet`
+# is scanned too, and every socket found gets a line with its count -- a socket that is listed with zero is
+# a statement that it was looked at, where a socket that is never listed could equally have been missed.
+# Read by PATH (`-S`), never by name: `-L` resolves the name under this shell's own TMUX_TMPDIR/uid, which
+# is not necessarily the directory the glob found it in.
 shopt -s nullglob
-for sockdir in /tmp/tmux-*/; do
-  for sockpath in "$sockdir"fleet-*; do
+for sockdir in $TMUX_SOCKET_DIRS; do
+  for sockpath in "${sockdir%/}/fleet" "${sockdir%/}"/fleet-*; do
+    [ -S "$sockpath" ] || continue
     sockname="$(basename "$sockpath")"
     [ "$sockname" = "$FLEET_TMUX_SOCKET" ] && continue
-    n="$(count_dt_sessions "$sockname")"
-    [ "$n" -gt 0 ] && warn "another root's socket ($sockname) has $n live dt- session(s) -- this box has live fleet work"
+    if ! sessions="$(tmux -S "$sockpath" ls -F '#{session_name}' 2>/dev/null)"; then
+      echo "socket $sockpath: no server answering (a stale socket file, or not readable by this user)"
+      continue
+    fi
+    n="$(printf '%s\n' "$sessions" | grep -c '^dt-')"
+    if [ "$n" -gt 0 ]; then
+      warn "another root's socket ($sockpath) has $n live dt- session(s) -- this box has live fleet work"
+    else
+      echo "socket $sockpath: 0 live dt- session(s)"
+    fi
   done
 done
 shopt -u nullglob

@@ -106,6 +106,18 @@ fi
 : "${DUMMY:=$IT_ROOT/dummy-project}"
 export DUMMY
 
+# `env` arguments that remove EVERY ambient variable able to name a fleet destination: `env "${IT_ENV_UNNAMED[@]}" …`.
+# For a probe whose premise is "nothing names a store". Stripping FLEET_HOME and FLEET_INSTANTS alone is not
+# that: `FLEET_ROOT` is root tier 4 (`cli.resolve_root`) and a DISPATCHED session exports it
+# (`runtime_launch.prepare`), so §A's A1 probe resolved the dispatcher's live root, 15-17 of its mutating
+# verbs succeeded instead of refusing, and they wrote that root's store (0.6.3 gate, I-5 / FB-22).
+# FLEET_RELEASES names a release area the same way; FLEET_INSTANT is exported beside FLEET_ROOT and read by
+# no verb today — stripped so a future reader of it cannot reopen this. FLEET_TMUX_SOCKET is deliberately NOT
+# here: inside a section it is the section's PRIVATE server, and removing it would point a probe that fails
+# to refuse at the default server instead.
+# shellcheck disable=SC2034  # used by run-A.sh after lib.sh is sourced
+IT_ENV_UNNAMED=(-u FLEET_HOME -u FLEET_INSTANTS -u FLEET_ROOT -u FLEET_INSTANT -u FLEET_RELEASES)
+
 it_section() {            # it_section <name> -> own FLEET_HOME, own slots, own tmux prefix, own tmux SERVER
   SECTION="$1"
   export FLEET_HOME="$IT_ROOT/$SECTION/home"

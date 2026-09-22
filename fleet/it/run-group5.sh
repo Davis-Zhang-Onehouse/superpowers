@@ -849,6 +849,13 @@ VIEWS = {
     "roadmap": (["--instant", INSTP], 1, 2),
     "status": (["--id", TODO], None, None),
 }
+#: `B04` ends `board` and `leases` porcelain with ONE `population` row — what was examined — which the human
+#: form prints as a banner, never as a table row. It is not a subject, so it is not in the (identity, state)
+#: comparison: the 0.6.3 gate compared it and failed M7 on every run (I-4 / FB-23). The column that marks it
+#: is read by NAME, as `release_verify.live_subject_rows` and `bin/fleet-view` do. It is still held to its
+#: declared column count below, and there must be exactly one — so the filter cannot hide a missing or a
+#: doubled row, and a view that grows a population row without a line here fails loudly, not silently.
+POPULATION_MARKER = {"board": "kind", "leases": "lease"}
 
 def run(verb, args, porcelain):
     cmd = [sys.executable, "-m", "fleet.cli", verb] + args + (["--porcelain"] if porcelain else [])
@@ -888,7 +895,15 @@ for verb, (args, ident_col, state_col) in VIEWS.items():
         if p_pair != h_pair:
             bad.append(f"status: porcelain {p_pair} != human {h_pair}")
         continue
-    p_pairs = {(l.split("\t")[ident_col], l.split("\t")[state_col]) for l in out.splitlines() if l}
+    rows = [l.split("\t") for l in out.splitlines() if l]
+    if verb in POPULATION_MARKER:
+        mark = PORCELAIN_COLUMNS[verb].index(POPULATION_MARKER[verb])
+        npop = sum(1 for r in rows if r[mark:mark + 1] == ["population"])
+        print(f"    population rows={npop} (column {POPULATION_MARKER[verb]!r}), excluded from the comparison")
+        if npop != 1:
+            bad.append(f"{verb}: {npop} population row(s) in porcelain, B04 declares exactly one")
+        rows = [r for r in rows if r[mark:mark + 1] != ["population"]]
+    p_pairs = {(r[ident_col], r[state_col]) for r in rows}
     h_pairs = set()
     if verb == "board":
         # human columns: label, identity, state, slot, note
@@ -909,7 +924,8 @@ for verb, (args, ident_col, state_col) in VIEWS.items():
         bad.append(f"{verb}: porcelain {sorted(p_pairs)} != human {sorted(h_pairs)}")
 assert not bad, "\n".join(bad)
 print("OK M7: board/leases/roadmap/status parse at their declared column counts with stderr discarded, "
-      "and each view's human form reports the same (identity, state) set as its porcelain form")
+      "board/leases each carry exactly one B04 population row, and each view's human form reports the "
+      "same (identity, state) set as its porcelain form's subject rows")
 PY
   it_py M7 "$PY_DIR/m7.py"
 
