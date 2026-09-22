@@ -1086,3 +1086,47 @@ class TestAnAttachedHumanIsNotAStuckWorker(unittest.TestCase):
 
         self.assertIn("attached", evidence)
         self.assertTrue(evidence["attached"].startswith("1 client"), evidence["attached"])
+
+
+class TestOnlyWhatWasSeenIsExcusedOnACodexPane(unittest.TestCase):
+    """`RV-25`. A codex pane that could not be CAPTURED observes as `unknown`, and so does a frame the
+    classifier does not recognise; both reach the codex BLOCKED. Marking that "on the pane" let an attached
+    client excuse a pane fleet never saw — `FI-7`'s permissive default one step removed. Only an observed
+    DIALOG is on the human's screen to answer."""
+
+    def setUp(self):
+        self.fleet = SyntheticFleet()
+
+    def codex_worker(self, todo_id, tmux, pid, pane):
+        stamp = todo_id.split("-")[1]
+        self.fleet.dispatch(todo_id, f"00000000-{stamp}-inflight-append-{todo_id.split('-')[0]}",
+                            "ws9", tmux, runtime="codex")
+        self.fleet.procs.append(LiveSession(pid=pid, cwd=self.fleet.slots_dir / "ws9", name=tmux,
+                                            runtime="codex"))
+        self.fleet.panes[tmux] = pane          # None: the capture FAILED (`capture_pane` returns None)
+        self.fleet.tmux_live.add(tmux)
+        self.fleet.attached[tmux] = (1, time.time() - 5)
+        return {s.identity: s for s in reconcile(self.fleet.store, self.fleet.pool, self.fleet.sessions,
+                                                  self.fleet.instants)}[todo_id]
+
+    def test_a_codex_pane_whose_capture_failed_is_counted(self):
+        subject = self.codex_worker("cxfailed-07300701", "dt-cxfailed", 5401, None)
+
+        self.assertEqual(subject.state, BLOCKED, subject.note)
+        self.assertTrue(needs_a_human(subject),
+                        f"a pane fleet could not capture was excused by an attached client: {subject.note!r}")
+
+    def test_an_unrecognised_codex_frame_is_counted(self):
+        subject = self.codex_worker("cxodd-07300702", "dt-cxodd", 5402, "something codex never draws")
+
+        self.assertEqual(subject.state, BLOCKED, subject.note)
+        self.assertTrue(needs_a_human(subject), subject.note)
+
+    def test_an_observed_codex_dialog_with_a_human_attached_is_theirs(self):
+        """The neighbour the narrowing must keep: a dialog fleet SAW, in front of an attached human."""
+        #: Codex's measured approval row (`runtime._DIALOG_ROWS`); `observe("codex", ...)` reads it `dialog`.
+        frame = "Run this command?\n  $ make test\n\n  1. Yes\n  2. No\n\nPress enter to confirm or esc to cancel\n"
+        subject = self.codex_worker("cxdlg-07300703", "dt-cxdlg", 5403, frame)
+
+        self.assertEqual(subject.state, BLOCKED, subject.note)
+        self.assertFalse(needs_a_human(subject), subject.note)
