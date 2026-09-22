@@ -52,6 +52,10 @@ WATCHED_PANE = "\n".join(["gh run watch 1234 --exit-status", "",
 #: this shape exercises the codex branch inside `_live_state`.
 CODEX_IDLE_PANE = "reading src/fleet/pool.py\n\x1b[0;1m\u203a \x1b[0m\ncodex gpt-5 \u00b7 /home/ubuntu/work"
 
+#: `B24`. A human mid-sentence: text in the input box, nothing submitted, and the turn is over (no interrupt
+#: hint) — byte-identical to a swallowed submit, which is the whole problem.
+TYPING_PANE = "\n".join(["wrote target/fleet.jar", "done", "", "\u276f\u00a0also re-run the rebase check before you"])
+
 PARK_BUSY_Q = "should the shim land before the rebase, or after?"
 PARK_BLOCKED_Q = "is merging #441 mine to do?"
 
@@ -100,6 +104,12 @@ class SyntheticFleet:
                         has_session=lambda name: name in self.tmux_live,
                         start_session=lambda name, cwd, cmd: None,
                         kill_session=lambda name: None)
+        #: `B24`. Session name -> `(clients, last_input_epoch)` as tmux reports it; absent means
+        #: NOT MEASURED. Assigned rather than passed, so the fixture also builds on a package that predates
+        #: the field — which is what lets the new cases run RED against the base for a behavioural reason
+        #: instead of a TypeError.
+        self.attached = {}
+        probes.attachment = lambda name: self.attached.get(name)
         self.sessions = SessionLayer(probes)
         self.store = Store(self.home)
         self.pool = Pool(self.home,
@@ -944,3 +954,135 @@ class TestNeedsAHumanUsesKnownFacts(unittest.TestCase):
         self.assertEqual(subject.state, RUNNING,
                          f"a record with no recorded folder was reported {subject.state}: {subject.note!r}")
         self.assertEqual(subject.note, "", f"an empty folder name reached the note: {subject.note!r}")
+
+
+class TestAnAttachedHumanIsNotAStuckWorker(unittest.TestCase):
+    """`B24` (x2 `G-4`, `FI-9`). `BLOCKED` is actionable, and a pane showing unsubmitted text or a dialog
+    reads the same whether a worker is stuck there or a HUMAN is attached and mid-sentence. Those demand
+    opposite responses, and tmux knows which it is (`#{session_attached}`); fleet never asked.
+
+    The state stays BLOCKED — the row still says what the pane shows (no new state, B16's fence), and the
+    reporter's retracted remedy (narrow BLOCKED to `park.json`) is not taken: a worker at a permission modal
+    has no `park.json` either. What changes is whether it is counted as waiting on somebody who is not there.
+
+    Every positive has its control: the same pane with the one fact removed.
+    """
+
+    def setUp(self):
+        self.fleet = SyntheticFleet()
+
+    def subjects(self, idle_after_s=1800):
+        return {s.identity: s for s in reconcile(
+            self.fleet.store, self.fleet.pool, self.fleet.sessions,
+            self.fleet.instants, idle_after_s=idle_after_s)}
+
+    def worker(self, todo_id, tmux, pid, pane, attached=None):
+        stamp = todo_id.split("-")[1]
+        self.fleet.dispatch(todo_id, f"00000000-{stamp}-inflight-append-{todo_id.split('-')[0]}",
+                            "ws9", tmux)
+        self.fleet.launch(tmux, pid, "ws9", pane)
+        if attached is not None:
+            self.fleet.attached[tmux] = attached
+        return self.fleet.paths[todo_id]
+
+    def test_a_human_attached_and_mid_sentence_is_not_counted(self):
+        """The defect. `evidence/50-cli-repro/base.txt` S1: `attention` for a human typing in the pane."""
+        self.worker("typing-07300601", "dt-typing", 5301, TYPING_PANE, attached=(1, time.time() - 20))
+
+        subject = self.subjects()["typing-07300601"]
+
+        self.assertEqual(subject.state, BLOCKED, "the row must still say what the pane shows")
+        self.assertFalse(needs_a_human(subject),
+                         f"a human attached and typing was counted as needing a human: {subject.note!r}")
+        self.assertIn("human is attached", subject.note)
+
+    def test_the_same_text_with_nobody_attached_is_still_counted(self):
+        """The control, and the reason BLOCKED exists: a swallowed submit with nobody at the pane."""
+        self.worker("swallowed-07300602", "dt-swallowed", 5302, TYPING_PANE, attached=(0, time.time() - 20))
+
+        subject = self.subjects()["swallowed-07300602"]
+
+        self.assertEqual(subject.state, BLOCKED)
+        self.assertTrue(needs_a_human(subject))
+        self.assertNotIn("attached", subject.note, "a detached pane's note must read as it always did")
+
+    def test_a_dialog_with_a_human_attached_is_theirs_to_answer(self):
+        self.worker("dlgattached-07300603", "dt-dlgattached", 5303, DIALOG_PANE,
+                    attached=(1, time.time() - 5))
+
+        subject = self.subjects()["dlgattached-07300603"]
+
+        self.assertEqual(subject.state, BLOCKED)
+        self.assertFalse(needs_a_human(subject), subject.note)
+
+    def test_a_dialog_with_nobody_attached_is_a_stuck_worker(self):
+        """The case the retraction protects: a worker stopped at a permission modal, no park, no human."""
+        self.worker("dlgstuck-07300604", "dt-dlgstuck", 5304, DIALOG_PANE, attached=(0, time.time() - 5))
+
+        subject = self.subjects()["dlgstuck-07300604"]
+
+        self.assertEqual(subject.state, BLOCKED)
+        self.assertTrue(needs_a_human(subject))
+
+    def test_a_client_attached_with_no_input_past_the_threshold_is_not_a_human_at_the_pane(self):
+        """A terminal left attached overnight. Attachment alone would silence a stuck modal FOREVER — the
+        counter's unrecoverable direction — so a stale attachment falls back to counted, and says why."""
+        self.worker("forgotten-07300605", "dt-forgotten", 5305, DIALOG_PANE,
+                    attached=(1, time.time() - 1801))
+
+        subject = self.subjects(idle_after_s=1800)["forgotten-07300605"]
+
+        self.assertEqual(subject.state, BLOCKED)
+        self.assertTrue(needs_a_human(subject),
+                        f"a client silent for longer than the idle threshold hid a stuck worker: {subject.note!r}")
+        self.assertIn("no input", subject.note)
+
+    def test_an_unobservable_attachment_is_counted(self):
+        """Fails safe FOR THIS CONSUMER. Not measured is not "a human is here": the counter keeps today's
+        answer. (An actuator's safe side is the opposite; `SessionLayer.attachment` leaves that to it.)"""
+        self.worker("unasked-07300606", "dt-unasked", 5306, TYPING_PANE)   # no attachment fact at all
+
+        subject = self.subjects()["unasked-07300606"]
+
+        self.assertEqual(subject.state, BLOCKED)
+        self.assertTrue(needs_a_human(subject))
+
+    def test_attachment_alone_makes_nothing_actionable_or_blocked(self):
+        self.worker("watched-07300607", "dt-watched", 5307, QUIET_PANE, attached=(2, time.time()))
+
+        subject = self.subjects()["watched-07300607"]
+
+        self.assertEqual(subject.state, RUNNING, subject.note)
+        self.assertFalse(needs_a_human(subject))
+
+    def test_a_missing_folder_is_not_excused_by_an_attached_human(self):
+        """Only what is ON THE PANE belongs to the human at it. A deleted instant folder is not on their
+        screen, and attaching does not bring it back."""
+        path = self.worker("nofolder-07300608", "dt-nofolder", 5308, TYPING_PANE,
+                           attached=(1, time.time()))
+        shutil.rmtree(path)
+
+        subject = self.subjects()["nofolder-07300608"]
+
+        self.assertEqual(subject.state, BLOCKED)
+        self.assertIn("not on disk", subject.note)
+        self.assertTrue(needs_a_human(subject))
+
+    def test_a_parked_question_is_not_excused_by_an_attached_human(self):
+        """A park is addressed to the coordinator, not to whoever is at the pane, so it keeps counting."""
+        path = self.worker("dlgparked-07300609", "dt-dlgparked", 5309, DIALOG_PANE,
+                           attached=(1, time.time()))
+        Declarations(path).park(PARK_BLOCKED_Q)
+
+        subject = self.subjects()["dlgparked-07300609"]
+
+        self.assertEqual(subject.state, BLOCKED)
+        self.assertTrue(needs_a_human(subject), subject.note)
+
+    def test_the_attachment_is_reported_as_evidence(self):
+        self.worker("evid-07300610", "dt-evid", 5310, QUIET_PANE, attached=(1, time.time() - 40))
+
+        evidence = self.subjects()["evid-07300610"].evidence
+
+        self.assertIn("attached", evidence)
+        self.assertTrue(evidence["attached"].startswith("1 client"), evidence["attached"])
