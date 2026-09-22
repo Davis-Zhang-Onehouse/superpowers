@@ -42,6 +42,9 @@ name, and raises `LiveFleetReached` if a test resolves one of them. A test that 
 own: `hermetic_environment(instants, home=<tmp>)` plus a `--root`/`--home` the fixture wrote. Before this,
 nine promote cases passed inside `davis_root` by reading the live root and failed from any `/tmp` export,
 so `assert-head-green.sh` was RED at every tree (FB-35).
+The guard is installed when the `tests` package is imported. That always happens for `discover -s tests`
+over the whole suite, which is how P-1, `selftest` and `release-verify` run it, and for any
+`tests.<module>` target. A `-p` subset whose modules never import `tests` runs unguarded.
 
 ## Running the integration sections
 
