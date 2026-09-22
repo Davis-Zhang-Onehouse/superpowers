@@ -195,8 +195,8 @@ looks identical to a quiet box whether the box is quiet or the environment was s
 root's live `dt-` sessions, every *other* root's socket — `fleet-*` **and a socket named literally `fleet`**,
 which a root on an older installation still serves on (0.6.3's preflight missed three live workers there),
 each listed with its `dt-` count so a quiet socket reads as looked-at rather than missed (an uncontrollable
-residual, reported but never refused — this box has more than one root), any `board` subject still `COMPLETE` and holding a slot, the
-sync-cron window (Trap 7), and orphaned `.fleet-v*.tmp` verify worktrees left by a run that terminated
+residual, reported but never refused — this box has more than one root), any `board` subject still
+`COMPLETE` and holding a slot, the sync-cron window (Trap 7), and orphaned `.fleet-v*.tmp` verify worktrees left by a run that terminated
 abnormally (`--reap` removes them — restoring write access to a read-only §Q export first, and refusing to
 touch anything whose name does not match the orphan pattern exactly). Every finding is a `WARN:` at exit 0
 — advisory, because none of it is this root's business to refuse on — except one hard refusal at exit 2
