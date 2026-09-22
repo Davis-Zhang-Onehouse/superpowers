@@ -51,6 +51,7 @@ from dataclasses import asdict, dataclass
 from datetime import datetime, timezone
 from pathlib import Path
 
+from fleet import evidence as evidence_mod
 from fleet.atomic import atomic_write, held_for_update
 from fleet.errors import BadInput
 from fleet.identity import resolve
@@ -182,6 +183,10 @@ class Row:
     #: `owner == ""` is the dispatchable test; None on the population row, which is about no milestone.
     title: str = None
     owner: str = None
+    #: `B03`. The row's evidence, each item as it resolves NOW (`evidence.describe`), comma-joined; an item
+    #: that does not resolve says so. The view used to print a proposal's evidence as a count and a
+    #: milestone's not at all, so no reader of `fleet roadmap` could open one. None on the population row.
+    evidence: str = None
 
 
 def _check_status(status: str) -> str:
@@ -199,6 +204,11 @@ def _check_evidence(evidence, milestone: str) -> list:
             f"a status change for {milestone!r} needs at least one evidence path; a claim with no "
             "artifact is not a status change")
     return [str(e) for e in items]
+
+
+def _described(items, anchor) -> str:
+    """`B03`. A list of evidence items as the view prints them: each where it is now, comma-joined."""
+    return ", ".join(evidence_mod.describe(e, anchor) for e in items)
 
 
 def last_index(rows: list, row) -> int:
@@ -537,7 +547,8 @@ class Roadmap:
         self.milestone(milestone)          # an unknown milestone is refused at the producer
         proposal = Proposal(instant=str(Path(instant)), milestone=milestone,
                             status=_check_status(status),
-                            evidence=_check_evidence(evidence, milestone), at=_now(),
+                            evidence=evidence_mod.admit(_check_evidence(evidence, milestone), instant),
+                            at=_now(),
                             note=" ".join(str(note or "").split()))
         with held_for_update(self.proposals_path):        # FI-30c
             data = self._load_proposals()
@@ -584,12 +595,29 @@ class Roadmap:
                 f"{self.instant} --milestone {proposal.milestone} --at {proposal.at} --reason "
                 f"<why>` closes it; if re-opening the milestone is intended, apply it with `--reopen`.")
 
+    def evidence_refusal(self, proposal: Proposal):
+        """`B03`. Why `apply` would refuse this row's EVIDENCE, else None: an item that no longer resolves
+        against the proposer (re-resolved through its rename). `propose` checked each item when it was
+        written, so what reaches here is a file deleted since, a folder moved, a row written before the
+        check existed, or one built by hand — and applying it is how an unopenable path came to sit on a
+        milestone with exit 0."""
+        gone = evidence_mod.dangling(proposal.evidence, proposal.instant)
+        if not gone:
+            return None
+        return (f"{len(gone)} of {len(proposal.evidence)} evidence item(s) in the row {proposal.milestone} -> "
+                f"{proposal.status} at {proposal.at} do not resolve against its proposer "
+                f"{_proposer(proposal.instant)}: {', '.join(gone)}. Refused, and the row stays pending. The "
+                f"proposer re-proposes citing paths that resolve (relative to its own folder), or `fleet "
+                f"withdraw --instant {self.instant} --milestone {proposal.milestone} --at {proposal.at} "
+                f"--reason <why>` closes the row.")
+
     def apply_refusal(self, proposal: Proposal, reopen: bool = False):
         """`B02`. Why `apply` would refuse this row, else None — the same judgement `apply` makes under its
-        lock, exposed so a dry run evaluates the gate the real run enforces."""
+        lock, exposed so a dry run evaluates the gate the real run enforces. `B03`: the evidence half too."""
         for entry in self._load()["milestones"]:
             if entry["id"] == proposal.milestone:
-                return self._terminal_refusal(entry, proposal, reopen)
+                return (self._terminal_refusal(entry, proposal, reopen)
+                        or self.evidence_refusal(proposal))
         return f"no milestone {proposal.milestone!r} in {self.path}; refusing to invent one"
 
     def apply(self, proposal: Proposal, reopen: bool = False) -> Milestone:
@@ -606,6 +634,9 @@ class Roadmap:
         `retired_reason`, which would otherwise explain why a live milestone is not live."""
         status = _check_status(proposal.status)
         evidence = _check_evidence(proposal.evidence, proposal.milestone)
+        refusal = self.evidence_refusal(proposal)
+        if refusal:
+            raise BadInput(refusal)
         # FI-30c. `_consume` is called INSIDE this lock and takes its own on `proposals_path` — a
         # different file, and always in this order (roadmap then proposals), which is the only order any
         # path here uses. Two locks acquired in one order cannot deadlock against themselves.
@@ -619,9 +650,15 @@ class Roadmap:
                     if reopen and d["status"] == "dropped" and status != "dropped":
                         d["retired_reason"] = ""
                     d["status"] = status
+                    #: `B03`. Written ANCHORED — where the item is now — because a relative string on a
+                    #: milestone has no proposer left to be relative to. Deduplicated by location, so one
+                    #: file cited while `-inflight-` and again after `-complete-` lands once.
+                    seen = {str(evidence_mod.locate(e, d.get("owner")) or e) for e in d["evidence"]}
                     for item in evidence:
-                        if item not in d["evidence"]:
-                            d["evidence"].append(item)
+                        where = evidence_mod.locate(item, proposal.instant)
+                        if str(where or item) not in seen:
+                            seen.add(str(where or item))
+                            d["evidence"].append(evidence_mod.anchored(item, proposal.instant))
                     self._save(self.path, data)
                     self._consume(proposal)
                     return Milestone(**d)
@@ -711,7 +748,8 @@ class Roadmap:
         why = f"every dep has LANDED ({deps})" if m.deps else "it has no deps"
         return Row(kind=READY, subject=m.id, severity=INFO,
                    detail=f"READY: {m.title!r} — {why}; status={m.status}; {state}",
-                   clears_when=when, clears_who=who, title=m.title, owner=m.owner or "")
+                   clears_when=when, clears_who=who, title=m.title, owner=m.owner or "",
+                   evidence=_described(m.evidence, m.owner))
 
     def report(self) -> list:
         """Everything the coordinator has to act on, plus the population it was derived from.
@@ -727,7 +765,8 @@ class Roadmap:
             rows.append(Row(kind=NOT_READY, subject=m.id, detail=blocker,
                             severity=severity,
                             clears_when=clears_when, clears_who=clears_who,
-                            title=m.title, owner=m.owner or ""))
+                            title=m.title, owner=m.owner or "",
+                            evidence=_described(m.evidence, m.owner)))
 
         milestones = self.milestones()
         by_id = {m.id: m for m in milestones}
@@ -745,9 +784,13 @@ class Roadmap:
                         if m in entries and self._terminal_refusal(entries[m], p, reopen=False)}
         superseded = stale = 0
         for p in pending:
+            #: `B03`. The items themselves, after the count — relative ones as written, because the row
+            #: already names the proposer they are relative to — and the `proposes … at …` phrase untouched.
+            short = ", ".join(evidence_mod.describe(e, p.instant, short=True) for e in p.evidence)
             base = (f"{_proposer(p.instant)} proposes {p.milestone} -> {p.status} at {p.at} with "
-                    f"{len(p.evidence)} evidence item(s); the roadmap is UNCHANGED until the "
+                    f"{len(p.evidence)} evidence item(s) ({short}); the roadmap is UNCHANGED until the "
                     "coordinator applies it")
+            gone = evidence_mod.dangling(p.evidence, p.instant)
             #: The note goes FIRST when there is one (`I-2`). It is the proposer's one line about why this
             #: proposal exists, and a coordinator scanning an inbox reads the front of the row. Omitted
             #: entirely when empty rather than rendered as `""` — every proposal written before the field
@@ -758,7 +801,8 @@ class Roadmap:
             milestone = by_id.get(p.milestone)
             #: `B04`: which milestone this proposal is about, as fields — empty for one no longer on the roadmap.
             about = {"title": milestone.title if milestone else "",
-                     "owner": (milestone.owner or "") if milestone else ""}
+                     "owner": (milestone.owner or "") if milestone else "",
+                     "evidence": _described(p.evidence, p.instant)}
             withdraw = (f"`fleet withdraw --instant {self.instant} --milestone {p.milestone} --at {p.at} "
                         f"--reason <why>`")
             if newest[p.milestone] is not p:
@@ -781,6 +825,17 @@ class Roadmap:
                     severity=ATTENTION,
                     clears_when=(f"{withdraw} if it is residue, or `fleet apply --instant {self.instant} "
                                  f"--milestone {p.milestone} --reopen` if re-opening is intended"),
+                    clears_who=COORDINATOR, **about))
+            elif gone:
+                #: `B03`. The row `apply` would land, and `apply` refuses it: say so here, where the
+                #: coordinator decides, instead of at the refusal.
+                rows.append(Row(
+                    kind=PENDING_PROPOSAL, subject=p.milestone,
+                    detail=(f"DANGLING EVIDENCE: {len(gone)} of {len(p.evidence)} item(s) do not resolve, "
+                            f"and `apply` refuses it: " + note + base),
+                    severity=ATTENTION,
+                    clears_when=(f"the proposer re-proposes citing paths that resolve, or {withdraw} "
+                                 f"closes it"),
                     clears_who=COORDINATOR, **about))
             else:
                 rows.append(Row(

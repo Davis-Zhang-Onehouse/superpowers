@@ -13,9 +13,9 @@ What an item means, one rule per shape:
 * a RELATIVE item means the PROPOSING instant's folder — the convention the skills teach and ~95% of real items
   follow — re-resolved through `identity.resolve`, so it survives the proposer's own `-inflight-` →
   `-complete-` rename. Never the cwd: a worker's cwd is its slot, a different directory;
-* an ABSOLUTE item is itself if it exists, else the deepest path component that is an instant name is
-  re-resolved the same way and the tail re-joined — the case of a coordinator citing a worker's file, or of
-  a milestone path written while its instant was still `-inflight-`.
+* an ABSOLUTE item is itself if it exists, else every path component that is an instant name and no longer
+  exists is re-resolved the same way, root first — the case of a coordinator citing a worker's file, or of a
+  milestone path written while its instant was still `-inflight-`.
 
 An instant MOVED to another parent folder is not a rename and does not resolve; it is reported as not
 resolving rather than guessed at.
@@ -49,20 +49,24 @@ def _folder(instant):
 
 
 def _through_rename(path: Path):
+    """`path`, walked from the root: each component that does not exist and is an instant name is
+    re-resolved inside its (already resolved) parent. Every instant component, not only the deepest, so a
+    nested instant whose OUTER folder completed first still resolves."""
     if path.exists():
         return path
-    parts = path.parts
-    for i in range(len(parts) - 1, 0, -1):
-        try:
-            InstantName.parse(parts[i])
-        except InstantNameError:
-            continue
-        folder = _folder(Path(*parts[:i + 1]))
-        if folder is None:
-            return None
-        found = folder.joinpath(*parts[i + 1:])
-        return found if found.exists() else None
-    return None
+    current = Path(path.parts[0])
+    for part in path.parts[1:]:
+        candidate = current / part
+        if not candidate.exists():
+            try:
+                InstantName.parse(part)
+            except InstantNameError:
+                return None
+            candidate = _folder(candidate)
+            if candidate is None:
+                return None
+        current = candidate
+    return current
 
 
 def locate(item, anchor):
@@ -115,7 +119,9 @@ def admit(items, proposer) -> list:
             if folder is not None and (folder / path).exists():
                 stored.append(item)
             else:
-                missing.append(f"{item!r} (relative, so looked for at {folder or proposer}/{item})")
+                missing.append(f"{item!r} (relative, so looked for at {folder}/{item})" if folder is not None
+                               else f"{item!r} (relative, but the proposing instant {proposer} does not "
+                                    f"resolve, so there is no folder to look in)")
             continue
         if not path.exists():
             missing.append(f"{item!r} (absolute; no such file or directory)")

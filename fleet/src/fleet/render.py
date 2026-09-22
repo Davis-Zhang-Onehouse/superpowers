@@ -47,7 +47,10 @@ LABEL_MIN_LEN = 3
 BOARD_COLUMNS = ("identity", "kind", "state", "label", "slot", "milestone", "note")
 STATUS_COLUMNS = ("field", "value")
 LEASE_COLUMNS = ("slot", "lease", "todo_id", "owner", "tmux", "claimed_at", "path", "note")
-ROADMAP_COLUMNS = ("kind", "subject", "severity", "detail", "clears_when", "clears_who", "title", "owner")
+#: `B03` appended `evidence`: each item as it resolves today, so a script can open what a milestone or a
+#: proposal cites without re-deriving which instant a relative string was relative to.
+ROADMAP_COLUMNS = ("kind", "subject", "severity", "detail", "clears_when", "clears_who", "title", "owner",
+                   "evidence")
 #: The human roadmap keeps its six columns: `owner` is an absolute instant path and would push the detail —
 #: the part a person reads — off the screen. A ready row names its title and claim in `detail` instead.
 ROADMAP_HUMAN_COLUMNS = ROADMAP_COLUMNS[:6]
@@ -294,6 +297,7 @@ def roadmap_view(roadmap, porcelain: bool = False) -> str:
         "clears_who": row.clears_who or "",
         "title": getattr(row, "title", None) or "",
         "owner": getattr(row, "owner", None) or "",
+        "evidence": getattr(row, "evidence", None) or "",
     } for row in rows]
     if porcelain:
         return _tsv(cells, ROADMAP_COLUMNS)
