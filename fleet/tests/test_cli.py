@@ -645,6 +645,7 @@ class CliCase(unittest.TestCase):
             "propose": ["--instant", ready, "--milestone", "M1", "--status", "done",
                         "--evidence", "evidence/02-acceptance/verify-acs.sh"],
             "apply": ["--instant", ready, "--milestone", "M1"],
+            "withdraw": ["--instant", ready, "--milestone", "M1", "--reason", "the matrix withdraws it"],
             "review": ["--instant", ready, "--scope", "all", "--verdict", "READY"],
             "complete": ["--instant", ready],
             "abort": ["--instant", str(fleet.paths["doomed"]),
@@ -1167,9 +1168,10 @@ OUTWARD_CALL_SITES = {
         "deletes a convenience copy and not a record. Owner-write is restored first because a cut ends in "
         "`chmod -R a-w` and rmtree cannot delete a read-only tree — the same mistake QI-7 left in the "
         "verification worktrees, one directory over"),
-    ("roadmap", "_consume"): (
-        "list.remove of a dict from a LOCAL list built by `list(data['pending'])` — an in-memory element, "
-        "not a path. Nothing is deleted; the list is then written back through atomic_write"),
+    ("roadmap", "_close"): (
+        "`B02`. list.remove of a dict from the in-memory `inbox['pending']` list — an element, not a path. "
+        "Nothing is deleted: the same row is appended to `closed` with why, and the caller writes both "
+        "lists back through atomic_write"),
     # --- the three subprocess seams, enumerated (FI-27a) --------------------------------------------
     ("cli", "_default_runner"): "spawn seam: the command runner every handler is handed, injected in tests",
     ("session", "default_probes"): "spawn seam: pgrep and tmux, injected in tests as `Probes`",
@@ -2766,6 +2768,169 @@ class TestApplyWarnsWhileTheWorkersSessionIsStillLive(CliCase):
                          f"apply warned about liveness for a worker with no live session: {out}{err}")
 
 
+class TestApplyChoosesOneRow(CliCase):
+    """`B02` at the verb. `apply --milestone` applied EVERY pending row for the milestone in file order and
+    declared no way to pick one; there was no verb to withdraw a row; `milestone --retire` left the
+    milestone's rows pending; and residue could move a terminal milestone. Measured on the base in
+    `evidence/01-red/repro-base.txt` of the B02 instant."""
+
+    def _three(self, fleet, milestone_id="m7", status="blocked"):
+        coordinator = fleet.paths["readyWorker"]
+        Roadmap(coordinator).add(Milestone(id=milestone_id, title="three reports", status=status,
+                                           deps=[], evidence=[]))
+        worker = fleet.worker("reporter", slot="ws4", live=False)
+        stamps = [f"2026-09-22T00:00:0{i}Z" for i in range(3)]
+        with mock.patch("fleet.roadmap._now", side_effect=stamps):
+            for i, s in enumerate(("running", "awaiting-ci", "running")):
+                code, _, err = fleet.run(["propose", "--instant", str(worker), "--to", str(coordinator),
+                                          "--milestone", milestone_id, "--status", s,
+                                          "--evidence", f"evidence/{i}.log"])
+                self.assertEqual(EXIT_OK, code, err)
+        return coordinator, stamps
+
+    def lines(self, out, kind):
+        return [line for line in out.splitlines() if line.startswith(kind + "\t")]
+
+    def test_apply_lands_the_newest_row_and_reports_the_superseded(self):
+        fleet = self.loaded()
+        coordinator, stamps = self._three(fleet)
+
+        code, out, err = fleet.run(["apply", "--instant", str(coordinator), "--milestone", "m7",
+                                    "--porcelain"])
+
+        self.assertEqual(EXIT_OK, code, err)
+        self.assertEqual(1, len(self.lines(out, "applied")), out)
+        self.assertEqual(2, len(self.lines(out, "superseded")), out)
+        self.assertEqual(["evidence/2.log"], Roadmap(coordinator).milestone("m7").evidence)
+        self.assertEqual([], [p for p in Roadmap(coordinator).proposals() if p.milestone == "m7"])
+        self.assertEqual([(stamps[0], "superseded"), (stamps[1], "superseded")],
+                         [(c["at"], c["closed_as"]) for c in Roadmap(coordinator).closed()
+                          if c["milestone"] == "m7"])
+
+    def test_at_applies_the_row_it_names_and_leaves_newer_rows_pending(self):
+        fleet = self.loaded()
+        coordinator, stamps = self._three(fleet)
+
+        code, out, err = fleet.run(["apply", "--instant", str(coordinator), "--milestone", "m7",
+                                    "--at", stamps[1], "--porcelain"])
+
+        self.assertEqual(EXIT_OK, code, err)
+        roadmap = Roadmap(coordinator)
+        self.assertEqual("awaiting-ci", roadmap.milestone("m7").status)
+        self.assertEqual([stamps[2]], [p.at for p in roadmap.proposals() if p.milestone == "m7"])
+        self.assertEqual(1, len(self.lines(out, "superseded")), out)
+        self.assertIn("1 newer", out, "apply must say a newer row is still pending")
+
+    def test_at_that_names_no_row_is_refused_and_lists_the_pending(self):
+        fleet = self.loaded()
+        coordinator, stamps = self._three(fleet)
+
+        code, out, err = fleet.run(["apply", "--instant", str(coordinator), "--milestone", "m7",
+                                    "--at", "1999-01-01T00:00:00Z"])
+
+        self.assertEqual(EXIT_BAD_INPUT, code)
+        for stamp in stamps:
+            self.assertIn(stamp, err)
+        self.assertEqual("blocked", Roadmap(coordinator).milestone("m7").status)
+
+    def test_dry_run_names_the_row_it_would_apply_and_the_ones_it_would_supersede(self):
+        fleet = self.loaded()
+        coordinator, stamps = self._three(fleet)
+        before = Roadmap(coordinator).path.read_bytes()
+
+        code, out, err = fleet.run(["apply", "--instant", str(coordinator), "--milestone", "m7",
+                                    "--dry-run", "--porcelain"])
+        self.assertEqual(before, Roadmap(coordinator).path.read_bytes(), "a dry run wrote the roadmap")
+
+        self.assertEqual(EXIT_OK, code, err)
+        would = self.lines(out, "would-apply")
+        self.assertEqual(1, len(would), out)
+        self.assertIn(stamps[2], would[0])
+        self.assertEqual(2, len(self.lines(out, "would-supersede")), out)
+        self.assertEqual(3, len([p for p in Roadmap(coordinator).proposals() if p.milestone == "m7"]))
+
+    def test_a_terminal_milestone_is_refused_in_the_dry_run_too_and_reopen_moves_it(self):
+        fleet = self.loaded()
+        coordinator, _ = self._three(fleet, status="done")
+        argv = ["apply", "--instant", str(coordinator), "--milestone", "m7"]
+
+        for extra in ([], ["--dry-run"]):
+            with self.subTest(extra=extra):
+                code, out, err = fleet.run(argv + extra)
+                self.assertEqual(EXIT_BAD_INPUT, code, out)
+                self.assertIn("fleet withdraw", err)
+                self.assertEqual("done", Roadmap(coordinator).milestone("m7").status)
+
+        code, out, err = fleet.run(argv + ["--reopen"])
+        self.assertEqual(EXIT_OK, code, err)
+        self.assertEqual("running", Roadmap(coordinator).milestone("m7").status)
+
+    def test_withdraw_dry_run_refuses_an_unknown_milestone_like_the_real_run(self):
+        fleet = self.loaded()
+        coordinator, _ = self._three(fleet)
+        for extra in ([], ["--dry-run"]):
+            with self.subTest(extra=extra):
+                code, _, _ = fleet.run(["withdraw", "--instant", str(coordinator), "--milestone", "nope",
+                                        "--reason", "x"] + extra)
+                self.assertEqual(EXIT_BAD_INPUT, code)
+
+    def test_withdraw_closes_rows_and_needs_a_reason(self):
+        fleet = self.loaded()
+        coordinator, stamps = self._three(fleet)
+        base = ["withdraw", "--instant", str(coordinator), "--milestone", "m7"]
+
+        code, _, err = fleet.run(base + ["--reason", "   "])
+        self.assertEqual(EXIT_BAD_INPUT, code, "an empty reason must be refused")
+        code, out, err = fleet.run(base + ["--at", stamps[2], "--reason", "typo", "--dry-run",
+                                           "--porcelain"])
+        self.assertEqual(EXIT_OK, code, err)
+        self.assertEqual(1, len(self.lines(out, "would-withdraw")), out)
+        self.assertEqual(3, len([p for p in Roadmap(coordinator).proposals() if p.milestone == "m7"]))
+
+        code, out, err = fleet.run(base + ["--reason", "residue", "--porcelain"])
+
+        self.assertEqual(EXIT_OK, code, err)
+        self.assertEqual(3, len(self.lines(out, "withdrawn")), out)
+        self.assertEqual([], [p for p in Roadmap(coordinator).proposals() if p.milestone == "m7"])
+        self.assertEqual(["withdrawn"] * 3,
+                         [c["closed_as"] for c in Roadmap(coordinator).closed() if c["milestone"] == "m7"])
+        code, _, err = fleet.run(base + ["--reason", "again"])
+        self.assertEqual(EXIT_BAD_INPUT, code, "withdrawing from an empty queue must say so")
+
+    def test_retire_reports_the_rows_it_closed(self):
+        fleet = self.loaded()
+        coordinator, _ = self._three(fleet)
+        argv = ["milestone", "--instant", str(coordinator), "--id", "m7", "--retire",
+                "--reason", "done by another route", "--porcelain"]
+
+        code, out, err = fleet.run(argv + ["--dry-run"])
+        self.assertEqual(EXIT_OK, code, err)
+        self.assertIn("3 pending proposal(s)", out)
+
+        code, out, err = fleet.run(argv)
+
+        self.assertEqual(EXIT_OK, code, err)
+        self.assertIn("proposals-closed\t", out)
+        self.assertIn("3 pending proposal(s)", out)
+        self.assertEqual([], [p for p in Roadmap(coordinator).proposals() if p.milestone == "m7"])
+        self.assertEqual(["retired"] * 3, [c["closed_as"] for c in Roadmap(coordinator).closed()
+                                           if c["milestone"] == "m7"])
+        code, out, err = fleet.run(argv + ["--dry-run"])
+        self.assertEqual(EXIT_BAD_INPUT, code, "the dry run must refuse what the real retire refuses")
+
+        #: Task 3 review: re-opened and retired AGAIN, the count is this retire's rows, not every retire's.
+        roadmap = Roadmap(coordinator)
+        roadmap.apply(roadmap.propose(coordinator, "m7", "running", ["evidence/back.log"]), reopen=True)
+        roadmap.propose(coordinator, "m7", "running", ["evidence/again.log"])
+        code, out, err = fleet.run(argv)
+        self.assertEqual(EXIT_OK, code, err)
+        self.assertIn("1 pending proposal(s)", out, "the second retire counted the first retire's rows")
+        code, _, err = fleet.run(["milestone", "--instant", str(coordinator), "--id", "m7", "--retire",
+                                  "--reason", "   ", "--dry-run"])
+        self.assertEqual(EXIT_BAD_INPUT, code, "a blank reason passed the dry run the real run refuses")
+        self.assertIn("needs `--reason`", err)
+
+
 class TestProposeTakesTwoInstants(CliCase):
     """`SI-23`. `propose` has a PROPOSER and a DESTINATION roadmap, and this handler passed the same value
     for both — so a worker could not propose at all (the milestone was looked up in its own empty roadmap)
@@ -3307,10 +3472,13 @@ class TestTheDispatchMilestoneJoin(CliCase):
         `harvesting-an-instant` step 2 exists to catch exactly that by hand. Harvest must not be the way
         round it: the row stays pending for the coordinator, and the harvest says so."""
         fleet = self.loaded()
-        coordinator, todo, child, _ = self._reported_and_finished(fleet, "running")
+        coordinator, todo, child, _ = self._reported_and_finished(fleet, "done")
         roadmap = Roadmap(coordinator)
-        landed = roadmap.propose(coordinator, "M9", "done", ["evidence/INDEX.md"])
-        roadmap.apply(landed)                         # landed by another route while the row sat pending
+        roadmap.apply([p for p in roadmap.proposals() if p.instant == child][-1])   # M9 landed
+        #: `B02`. The stale row must ARRIVE after the landing. A row that was pending when a newer row for
+        #: the same milestone was applied is closed as superseded by that apply and never reaches harvest
+        #: (next test); the one harvest must hold back is a report the worker sent after M9 finished.
+        roadmap.propose(child, "M9", "running", ["evidence/late.log"])
 
         code, out, err = fleet.run(["harvest", "--id", todo, "--porcelain"])
 
@@ -3323,6 +3491,120 @@ class TestTheDispatchMilestoneJoin(CliCase):
         held = [line for line in out.splitlines() if line.startswith("harvest-held\t")]
         self.assertTrue(held, f"harvest held a row back without saying so: {out}")
         self.assertIn("attention", held[0])
+
+    def _reported_three(self, fleet, statuses=("running", "awaiting-ci", "done")):
+        """Dispatch onto M9 and have the worker report three times (one second apart), then finish."""
+        coordinator = self._coordinator_with(fleet)
+        code, out, err = self._dispatch(fleet, coordinator, milestone="M9")
+        self.assertEqual(0, code, err)
+        child = [line.split("\t")[1] for line in out.splitlines() if line.startswith("instant\t")][0]
+        todo = [line.split("\t")[1] for line in out.splitlines() if line.startswith("todo_id\t")][0]
+        with mock.patch("fleet.roadmap._now", side_effect=[f"2026-09-22T00:00:0{i}Z" for i in range(9)]):
+            for i, status in enumerate(statuses):
+                code, _, err = fleet.run(["propose", "--instant", child, "--milestone", "M9",
+                                          "--status", status, "--evidence", f"evidence/{i}.log"])
+                self.assertEqual(0, code, err)
+        self._finished(fleet, pathlib.Path(child))
+        return coordinator, todo, child
+
+    def test_harvest_applies_only_the_workers_last_row_and_supersedes_the_rest(self):
+        """`B02` through harvest (D-7). Applying a worker's rows in order re-created i28(c) by another door:
+        every superseded report's evidence landed on the milestone."""
+        fleet = self.loaded()
+        coordinator, todo, child = self._reported_three(fleet)
+
+        code, out, err = fleet.run(["harvest", "--id", todo, "--dry-run", "--porcelain"])
+        row = [line for line in out.splitlines() if line.startswith("would-harvest\t")]
+        self.assertTrue(row, f"{out} {err}")
+        self.assertIn("apply 1 proposal(s)", row[0])
+        self.assertIn("superseding 2 earlier row(s)", row[0])
+
+        code, out, err = fleet.run(["harvest", "--id", todo, "--porcelain"])
+
+        self.assertIn("harvested\t", out, f"{out} {err}")
+        milestone = Roadmap(coordinator).milestone("M9")
+        self.assertEqual(("done", ["evidence/2.log"]), (milestone.status, milestone.evidence),
+                         "a superseded report's evidence landed through harvest")
+        self.assertEqual([("running", "superseded"), ("awaiting-ci", "superseded")],
+                         [(c["status"], c["closed_as"]) for c in Roadmap(coordinator).closed()
+                          if c["instant"] == child])
+
+    def test_a_held_row_that_harvests_own_apply_supersedes_is_not_reported_as_held(self):
+        """Task 1 review, minor #2. M9 already `done`; the worker's rows are `running` (would un-land it, so
+        held) and then `done` (same status, applied). That apply closes the earlier `running` as superseded,
+        so reporting it as held — "stays PENDING" — would be false."""
+        fleet = self.loaded()
+        coordinator, todo, child = self._reported_three(fleet, statuses=("running", "done"))
+        roadmap = Roadmap(coordinator)
+        roadmap.apply(roadmap.propose(coordinator, "M9", "done", ["evidence/INDEX.md"]))
+        #: that coordinator apply superseded the worker's two rows; re-send them after the landing
+        with mock.patch("fleet.roadmap._now", side_effect=["2026-09-22T00:01:00Z", "2026-09-22T00:01:01Z"]):
+            roadmap.propose(child, "M9", "running", ["evidence/late.log"])
+            roadmap.propose(child, "M9", "done", ["evidence/final.log"])
+
+        code, out, err = fleet.run(["harvest", "--id", todo, "--porcelain"])
+
+        self.assertIn("harvested\t", out, f"{out} {err}")
+        self.assertEqual([], [line for line in out.splitlines() if line.startswith("harvest-held\t")],
+                         f"a row harvest's own apply closed is reported as held: {out}")
+        self.assertEqual([], [p for p in Roadmap(coordinator).proposals() if p.instant == child])
+
+    def test_the_held_remedy_names_the_selector_and_withdraw(self):
+        fleet = self.loaded()
+        coordinator, todo, child, _ = self._reported_and_finished(fleet, "done")
+        roadmap = Roadmap(coordinator)
+        roadmap.apply([p for p in roadmap.proposals() if p.instant == child][-1])
+        roadmap.propose(child, "M9", "running", ["evidence/late.log"])
+
+        code, out, err = fleet.run(["harvest", "--id", todo, "--porcelain"])
+
+        held = [line for line in out.splitlines() if line.startswith("harvest-held\t")]
+        self.assertTrue(held, out)
+        self.assertNotIn("no per-row selector", held[0])
+        self.assertIn("fleet withdraw", held[0])
+
+    def test_a_worker_whose_report_was_superseded_still_counts_as_having_reported(self):
+        """Task 1 review, minor #1. The worker's `awaiting-ci` handoff sat pending when the coordinator applied
+        a NEWER `blocked` of its own for the non-terminal M9. That apply closed the worker's row as superseded
+        — it arrived, and it was decided on. The guard must not call it "NO report"."""
+        fleet = self.loaded()
+        coordinator, todo, child, _ = self._reported_and_finished(fleet, "awaiting-ci")
+        roadmap = Roadmap(coordinator)
+        roadmap.apply(roadmap.propose(coordinator, "M9", "blocked", ["evidence/rescoped.log"]))
+
+        code, out, err = fleet.run(["harvest", "--id", todo, "--porcelain"])
+
+        self.assertIn("harvested\t", out, f"a superseded report was treated as none: {out} {err}")
+
+    def test_a_superseded_running_is_still_only_progress(self):
+        fleet = self.loaded()
+        coordinator, todo, child, _ = self._reported_and_finished(fleet, "running")
+        roadmap = Roadmap(coordinator)
+        roadmap.apply(roadmap.propose(coordinator, "M9", "blocked", ["evidence/rescoped.log"]))
+
+        code, out, err = fleet.run(["harvest", "--id", todo, "--porcelain"])
+
+        self.assertIn("harvest-refused", out, f"a superseded `running` was taken as a final word: {out}")
+        self.assertIn("last report says 'running'", out, "refused for the wrong reason: it DID report")
+
+    def test_a_row_pending_when_the_milestone_landed_is_superseded_not_held(self):
+        """`B02`. The worker's `running` sat pending while the coordinator applied a NEWER `done` for M9:
+        that apply closes the older row as superseded, so it is neither applied by harvest (no un-landing)
+        nor left pending as residue nobody can clear — it is recorded, with what superseded it."""
+        fleet = self.loaded()
+        coordinator, todo, child, _ = self._reported_and_finished(fleet, "running")
+        roadmap = Roadmap(coordinator)
+        landed = roadmap.propose(coordinator, "M9", "done", ["evidence/INDEX.md"])
+        roadmap.apply(landed)
+
+        code, out, err = fleet.run(["harvest", "--id", todo, "--porcelain"])
+
+        self.assertIn("harvested\t", out, f"{out} {err}")
+        self.assertEqual("done", Roadmap(coordinator).milestone("M9").status)
+        self.assertEqual([], [p for p in Roadmap(coordinator).proposals() if p.instant == child])
+        superseded = [c for c in Roadmap(coordinator).closed() if c["instant"] == child]
+        self.assertEqual([("running", "superseded", landed.at)],
+                         [(c["status"], c["closed_as"], c["superseded_by"]["at"]) for c in superseded])
 
     def test_harvest_after_the_coordinator_applied_first_still_closes_and_gives_back_the_claim(self):
         """`harvesting-an-instant`'s documented sequence APPLIES first and harvests second. Measured by the

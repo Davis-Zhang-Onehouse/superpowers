@@ -60,6 +60,7 @@ import shlex
 import sys
 import tempfile
 from dataclasses import dataclass, field
+from dataclasses import fields as dataclass_fields
 from contextlib import nullcontext
 from pathlib import Path
 from typing import Callable
@@ -87,7 +88,8 @@ from fleet.release_verify import (EXEMPT, EXEMPT_ROSTER, FULL_ROSTER, GATE_ROSTE
 from fleet.review import Finding, Review, exit_code_for, receive_advisory
 from fleet import origin as origin_mod
 from fleet.origin import Origin
-from fleet.roadmap import ATTENTION, COORDINATOR, TERMINAL, Milestone, Roadmap
+from fleet.roadmap import (ATTENTION, COORDINATOR, RETIRED, SUPERSEDED, TERMINAL, Milestone,
+                           Proposal, Roadmap, last_index)
 from fleet.session import (TMUX_SOCKET_ENV, SessionLayer, default_probes,
                            plain as pane_plain)
 from fleet.store import Declarations, Record, Store
@@ -2461,17 +2463,34 @@ def _do_milestone(ctx: Ctx, parsed: Parsed) -> int:
     #: in three IT fixture matrices (`II-4`). It writes exactly `dropped`, only onto a milestone that has
     #: not finished, and only with a reason — see `Roadmap.retire`.
     if parsed.on("retire"):
-        if not parsed.get("reason"):
+        if not " ".join(str(parsed.get("reason") or "").split()):
             raise BadInput(
                 f"`--retire` needs `--reason`. `dropped` and `done` are both terminal and look alike to "
                 f"a later reader, so a milestone that left the population without a recorded why is a "
                 f"decision nobody can reconstruct.")
+        #: `B02`. Retiring closes the milestone's pending proposals (`Roadmap.retire`); said, with the count,
+        #: because a report leaving the inbox silently is the loss the `closed` list exists to prevent.
+        target = parsed.get("id")
         if ctx.dry_run:
+            #: `retire`'s own refusals first, so the dry run never promises rows a real run would not close.
+            if roadmap.milestone(target).status in TERMINAL:
+                raise BadInput(f"milestone {target!r} is already {roadmap.milestone(target).status}, which "
+                               f"is terminal; retiring it would rewrite a finished record")
+            doomed = len([p for p in roadmap.proposals() if p.milestone == target])
             _emit(ctx, "milestone", [("dry-run", "the roadmap was not written"),
                                      ("would-retire", parsed.get("id")),
-                                     ("reason", parsed.get("reason"))])
+                                     ("reason", parsed.get("reason")),
+                                     ("would-close", f"{doomed} pending proposal(s) for {parsed.get('id')}, "
+                                                     f"as retired")])
             return EXIT_OK
-        retired = roadmap.retire(parsed.get("id"), parsed.get("reason"))
+        def retired_rows():
+            return len([c for c in roadmap.closed() if c["milestone"] == target and c["closed_as"] == RETIRED])
+        #: Counted as the difference in what `retire` RECORDED, not from a read of `pending` before it: a
+        #: milestone re-opened with `apply --reopen` can be retired a second time, and the first retire's
+        #: rows are not this call's.
+        already = retired_rows()
+        retired = roadmap.retire(target, parsed.get("reason"))
+        doomed = retired_rows() - already
         #: S3 / I-24a. Retiring frees the ROW, not the id: on a live effort `m8` could not be re-raised
         #: and became `m9`, then `m12`->`m15`, `m13`->`m16`, `m14`->`m17`. That permanence is correct —
         #: `OBS-14`, append-only registers, and a roadmap full of cross-references that depend on an id
@@ -2482,6 +2501,8 @@ def _do_milestone(ctx: Ctx, parsed: Parsed) -> int:
         _emit(ctx, "milestone", [
             ("milestone", retired.id), ("status", retired.status),
             ("retired-reason", retired.retired_reason),
+            ("proposals-closed", f"{doomed} pending proposal(s) for {retired.id} closed as retired — kept in "
+                                 f"the inbox's closed list, never applied"),
             ("dispatchable", "no — a retired milestone leaves the ready population, which is the point: "
                              "once its deps land a superseded one is derived READY forever and no report "
                              "prints ready rows"),
@@ -2703,31 +2724,69 @@ def _live_session_warning(ctx: Ctx, proposal) -> str:
             f"applied.")
 
 
+def _row_named(p) -> str:
+    return f"{p.milestone} -> {p.status} at {p.at} ({p.instant})"
+
+
 def _do_apply(ctx: Ctx, parsed: Parsed) -> int:
-    """The COORDINATOR's verb and the only path that changes a milestone status."""
+    """The COORDINATOR's verb and the only path that changes a milestone status.
+
+    `B02`. It lands ONE row: the newest pending row for the milestone, or the one `--at` names. It used to
+    apply every pending row in file order, so the last row's status won and the milestone's evidence became
+    the union of every superseded report — including a typo'd path the worker had already corrected. The
+    earlier rows are closed as superseded (recorded in the inbox, never deleted); later rows stay pending.
+    A row that would move a TERMINAL milestone is refused unless `--reopen`, in the dry run too, because
+    residue is what used to resurrect a retired milestone."""
     child = _instant(ctx, parsed)
     roadmap = Roadmap(child)
     milestone = parsed.get("milestone")
-    pending = [proposal for proposal in roadmap.proposals() if proposal.milestone == milestone]
-    if not pending:
-        raise BadInput(
-            f"no pending proposal names milestone {milestone!r} in {roadmap.proposals_path}. `apply` "
-            "applies a worker's proposal; it does not invent a status.")
+    reopen = parsed.on("reopen")
+    chosen, earlier, newer = roadmap.select(milestone, parsed.get("at"))
+    refusal = roadmap.apply_refusal(chosen, reopen=reopen)
+    if refusal:
+        raise BadInput(refusal)
+    left = ([("pending-left", f"{len(newer)} newer row(s) for {milestone} stay pending — "
+                              + "; ".join(_row_named(p) for p in newer))] if newer else [])
     if ctx.dry_run:
-        rows = [("dry-run", "the roadmap was not written")]
-        rows += [("would-apply", f"{p.milestone} -> {p.status} ({p.instant})") for p in pending]
-        _emit(ctx, "apply", rows)
+        rows = [("dry-run", "the roadmap was not written"), ("would-apply", _row_named(chosen))]
+        rows += [("would-supersede", _row_named(p)) for p in earlier]
+        _emit(ctx, "apply", rows + left)
         return EXIT_OK
-    rows = []
-    for proposal in pending:
-        applied = roadmap.apply(proposal)
-        rows.append(("applied", f"{applied.id} -> {applied.status}"))
-        rows.append(("evidence", ", ".join(applied.evidence)))
-        #: Reported, never refused (`I-10`) — the exit code below is untouched by this branch on purpose.
-        warning = _live_session_warning(ctx, proposal)
-        if warning:
-            rows.append(("warning", warning))
+    applied = roadmap.apply(chosen, reopen=reopen)
+    rows = [("applied", f"{applied.id} -> {applied.status}"), ("evidence", ", ".join(applied.evidence))]
+    rows += [("superseded", _row_named(p)) for p in earlier]
+    rows += left
+    #: Reported, never refused (`I-10`) — the exit code below is untouched by this branch on purpose.
+    warning = _live_session_warning(ctx, chosen)
+    if warning:
+        rows.append(("warning", warning))
     _emit(ctx, "apply", rows)
+    return EXIT_OK
+
+
+def _do_withdraw(ctx: Ctx, parsed: Parsed) -> int:
+    """`B02`. Close pending proposals WITHOUT applying them — every row for the milestone, or the one `--at`
+    names. There was no way to do this: a worker that corrected a report, or a coordinator holding residue
+    for a milestone finished another way, could only add rows or apply them. Writes the inbox only; the
+    roadmap is never opened for writing, so a withdrawn report moves nothing, as it never had."""
+    child = _instant(ctx, parsed)
+    roadmap = Roadmap(child)
+    milestone, at, reason = parsed.get("milestone"), parsed.get("at"), parsed.get("reason")
+    if ctx.dry_run:
+        #: The real run's refusals, in its order (`Roadmap.withdraw`), so the two cannot disagree.
+        if not " ".join(str(reason or "").split()):
+            raise BadInput("`withdraw` needs a --reason; a report that left the inbox with no recorded why "
+                           "cannot be told apart from one that was lost")
+        roadmap.milestone(milestone)
+        chosen, earlier, newer = roadmap.select(milestone, at)
+        rows = [chosen] if at is not None else earlier + [chosen] + newer
+        _emit(ctx, "withdraw", [("dry-run", "the inbox was not written")]
+              + [("would-withdraw", _row_named(p)) for p in rows]
+              + [("reason", " ".join(str(reason).split()))])
+        return EXIT_OK
+    closed = roadmap.withdraw(milestone, reason, at=at)
+    _emit(ctx, "withdraw", [("withdrawn", _row_named(p)) for p in closed]
+          + [("reason", " ".join(str(reason).split()))])
     return EXIT_OK
 
 
@@ -3211,9 +3270,10 @@ def _unreported_to_coordinator(ctx: Ctx, child: Path):
         check's to diagnose;
       * that milestone is NOT terminal at the coordinator — if it already reads done or dropped, the report
         arrived or the work was written off, and either way nothing is being lost;
-      * and this worker's LAST report for it — its last pending row, else its last applied one — is
-        absent or only progress (`running`). A pending final word is about to be applied by `harvest`
-        itself; an applied one was already acted on by the coordinator (`B01`).
+      * and this worker's LAST report for it — its last pending row, else the newest of its applied and
+        superseded ones (`B02`: a superseded row arrived and was decided on) — is absent or only progress
+        (`running`). A pending final word is about to be applied by `harvest` itself; an applied or
+        superseded one was already acted on by the coordinator (`B01`).
 
     So the refusal fires only when the FINAL report exists nowhere — no report at all, or a last report
     that is only progress (`running`). It is a refusal rather than a warning because
@@ -3235,18 +3295,28 @@ def _unreported_to_coordinator(ctx: Ctx, child: Path):
     if milestone.status in TERMINAL:
         return None
     #: `B01`. The worker's LAST WORD, however it reached the coordinator: its last pending row if it has
-    #: one (harvest applies pending rows in order, so that is the status it would leave), else its last
-    #: applied row (the status an apply already left — list order is apply order, which is what
-    #: `roadmap.json` shows). Only THIS worker's rows: one another instant wrote proves nothing about this one.
+    #: one (harvest applies the worker's last row per milestone, so that is the status it would leave),
+    #: else its last applied row (the status an apply already left — list order is apply order, which is
+    #: what `roadmap.json` shows). Only THIS worker's rows: one another instant wrote proves nothing about this one.
     #: Refused when there is none, or when it is `running`, the one status that is only ever progress. So the
     #: answer depends neither on whether the coordinator applied first (`harvesting-an-instant` applies
     #: first) nor on harvest's own earlier apply (a retry after a crash in J9's window), and a mid-flight
     #: progress report never stands in for the final one — three cases measured in review.
     #: Pending is read before applied deliberately: a concurrent `apply` moves a row from the first list to
     #: the second, so this order sees it in one of them.
+    #: `B02`: a row closed as SUPERSEDED also arrived — it was decided on when a newer row for the milestone
+    #: was applied — so with nothing pending, the last word is the newest of this worker's applied and
+    #: superseded rows. Across two lists position cannot order them, so `at` does; on a same-second tie the
+    #: applied row wins, because an apply only ever supersedes rows that arrived before it. Withdrawn and
+    #: retired rows are not a report of the outcome and never count.
     def by_this_worker(rows):
         return [p for p in rows if p.milestone == recorded.milestone and _proposed_by(child, p)]
-    last = (by_this_worker(roadmap.proposals()) or by_this_worker(roadmap.applied()) or [None])[-1]
+    fields = {f.name for f in dataclass_fields(Proposal)}
+    superseded = [Proposal(**{k: v for k, v in c.items() if k in fields})
+                  for c in roadmap.closed() if c.get("closed_as") == SUPERSEDED]
+    arrived = sorted([(p.at, 1, p) for p in by_this_worker(roadmap.applied())]
+                     + [(p.at, 0, p) for p in by_this_worker(superseded)], key=lambda t: t[:2])
+    last = (by_this_worker(roadmap.proposals()) or [p for _, _, p in arrived] or [None])[-1]
     if last is not None and last.status != IN_PROGRESS:
         return None
     reported = ("NO report from this instant pending or applied" if last is None else
@@ -3291,14 +3361,36 @@ def _harvest_inbox(ctx: Ctx, child: Path):
             destination = child
     roadmap = Roadmap(destination)
     mine = [p for p in roadmap.proposals() if _proposed_by(child, p)]
-    #: Held back, never applied: a row that would move a TERMINAL milestone somewhere else. `apply` does not
-    #: compare the incoming status with the current one (`SI-48`), so applying it here would make closing a
-    #: worker a silent way to un-land a milestone. It stays PENDING in the inbox for the coordinator.
+    #: Held back, never applied: a row that would move a TERMINAL milestone somewhere else. `apply` now
+    #: refuses such a row itself (`B02`, closing `SI-48`), so applying it here would abort the close-out
+    #: part-way; filtering first keeps harvest a transaction. It stays PENDING in the inbox for the
+    #: coordinator, who withdraws it or applies it with `--reopen`.
     #: Judged against the status BEFORE anything is applied: a worker's own ordered rows over a milestone
     #: that was not finished are its report, and are applied as written.
     current = {m.id: m.status for m in roadmap.milestones()}
     held = [p for p in mine if current.get(p.milestone) in TERMINAL and p.status != current[p.milestone]]
-    return roadmap, [p for p in mine if p not in held], held, recorded
+    #: `B02` (D-7). Only the worker's LAST applicable row per milestone is applied; `apply` closes the
+    #: earlier ones as superseded. Applying all of them in order is how every superseded report's evidence
+    #: came to land on the milestone. A held row that arrived before that applied row is superseded by the
+    #: same apply, so it is not held — reporting it as "stays pending" would be false.
+    kept = [p for p in mine if p not in held]
+    last = {p.milestone: p for p in kept}
+    position = {id(p): i for i, p in enumerate(mine)}
+    held = [p for p in held
+            if p.milestone not in last or position[id(p)] > position[id(last[p.milestone])]]
+    return roadmap, [p for p in kept if last[p.milestone] is p], held, recorded
+
+
+def _superseded_by(roadmap: Roadmap, rows: list) -> int:
+    """How many pending rows (any proposer) applying `rows` would close as superseded — the same cut
+    `Roadmap._consume` makes: the earlier pending rows for each applied row's milestone."""
+    pending = roadmap.proposals()
+    count = 0
+    for row in rows:
+        if row in pending:
+            cut = last_index(pending, row)
+            count += sum(1 for p in pending[:cut] if p.milestone == row.milestone)
+    return count
 
 
 def _stranded_claim(roadmap: Roadmap, recorded, child: Path, status: str | None = None):
@@ -3333,11 +3425,11 @@ def _held_rows(record, roadmap: Roadmap, held: list) -> list:
                         f"already reads {roadmap.milestone(p.milestone).status} on {roadmap.instant.name}. "
                         f"Applying it would un-land a finished milestone (`SI-48`), so harvest left it "
                         f"PENDING instead of applying it as a side effect of closing the worker"),
-                clears_when=(f"the coordinator reads it and decides: `fleet apply --instant {roadmap.instant} "
-                             f"--milestone {p.milestone} --dry-run`, then apply it only if the move is "
-                             f"intended. `apply --milestone` applies EVERY pending row for that milestone and "
-                             f"has no per-row selector or withdraw yet (backlog bucket B02), so read the whole "
-                             f"list it prints"),
+                clears_when=(f"the coordinator decides: `fleet withdraw --instant {roadmap.instant} "
+                             f"--milestone {p.milestone} --at {p.at} --reason <why>` if it is residue, or "
+                             f"`fleet apply --instant {roadmap.instant} --milestone {p.milestone} --at {p.at} "
+                             f"--reopen` if moving the finished milestone is intended (`apply` refuses it "
+                             f"without --reopen)"),
                 clears_who=COORDINATOR)
             for p in held]
 
@@ -3377,10 +3469,12 @@ def _do_harvest(ctx: Ctx, parsed: Parsed) -> int:
             #: milestone, else the milestone's current status (`_stranded_claim` reads that itself).
             left = [p.status for p in mine if recorded is not None and p.milestone == recorded.milestone]
             stranded = _stranded_claim(roadmap, recorded, child, status=(left[-1] if left else None))
+            superseding = _superseded_by(roadmap, mine)
             rows.append(Row(kind="would-harvest", subject=record.todo_id, severity=INFO,
                             detail=(f"the gate allows ({gate.guard}) and the folder is {child.name}; a "
                                     f"real run would apply {len(mine)} proposal(s) this instant wrote to "
                                     f"{roadmap.instant.name}"
+                                    + (f" (superseding {superseding} earlier row(s))" if superseding else "")
                                     + (f", give back the claim on {stranded.id} (it would be left at "
                                        f"status={left[-1] if left else stranded.status})"
                                        if stranded is not None else "")
@@ -3390,6 +3484,7 @@ def _do_harvest(ctx: Ctx, parsed: Parsed) -> int:
             rows += _held_rows(record, roadmap, held)
         else:
             roadmap, mine, held, recorded = _harvest_inbox(ctx, child)
+            superseding = _superseded_by(roadmap, mine)
             applied = []
             for proposal in mine:
                 applied.append(roadmap.apply(proposal).id)
@@ -3429,6 +3524,8 @@ def _do_harvest(ctx: Ctx, parsed: Parsed) -> int:
             rows.append(Row(kind="harvested", subject=record.todo_id, severity=INFO,
                             detail=(f"delta applied at {roadmap.instant.name} "
                                     f"({', '.join(applied) or 'none pending'})"
+                                    + (f", {superseding} earlier row(s) closed as superseded"
+                                       if superseding else "")
                                     + (f", claim on {stranded.id} given back (status={stranded.status})"
                                        if stranded is not None else "")
                                     + f", session "
@@ -5415,6 +5512,17 @@ VERBS = {spec.name: spec for spec in (
     _verb("apply", _do_apply, False, "the COORDINATOR applies a proposal; the single writer", (
         Flag("--instant", True, True, "the instant holding the roadmap"),
         Flag("--milestone", True, True, "the milestone id"),
+        #: `B02`. The newest pending row is applied by default and earlier ones close as superseded.
+        Flag("--at", True, False, "apply the ONE pending row with this `at` stamp instead of the newest"),
+        Flag("--reopen", False, False,
+             "allow moving a TERMINAL (done/dropped) milestone to another status; clears retired_reason"),
+    )),
+    _verb("withdraw", _do_withdraw, False,
+          "close pending proposals without applying them; the inbox only, never the roadmap", (
+        Flag("--instant", True, True, "the instant holding the roadmap (whose inbox the rows are in)"),
+        Flag("--milestone", True, True, "the milestone id"),
+        Flag("--at", True, False, "withdraw only the ONE pending row with this `at` stamp"),
+        Flag("--reason", True, True, "why; recorded with every row it closes"),
     )),
     _verb("review", _do_review, False, "record a structured round and report the gate", checker=True,
           flags=(
@@ -5619,6 +5727,7 @@ PORCELAIN_COLUMNS = {
     "milestone": KV_COLUMNS,
     "propose": KV_COLUMNS,
     "apply": KV_COLUMNS,
+    "withdraw": KV_COLUMNS,
     "complete": KV_COLUMNS,
     "abort": KV_COLUMNS,
     "close": KV_COLUMNS,

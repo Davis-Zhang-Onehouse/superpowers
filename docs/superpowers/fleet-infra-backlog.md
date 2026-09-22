@@ -271,7 +271,10 @@ the count in the population row is derivable from rows the same command emitted.
 
 ## SI-48 — `fleet apply` silently regresses a `done` milestone, and the readiness cascade goes with it
 
-**Status:** OPEN. **Severity: highest in this register** — it un-lands landed work with rc=0.
+**Status:** CLOSED by B02 (2026-09-22, branch `fix/b02-proposal-queue-lifecycle`): `apply` refuses to move a
+`done`/`dropped` milestone to another status (exit 2, the row stays pending; `--reopen` is the deliberate door),
+pinned by `skills/harvesting-an-instant/tests/si48-apply-refuses-regression.sh` and fleet/it H11. Kept below as
+the record. **Severity (when open): highest in this register** — it un-landed landed work with rc=0.
 **Blocks:** `harvesting-an-instant`. **Field id:** `FI-415`.
 
 **Reproduced 2026-09-05** in a scratch store, start to finish:

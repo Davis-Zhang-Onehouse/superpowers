@@ -214,6 +214,7 @@ a1_args() {               # every required flag supplied; no value contains a sp
     milestone)  echo "--instant $A1_INST --id a1m --title a1milestone" ;;
     propose)    echo "--instant $A1_INST --milestone M1 --status running --evidence a1evidence" ;;
     apply)      echo "--instant $A1_INST --milestone M1" ;;
+    withdraw)   echo "--instant $A1_INST --milestone M1 --reason a1reason" ;;
     review)     echo "--instant $A1_INST --scope all --verdict READY" ;;
     complete)   echo "--instant $A1_COMP" ;;
     abort)      echo "--instant $A1_ABRT --reason a1reason" ;;
