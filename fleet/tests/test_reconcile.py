@@ -1051,6 +1051,16 @@ class TestAnAttachedHumanIsNotAStuckWorker(unittest.TestCase):
         self.assertIn("could not be observed", subject.note)
         self.assertNotIn("tmux did not answer", subject.note)
 
+    def test_a_last_input_in_the_future_is_not_measured(self):
+        """`RV-33`. A clock stepped backwards puts `last_input` in the future; clamping that age to 0 read it
+        as "input 0s ago", i.e. attended. An age that cannot be true is not a measurement."""
+        self.worker("future-07300611", "dt-future", 5311, DIALOG_PANE, attached=(1, time.time() + 600))
+
+        subject = self.subjects()["future-07300611"]
+
+        self.assertTrue(needs_a_human(subject), subject.note)
+        self.assertIn("could not be observed", subject.note)
+
     def test_attachment_alone_makes_nothing_actionable_or_blocked(self):
         self.worker("watched-07300607", "dt-watched", 5307, QUIET_PANE, attached=(2, time.time()))
 
