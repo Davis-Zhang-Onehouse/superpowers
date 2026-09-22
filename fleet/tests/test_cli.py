@@ -645,6 +645,7 @@ class CliCase(unittest.TestCase):
             "propose": ["--instant", ready, "--milestone", "M1", "--status", "done",
                         "--evidence", "evidence/02-acceptance/verify-acs.sh"],
             "apply": ["--instant", ready, "--milestone", "M1"],
+            "withdraw": ["--instant", ready, "--milestone", "M1", "--reason", "the matrix withdraws it"],
             "review": ["--instant", ready, "--scope", "all", "--verdict", "READY"],
             "complete": ["--instant", ready],
             "abort": ["--instant", str(fleet.paths["doomed"]),
@@ -2768,6 +2769,139 @@ class TestApplyWarnsWhileTheWorkersSessionIsStillLive(CliCase):
         self.assertEqual(code, EXIT_OK, err)
         self.assertNotIn("alive", (out + err).lower(),
                          f"apply warned about liveness for a worker with no live session: {out}{err}")
+
+
+class TestApplyChoosesOneRow(CliCase):
+    """`B02` at the verb. `apply --milestone` applied EVERY pending row for the milestone in file order and
+    declared no way to pick one; there was no verb to withdraw a row; `milestone --retire` left the
+    milestone's rows pending; and residue could move a terminal milestone. Measured on the base in
+    `evidence/01-red/repro-base.txt` of the B02 instant."""
+
+    def _three(self, fleet, milestone_id="m7", status="blocked"):
+        coordinator = fleet.paths["readyWorker"]
+        Roadmap(coordinator).add(Milestone(id=milestone_id, title="three reports", status=status,
+                                           deps=[], evidence=[]))
+        worker = fleet.worker("reporter", slot="ws4", live=False)
+        stamps = [f"2026-09-22T00:00:0{i}Z" for i in range(3)]
+        with mock.patch("fleet.roadmap._now", side_effect=stamps):
+            for i, s in enumerate(("running", "awaiting-ci", "running")):
+                code, _, err = fleet.run(["propose", "--instant", str(worker), "--to", str(coordinator),
+                                          "--milestone", milestone_id, "--status", s,
+                                          "--evidence", f"evidence/{i}.log"])
+                self.assertEqual(EXIT_OK, code, err)
+        return coordinator, stamps
+
+    def lines(self, out, kind):
+        return [line for line in out.splitlines() if line.startswith(kind + "\t")]
+
+    def test_apply_lands_the_newest_row_and_reports_the_superseded(self):
+        fleet = self.loaded()
+        coordinator, stamps = self._three(fleet)
+
+        code, out, err = fleet.run(["apply", "--instant", str(coordinator), "--milestone", "m7",
+                                    "--porcelain"])
+
+        self.assertEqual(EXIT_OK, code, err)
+        self.assertEqual(1, len(self.lines(out, "applied")), out)
+        self.assertEqual(2, len(self.lines(out, "superseded")), out)
+        self.assertEqual(["evidence/2.log"], Roadmap(coordinator).milestone("m7").evidence)
+        self.assertEqual([], [p for p in Roadmap(coordinator).proposals() if p.milestone == "m7"])
+
+    def test_at_applies_the_row_it_names_and_leaves_newer_rows_pending(self):
+        fleet = self.loaded()
+        coordinator, stamps = self._three(fleet)
+
+        code, out, err = fleet.run(["apply", "--instant", str(coordinator), "--milestone", "m7",
+                                    "--at", stamps[1], "--porcelain"])
+
+        self.assertEqual(EXIT_OK, code, err)
+        roadmap = Roadmap(coordinator)
+        self.assertEqual("awaiting-ci", roadmap.milestone("m7").status)
+        self.assertEqual([stamps[2]], [p.at for p in roadmap.proposals() if p.milestone == "m7"])
+        self.assertEqual(1, len(self.lines(out, "superseded")), out)
+        self.assertIn("1 newer", out, "apply must say a newer row is still pending")
+
+    def test_at_that_names_no_row_is_refused_and_lists_the_pending(self):
+        fleet = self.loaded()
+        coordinator, stamps = self._three(fleet)
+
+        code, out, err = fleet.run(["apply", "--instant", str(coordinator), "--milestone", "m7",
+                                    "--at", "1999-01-01T00:00:00Z"])
+
+        self.assertEqual(EXIT_BAD_INPUT, code)
+        for stamp in stamps:
+            self.assertIn(stamp, err)
+        self.assertEqual("blocked", Roadmap(coordinator).milestone("m7").status)
+
+    def test_dry_run_names_the_row_it_would_apply_and_the_ones_it_would_supersede(self):
+        fleet = self.loaded()
+        coordinator, stamps = self._three(fleet)
+
+        code, out, err = fleet.run(["apply", "--instant", str(coordinator), "--milestone", "m7",
+                                    "--dry-run", "--porcelain"])
+
+        self.assertEqual(EXIT_OK, code, err)
+        would = self.lines(out, "would-apply")
+        self.assertEqual(1, len(would), out)
+        self.assertIn(stamps[2], would[0])
+        self.assertEqual(2, len(self.lines(out, "would-supersede")), out)
+        self.assertEqual(3, len([p for p in Roadmap(coordinator).proposals() if p.milestone == "m7"]))
+
+    def test_a_terminal_milestone_is_refused_in_the_dry_run_too_and_reopen_moves_it(self):
+        fleet = self.loaded()
+        coordinator, _ = self._three(fleet, status="done")
+        argv = ["apply", "--instant", str(coordinator), "--milestone", "m7"]
+
+        for extra in ([], ["--dry-run"]):
+            with self.subTest(extra=extra):
+                code, out, err = fleet.run(argv + extra)
+                self.assertEqual(EXIT_BAD_INPUT, code, out)
+                self.assertIn("fleet withdraw", err)
+                self.assertEqual("done", Roadmap(coordinator).milestone("m7").status)
+
+        code, out, err = fleet.run(argv + ["--reopen"])
+        self.assertEqual(EXIT_OK, code, err)
+        self.assertEqual("running", Roadmap(coordinator).milestone("m7").status)
+
+    def test_withdraw_closes_rows_and_needs_a_reason(self):
+        fleet = self.loaded()
+        coordinator, stamps = self._three(fleet)
+        base = ["withdraw", "--instant", str(coordinator), "--milestone", "m7"]
+
+        code, _, err = fleet.run(base + ["--reason", "   "])
+        self.assertEqual(EXIT_BAD_INPUT, code, "an empty reason must be refused")
+        code, out, err = fleet.run(base + ["--at", stamps[2], "--reason", "typo", "--dry-run",
+                                           "--porcelain"])
+        self.assertEqual(EXIT_OK, code, err)
+        self.assertEqual(1, len(self.lines(out, "would-withdraw")), out)
+        self.assertEqual(3, len([p for p in Roadmap(coordinator).proposals() if p.milestone == "m7"]))
+
+        code, out, err = fleet.run(base + ["--reason", "residue", "--porcelain"])
+
+        self.assertEqual(EXIT_OK, code, err)
+        self.assertEqual(3, len(self.lines(out, "withdrawn")), out)
+        self.assertEqual([], [p for p in Roadmap(coordinator).proposals() if p.milestone == "m7"])
+        self.assertEqual(["withdrawn"] * 3,
+                         [c["closed_as"] for c in Roadmap(coordinator).closed() if c["milestone"] == "m7"])
+        code, _, err = fleet.run(base + ["--reason", "again"])
+        self.assertEqual(EXIT_BAD_INPUT, code, "withdrawing from an empty queue must say so")
+
+    def test_retire_reports_the_rows_it_closed(self):
+        fleet = self.loaded()
+        coordinator, _ = self._three(fleet)
+        argv = ["milestone", "--instant", str(coordinator), "--id", "m7", "--retire",
+                "--reason", "done by another route", "--porcelain"]
+
+        code, out, err = fleet.run(argv + ["--dry-run"])
+        self.assertEqual(EXIT_OK, code, err)
+        self.assertIn("3 pending proposal(s)", out)
+
+        code, out, err = fleet.run(argv)
+
+        self.assertEqual(EXIT_OK, code, err)
+        self.assertIn("proposals-closed\t", out)
+        self.assertIn("3 pending proposal(s)", out)
+        self.assertEqual([], [p for p in Roadmap(coordinator).proposals() if p.milestone == "m7"])
 
 
 class TestProposeTakesTwoInstants(CliCase):
