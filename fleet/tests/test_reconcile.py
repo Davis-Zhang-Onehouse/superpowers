@@ -47,6 +47,11 @@ MODAL_PANE = "\n".join(["Edit file src/fleet/pool.py?",
 WATCHED_PANE = "\n".join(["gh run watch 1234 --exit-status", "",
                           "  auto mode on · 1 monitor · ? for shortcuts"])
 
+#: A codex pane that `runtime.observe` reads as `idle` — a bold caret above the model/path footer. A codex
+#: pane that reads `unknown` returns BLOCKED from `_state_of` before `_live_state` is ever reached, so only
+#: this shape exercises the codex branch inside `_live_state`.
+CODEX_IDLE_PANE = "reading src/fleet/pool.py\n\x1b[0;1m\u203a \x1b[0m\ncodex gpt-5 \u00b7 /home/ubuntu/work"
+
 PARK_BUSY_Q = "should the shim land before the rebase, or after?"
 PARK_BLOCKED_Q = "is merging #441 mine to do?"
 
@@ -885,3 +890,27 @@ class TestNeedsAHumanUsesKnownFacts(unittest.TestCase):
         self.assertIn("disregarded", subject.note)
         self.assertNotIn("ages into IDLE", subject.note,
                          "the note predicts a future this state cannot reach")
+
+    def test_a_codex_claim_is_blocked_and_never_called_unwatched(self):
+        """`RV-45`. The `unwatched` predicate excludes codex on purpose — `_observe_codex` never populates a
+        watcher, so every codex `awaiting-ci` claim would classify unwatched and collect a second sentence
+        beside the codex BLOCKED note, which already says the whole truth ("this worker still consumes
+        capacity"). Nothing pinned that term: deleting it left the suite green."""
+        stamp = "07300544"
+        self.fleet.dispatch("codexci-07300544", f"00000000-{stamp}-inflight-append-codexci",
+                            "ws9", "dt-codexci", runtime="codex")
+        # the live process is codex too; a claude process on a codex record is a different finding
+        # (`_worker_subject`'s runtime-mismatch BLOCKED) and would mask this one.
+        self.fleet.procs.append(LiveSession(pid=5244, cwd=self.fleet.slots_dir / "ws9",
+                                            name="dt-codexci", runtime="codex"))
+        self.fleet.panes["dt-codexci"] = CODEX_IDLE_PANE
+        self.fleet.tmux_live.add("dt-codexci")
+        Declarations(self.fleet.paths["codexci-07300544"]).set_phase("awaiting-ci")
+
+        subject = self.subjects()["codexci-07300544"]
+
+        self.assertEqual(subject.state, BLOCKED, f"{subject.state}: {subject.note!r}")
+        self.assertIn("Codex has no verified CI wake mechanism", subject.note,
+                      "this case must reach `_live_state`'s codex branch, not the earlier dialog return")
+        self.assertNotIn("NO WATCHER", subject.note,
+                         "a codex claim collected the disregard sentence beside the codex note")
