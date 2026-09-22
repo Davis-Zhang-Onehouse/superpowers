@@ -772,3 +772,76 @@ class TestExtendedColourIsNotDim(unittest.TestCase):
         row = f"\x1b[39m{CARET}{NBSP}\x1b[38mtyped after a malformed introducer"
         self.assertEqual(self.sessions.unsubmitted(pane("output", row, LIVE_FOOTER)),
                          "typed after a malformed introducer")
+
+
+class TestAttachmentIsCollected(unittest.TestCase):
+    """`B24` (x2 `G-4`). Whether a HUMAN is at a session: tmux's `#{session_attached}` (a client COUNT) and
+    `#{session_activity}` (moved by an attach or a client's keystroke, NOT by `send-keys`/`paste-buffer` —
+    `evidence/20-red/tmux-activity-probe.txt`). fleet collected neither.
+
+    The fact is TRI-STATE and the probe must be able to say it could not look: the attention counter and
+    a future actuator (B12) fail safe in OPPOSITE directions, so "unknown" may not be pre-decided as either.
+    """
+
+    def probes_answering(self, rc, stdout):
+        seen = []
+        real = subprocess.run
+
+        def spy(argv, *args, **kwargs):
+            seen.append(list(argv))
+            return subprocess.CompletedProcess(argv, rc, stdout, "")
+
+        subprocess.run = spy
+        return default_probes(tmux_socket="itfleet-selftest-attach"), seen, lambda: setattr(subprocess, "run", real)
+
+    def ask(self, rc, stdout, name):
+        probes, seen, restore = self.probes_answering(rc, stdout)
+        try:
+            return probes.attachment(name), seen
+        finally:
+            restore()
+
+    def test_an_attached_session_reports_its_clients_and_last_input(self):
+        got, seen = self.ask(0, "dt-other\t0\t1700000000\ndt-w\t2\t1700000123\n", "dt-w")
+        self.assertEqual(got, (2, 1700000123))
+        self.assertIn("list-sessions", seen[0])
+        self.assertEqual(seen[0][:3], ["tmux", "-L", "itfleet-selftest-attach"],
+                         "the probe must ask the layer's own server, like every other tmux call")
+
+    def test_a_detached_session_is_zero_clients_not_unknown(self):
+        got, _ = self.ask(0, "dt-w\t0\t1700000000\n", "dt-w")
+        self.assertEqual(got, (0, 1700000000))
+
+    def test_the_name_is_matched_EXACTLY_not_by_prefix(self):
+        """`FI-23`'s hazard in a new place: `dt-w` must not answer for `dt-wide`."""
+        got, _ = self.ask(0, "dt-wide\t1\t1700000000\n", "dt-w")
+        self.assertIsNone(got)
+
+    def test_a_failed_list_is_NOT_MEASURED(self):
+        got, _ = self.ask(1, "", "dt-w")
+        self.assertIsNone(got, "tmux could not answer, and that must not read as 'nobody attached'")
+
+    def test_an_unparsable_row_is_NOT_MEASURED(self):
+        got, _ = self.ask(0, "dt-w\tmany\tsoon\n", "dt-w")
+        self.assertIsNone(got)
+
+    def test_the_layer_says_None_when_no_probe_was_supplied(self):
+        s, _, _ = layer()
+        self.assertIsNone(s.attachment("dt-w"))
+        self.assertIsNone(s.attachment(""))
+
+    def test_against_real_tmux_a_detached_session_and_a_missing_one(self):
+        """Why `list-sessions` and not `display-message`: `display -p -t =nosuch:` exits 0 with an EMPTY
+        format (`evidence/20-red/display-message-missing-session.txt`), which would parse as 'detached'."""
+        tmux = ["tmux", "-L", SELFTEST_TMUX_SOCKET]
+        name = f"itfleet-selftest-att-{os.getpid()}-{uuid.uuid4().hex[:6]}"
+        subprocess.run(tmux + ["new-session", "-d", "-s", name, "sleep 60"], capture_output=True)
+        try:
+            probes = default_probes(tmux_socket=SELFTEST_TMUX_SOCKET)
+            got = probes.attachment(name)
+            self.assertIsNotNone(got, "a live detached session was reported as not measured")
+            self.assertEqual(got[0], 0)
+            self.assertLess(abs(got[1] - time.time()), 120)
+            self.assertIsNone(probes.attachment(name + "x"))
+        finally:
+            subprocess.run(tmux + ["kill-session", "-t", exact_session_target(name)], capture_output=True)
