@@ -3207,8 +3207,9 @@ def _unreported_to_coordinator(ctx: Ctx, child: Path):
         check's to diagnose;
       * that milestone is NOT terminal at the coordinator — if it already reads done or dropped, the report
         arrived or the work was written off, and either way nothing is being lost;
-      * and no proposal for it is PENDING there — a pending proposal means the report DID arrive and is
-        merely unapplied, which `harvest` itself is about to do for the coordinator.
+      * and no proposal for it BY THIS WORKER is pending or applied there — a pending one means the report
+        DID arrive and is merely unapplied, which `harvest` itself is about to do; an applied one means the
+        coordinator already acted on it (`B01`).
 
     So the refusal fires only when the report exists nowhere. It is a refusal rather than a warning because
     `harvest` is the step that makes the loss unrecoverable: after it the slot is gone, the session is dead
@@ -3230,11 +3231,15 @@ def _unreported_to_coordinator(ctx: Ctx, child: Path):
         return None
     #: `B01`. Only THIS worker's rows count: `harvest` applies nothing else (`_harvest_inbox`), so a row
     #: another instant wrote about the same milestone proves nothing about whether this one reported.
+    #: PENDING or already APPLIED: `harvesting-an-instant` applies first and harvests second, and a harvest
+    #: killed between its own apply and its stamp is retried — in both, the report arrived and was consumed,
+    #: and reading only the pending inbox refused the close-out as a report that "exists nowhere".
     if any(proposal.milestone == recorded.milestone and _proposed_by(child, proposal)
-           for proposal in roadmap.proposals()):
+           for proposal in roadmap.proposals() + roadmap.applied()):
         return None
     return (f"this instant was dispatched for milestone {recorded.milestone!r} on {coordinator}, and that "
-            f"milestone still reads status={milestone.status!r} there with NO proposal pending. Harvesting "
+            f"milestone still reads status={milestone.status!r} there with NO proposal from this instant "
+            f"pending or applied. Harvesting "
             f"now would kill the session, release the slot and stamp the record while the project-level "
             f"roadmap never learns what happened — and after that the loss is unrecoverable.")
 
@@ -3258,6 +3263,10 @@ def _harvest_inbox(ctx: Ctx, child: Path):
     and only rows THIS worker wrote are returned: the coordinator's inbox also holds other workers' reports
     and the coordinator's own, and closing one worker must not apply them. A coordinator that no longer
     resolves falls back to the instant itself (the pre-`SI-27` behaviour), and the row says where it read.
+
+    Not covered, deliberately: a worker that proposed with an explicit `--to` somewhere OTHER than its
+    recorded coordinator. That inbox is a place the dispatch never named, so harvest cannot know it; the
+    unreported-work guard still refuses when the recorded coordinator heard nothing.
     """
     recorded = origin_mod.read(child)
     destination = child
@@ -3278,7 +3287,7 @@ def _harvest_inbox(ctx: Ctx, child: Path):
     return roadmap, [p for p in mine if p not in held], held, recorded
 
 
-def _stranded_claim(roadmap: Roadmap, recorded, child: Path):
+def _stranded_claim(roadmap: Roadmap, recorded, child: Path, status: str = None):
     """-> the milestone this worker still OWNS and did not finish, else None.  `B01` (re-measure `NEW-2`).
 
     `dispatch` claims the milestone for the worker's `-inflight-` path; `abort` gives it back, and `harvest`
@@ -3286,6 +3295,9 @@ def _stranded_claim(roadmap: Roadmap, recorded, child: Path):
     later dispatch onto that milestone was refused as "already claimed" by an instant that no longer
     exists. A TERMINAL milestone keeps its owner: nothing can claim it again, and the owner is the record of
     who did the work.
+
+    `status` overrides the milestone's current one — the dry run passes the status the rows it WOULD apply
+    leave behind, so its preview and the real run judge the same thing.
     """
     if recorded is None or not recorded.milestone or roadmap.instant == child:
         return None
@@ -3293,7 +3305,7 @@ def _stranded_claim(roadmap: Roadmap, recorded, child: Path):
         milestone = roadmap.milestone(recorded.milestone)
     except BadInput:
         return None
-    if not milestone.owner or milestone.status in TERMINAL:
+    if not milestone.owner or (status or milestone.status) in TERMINAL:
         return None
     if resolve(Path(milestone.owner)) != child:
         return None                                  # somebody else holds it now; never free their claim
@@ -3309,7 +3321,9 @@ def _held_rows(record, roadmap: Roadmap, held: list) -> list:
                         f"PENDING instead of applying it as a side effect of closing the worker"),
                 clears_when=(f"the coordinator reads it and decides: `fleet apply --instant {roadmap.instant} "
                              f"--milestone {p.milestone} --dry-run`, then apply it only if the move is "
-                             f"intended"),
+                             f"intended. `apply --milestone` applies EVERY pending row for that milestone and "
+                             f"has no per-row selector or withdraw yet (backlog bucket B02), so read the whole "
+                             f"list it prints"),
                 clears_who=COORDINATOR)
             for p in held]
 
@@ -3341,11 +3355,19 @@ def _do_harvest(ctx: Ctx, parsed: Parsed) -> int:
                              "--instant <this> --reason <why>`"),
                 clears_who="the dispatched instant, or the coordinator if it is abandoning the work"))
         elif ctx.dry_run:
-            roadmap, mine, held, _ = _harvest_inbox(ctx, child)
+            roadmap, mine, held, recorded = _harvest_inbox(ctx, child)
+            #: The status the real run would judge the claim on: the last row it would apply for the origin
+            #: milestone, else the milestone's current status (`_stranded_claim` reads that itself).
+            left = [p.status for p in mine if recorded is not None and p.milestone == recorded.milestone]
+            stranded = _stranded_claim(roadmap, recorded, child, status=(left[-1] if left else None))
             rows.append(Row(kind="would-harvest", subject=record.todo_id, severity=INFO,
                             detail=(f"the gate allows ({gate.guard}) and the folder is {child.name}; a "
                                     f"real run would apply {len(mine)} proposal(s) this instant wrote to "
-                                    f"{roadmap.instant.name}, close {record.tmux}, "
+                                    f"{roadmap.instant.name}"
+                                    + (f", give back the claim on {stranded.id} (it would be left at "
+                                       f"status={left[-1] if left else stranded.status})"
+                                       if stranded is not None else "")
+                                    + f", close {record.tmux}, "
                                     f"release {record.slot or '(no slot)'} and stamp the record. "
                                     f"Nothing was changed.")))
             rows += _held_rows(record, roadmap, held)

@@ -489,6 +489,11 @@ class Roadmap:
     def proposals(self) -> list:
         return [Proposal(**d) for d in self._load_proposals()["pending"]]
 
+    def applied(self) -> list:
+        """The proposals `apply` has consumed, oldest first. Read-only: `harvest`'s unreported-work guard
+        needs "did this worker's report ARRIVE", and a report the coordinator already applied arrived."""
+        return [Proposal(**d) for d in self._load_proposals()["applied"]]
+
     def apply(self, proposal: Proposal) -> Milestone:
         """The COORDINATOR's verb and THE single writer of a milestone status.
 

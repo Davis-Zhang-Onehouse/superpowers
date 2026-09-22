@@ -3260,6 +3260,18 @@ class TestTheDispatchMilestoneJoin(CliCase):
         self.assertEqual("running", milestone.status, "the report was not applied")
         self.assertIsNone(milestone.owner, "a harvested worker still holds an in-flight milestone")
 
+    def test_harvest_dry_run_previews_the_claim_it_would_give_back_and_changes_nothing(self):
+        fleet = self.loaded()
+        coordinator, todo, child, _ = self._reported_and_finished(fleet, "blocked")
+
+        code, out, err = fleet.run(["harvest", "--id", todo, "--dry-run", "--porcelain"])
+
+        row = [line for line in out.splitlines() if line.startswith("would-harvest\t")]
+        self.assertTrue(row, f"{out} {err}")
+        self.assertIn("give back the claim on M9", row[0],
+                      f"the dry run hides a change the real run makes: {row[0]}")
+        self.assertEqual(child, Roadmap(coordinator).milestone("M9").owner, "a dry run released a claim")
+
     def test_harvest_keeps_the_owner_of_a_milestone_it_finished(self):
         """The other side of the release: a DONE milestone keeps the record of who did it."""
         fleet = self.loaded()
@@ -3291,6 +3303,44 @@ class TestTheDispatchMilestoneJoin(CliCase):
         held = [line for line in out.splitlines() if line.startswith("harvest-held\t")]
         self.assertTrue(held, f"harvest held a row back without saying so: {out}")
         self.assertIn("attention", held[0])
+
+    def test_harvest_after_the_coordinator_applied_first_still_closes_and_gives_back_the_claim(self):
+        """`harvesting-an-instant`'s documented sequence APPLIES first and harvests second. Measured by the
+        PR review: after an apply-first of a non-terminal report the unreported-work guard saw no PENDING row
+        from this worker and refused the harvest as "never reported" — so the claim release could only run
+        off the documented path, and a harvest killed between its own apply and its stamp (J9's window) could
+        never be retried. A row this worker wrote that was already APPLIED is proof the report arrived."""
+        fleet = self.loaded()
+        coordinator, todo, child, _ = self._reported_and_finished(fleet, "blocked")
+        code, out, err = fleet.run(["apply", "--instant", str(coordinator), "--milestone", "M9"])
+        self.assertEqual(0, code, err)
+
+        code, out, err = fleet.run(["harvest", "--id", todo, "--porcelain"])
+
+        self.assertNotIn("harvest-refused", out,
+                         f"harvest refused a worker whose report the coordinator had already applied: {out}")
+        self.assertIn("harvested\t", out, f"{out} {err}")
+        self.assertIsNone(Roadmap(coordinator).milestone("M9").owner,
+                          "after apply-first, the harvested worker still holds the claim")
+        code, out, err = self._dispatch(fleet, coordinator, milestone="M9", title="secondOne",
+                                        extra=["--cap", "8"])
+        self.assertEqual(0, code, f"M9 could not be dispatched again: {err}")
+
+    def test_an_applied_row_another_instant_wrote_does_not_count_as_this_workers_report(self):
+        fleet = self.loaded()
+        coordinator = self._coordinator_with(fleet)
+        code, out, err = self._dispatch(fleet, coordinator, milestone="M9")
+        self.assertEqual(0, code, err)
+        child = [line.split("\t")[1] for line in out.splitlines() if line.startswith("instant\t")][0]
+        todo = [line.split("\t")[1] for line in out.splitlines() if line.startswith("todo_id\t")][0]
+        roadmap = Roadmap(coordinator)
+        roadmap.apply(roadmap.propose(coordinator, "M9", "running", ["evidence/INDEX.md"]))
+        self._finished(fleet, pathlib.Path(child))
+
+        code, out, err = fleet.run(["harvest", "--id", todo, "--porcelain"])
+
+        self.assertIn("harvest-refused", out,
+                      f"an APPLIED row the coordinator wrote let a worker that never reported be harvested: {out}")
 
     def test_another_instants_row_does_not_silence_the_unreported_work_guard(self):
         """The guard's premise is "a pending proposal means harvest is about to apply it". Harvest applies
