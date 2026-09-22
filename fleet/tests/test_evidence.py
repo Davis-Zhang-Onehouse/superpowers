@@ -3,8 +3,8 @@
 A proposal's evidence was checked for "non-empty" and nothing else, so a typo'd path was accepted at `propose`
 and copied onto the milestone at `apply`, and an absolute `-inflight-` path dangled one rename later. These
 cases pin the one resolver every stage now asks: a URL passes untouched, a relative item means the PROPOSING
-instant's folder (re-resolved through the rename), and an absolute item is re-resolved through the deepest
-instant folder it names.
+instant's folder (re-resolved through the rename), and an absolute item re-resolves every instant folder it
+names that was renamed.
 """
 import os
 import pathlib
@@ -105,6 +105,18 @@ class TestThroughTheRename(EvidenceCase):
         stale = str(inner_old / "r.txt")
         inner_new = inner_old.rename(inner_old.parent / "00000000-07300500-complete-append-inner")
         self.assertEqual(inner_new / "r.txt", evidence.locate(stale, None))
+
+    def test_an_outer_instant_renamed_while_the_inner_kept_its_name_still_resolves(self):
+        inner = self.worker / "evidence" / "00000000-07300500-inflight-append-inner"
+        inner.mkdir()
+        (inner / "r.txt").write_text("r")
+        stale = str(inner / "r.txt")
+        done = self.complete()
+        self.assertEqual(done / "evidence" / inner.name / "r.txt", evidence.locate(stale, None))
+
+    def test_a_directory_and_a_dotdot_item_that_resolve_are_admitted(self):
+        (self.tasks / "shared.txt").write_text("s")
+        self.assertEqual(["evidence", "../shared.txt"], evidence.admit(["evidence", "../shared.txt"], self.worker))
 
     def test_a_file_deleted_after_propose_dangles(self):
         (self.worker / "evidence" / "proof.log").unlink()
