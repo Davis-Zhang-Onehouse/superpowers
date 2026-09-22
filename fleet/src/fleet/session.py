@@ -383,16 +383,43 @@ def default_probes(process_name: str = "claude", tmux_socket=_FROM_ENV, *,
         except (IndexError, ValueError):
             return 0
 
+    where = f"socket {tmux_socket!r}" if tmux_socket else "the default socket"
+    #: The route a human can take when this server cannot answer, named in every refusal about it (B26).
+    held_route = (f"a tmux client stopped or wedged on {where} can hold that server up after its sessions "
+                  f"are gone; `ps -o pid,stat,args -C tmux` names it (state T is stopped), and resuming "
+                  f"or ending that client lets the server exit")
+
     def pane_owners() -> dict:
-        """pane pid -> tmux session name, for attributing a process to its session."""
-        done = run(tmux + ["list-panes", "-a", "-F", "#{pane_pid} #{session_name}"])
+        """pane pid -> tmux session name, for attributing a process to its session.
+
+        Three failures mean "this server holds no pane to attribute", and read as an empty population.
+        Every other failure refuses — `Operation not permitted` is NOT an empty server. B26, measured on
+        tmux 3.2a (`evidence/01-red/state-A.txt`, `state-B.txt` in the B26 instant):
+
+        * no server on the socket (`no server running on …` / `… (No such file or directory)`);
+        * a live server with ZERO sessions: `list-panes -a` still needs a current session and answers
+          `no current target`. Not trusted as a string — `list-sessions` must positively list nothing;
+        * a server that is exiting while a stopped client holds it: every command answers `server exited
+          unexpectedly`, and `kill-server` has already destroyed its sessions.
+        """
+        argv = tmux + ["list-panes", "-a", "-F", "#{pane_pid} #{session_name}"]
+        done = run(argv)
         owners = {}
         if done.returncode != 0:
             error = done.stderr.strip()
             if (error.startswith("no server running on ") or
-                    error.endswith("(No such file or directory)")):
+                    error.endswith("(No such file or directory)") or
+                    error == "server exited unexpectedly"):
                 return owners
-            raise FleetError(f"Cannot inspect tmux server: {error or 'list-panes failed'}")
+            if error == "no current target":
+                listed = run(tmux + ["list-sessions", "-F", "#{session_name}"])
+                if listed.returncode == 0 and not listed.stdout.strip():
+                    return owners
+            raise FleetError(
+                f"Cannot inspect tmux server on {where}: `{' '.join(argv[:-2])}` exited {done.returncode}: "
+                f"{error or 'no message'} · clears when: `{' '.join(tmux)} list-sessions` answers — a "
+                f"server that lists its sessions, or no server at all ({held_route}) · clears who: the "
+                f"operator")
         for line in done.stdout.splitlines():
             parts = line.split(None, 1)
             if len(parts) == 2 and parts[0].isdigit():
@@ -487,7 +514,12 @@ def default_probes(process_name: str = "claude", tmux_socket=_FROM_ENV, *,
     def start_session(name: str, cwd: Path, command: str) -> None:
         done = run(tmux + ["new-session", "-d", "-s", name, "-c", str(cwd), command])
         if done.returncode != 0:
-            raise BadInput(f"tmux refused to start {name!r}: {done.stderr.strip()}")
+            error = done.stderr.strip()
+            route = ""
+            if error == "server exited unexpectedly":
+                route = (f" · clears when: the tmux server on {where} finishes exiting ({held_route}) · "
+                         f"clears who: the operator")
+            raise BadInput(f"tmux refused to start {name!r}: {error}{route}")
 
     def kill_session(name: str) -> None:
         run(tmux + ["kill-session", "-t", exact_session_target(name)])
