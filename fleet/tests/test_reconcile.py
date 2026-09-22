@@ -13,13 +13,15 @@ import calendar
 import json
 import os
 import pathlib
+import shutil
 import tempfile
 import time
 import unittest
 from dataclasses import fields as dataclass_fields
 
+from fleet.guards import CAP_EXCLUDED_STATES
 from fleet.pool import Pool
-from fleet.reconcile import (COMPLETE, DEAD, IDLE, KINDS, RUNNING, STALE_WAIT_S, STATES,
+from fleet.reconcile import (AWAITING_CI, BLOCKED, COMPLETE, DEAD, IDLE, KINDS, PARKED, RUNNING, STALE_WAIT_S, STATES,
                              UNREACHABLE, Subject, _awaiting_note, needs_a_human, reconcile)
 from fleet.session import LiveSession, Probes, SessionLayer
 from fleet.store import Declarations, Record, Store
@@ -39,6 +41,16 @@ BUSY_PANE = "\n".join(["reading src/fleet/pool.py", "Thinking...", "  esc to int
 MODAL_PANE = "\n".join(["Edit file src/fleet/pool.py?",
                         "❯ 1. Yes",
                         "  2. No, tell Claude what to do differently"])
+
+#: A quiet pane whose STATUS LINE shows an armed watcher, the shape `declare --phase awaiting-ci` accepts.
+#: Not busy (no interrupt hint), so the watcher is the only thing that will wake the session.
+WATCHED_PANE = "\n".join(["gh run watch 1234 --exit-status", "",
+                          "  auto mode on · 1 monitor · ? for shortcuts"])
+
+#: A codex pane that `runtime.observe` reads as `idle` — a bold caret above the model/path footer. A codex
+#: pane that reads `unknown` returns BLOCKED from `_state_of` before `_live_state` is ever reached, so only
+#: this shape exercises the codex branch inside `_live_state`.
+CODEX_IDLE_PANE = "reading src/fleet/pool.py\n\x1b[0;1m\u203a \x1b[0m\ncodex gpt-5 \u00b7 /home/ubuntu/work"
 
 PARK_BUSY_Q = "should the shim land before the rebase, or after?"
 PARK_BLOCKED_Q = "is merging #441 mine to do?"
@@ -171,8 +183,10 @@ class SyntheticFleet:
         # 6. A declared CI waiter. Read from STRUCTURED state, never from prose.
         ci = self.dispatch("ciWaiter-07300304", "00000000-07300304-inflight-append-ciWaiter",
                            "ws4", "dt-ciWaiter")
+        # B06: with a watcher on its status line. A claim nothing watches is disregarded (tested in
+        # `TestNeedsAHumanUsesKnownFacts`), so the fixture that means "a real CI wait" shows its watcher.
         Declarations(ci).set_phase("awaiting-ci")
-        self.launch("dt-ciWaiter", 101, "ws4", QUIET_PANE)
+        self.launch("dt-ciWaiter", 101, "ws4", WATCHED_PANE)
 
         # 7. PROSE claiming the same phase, with no declaration. RCF-9, made unreachable.
         self.dispatch("proseClaimer-07300305", "00000000-07300305-inflight-append-proseClaimer",
@@ -286,7 +300,7 @@ class TestReconcile(unittest.TestCase):
         #: `_awaiting_note` re-observes the pane's own status line rather than trusting the declaration
         #: alone; asserting on `.state` only lets that branch be unwired and the suite stay green (I8).
         self.assertIn("declared awaiting-ci", s.note)
-        self.assertIn("NO WATCHER OBSERVABLE", s.note)
+        self.assertIn("watcher observed (1 monitor)", s.note)
 
     def test_prose_claiming_a_phase_does_not_change_the_state(self):
         # RCF-9 made unreachable: the prose is right there, and it is not a control signal.
@@ -628,3 +642,305 @@ class TestTheIdleStateIsProduced(unittest.TestCase):
                          f"a parked worker quiet for 2700s was reported {subject.state}: {subject.note!r}")
         self.assertIn(PARK_BLOCKED_Q, subject.note, "the standing park was dropped from the IDLE note")
         self.assertTrue(needs_a_human(subject), "a stalled parked worker is not asked of a human")
+
+
+#: `FI-55`/`i51(b)`. The exact frame `pane-guard` answered `15 awaiting-operator` for while `board` and `status`
+#: said RUNNING with an empty note (re-measure `scenC` C7): an `AskUserQuestion` selection, no caret row, no
+#: interrupt hint. `unsubmitted` is None and `busy` is False here, which is the whole defect.
+DIALOG_PANE = "\n".join(["Which of these should I keep?",
+                         "  1. Drop it",
+                         "  2. Keep it and carry the note",
+                         "",
+                         "Enter to select · Tab/Arrow keys to navigate · Esc to cancel",
+                         ""])
+
+
+class TestNeedsAHumanUsesKnownFacts(unittest.TestCase):
+    """`B06`. Attention is decided in one place, and that place consulted fewer facts than the package had
+    already computed. Each case drives the real join through `SyntheticFleet`, as `TestTheIdleStateIsProduced`
+    does. A hand-built Subject would pass whether or not the producer can ever emit the state.
+
+    Every positive case has a control beside it: the same worker with the one fact removed. Without the
+    control, a new branch that fires on everything would pass.
+    """
+
+    def setUp(self):
+        self.fleet = SyntheticFleet()
+
+    def subjects(self, idle_after_s=1800):
+        return {s.identity: s for s in reconcile(
+            self.fleet.store, self.fleet.pool, self.fleet.sessions,
+            self.fleet.instants, idle_after_s=idle_after_s)}
+
+    def worker(self, todo_id, tmux, pid, pane=QUIET_PANE):
+        # ws9 is the fixture's only unleased slot; each case builds its own fleet and takes it once.
+        stamp = todo_id.split("-")[1]
+        self.fleet.dispatch(todo_id, f"00000000-{stamp}-inflight-append-{todo_id.split('-')[0]}",
+                            "ws9", tmux)
+        self.fleet.launch(tmux, pid, "ws9", pane)
+        return self.fleet.paths[todo_id]
+
+    # --- fact 1: an operator dialog on the pane (`sessions.asking`, pane-guard 15) --------------------
+
+    def test_a_pane_showing_an_operator_dialog_is_blocked(self):
+        self.worker("asking-07300501", "dt-asking", 5201, pane=DIALOG_PANE)
+
+        subject = self.subjects()["asking-07300501"]
+
+        self.assertEqual(subject.state, BLOCKED,
+                         f"a pane pane-guard calls awaiting-operator (15) was reported {subject.state}: "
+                         f"{subject.note!r}")
+        self.assertIn("dialog", subject.note, "the note does not say what the human is being asked for")
+        self.assertTrue(needs_a_human(subject), "a worker blocked on a dialog is not asked of a human")
+
+    def test_a_quiet_pane_with_no_dialog_is_running(self):
+        """The control: same worker, same freshness, the dialog row gone."""
+        self.worker("quietctl-07300502", "dt-quietctl", 5202)
+
+        subject = self.subjects()["quietctl-07300502"]
+
+        self.assertEqual(subject.state, RUNNING, f"{subject.state}: {subject.note!r}")
+        self.assertFalse(needs_a_human(subject))
+
+    def test_a_busy_pane_outranks_a_dialog_hint_in_its_tail(self):
+        """pane-guard's ordering: busy before asking. A live turn keeps its stronger answer."""
+        self.worker("busydlg-07300503", "dt-busydlg", 5203,
+                    pane=DIALOG_PANE + "\n".join(["Thinking...", "  esc to interrupt"]))
+
+        subject = self.subjects()["busydlg-07300503"]
+
+        self.assertEqual(subject.state, RUNNING, f"{subject.state}: {subject.note!r}")
+
+    def test_a_dialog_is_not_masked_by_a_standing_park(self):
+        """OBS-7: an actionable state is never replaced by a standing declaration; the park is appended."""
+        path = self.worker("dlgpark-07300504", "dt-dlgpark", 5204, pane=DIALOG_PANE)
+        Declarations(path).park(PARK_BLOCKED_Q)
+
+        subject = self.subjects()["dlgpark-07300504"]
+
+        self.assertEqual(subject.state, BLOCKED, f"{subject.state}: {subject.note!r}")
+        self.assertIn(PARK_BLOCKED_Q, subject.note)
+
+    # --- fact 2: the instant folder the record names is gone, and the session is live ----------------
+
+    def test_a_live_worker_whose_instant_folder_is_gone_is_blocked(self):
+        """re-measure `scenD` D3: folder deleted; `seed-check`/`brief` rc=2; `board`/`status` RUNNING with
+        an empty note. Every verb the worker would run to report or finish refuses, so it cannot get out
+        on its own, and `_idle_for(None)` is 0, so it would never even age into IDLE."""
+        path = self.worker("gone-07300511", "dt-gone", 5211)
+        shutil.rmtree(path)
+
+        subject = self.subjects()["gone-07300511"]
+
+        self.assertEqual(subject.state, BLOCKED,
+                         f"a live worker with no instant folder was reported {subject.state}: "
+                         f"{subject.note!r}")
+        self.assertIn(path.name, subject.note, "the note does not name the folder that is gone")
+        self.assertTrue(needs_a_human(subject))
+
+    def test_a_folder_gone_with_no_session_stays_dead(self):
+        """Scope control. A record with no live session is DEAD, and DEAD needs a reap, not a keystroke
+        (W2-14/OBS-57). The missing folder does not reopen that."""
+        path = self.fleet.dispatch("gonedead-07300512", "00000000-07300512-inflight-append-gonedead",
+                                   "ws9", "dt-gonedead")
+        shutil.rmtree(path)
+
+        subject = self.subjects()["gonedead-07300512"]
+
+        self.assertEqual(subject.state, DEAD, f"{subject.state}: {subject.note!r}")
+        self.assertFalse(needs_a_human(subject))
+
+    # --- fact 3: a parked question ------------------------------------------------------------------
+
+    def test_a_parked_question_asks_for_a_human(self):
+        """x2 `G-11`: a child that parked a question rendered PARKED with the question, and the banner said
+        `0 needs you`. `park --question ""` is refused, so a park always asks somebody something. Before
+        this change it surfaced only by timing out into IDLE after 30 minutes, which turns a question into
+        a stall."""
+        path = self.worker("asks-07300521", "dt-asks", 5221)
+        Declarations(path).park(PARK_BLOCKED_Q)
+
+        subject = self.subjects()["asks-07300521"]
+
+        self.assertEqual(subject.state, PARKED, f"{subject.state}: {subject.note!r}")
+        self.assertIn(PARK_BLOCKED_Q, subject.note)
+        self.assertTrue(needs_a_human(subject),
+                        "a child blocked on a parked question is not in the population asked of a human")
+
+    def test_a_parked_worker_still_progressing_needs_nobody(self):
+        """The control, and OBS-3's carve-out: "a parked note while still working is just a note"."""
+        path = self.worker("parkbusy-07300522", "dt-parkbusy", 5222, pane=BUSY_PANE)
+        Declarations(path).park(PARK_BUSY_Q)
+
+        subject = self.subjects()["parkbusy-07300522"]
+
+        self.assertEqual(subject.state, RUNNING, f"{subject.state}: {subject.note!r}")
+        self.assertFalse(needs_a_human(subject))
+
+    # --- fact 4: an awaiting-ci claim with nothing watching ------------------------------------------
+
+    def ci_worker(self, todo_id, tmux, pid, pane=QUIET_PANE, recorded=None):
+        path = self.worker(todo_id, tmux, pid, pane=pane)
+        Declarations(path).set_phase("awaiting-ci")
+        if recorded is not None:
+            Declarations(path).set_watchers(recorded)
+        return path
+
+    def test_an_unwatched_ci_claim_counts_against_the_cap(self):
+        """x2 `M-3`/`D-10`, re-measure scenC. `awaiting-ci` is the one phase that outranks `busy` AND the idle
+        threshold, and it takes the worker out of the WIP cap. Claimed with nothing observed on the pane and
+        nothing recorded at the claim, it is an exemption nothing backs. The note already said "NO WATCHER
+        OBSERVABLE", and the state stayed AWAITING-CI, so the claim kept its exemption."""
+        self.ci_worker("unwatched-07300531", "dt-unwatched", 5231)
+
+        subject = self.subjects()["unwatched-07300531"]
+
+        self.assertNotEqual(subject.state, AWAITING_CI,
+                            f"an awaiting-ci claim nothing watches kept its exemption: {subject.note!r}")
+        self.assertNotIn(subject.state, CAP_EXCLUDED_STATES)
+        self.assertIn("NO WATCHER OBSERVABLE", subject.note)
+        self.assertIn("disregarded", subject.note, "the note does not say the declaration was set aside")
+
+    def test_an_unwatched_ci_claim_ages_into_idle(self):
+        """The half a human sees: nothing will wake it, so once the instant has been quiet past the
+        threshold it is IDLE and asks for a human, like any undeclared worker in the same state."""
+        self.ci_worker("unwatchedold-07300532", "dt-unwatchedold", 5232)
+        self.fleet.age("unwatchedold-07300532", 2700)
+
+        subject = self.subjects()["unwatchedold-07300532"]
+
+        self.assertEqual(subject.state, IDLE, f"{subject.state}: {subject.note!r}")
+        self.assertTrue(needs_a_human(subject))
+
+    def test_a_watched_ci_claim_keeps_its_exemption_however_old(self):
+        """Control: the watcher is on the status line now. The wait is real and it is excluded from the cap."""
+        self.ci_worker("watched-07300533", "dt-watched", 5233, pane=WATCHED_PANE)
+        self.fleet.age("watched-07300533", 2700)
+
+        subject = self.subjects()["watched-07300533"]
+
+        self.assertEqual(subject.state, AWAITING_CI, f"{subject.state}: {subject.note!r}")
+        self.assertFalse(needs_a_human(subject))
+
+    def test_an_attested_ci_claim_keeps_its_exemption(self):
+        """Control: an attestation (`declare --watcher`) names a watcher this tool cannot see, such as a
+        cron or a peer's monitor. It was accepted at the claim and is trusted, labelled ATTESTED. Telling a
+        genuine attestation from an observed watcher that has since vanished is B07's, not this change's."""
+        self.ci_worker("attested-07300534", "dt-attested", 5234,
+                       recorded="attested: cron 0,30 * * * * gh-run-poll")
+        self.fleet.age("attested-07300534", 2700)
+
+        subject = self.subjects()["attested-07300534"]
+
+        self.assertEqual(subject.state, AWAITING_CI, f"{subject.state}: {subject.note!r}")
+        self.assertIn("ATTESTED", subject.note)
+
+    def test_a_watched_claim_blocked_on_a_dialog_is_not_called_unwatched(self):
+        """The disregard note is keyed on the watcher classification, never on "the state is not AWAITING-CI".
+        A dialog outranks the phase, and the watcher is still there, so saying NO WATCHER here would be false."""
+        self.ci_worker("dlgwatched-07300535", "dt-dlgwatched", 5235,
+                       recorded="attested: cron 0,30 * * * * gh-run-poll", pane=DIALOG_PANE)
+
+        subject = self.subjects()["dlgwatched-07300535"]
+
+        self.assertEqual(subject.state, BLOCKED, f"{subject.state}: {subject.note!r}")
+        self.assertNotIn("NO WATCHER", subject.note)
+
+    def test_a_failed_pane_capture_is_not_read_as_an_absent_watcher(self):
+        """`RV-42`/`FI-7`. `sessions.pane` flattens a FAILED capture to `""`, and a caller that BRANCHES on
+        emptiness must not. A capture that failed is NOT MEASURED — nothing was observed about the pane, so
+        nothing was observed about its watcher either — and reading it as "no watcher" would take a real CI
+        waiter's cap exemption away on a tmux hiccup. Before this case the claim was disregarded and the
+        note said NO WATCHER OBSERVABLE **on the pane**, about a pane that was never read."""
+        self.ci_worker("capfail-07300541", "dt-capfail", 5241, pane=WATCHED_PANE)
+        # the capture FAILS: the probe answers None, which is what a tmux that did not answer produces.
+        self.fleet.panes["dt-capfail"] = None
+        self.fleet.age("capfail-07300541", 2700)
+
+        subject = self.subjects()["capfail-07300541"]
+
+        self.assertEqual(subject.state, AWAITING_CI,
+                         f"a failed capture was read as an absent watcher: {subject.state} / "
+                         f"{subject.note!r}")
+        self.assertNotIn("NO WATCHER OBSERVABLE", subject.note)
+        self.assertIn("capture", subject.note.lower(),
+                      "the note does not say the pane could not be read")
+
+    def test_an_empty_pane_that_captured_cleanly_is_still_unwatched(self):
+        """The control that keeps RV-42's fix from swallowing the defect it guards: an EMPTY capture is an
+        observation, and an empty status line carries no watcher."""
+        self.ci_worker("capempty-07300542", "dt-capempty", 5242, pane="")
+        self.fleet.age("capempty-07300542", 2700)
+
+        subject = self.subjects()["capempty-07300542"]
+
+        self.assertEqual(subject.state, IDLE, f"{subject.state}: {subject.note!r}")
+        self.assertIn("NO WATCHER OBSERVABLE", subject.note)
+
+    def test_the_disregard_note_states_the_fact_and_predicts_nothing(self):
+        """`RV-43`. The note is appended to whatever state the ordinary detector chose, so a prediction in
+        it can be false: a busy pane is RUNNING and `elif busy` precedes the idle check, so that worker
+        never ages into IDLE at all. A note that says something the state does not is the family this
+        bucket exists to close, one sentence over."""
+        self.ci_worker("busyunwatched-07300543", "dt-busyunwatched", 5243, pane=BUSY_PANE)
+
+        subject = self.subjects()["busyunwatched-07300543"]
+
+        self.assertEqual(subject.state, RUNNING, f"{subject.state}: {subject.note!r}")
+        self.assertIn("disregarded", subject.note)
+        self.assertNotIn("ages into IDLE", subject.note,
+                         "the note predicts a future this state cannot reach")
+
+    def test_a_codex_claim_is_blocked_and_never_called_unwatched(self):
+        """`RV-45`. The `unwatched` predicate excludes codex on purpose — `_observe_codex` never populates a
+        watcher, so every codex `awaiting-ci` claim would classify unwatched and collect a second sentence
+        beside the codex BLOCKED note, which already says the whole truth ("this worker still consumes
+        capacity"). Nothing pinned that term: deleting it left the suite green."""
+        stamp = "07300544"
+        self.fleet.dispatch("codexci-07300544", f"00000000-{stamp}-inflight-append-codexci",
+                            "ws9", "dt-codexci", runtime="codex")
+        # the live process is codex too; a claude process on a codex record is a different finding
+        # (`_worker_subject`'s runtime-mismatch BLOCKED) and would mask this one.
+        self.fleet.procs.append(LiveSession(pid=5244, cwd=self.fleet.slots_dir / "ws9",
+                                            name="dt-codexci", runtime="codex"))
+        self.fleet.panes["dt-codexci"] = CODEX_IDLE_PANE
+        self.fleet.tmux_live.add("dt-codexci")
+        Declarations(self.fleet.paths["codexci-07300544"]).set_phase("awaiting-ci")
+
+        subject = self.subjects()["codexci-07300544"]
+
+        self.assertEqual(subject.state, BLOCKED, f"{subject.state}: {subject.note!r}")
+        self.assertIn("Codex has no verified CI wake mechanism", subject.note,
+                      "this case must reach `_live_state`'s codex branch, not the earlier dialog return")
+        self.assertNotIn("NO WATCHER", subject.note,
+                         "a codex claim collected the disregard sentence beside the codex note")
+
+    def test_a_missing_folder_outranks_a_busy_pane(self):
+        """`RV-47`. The missing-folder branch is decided before `_live_state`, so it wins over `busy` — the
+        opposite of the rule the same function applies to a park (`OBS-3`), and deliberately: a worker
+        mid-turn whose instant folder is gone will still be refused by every verb it runs at the end of that
+        turn, and the folder does not come back on its own. Fact 1 got exactly this control; fact 2 did not,
+        and nothing pinned the ordering."""
+        path = self.worker("goneBusy-07300545", "dt-goneBusy", 5245, pane=BUSY_PANE)
+        shutil.rmtree(path)
+
+        subject = self.subjects()["goneBusy-07300545"]
+
+        self.assertEqual(subject.state, BLOCKED,
+                         f"a busy pane hid a missing instant folder: {subject.state} / {subject.note!r}")
+        self.assertIn(path.name, subject.note)
+
+    def test_a_record_that_never_named_a_folder_is_untouched(self):
+        """`RV-46`. The missing-folder branch is gated on `rec.child_instant`, and nothing pinned that gate:
+        without it, a record that never named a folder would be reported BLOCKED with an empty folder name
+        interpolated into the note. `dispatch` always writes the field, so this is a defensive gate — and a
+        defensive gate with no case is indistinguishable from a dead one."""
+        self.fleet.store.write(_record(todo_id="nofolder-07300546", child_instant="", slot="",
+                                       tmux="dt-nofolder"))
+        self.fleet.launch("dt-nofolder", 5246, "ws9", QUIET_PANE)
+
+        subject = self.subjects()["nofolder-07300546"]
+
+        self.assertEqual(subject.state, RUNNING,
+                         f"a record with no recorded folder was reported {subject.state}: {subject.note!r}")
+        self.assertEqual(subject.note, "", f"an empty folder name reached the note: {subject.note!r}")

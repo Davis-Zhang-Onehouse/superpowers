@@ -85,7 +85,15 @@ KINDS = (KIND_WORKER, KIND_UNKNOWN, KIND_STALE_LEASE)
 #: `W2-14`/`OBS-57` recorded: a banner that cries for attention on a session nobody can answer trains
 #: people to ignore the banner. That is the same failure this fix is curing, so widening past what a
 #: human can actually DO would trade one silence for one more thing to tune out.
-ACTIONABLE_STATES = (BLOCKED, IDLE)
+#:
+#: `PARKED` added for `B06` (x2 `G-11`; prior art 4933291, on a branch that was never deployed). `fleet
+#: park --question` is a child saying "I cannot proceed without a decision", and an empty question is refused,
+#: so a park always asks somebody something. Excluded, a parked child rendered its question on the board
+#: beside `0 needs you`, and it surfaced only by timing out into `IDLE` after 30 minutes, which turns a
+#: question into a stall. The remedy is an answer, which a human can give, so this stays inside "what a
+#: human can actually DO". A parked worker whose pane is still busy is not PARKED at all (`OBS-3`, in
+#: `_live_state`), so this does not make progressing work shout.
+ACTIONABLE_STATES = (BLOCKED, IDLE, PARKED)
 
 
 def needs_a_human(subject) -> bool:
@@ -237,7 +245,11 @@ def _worker_subject(rec, pool, sessions, instants_dir: Path, idle_after_s: int, 
     declared = Declarations(instant) if instant is not None else None
     phase = declared.phase() if declared is not None else None
     parked = declared.parked() if declared is not None else None
-    pane = sessions.pane(rec.tmux) if (live and rec.tmux) else ""
+    #: `RV-42`/`FI-7`. `capture()`, not `pane()`: a FAILED capture returns `None` and an EMPTY pane returns
+    #: `""`, and anything that BRANCHES on absence has to tell them apart. `pane` keeps the flattened text
+    #: for the readers that only scan it; `capture_failed` is what the watcher decision below consults.
+    captured = sessions.capture(rec.tmux) if (live and rec.tmux) else ""
+    pane = captured or ""
 
     #: The slot holder is PROCESS evidence and never touches tmux, so it survives being pointed at the
     #: wrong server — which is exactly when the tmux answer is the one that misleads.
@@ -251,7 +263,7 @@ def _worker_subject(rec, pool, sessions, instants_dir: Path, idle_after_s: int, 
     holds = _holds_slot(pool, rec)
     holder = _slot_holder_pid(rec, pool, live_sessions) if holds else None
     state, note = _state_of(rec, folder_state, live, phase, parked, pane, sessions,
-                            instant, idle_after_s, holder)
+                            instant, idle_after_s, holder, capture_failed=captured is None)
     if sess is not None and sess.runtime != rec.runtime:
         state, note = BLOCKED, f'live runtime {sess.runtime} differs from record runtime {rec.runtime}'
     evidence = {
@@ -311,7 +323,7 @@ def _slot_holder_pid(rec, pool, live_sessions):
 
 
 def _state_of(rec, folder_state, live, phase, parked, pane, sessions, instant, idle_after_s,
-              slot_holder=None):
+              slot_holder=None, capture_failed=False):
     """The single state decision. Every branch is reachable from one join of all five fact sources."""
     if folder_state in TERMINAL_FOLDER_STATES:
         # The worker's own rename is the completion signal, and it outranks the recorded path — that is
@@ -357,20 +369,48 @@ def _state_of(rec, folder_state, live, phase, parked, pane, sessions, instant, i
         asked = getattr(sessions, "socket", "") or "the default server"
         return DEAD, (f"launched at {rec.launched_at} and no session is alive on tmux server {asked!r}: "
                       "the work stopped without renaming its folder")
-    return _live_state(phase, parked, pane, sessions, instant, idle_after_s)
+    if instant is None and rec.child_instant:
+        #: `B06`, re-measure `scenD` D3. The record names an instant and nothing on disk answers for it,
+        #: while the session is live. Every verb this worker would run to report or finish (`brief`,
+        #: `seed-check`, `propose`, `complete`) refuses with rc=2, so it cannot get out on its own. Before
+        #: this branch it was RUNNING with an empty note forever, because `_idle_for(None)` is 0 and so it
+        #: never even aged into IDLE. Gated on `child_instant`: a record that never named a folder has
+        #: lost nothing.
+        #:
+        #: `RV-47`. Decided here, BEFORE `_live_state`, so it outranks `busy` — the opposite of the park's
+        #: `OBS-3` rule one function down, and meant: a worker mid-turn whose folder is gone will be refused
+        #: by every verb it runs at the end of that turn, and a folder does not come back on its own. Pinned
+        #: by `test_a_missing_folder_outranks_a_busy_pane`.
+        return BLOCKED, (f"the instant folder this record names, {rec.child_instant}, is not on disk "
+                         f"(deleted, or moved outside {Path(rec.child_instant).parent}); the session is "
+                         f"live, and every fleet verb it would run to report or finish refuses")
+    return _live_state(phase, parked, pane, sessions, instant, idle_after_s,
+                       capture_failed=capture_failed)
 
 
-def _live_state(phase, parked, pane, sessions, instant, idle_after_s):
+def _live_state(phase, parked, pane, sessions, instant, idle_after_s, capture_failed=False):
     waiting = sessions.unsubmitted(pane)
     busy = sessions.busy(pane)
-    if waiting and not busy:
+    unwatched = (phase == PHASE_AWAITING_CI and sessions.runtime != 'codex'
+                 and _watcher_of(pane, sessions, instant,
+                                 capture_failed=capture_failed)[0] == WATCHER_NONE)
+    if not busy and sessions.asking(pane):
+        #: `B06`/`FI-55`. `pane-guard` has answered `15 awaiting-operator` for this frame since `I-16`, and
+        #: this join still said RUNNING with an empty note: an `AskUserQuestion` selection carries no caret
+        #: row, so `unsubmitted` is None, and nothing else here asked. It is the same predicate in the same
+        #: order `cli._do_pane_guard` uses (busy, then asking, then unsubmitted), so the guard and the board
+        #: cannot disagree about one frame. Waiting will not clear a dialog, and only an answer will.
+        state, note = BLOCKED, ("the pane is showing an operator dialog (a selection question, a trust "
+                                "screen or an approval prompt) and nothing moves until a human answers it")
+    elif waiting and not busy:
         # A pane holding text nobody submitted needs a keystroke: a modal, or a swallowed submit. Text
         # queued while the agent is still working is not blocked — it is queued, and it will be sent.
         state, note = BLOCKED, f"the pane is waiting on a human: {waiting!r}"
     elif phase == PHASE_AWAITING_CI and sessions.runtime == 'codex':
         state, note = BLOCKED, 'Codex has no verified CI wake mechanism; this worker still consumes capacity'
-    elif phase == PHASE_AWAITING_CI:
-        state, note = AWAITING_CI, _awaiting_note(pane, sessions, instant)
+    elif phase == PHASE_AWAITING_CI and not unwatched:
+        state, note = AWAITING_CI, _awaiting_note(pane, sessions, instant,
+                                                  capture_failed=capture_failed)
     elif busy:
         state, note = RUNNING, ""
     elif _idle_for(instant) > idle_after_s:
@@ -378,6 +418,24 @@ def _live_state(phase, parked, pane, sessions, instant, idle_after_s):
                              f"{idle_after_s}s and the pane is not working")
     else:
         state, note = RUNNING, ""
+
+    if unwatched:
+        #: `B06` (x2 `M-3`, the design `D-10` shipped on a branch that was never deployed). `awaiting-ci` is
+        #: the one phase that outranks both `busy` and the idle threshold, and it takes the worker out of the
+        #: WIP cap. With nothing observed on the pane and nothing recorded at the claim, that exemption is
+        #: backed by nothing. The note already said so and the state kept the exemption. So the claim is
+        #: DISREGARDED here and the ordinary detector decides, exactly as for an undeclared worker: it counts
+        #: against the cap, and it ages into IDLE once nothing has moved. Disregarded rather than cleaned
+        #: up, because this module never writes (property 2), and a stale claim stops lying without a sweep.
+        #: The phase stays visible in `evidence.declared_phase`.
+        #: `RV-43`. States what IS, and predicts nothing. The first wording promised the worker "ages into
+        #: IDLE like any other" — false whenever the chosen state is RUNNING on a busy pane (`elif busy`
+        #: precedes the idle check) or BLOCKED on a dialog. A note that says something its own state does
+        #: not is exactly the defect family this bucket closes.
+        disregarded = (f"declared {PHASE_AWAITING_CI}; NO WATCHER OBSERVABLE on the pane and none recorded "
+                       f"at the claim, so the declaration is disregarded and the ordinary detector decides "
+                       f"this row — which means the worker counts against the WIP cap again")
+        note = f"{note}; {disregarded}" if note else disregarded
 
     if parked:
         if state in ACTIONABLE_STATES:
@@ -405,7 +463,41 @@ def _declared_age_s(instant, now):
         return None
 
 
-def _awaiting_note(pane, sessions, instant, stale_after_s=STALE_WAIT_S, now=None) -> str:
+#: What stands behind an `awaiting-ci` claim, as `_watcher_of` classifies it. `UNREADABLE` is NOT MEASURED
+#: and deliberately not `NONE`: the two are the same on screen and opposite in what they license.
+WATCHER_OBSERVED = "observed"
+WATCHER_ATTESTED = "attested"
+WATCHER_UNREADABLE = "unreadable"
+WATCHER_NONE = "none"
+
+
+def _watcher_of(pane, sessions, instant, capture_failed=False) -> tuple:
+    """`(kind, text)`: what backs an `awaiting-ci` claim right now. OBSERVED is on the pane's status line
+    at this moment; ATTESTED is what the claim recorded in `declare.json`; NONE is neither.
+
+    ONE classification, read by both the note (`_awaiting_note`) and the state (`_live_state`), so the two
+    cannot disagree about one worker. `B07` lives here too: a watcher OBSERVED at the claim is stored bare
+    and one ATTESTED is stored with an `attested:` prefix, and this reads only whether something was
+    recorded. So an observed watcher that has since vanished still classifies ATTESTED. Fixing that here
+    moves the note and the state together.
+    """
+    observed = sessions.watchers(pane)
+    if observed:
+        return WATCHER_OBSERVED, observed
+    recorded = Declarations(instant).watchers() if instant is not None else None
+    if recorded:
+        return WATCHER_ATTESTED, recorded
+    #: `RV-42`/`FI-7`. The capture FAILED, so the pane was never read and nothing was observed about a
+    #: watcher either way. A failed observation is not a negative observation: reported as NOT MEASURED,
+    #: which leaves the declaration standing, because withdrawing a cap exemption on a tmux hiccup is a
+    #: guard whose failure mode is to punish the innocent.
+    if capture_failed:
+        return WATCHER_UNREADABLE, ""
+    return WATCHER_NONE, ""
+
+
+def _awaiting_note(pane, sessions, instant, stale_after_s=STALE_WAIT_S, now=None,
+                   capture_failed=False) -> str:
     """What the board says about a worker that claims to be waiting on CI.
 
     The declaration is a claim made at ONE moment; nothing re-reads it. A Monitor that emitted zero
@@ -415,12 +507,14 @@ def _awaiting_note(pane, sessions, instant, stale_after_s=STALE_WAIT_S, now=None
     live observation is not possible — falls back to what was ATTESTED at claim time, distinguishably
     from what is actually OBSERVED now.
     """
-    observed = sessions.watchers(pane)
-    attested = Declarations(instant).watchers() if instant is not None else None
-    if observed:
-        note = f"declared awaiting-ci; watcher observed ({observed})"
-    elif attested:
-        note = f"declared awaiting-ci; watcher ATTESTED, not observable: {attested}"
+    kind, watcher = _watcher_of(pane, sessions, instant, capture_failed=capture_failed)
+    if kind == WATCHER_OBSERVED:
+        note = f"declared awaiting-ci; watcher observed ({watcher})"
+    elif kind == WATCHER_ATTESTED:
+        note = f"declared awaiting-ci; watcher ATTESTED, not observable: {watcher}"
+    elif kind == WATCHER_UNREADABLE:
+        note = ("declared awaiting-ci; the pane CAPTURE FAILED, so nothing was observed about a watcher "
+                "either way — NOT MEASURED, and the declaration stands until a pane can be read")
     else:
         note = "declared awaiting-ci; NO WATCHER OBSERVABLE on the pane"
     age = _declared_age_s(instant, now if now is not None else time.time())

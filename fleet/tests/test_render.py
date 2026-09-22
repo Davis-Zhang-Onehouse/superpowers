@@ -157,7 +157,7 @@ class TestBoard(unittest.TestCase):
 
         self.assertEqual(count([DEAD]), 0, "a dead session is counted as needing a human")
         self.assertEqual(count([DEAD, BLOCKED]), 1, "the banner does not count an actionable state")
-        self.assertEqual(set(ACTIONABLE_STATES), {"BLOCKED", "IDLE"},
+        self.assertEqual(set(ACTIONABLE_STATES), {"BLOCKED", "IDLE", "PARKED"},
                          "the needs-you population is reconcile's, not render's")
 
     def test_a_stalled_worker_is_counted_as_needing_a_human(self):

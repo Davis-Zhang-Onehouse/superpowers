@@ -20,7 +20,7 @@ IT_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 . "$IT_ROOT/lib.sh"
 
 IT_FAILED=0
-it_own_cases 'F[0-9]+|ISOLATION-F-(enter|leave)'
+it_own_cases 'F[0-9]+[a-z]?|ISOLATION-F-(enter|leave)'
 
 it_section F
 OUT="$EV/out"; rm -rf "$OUT"; mkdir -p "$OUT"
@@ -69,6 +69,9 @@ for s in ws1 ws2 ws3; do fleet enroll --slot "$OUT/slots/$s" >> "$OUT/setup.out"
 fleet dispatch --profile "$OUT/profile" --title "capHolder" --base 00000000 --optype append \
       --porcelain > "$OUT/w1.out" 2>&1
 W1="$(awk -F'\t' '$1=="instant"{print $2}' "$OUT/w1.out")"
+#: `RV-40`. The TODO ID, which is what identifies this worker on a board row; `$W1` is a FOLDER path and
+#: no board column carries it.
+W1_ID="$(awk -F'\t' '$1=="todo_id"{print $2}' "$OUT/w1.out")"
 if [ -z "$W1" ] || [ ! -d "$W1" ]; then
   echo "the first dispatch produced no instant; nothing below is a verdict:" >&2
   cat "$OUT/w1.out" >&2
@@ -109,7 +112,13 @@ fi
 # F2 — AND A REAL DECLARATION DOES.  Same worker, same prose still in place, one declaration added: the
 #      cap must now report room and the dispatch must succeed. This is what makes F3 non-vacuous.
 # ==================================================================================================
-fleet declare --instant "$W1" --phase AWAITING-CI --porcelain > "$OUT/F2-declare.out" 2>&1
+#: `B06`. A declaration with NOTHING behind it is DISREGARDED by `reconcile`, so it frees no cap — that is
+#: F2b below, the negative twin of this case. The declaration here names its watcher, which is what a real
+#: CI wait has: this worker's pane is the harness stub, so nothing observable is on its status line and the
+#: gate lets the claim through ungated. F2's claim is about a declaration versus prose, and it needs a
+#: declaration somebody would accept.
+fleet declare --instant "$W1" --phase AWAITING-CI --watcher 'cron 0,30 * * * * gh-run-poll' \
+      --porcelain > "$OUT/F2-declare.out" 2>&1
 f2_declare_rc=$?
 fleet dispatch --profile "$OUT/profile" --title "secondC" --base 00000000 --optype append \
       --porcelain > "$OUT/F2-dispatch.out" 2>&1
@@ -122,6 +131,48 @@ else
   it_fail F2 "fleet/it/F/out/F2-dispatch.out" \
     "a declaration did not free the cap: declare_rc=$f2_declare_rc dispatch_rc=$f2_rc instant='$W2'"
 fi
+
+# ==================================================================================================
+# F2b — AND A DECLARATION WITH NOTHING BEHIND IT DOES NOT.  `B06`: `awaiting-ci` is the one phase that
+#      outranks both `busy` and the idle threshold AND takes a worker out of the cap, so a claim with no
+#      watcher observed on the pane and none recorded at the claim is an exemption nothing backs. The
+#      declaration is written (the phase is stored and `brief` reports it) and `reconcile` disregards it.
+#      Pairs with F2 the way F3 does: same worker, same verb, one field different.
+# ==================================================================================================
+rm -f "$W1/.fleet/declare.json"
+fleet declare --instant "$W1" --phase AWAITING-CI --porcelain > "$OUT/F2b-declare.out" 2>&1
+f2b_declare_rc=$?
+fleet dispatch --profile "$OUT/profile" --title "secondD" --base 00000000 --optype append \
+      --porcelain > "$OUT/F2b-dispatch.out" 2>&1
+f2b_rc=$?
+#: `RV-40`. Keyed on the TODO ID, which is what a board row's `identity` column carries
+#: (`render.BOARD_COLUMNS`); the first draft matched the INSTANT FOLDER name, which appears on no row, so
+#: the lookup returned "" and `[ "" != "AWAITING-CI" ]` passed on a failed measurement — absence read as
+#: success, inside the case written to close that very family. Asserted POSITIVELY for the same reason: a
+#: negative assertion is satisfied by every kind of nothing.
+#: `RV-48`. The board is run ONCE, into a file, and its own exit status is judged — the first draft piped
+#: it into `awk` and grepped a second, unjudged run through a process substitution, so a board that failed
+#: would have been read as "no disregard note" rather than as a failure. The note is read from THIS
+#: worker's row too: `disregarded` anywhere on the board would otherwise satisfy a claim about W1.
+fleet board --porcelain > "$OUT/F2b-board.out" 2>&1
+f2b_board_rc=$?
+f2b_state="$(awk -F'\t' -v id="$W1_ID" '$1==id {print $3; exit}' "$OUT/F2b-board.out")"
+f2b_note="$(awk -F'\t' -v id="$W1_ID" '$1==id {print $7; exit}' "$OUT/F2b-board.out")"
+f2b_disregarded=0
+case "$f2b_note" in *disregarded*) f2b_disregarded=1 ;; esac
+case "$f2b_state" in RUNNING|IDLE) f2b_counted=1 ;; *) f2b_counted=0 ;; esac
+if [ "$f2b_declare_rc" = 0 ] && [ "$f2b_board_rc" = 0 ] && [ "$f2b_rc" != 0 ] \
+   && [ "$f2b_counted" = 1 ] && [ "$f2b_disregarded" = 1 ]; then
+  it_pass F2b "fleet/it/F/out/F2b-dispatch.out" \
+    "the SAME declaration with no watcher behind it did NOT free the cap: declare exit 0, the board reports $W1_ID as $f2b_state with a note saying the declaration is disregarded, and the dispatch is still refused (exit $f2b_rc). F2 and F2b differ by one flag, so neither can be explained by the cap's state"
+else
+  it_fail F2b "fleet/it/F/out/F2b-dispatch.out" \
+    "declare_rc=$f2b_declare_rc board_rc=$f2b_board_rc dispatch_rc=$f2b_rc state='$f2b_state' (want RUNNING or IDLE for $W1_ID) disregarded=$f2b_disregarded note='$f2b_note'"
+fi
+#: F2's exemption is restored for everything below, which was written against a freed cap.
+rm -f "$W1/.fleet/declare.json"
+fleet declare --instant "$W1" --phase AWAITING-CI --watcher 'cron 0,30 * * * * gh-run-poll' \
+      --porcelain > "$OUT/F2-redeclare.out" 2>&1
 
 # ==================================================================================================
 # F9 — `compaction-status` REPORTS THE FREEZE AND CHANGES NOTHING.  Zero delta over FLEET_HOME and the
@@ -263,9 +314,19 @@ done
   echo "F4_EXIT=$?"
   echo "F5_DECLARE_START"
   COMPACT_INST="$(find "$FZ_INST" -maxdepth 1 -name '*-inflight-compact-fzcompaction' | head -1)"
-  fleet declare --instant "$COMPACT_INST" --phase AWAITING-CI --porcelain
+  #: `RV-41`/`B06`. NAMES ITS WATCHER, as F2 and §K's K5 do. A claim with nothing observed on the pane and
+  #: nothing recorded is disregarded by `reconcile`, so it frees no cap — and F5's whole claim is that this
+  #: declaration DOES take the compaction out of the cap's count while the exclusivity rule still refuses.
+  #: The compaction's pane is the harness stub, which renders no status line, so the watcher is attested.
+  fleet declare --instant "$COMPACT_INST" --phase AWAITING-CI \
+        --watcher 'cron 0,30 * * * * gh-run-poll' --porcelain
   echo "F5_CAP_START"
   fleet compaction-status --porcelain
+  #: `RV-41`. The cap half, MEASURED rather than narrated (SI-50 recorded that it never was): the dry run
+  #: prints each guard's own verdict, so `guard.wip-cap` says whether the cap has room while
+  #: `guard.compaction-exclusive` refuses.
+  fleet dispatch --dry-run --profile "$OUT/profile" --title "fzCapProbe" --base 00000000 \
+        --optype append --porcelain
   fleet dispatch --profile "$OUT/profile" --title "fzBlocked2" --base 00000000 --optype append
   echo "F5_EXIT=$?"
   echo "F6_RESUME_START"
@@ -297,19 +358,22 @@ fi
 
 # ---- F5: the cap has room AND the dispatch is still refused ----
 f5_rc="$(ex F5_EXIT)"
-# shellcheck disable=SC2034  # F5's title claims 'the cap has room', but the gate below asserts on
-# f5_declared/f5_still_refused only -- this measurement is never checked. See SI-50.
+#: `RV-41`. ASSERTED now, not merely measured. SI-50 recorded that F5's title claimed "the cap has room"
+#: while the gate read `f5_declared`/`f5_still_refused` only — so when `B06` made an unbacked declaration
+#: stop freeing the cap, this case kept passing while its own artifact printed the compaction as counted.
+#: The value comes from the dry run's own `guard.wip-cap` row.
 f5_cap_room=0
-# shellcheck disable=SC2034  # see the note above: measured, never asserted. SI-50.
-sec F5_CAP_START F5_EXIT= | grep -qiE 'no compaction|examined' && f5_cap_room=1
+case "$(sec F5_CAP_START F5_EXIT= | awk -F'\t' '$1=="guard.wip-cap"{print $2; exit}')" in
+  allow*) f5_cap_room=1 ;;
+esac
 f5_still_refused=0; [ "$f5_rc" = 4 ] && f5_still_refused=1
 f5_declared=0; sec F5_DECLARE_START F5_CAP_START | grep -qi 'awaiting-ci' && f5_declared=1
-if [ "$f5_declared" = 1 ] && [ "$f5_still_refused" = 1 ]; then
+if [ "$f5_declared" = 1 ] && [ "$f5_still_refused" = 1 ] && [ "$f5_cap_room" = 1 ]; then
   it_pass F5 "fleet/it/F/out/F4-F7.out" \
-    "the compaction declared AWAITING-CI — which takes it OUT of the cap's active-dev count — and the dispatch is STILL refused (exit $f5_rc). Two rules kept structurally apart, each reporting its own verdict: folding them together gets exactly one of these two cases wrong whichever way you fold it, and 'the cap says I have room' is not an answer to 'may I dispatch?'"
+    "the compaction declared AWAITING-CI with a watcher behind it — and the dry run's guard.wip-cap row says ALLOW, which is the cap reporting room, measured rather than narrated — while the dispatch is STILL refused (exit $f5_rc). Two rules kept structurally apart, each reporting its own verdict: folding them together gets exactly one of these two cases wrong whichever way you fold it, and 'the cap says I have room' is not an answer to 'may I dispatch?'"
 else
   it_fail F5 "fleet/it/F/out/F4-F7.out" \
-    "declared=$f5_declared still_refused=$f5_still_refused (exit=$f5_rc, want 4)"
+    "declared=$f5_declared cap_room=$f5_cap_room still_refused=$f5_still_refused (exit=$f5_rc, want 4)"
 fi
 
 # ---- F6: a resume is never refused ----
