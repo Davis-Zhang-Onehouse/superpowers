@@ -59,9 +59,16 @@ applied is applied by the harvest, in the order it arrived — `harvest --id <to
 first. So applying first (step 2 below) is where your judgement goes; harvest is not a way to skip a row.
 The one exception it holds back is a row that would move a `done` or `dropped` milestone: it stays pending
 and harvest reports it, because that is the silent regression step 2 exists to catch. It also gives back
-the worker's claim on a milestone it left unfinished, so no closed instant holds it. A milestone the
-worker left `running` or `awaiting-ci` still cannot be dispatched until you move its status — that part is
-your call, not harvest's.
+the worker's claim on a milestone it left unfinished, so no closed instant holds it.
+
+**Harvest refuses a worker whose last report is `running`**, whether that row is still pending or you
+already applied it: `running` is progress, not a final word, and closing the worker then would lose the
+outcome. The remedy is a final status through `fleet propose --instant <worker> --milestone <m> --status
+<s> --evidence <path>` — it still works on the `-complete-` folder, and you may run it on the worker's
+behalf: `done` or `awaiting-ci` for finished work, `blocked` or `ready` to return it to the queue, `dropped`
+to write it off. `fleet abort` does not help here; it only takes an `-inflight-` folder. A worker that
+handed off at `awaiting-ci` is closed out, and its milestone stays undispatchable until you move the status
+— that part is your call, not harvest's.
 
 ## Never close on one pane sample
 
