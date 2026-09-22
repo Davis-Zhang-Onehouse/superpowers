@@ -376,6 +376,11 @@ def _state_of(rec, folder_state, live, phase, parked, pane, sessions, instant, i
         #: this branch it was RUNNING with an empty note forever, because `_idle_for(None)` is 0 and so it
         #: never even aged into IDLE. Gated on `child_instant`: a record that never named a folder has
         #: lost nothing.
+        #:
+        #: `RV-47`. Decided here, BEFORE `_live_state`, so it outranks `busy` — the opposite of the park's
+        #: `OBS-3` rule one function down, and meant: a worker mid-turn whose folder is gone will be refused
+        #: by every verb it runs at the end of that turn, and a folder does not come back on its own. Pinned
+        #: by `test_a_missing_folder_outranks_a_busy_pane`.
         return BLOCKED, (f"the instant folder this record names, {rec.child_instant}, is not on disk "
                          f"(deleted, or moved outside {Path(rec.child_instant).parent}); the session is "
                          f"live, and every fleet verb it would run to report or finish refuses")
