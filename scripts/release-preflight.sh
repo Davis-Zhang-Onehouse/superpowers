@@ -76,7 +76,7 @@ n="$(count_dt_sessions "$FLEET_TMUX_SOCKET")"
 # is not necessarily the directory the glob found it in.
 shopt -s nullglob
 for sockdir in $TMUX_SOCKET_DIRS; do
-  for sockpath in "$sockdir"fleet "$sockdir"fleet-*; do
+  for sockpath in "${sockdir%/}/fleet" "${sockdir%/}"/fleet-*; do
     [ -S "$sockpath" ] || continue
     sockname="$(basename "$sockpath")"
     [ "$sockname" = "$FLEET_TMUX_SOCKET" ] && continue
