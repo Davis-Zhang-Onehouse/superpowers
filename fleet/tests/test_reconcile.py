@@ -1130,3 +1130,49 @@ class TestOnlyWhatWasSeenIsExcusedOnACodexPane(unittest.TestCase):
 
         self.assertEqual(subject.state, BLOCKED, subject.note)
         self.assertFalse(needs_a_human(subject), subject.note)
+
+
+class TestTheNonPaneBlockedSourcesAreNeverExcused(unittest.TestCase):
+    """`RV-26`. DECISIONS D-3 names six BLOCKED producers and only the pane-level ones may be excused by an
+    attached human. The dialog, the unsubmitted text, the missing folder and the park are pinned above;
+    these pin the runtime mismatch (whose `on_pane = False` reset a mutation deleted with the suite green)
+    and codex's unwatched awaiting-ci."""
+
+    def setUp(self):
+        self.fleet = SyntheticFleet()
+
+    def subjects(self):
+        return {s.identity: s for s in reconcile(self.fleet.store, self.fleet.pool, self.fleet.sessions,
+                                                  self.fleet.instants)}
+
+    def test_a_runtime_mismatch_on_a_dialog_pane_is_counted_even_with_a_human_attached(self):
+        """The dialog would be excused on its own; the mismatch that REPLACES it is not on the pane."""
+        self.fleet.dispatch("mismatch-07300801", "00000000-07300801-inflight-append-mismatch",
+                            "ws9", "dt-mismatch")                     # a claude record ...
+        self.fleet.procs.append(LiveSession(pid=5501, cwd=self.fleet.slots_dir / "ws9",
+                                            name="dt-mismatch", runtime="codex"))   # ... a codex process
+        self.fleet.panes["dt-mismatch"] = DIALOG_PANE
+        self.fleet.tmux_live.add("dt-mismatch")
+        self.fleet.attached["dt-mismatch"] = (1, time.time() - 5)
+
+        subject = self.subjects()["mismatch-07300801"]
+
+        self.assertEqual(subject.state, BLOCKED)
+        self.assertIn("differs from record runtime", subject.note)
+        self.assertTrue(needs_a_human(subject), subject.note)
+
+    def test_a_codex_unwatched_awaiting_ci_is_counted_even_with_a_human_attached(self):
+        self.fleet.dispatch("codexciat-07300802", "00000000-07300802-inflight-append-codexciat",
+                            "ws9", "dt-codexciat", runtime="codex")
+        self.fleet.procs.append(LiveSession(pid=5502, cwd=self.fleet.slots_dir / "ws9",
+                                            name="dt-codexciat", runtime="codex"))
+        self.fleet.panes["dt-codexciat"] = CODEX_IDLE_PANE
+        self.fleet.tmux_live.add("dt-codexciat")
+        self.fleet.attached["dt-codexciat"] = (1, time.time() - 5)
+        Declarations(self.fleet.paths["codexciat-07300802"]).set_phase("awaiting-ci")
+
+        subject = self.subjects()["codexciat-07300802"]
+
+        self.assertEqual(subject.state, BLOCKED)
+        self.assertIn("Codex has no verified CI wake mechanism", subject.note)
+        self.assertTrue(needs_a_human(subject), subject.note)
