@@ -51,6 +51,15 @@ produces a confusing refusal at the end of a successful close-out, and a coordin
 failure reaches for the one flag that could take a slot somebody is still working in.
 <!-- v2-cite: harvest-commits-whole J2 -->
 
+**A tmux server can outlive its last session.** After `close` of the last session on the root's socket
+the server normally exits within seconds. An operator's `tmux -L <socket> attach` client that is stopped or
+wedged holds it up instead: `tmux -L <socket> list-panes -a` answers `no current target` (alive, zero
+sessions), and after a `kill-server` every command answers `server exited unexpectedly`. `board`, `status`
+and harvest's tail read both as an empty population; a new dispatch onto the second one fails and says
+how to find the client. `tmux list-clients` cannot show it in either state — `ps -o pid,stat,args -C tmux`
+does (a stopped client reads `T`). Resuming or ending that client clears it, and that is the operator's call: never kill a
+client or a server you did not start.
+
 **`fleet harvest` exiting 1 does not mean it failed.** Read the `harvested … info` row for the outcome;
 the exit status can be dominated by an unrelated standing violation.
 
