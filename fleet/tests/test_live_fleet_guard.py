@@ -9,6 +9,8 @@ import json
 import os
 import pathlib
 import shutil
+import subprocess
+import sys
 import tempfile
 import unittest
 from unittest import mock
@@ -115,6 +117,34 @@ class LiveFleetGuardCase(unittest.TestCase):
         _, stores, releases, _ = tests._live_destinations({"HOME": str(self.home)}, self.root)
         self.assertEqual(stores, {(self.tmp / "real-store").resolve()})
         self.assertEqual(releases, {(self.tmp / "real-releases").resolve()})
+
+    def test_the_import_captures_the_live_set_from_the_real_process(self):
+        """The call site itself, not `_live_destinations` with arguments a test chose: every other case
+        here either passes its own arguments or patches `LIVE_*`, so a regression in what the package
+        hands that function at import (the wrong cwd, an emptied environment) turned the guard off with
+        the whole suite still green (RV-C1, mutation M3). A fresh interpreter imports `tests` from a cwd
+        inside a fixture root, with every fleet variable naming a fixture path, and reports what it
+        captured."""
+        cwd = self.root / "slot"
+        cwd.mkdir()
+        fleet_dir = pathlib.Path(tests.__file__).resolve().parents[1]
+        env = {name: value for name, value in os.environ.items() if name not in tests.FLEET_ENV}
+        env.update(HOME=str(self.home), PYTHONPATH=f"{fleet_dir}{os.pathsep}{fleet_dir / 'src'}",
+                   FLEET_HOME=str(self.tmp / "h"), FLEET_RELEASES=str(self.tmp / "r"),
+                   FLEET_INSTANTS=str(self.tmp / "i"))
+        report = ("import json, tests; print(json.dumps({name: sorted(map(str, getattr(tests, name))) "
+                  "for name in ('LIVE_ROOTS', 'LIVE_STORES', 'LIVE_RELEASES', 'LIVE_INSTANTS')}))")
+        done = subprocess.run([sys.executable, "-c", report], cwd=cwd, env=env, capture_output=True,
+                              text=True, timeout=60)
+        self.assertEqual(done.returncode, 0, done.stderr)
+        root = self.root.resolve()
+        h, r, i = ((self.tmp / name).resolve() for name in "hri")
+        self.assertEqual(json.loads(done.stdout), {
+            "LIVE_ROOTS": [str(root)],
+            "LIVE_STORES": sorted([str(root / ".fleet"), str(h)]),
+            "LIVE_RELEASES": sorted([str(root / "fleet-releases"), str(r)]),
+            "LIVE_INSTANTS": sorted([str(root / ".fleet" / "instants"), str(h / "instants"), str(i)]),
+        })
 
     def test_outside_home_with_nothing_exported_nothing_is_live(self):
         """`/tmp` is outside `$HOME`, so the walk (FI-417's bound) finds nothing there — which is why the
