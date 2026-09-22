@@ -89,8 +89,8 @@ def _live_destinations(environ, cwd):
         if candidate:
             roots.add(_resolved(candidate))
     roots.discard(None)
-    stores = {r / ".fleet" for r in roots}
-    releases = {r / "fleet-releases" for r in roots}
+    stores = {_resolved(r / ".fleet") for r in roots}
+    releases = {_resolved(r / "fleet-releases") for r in roots}
     if environ.get("FLEET_HOME"):
         stores.add(_resolved(environ["FLEET_HOME"]))
     if environ.get("FLEET_RELEASES"):

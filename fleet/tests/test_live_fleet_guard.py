@@ -76,6 +76,17 @@ class LiveFleetGuardCase(unittest.TestCase):
         self.assertEqual(stores, {self.root.resolve() / ".fleet", (self.tmp / "h").resolve()})
         self.assertEqual(releases, {self.root.resolve() / "fleet-releases", (self.tmp / "r").resolve()})
 
+    def test_a_symlinked_store_or_release_area_is_compared_by_its_target(self):
+        """The migration case `root.find` documents: a root's `.fleet` reached through a symlink. Every
+        path the wrappers compare is resolved, so the live set must be resolved too or it never matches."""
+        (self.tmp / "real-store").mkdir()
+        (self.tmp / "real-releases").mkdir()
+        (self.root / ".fleet").symlink_to(self.tmp / "real-store")
+        (self.root / "fleet-releases").symlink_to(self.tmp / "real-releases")
+        _, stores, releases = tests._live_destinations({"HOME": str(self.home)}, self.root)
+        self.assertEqual(stores, {(self.tmp / "real-store").resolve()})
+        self.assertEqual(releases, {(self.tmp / "real-releases").resolve()})
+
     def test_outside_home_with_nothing_exported_nothing_is_live(self):
         """`/tmp` is outside `$HOME`, so the walk (FI-417's bound) finds nothing there — which is why the
         suite from an export under `/tmp` could never reach a root, and could never pass a test that
