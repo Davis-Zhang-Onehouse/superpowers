@@ -521,6 +521,9 @@ def _live_state(phase, parked, pane, sessions, instant, idle_after_s, capture_fa
                                     f"still working is just a note: {parked}")
         else:
             state, note = PARKED, f"parked decision: {parked}"
+    #: `and state == BLOCKED` is belt-and-braces, not load-bearing today: `on_pane` is only set beside a
+    #: BLOCKED, and the park rewrite above leaves an actionable state alone. It keeps `on_pane` meaning "a
+    #: BLOCKED read off the pane" if a later branch ever rewrites the state after it is set (`RV-34`).
     return state, note, on_pane and state == BLOCKED
 
 
