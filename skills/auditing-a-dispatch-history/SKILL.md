@@ -48,7 +48,10 @@ milestone  →  the instant(s) that owned it  →  their evidence  →  the chai
 ```
 
 Each hop has a source: the roadmap carries the owner and the evidence paths; the instant carries its own
-registers; the chain manifest carries the positions.
+registers; the chain manifest carries the positions. Read the evidence hop from `fleet roadmap --porcelain`'s
+`evidence` column (`$9`), not from raw `roadmap.json`: the column re-resolves every item through the instant's
+`-inflight-`→`-complete-` rename and marks one that no longer resolves `(does not resolve)`, while a stored
+string can name a folder that has since been renamed.
 
 **Where the join breaks is between hops 3 and 4.** An instant's evidence says what it proved; the chain
 says what landed. Nothing automatically connects them, and it is entirely possible for a milestone to be
