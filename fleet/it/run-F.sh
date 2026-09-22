@@ -69,6 +69,9 @@ for s in ws1 ws2 ws3; do fleet enroll --slot "$OUT/slots/$s" >> "$OUT/setup.out"
 fleet dispatch --profile "$OUT/profile" --title "capHolder" --base 00000000 --optype append \
       --porcelain > "$OUT/w1.out" 2>&1
 W1="$(awk -F'\t' '$1=="instant"{print $2}' "$OUT/w1.out")"
+#: `RV-40`. The TODO ID, which is what identifies this worker on a board row; `$W1` is a FOLDER path and
+#: no board column carries it.
+W1_ID="$(awk -F'\t' '$1=="todo_id"{print $2}' "$OUT/w1.out")"
 if [ -z "$W1" ] || [ ! -d "$W1" ]; then
   echo "the first dispatch produced no instant; nothing below is a verdict:" >&2
   cat "$OUT/w1.out" >&2
@@ -142,16 +145,22 @@ f2b_declare_rc=$?
 fleet dispatch --profile "$OUT/profile" --title "secondD" --base 00000000 --optype append \
       --porcelain > "$OUT/F2b-dispatch.out" 2>&1
 f2b_rc=$?
-f2b_state="$(fleet board --porcelain 2>/dev/null | awk -F'\t' -v n="$(basename "$W1")" '$0 ~ n {print $3; exit}')"
+#: `RV-40`. Keyed on the TODO ID, which is what a board row's `identity` column carries
+#: (`render.BOARD_COLUMNS`); the first draft matched the INSTANT FOLDER name, which appears on no row, so
+#: the lookup returned "" and `[ "" != "AWAITING-CI" ]` passed on a failed measurement — absence read as
+#: success, inside the case written to close that very family. Asserted POSITIVELY for the same reason: a
+#: negative assertion is satisfied by every kind of nothing.
+f2b_state="$(fleet board --porcelain 2>/dev/null | awk -F'\t' -v id="$W1_ID" '$1==id {print $3; exit}')"
 f2b_disregarded=0
 grep -qi 'disregarded' <(fleet board --porcelain 2>/dev/null) && f2b_disregarded=1
-if [ "$f2b_declare_rc" = 0 ] && [ "$f2b_rc" != 0 ] && [ "$f2b_state" != "AWAITING-CI" ] \
-   && [ "$f2b_disregarded" = 1 ]; then
+case "$f2b_state" in RUNNING|IDLE) f2b_counted=1 ;; *) f2b_counted=0 ;; esac
+if [ "$f2b_declare_rc" = 0 ] && [ "$f2b_rc" != 0 ] \
+   && [ "$f2b_counted" = 1 ] && [ "$f2b_disregarded" = 1 ]; then
   it_pass F2b "fleet/it/F/out/F2b-dispatch.out" \
-    "the SAME declaration with no watcher behind it did NOT free the cap: declare exit 0, the board reports $f2b_state with a note saying the declaration is disregarded, and the dispatch is still refused (exit $f2b_rc). F2 and F2b differ by one flag, so neither can be explained by the cap's state"
+    "the SAME declaration with no watcher behind it did NOT free the cap: declare exit 0, the board reports $W1_ID as $f2b_state with a note saying the declaration is disregarded, and the dispatch is still refused (exit $f2b_rc). F2 and F2b differ by one flag, so neither can be explained by the cap's state"
 else
   it_fail F2b "fleet/it/F/out/F2b-dispatch.out" \
-    "declare_rc=$f2b_declare_rc dispatch_rc=$f2b_rc state='$f2b_state' disregarded=$f2b_disregarded"
+    "declare_rc=$f2b_declare_rc dispatch_rc=$f2b_rc state='$f2b_state' (want RUNNING or IDLE for $W1_ID) disregarded=$f2b_disregarded"
 fi
 #: F2's exemption is restored for everything below, which was written against a freed cap.
 rm -f "$W1/.fleet/declare.json"
