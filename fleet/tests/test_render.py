@@ -16,6 +16,7 @@ Two structural rules run through the whole file:
 import ast
 import pathlib
 import re
+import shutil
 import subprocess
 import sys
 import tempfile
@@ -451,7 +452,7 @@ class TestPorcelainStatesItsPopulation(unittest.TestCase):
                          ("slot", "lease", "todo_id", "owner", "tmux", "claimed_at", "path"))
         self.assertEqual(render.ROADMAP_COLUMNS[:6],
                          ("kind", "subject", "severity", "detail", "clears_when", "clears_who"))
-        self.assertEqual(render.ROADMAP_COLUMNS[6:], ("title", "owner"))
+        self.assertEqual(render.ROADMAP_COLUMNS[6:], ("title", "owner", "evidence"))
 
 
 class TestRoadmapPorcelainNamesReadyMilestones(unittest.TestCase):
@@ -471,10 +472,35 @@ class TestRoadmapPorcelainNamesReadyMilestones(unittest.TestCase):
         self.assertEqual((ready["taken"]["title"], ready["taken"]["owner"]), ("the taken one", "/i/worker"))
         dispatchable = [r["subject"] for r in rows if r["kind"] == "ready" and not r["owner"]]
         self.assertEqual(dispatchable, ["free"])
+        self.assertEqual(len(render.ROADMAP_COLUMNS), len(render.roadmap_view(rm, porcelain=True)
+                                                           .splitlines()[0].split("\t")))
         human = render.roadmap_view(rm)
         self.assertIn("the free one", human, "the human form names the ready milestone's title too")
         self.assertIn("2 ready (1 unclaimed)", human.splitlines()[0],
                       "the banner's ready count must not pass a claimed milestone off as dispatchable")
+
+
+class TestRoadmapPorcelainPrintsEvidence(unittest.TestCase):
+    """`B03`. `fleet roadmap` printed a proposal's evidence as a count and a milestone's not at all."""
+
+    def test_a_milestones_evidence_is_a_column_that_resolves_today(self):
+        from fleet.roadmap import Milestone, Roadmap
+        tasks = pathlib.Path(tempfile.mkdtemp())
+        self.addCleanup(shutil.rmtree, tasks, True)
+        worker = tasks / "00000000-07300400-inflight-append-w"
+        (worker / "evidence").mkdir(parents=True)
+        (worker / "evidence" / "proof.log").write_text("x")
+        coord = tasks / "00000000-07300300-inflight-append-c"
+        coord.mkdir()
+        rm = Roadmap(coord)
+        rm.add(Milestone(id="k1", title="t", status="running", deps=[], evidence=[]))
+        rm.apply(rm.propose(worker, "k1", "done", ["evidence/proof.log"]))
+        done = worker.rename(tasks / "00000000-07300400-complete-append-w")
+        rows = [dict(zip(render.ROADMAP_COLUMNS, line.split("\t")))
+                for line in render.roadmap_view(rm, porcelain=True).splitlines()]
+        [k1] = [r for r in rows if r["subject"] == "k1"]
+        self.assertEqual(str(done / "evidence" / "proof.log"), k1["evidence"])
+        self.assertTrue(pathlib.Path(k1["evidence"]).is_file())
 
 
 if __name__ == "__main__":
