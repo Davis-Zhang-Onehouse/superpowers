@@ -99,6 +99,17 @@ class Probes:
     session_servers: Optional[Callable[[str], list]] = None
     send_literal: Optional[Callable[[str, str], None]] = None
     submit: Optional[Callable[[str], None]] = None
+    #: `B24` (x2 `G-4`). `(clients, last_input_epoch)` for one session — tmux's `#{session_attached}` and
+    #: `#{session_activity}` — or `None` when it could not be observed. Defaulted like `pane_pid`, so every
+    #: hand-built `Probes` keeps working and reads as NOT MEASURED rather than as "nobody attached".
+    attachment: Optional[Callable[[str], Optional[tuple]]] = None
+
+
+@dataclass(frozen=True)
+class Attachment:
+    """`B24`. Clients attached to a session and the epoch of the last input one of them gave it."""
+    clients: int
+    last_input: float
 
 
 #: tmux's exact-match marker. A BARE target is resolved by PREFIX: with only `itfleet-N-pre-ab` alive,
@@ -195,6 +206,31 @@ class SessionLayer:
             if session.name == name:
                 return True
         return bool(self.probes.has_session(name))
+
+    def attachment(self, name: str) -> Optional[Attachment]:
+        """Whether a HUMAN is at this session: its attached-client count and when a client last gave it
+        input — or `None` when that could not be observed (no probe, no name, tmux did not answer).
+
+        `B24` (x2 `G-4`). `BLOCKED` could not tell a worker stuck at a modal from a human attached and
+        mid-sentence, because this fact was never collected. It is deliberately returned RAW and
+        tri-state, because its two consumers fail safe in OPPOSITE directions:
+
+        - the attention count (`reconcile`) treats `None` as "not a human" — it keeps counting, which is
+          what it did before this fact existed, so a tmux hiccup cannot hide a stuck worker;
+        - anything that TYPES into a pane (a nudge, `B12`) must treat `None` as "occupied": "I could not
+          tell whether somebody is sitting there" has to mean leave it alone.
+
+        `last_input` moves on an attach and on a client's keystroke, and NOT on `send-keys` or
+        `paste-buffer` (`evidence/20-red/tmux-activity-probe.txt` in the B24 instant), so fleet's own
+        delivery can never make a pane look attended.
+        """
+        if not name or self.probes.attachment is None:
+            return None
+        answer = self.probes.attachment(name)
+        if answer is None:
+            return None
+        clients, last_input = answer
+        return Attachment(clients=int(clients), last_input=float(last_input))
 
     # --- pane --------------------------------------------------------------------------------
 
@@ -576,6 +612,28 @@ def default_probes(process_name: str = "claude", tmux_socket=_FROM_ENV, *,
                 found.append(candidate)
         return found
 
+    def attachment(name: str):
+        """`(clients, last_input_epoch)` for the session named EXACTLY `name`, or None when unobserved.
+
+        `list-sessions` and an exact name match, NOT `display-message -t =name:`: on tmux 3.2a that exits 0
+        with an EMPTY format for a session that does not exist (B24 instant,
+        `evidence/20-red/display-message-missing-session.txt`), which would parse as "nobody attached" —
+        `FI-7`'s falsy-default lie again. A missing row, a non-zero exit and an unparsable row are all
+        None: not measured.
+        """
+        done = run(tmux + ["list-sessions", "-F",
+                           "#{session_name}\t#{session_attached}\t#{session_activity}"])
+        if done.returncode != 0:
+            return None
+        for line in (done.stdout or "").splitlines():
+            parts = line.split("\t")
+            if len(parts) == 3 and parts[0] == name:
+                try:
+                    return int(parts[1]), int(parts[2])
+                except ValueError:
+                    return None
+        return None
+
     def send_literal(name, text):
         import uuid
         buffer_name = 'fleet-' + uuid.uuid4().hex
@@ -600,4 +658,5 @@ def default_probes(process_name: str = "claude", tmux_socket=_FROM_ENV, *,
                   has_session=has_session,
                   start_session=start_session,
                   kill_session=kill_session,
-                  pane_pid=pane_pid)
+                  pane_pid=pane_pid,
+                  attachment=attachment)
