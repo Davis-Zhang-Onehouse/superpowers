@@ -914,3 +914,18 @@ class TestNeedsAHumanUsesKnownFacts(unittest.TestCase):
                       "this case must reach `_live_state`'s codex branch, not the earlier dialog return")
         self.assertNotIn("NO WATCHER", subject.note,
                          "a codex claim collected the disregard sentence beside the codex note")
+
+    def test_a_missing_folder_outranks_a_busy_pane(self):
+        """`RV-47`. The missing-folder branch is decided before `_live_state`, so it wins over `busy` — the
+        opposite of the rule the same function applies to a park (`OBS-3`), and deliberately: a worker
+        mid-turn whose instant folder is gone will still be refused by every verb it runs at the end of that
+        turn, and the folder does not come back on its own. Fact 1 got exactly this control; fact 2 did not,
+        and nothing pinned the ordering."""
+        path = self.worker("goneBusy-07300545", "dt-goneBusy", 5245, pane=BUSY_PANE)
+        shutil.rmtree(path)
+
+        subject = self.subjects()["goneBusy-07300545"]
+
+        self.assertEqual(subject.state, BLOCKED,
+                         f"a busy pane hid a missing instant folder: {subject.state} / {subject.note!r}")
+        self.assertIn(path.name, subject.note)
