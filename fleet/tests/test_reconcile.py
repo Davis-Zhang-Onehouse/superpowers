@@ -840,3 +840,34 @@ class TestNeedsAHumanUsesKnownFacts(unittest.TestCase):
 
         self.assertEqual(subject.state, BLOCKED, f"{subject.state}: {subject.note!r}")
         self.assertNotIn("NO WATCHER", subject.note)
+
+    def test_a_failed_pane_capture_is_not_read_as_an_absent_watcher(self):
+        """`RV-42`/`FI-7`. `sessions.pane` flattens a FAILED capture to `""`, and a caller that BRANCHES on
+        emptiness must not. A capture that failed is NOT MEASURED — nothing was observed about the pane, so
+        nothing was observed about its watcher either — and reading it as "no watcher" would take a real CI
+        waiter's cap exemption away on a tmux hiccup. Before this case the claim was disregarded and the
+        note said NO WATCHER OBSERVABLE **on the pane**, about a pane that was never read."""
+        self.ci_worker("capfail-07300541", "dt-capfail", 5241, pane=WATCHED_PANE)
+        # the capture FAILS: the probe answers None, which is what a tmux that did not answer produces.
+        self.fleet.panes["dt-capfail"] = None
+        self.fleet.age("capfail-07300541", 2700)
+
+        subject = self.subjects()["capfail-07300541"]
+
+        self.assertEqual(subject.state, AWAITING_CI,
+                         f"a failed capture was read as an absent watcher: {subject.state} / "
+                         f"{subject.note!r}")
+        self.assertNotIn("NO WATCHER OBSERVABLE", subject.note)
+        self.assertIn("capture", subject.note.lower(),
+                      "the note does not say the pane could not be read")
+
+    def test_an_empty_pane_that_captured_cleanly_is_still_unwatched(self):
+        """The control that keeps RV-42's fix from swallowing the defect it guards: an EMPTY capture is an
+        observation, and an empty status line carries no watcher."""
+        self.ci_worker("capempty-07300542", "dt-capempty", 5242, pane="")
+        self.fleet.age("capempty-07300542", 2700)
+
+        subject = self.subjects()["capempty-07300542"]
+
+        self.assertEqual(subject.state, IDLE, f"{subject.state}: {subject.note!r}")
+        self.assertIn("NO WATCHER OBSERVABLE", subject.note)
