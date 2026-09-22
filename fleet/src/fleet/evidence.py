@@ -75,13 +75,15 @@ def locate(item, anchor):
     if is_url(item):
         return None
     path = Path(str(item))
-    if path.is_absolute():
-        return _through_rename(path)
-    folder = _folder(anchor)
-    if folder is None:
-        return None
-    found = folder / path
-    return found if found.exists() else None
+    if not path.is_absolute():
+        folder = _folder(anchor)
+        if folder is None:
+            return None
+        path = folder / path
+    #: Normalised first, so `a/../a/x` and `a/x` are one location and no `..` (with the proposer's folder name in
+    #: front of it) survives into an anchored item; then walked, so a RELATIVE item's own instant components
+    #: follow a rename exactly as an absolute item's do.
+    return _through_rename(Path(os.path.normpath(path)))
 
 
 def dangling(items, anchor) -> list:
@@ -116,18 +118,22 @@ def admit(items, proposer) -> list:
             continue
         path = Path(item)
         if not path.is_absolute():
-            if folder is not None and (folder / path).exists():
+            if folder is not None and locate(item, folder) is not None:
                 stored.append(item)
             else:
                 missing.append(f"{item!r} (relative, so looked for at {folder}/{item})" if folder is not None
                                else f"{item!r} (relative, but the proposing instant {proposer} does not "
                                     f"resolve, so there is no folder to look in)")
             continue
-        if not path.exists():
-            missing.append(f"{item!r} (absolute; no such file or directory)")
+        #: Through the rename, like `apply`: the coordinator re-proposing on a completed worker's behalf pastes
+        #: the worker's old `-inflight-` path, and refusing what `apply` would accept is a stricter producer
+        #: than consumer for no gain. Stored where it is NOW — relative when that is inside the proposer.
+        found = locate(item, None)
+        if found is None:
+            missing.append(f"{item!r} (absolute; no such file or directory, even through an instant rename)")
             continue
-        relative = _inside(path, folder)
-        stored.append(relative if relative is not None else item)
+        relative = _inside(found, folder)
+        stored.append(relative if relative is not None else str(found))
     if missing:
         raise BadInput(
             f"{len(missing)} evidence item(s) do not resolve: {'; '.join(missing)}. Evidence is a path a "

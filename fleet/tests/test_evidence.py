@@ -118,6 +118,31 @@ class TestThroughTheRename(EvidenceCase):
         (self.tasks / "shared.txt").write_text("s")
         self.assertEqual(["evidence", "../shared.txt"], evidence.admit(["evidence", "../shared.txt"], self.worker))
 
+    def test_a_relative_item_through_a_renamed_nested_instant_still_resolves(self):
+        """Final review Minor-1: the tail of a RELATIVE item is walked through renames too, not only its anchor."""
+        child = self.worker / "00000000-07300401-inflight-append-child"
+        (child / "evidence").mkdir(parents=True)
+        (child / "evidence" / "x.log").write_text("x")
+        self.assertEqual([f"{child.name}/evidence/x.log"], evidence.admit([f"{child.name}/evidence/x.log"], self.worker))
+        renamed = child.rename(self.worker / "00000000-07300401-complete-append-child")
+        self.assertEqual(renamed / "evidence" / "x.log", evidence.locate(f"{child.name}/evidence/x.log", self.worker))
+
+    def test_a_stale_absolute_path_that_resolves_through_the_rename_is_admitted(self):
+        """Final review Minor-2: the coordinator re-proposing on a completed worker's behalf pastes its old path."""
+        stale = str(self.worker / "evidence" / "proof.log")
+        coordinator = self.tasks / "00000000-07300300-inflight-append-coord"
+        coordinator.mkdir()
+        done = self.complete()
+        self.assertEqual([str(done / "evidence" / "proof.log")], evidence.admit([stale], coordinator))
+        self.assertEqual(["evidence/proof.log"], evidence.admit([stale], self.worker), "inside the proposer: relative")
+
+    def test_a_dotdot_item_is_located_normalised(self):
+        """Final review Minor-4: no `..` (and so no proposer name) survives into the anchored form."""
+        (self.tasks / "shared.txt").write_text("s")
+        self.assertEqual(str(self.tasks / "shared.txt"), evidence.anchored("../shared.txt", self.worker))
+        self.assertEqual(evidence.locate("evidence/proof.log", self.worker),
+                         evidence.locate("evidence/../evidence/proof.log", self.worker))
+
     def test_a_file_deleted_after_propose_dangles(self):
         (self.worker / "evidence" / "proof.log").unlink()
         self.assertEqual(["evidence/proof.log"], evidence.dangling(["evidence/proof.log"], self.worker))
