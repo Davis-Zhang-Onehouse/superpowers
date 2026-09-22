@@ -144,10 +144,20 @@ Entering the phase is gated: either this tool saw a watcher on the worker's pane
 could not see (`--watcher`). Both are recorded on the declaration, but ⚠️ **`fleet board` renders them
 identically** — the distinction lives on `fleet brief --instant <worker>`, and `i45` owns surfacing it here.
 
+A claim with **nothing observed on the pane and nothing recorded on the declaration** — a legacy
+declaration, or one the gate let through ungated — is no longer an `AWAITING-CI` row at all: `reconcile`
+disregards it, so the worker counts against the cap again and the ordinary detector decides the row — a quiet
+one ages into `IDLE`. The note says so. Writing `declare.json` by hand therefore buys nothing.
+
 So the row buys you less than it appears to. It does **not** promise the watcher is still alive, that it
 watches the right run, or that an attestation was true. A row sitting in `awaiting-ci` far longer than its CI
 takes is still yours to question — `brief` it before you assume either way. Do not read the phase as
 supervision; that assumption is what created this hazard in the first place.
+
+**A parked child is in the "needs you" count.** `fleet park --question` is a worker saying it cannot proceed
+without a decision, so `PARKED` is an actionable state and the banner counts it. Two other facts reach you the
+same way: a pane at an operator dialog (what `pane-guard` answers `15` for) and a live worker whose instant
+folder has gone missing both render `BLOCKED` with a note saying which. Answer the question, or the row stays.
 
 **Act on `attention`, report `info`.** Every checker row carries a severity. A finished milestone and a
 legitimately empty population are `info`. Treating them as alarms is how a green board comes to read as red

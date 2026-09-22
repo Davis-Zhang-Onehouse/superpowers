@@ -41,6 +41,11 @@ BUSY_PANE = "\n".join(["reading src/fleet/pool.py", "Thinking...", "  esc to int
 #: A pane that is neither working nor waiting for a keystroke. The state a CI waiter's pane is really in
 #: — and therefore the exact shape a guard must NOT read a phase out of (`M-46`).
 QUIET_PANE = "\n".join(["compiled 42 files", "wrote target/fleet.jar", "done"])
+#: A quiet pane with an armed watcher on its status line: the shape a legitimate `awaiting-ci` claim has.
+#: `B06`: a claim with no watcher observed and none recorded is disregarded by `reconcile` and counts
+#: against the cap, so every fixture that means "a real CI wait" has to show what is watching it.
+WATCHED_PANE = "\n".join(["gh run watch 1234 --exit-status", "",
+                          "  auto mode on · 1 monitor · ? for shortcuts"])
 
 #: Prose claiming the phase, with no declaration behind it. `RCF-9`: a worker declared `Phase:
 #: AWAITING-CI` exactly as its brief worded it, a leading `## ` defeated the consumer's regex, and at a
@@ -201,7 +206,7 @@ class GuardCase(unittest.TestCase):
 
         # THE cell `M-44` disagrees on: a re-derived count that forgets the exclusion refuses here.
         waiter = self.fleet()
-        waiter.worker("ciWaiter", slot="ws1", phase="awaiting-ci", pane=QUIET_PANE)
+        waiter.worker("ciWaiter", slot="ws1", phase="awaiting-ci", pane=WATCHED_PANE)
         cells.append(("one DECLARED ci waiter, cap has room", waiter.ctx()))
 
         undeclared = self.fleet()
@@ -215,7 +220,7 @@ class GuardCase(unittest.TestCase):
         # The unfoldable cell: the cap has room and the dispatch must still be refused.
         parked_compaction = self.fleet()
         parked_compaction.worker("foldTheStack", optype="compact", slot="ws1",
-                                 phase="awaiting-ci", pane=QUIET_PANE)
+                                 phase="awaiting-ci", pane=WATCHED_PANE)
         cells.append(("a compaction awaiting CI", parked_compaction.ctx()))
 
         completed_compaction = self.fleet()
@@ -227,7 +232,7 @@ class GuardCase(unittest.TestCase):
         cells.append(("another effort's worker", foreign.ctx()))
 
         full = self.fleet(slots=1)
-        full.worker("ciWaiter", slot="ws1", phase="awaiting-ci", pane=QUIET_PANE)
+        full.worker("ciWaiter", slot="ws1", phase="awaiting-ci", pane=WATCHED_PANE)
         cells.append(("every enrolled slot leased", full.ctx()))
 
         disagree = self.fleet()
@@ -240,7 +245,7 @@ class GuardCase(unittest.TestCase):
 
         overridden = self.fleet()
         overridden.worker("foldTheStack", optype="compact", slot="ws1",
-                          phase="awaiting-ci", pane=QUIET_PANE)
+                          phase="awaiting-ci", pane=WATCHED_PANE)
         cells.append(("a compaction, overridden with a stated reason",
                       overridden.ctx(override_reason="the rebase landed at 04:10; I checked the log")))
 
@@ -258,7 +263,7 @@ class TestInterrogation(GuardCase):
         # The probe's failure mode is doing the thing you were checking you could not do.
         fleet = self.fleet(slots=3)
         fleet.worker("solo", slot="ws1")
-        fleet.worker("ciWaiter", slot="ws2", phase="awaiting-ci", pane=QUIET_PANE)
+        fleet.worker("ciWaiter", slot="ws2", phase="awaiting-ci", pane=WATCHED_PANE)
         fleet.worker("foldTheStack", optype="compact", live=False, launched=False)
         ctx = fleet.ctx(profile=fleet.profile("compaction"), optype="append")
 
@@ -291,7 +296,7 @@ class TestInterrogation(GuardCase):
         # A refusal that does not name what blocks it cannot be acted on.
         fleet = self.fleet()
         folder = fleet.worker("foldTheStack", optype="compact", slot="ws1",
-                              phase="awaiting-ci", pane=QUIET_PANE)
+                              phase="awaiting-ci", pane=WATCHED_PANE)
         ctx = fleet.ctx()
 
         with self.assertRaises(Refused) as caught:
@@ -362,7 +367,7 @@ class TestTheCap(GuardCase):
         # The declaration is the whole bargain: at a cap of 1 an undeclared waiter holds the effort's
         # only dev slot for the length of a CI queue.
         fleet = self.fleet()
-        fleet.worker("ciWaiter", slot="ws1", phase="awaiting-ci", pane=QUIET_PANE)
+        fleet.worker("ciWaiter", slot="ws1", phase="awaiting-ci", pane=WATCHED_PANE)
         path = fleet.paths["ciWaiter"]
         self.assertEqual(Declarations(path).phase(), "awaiting-ci")
 
@@ -397,7 +402,7 @@ class TestTheCap(GuardCase):
         # attention, has room, and the dispatch is refused anyway.
         fleet = self.fleet()
         folder = fleet.worker("foldTheStack", optype="compact", slot="ws1",
-                              phase="awaiting-ci", pane=QUIET_PANE)
+                              phase="awaiting-ci", pane=WATCHED_PANE)
         ctx = fleet.ctx()
 
         cap = WipCap().evaluate(ctx)
@@ -478,7 +483,7 @@ class TestTheCap(GuardCase):
         # "'The cap says I have room' is not an answer to 'may I dispatch?'"
         fleet = self.fleet()
         fleet.worker("foldTheStack", optype="compact", slot="ws1",
-                     phase="awaiting-ci", pane=QUIET_PANE)
+                     phase="awaiting-ci", pane=WATCHED_PANE)
         verdicts = evaluate_all(fleet.ctx(), "dispatch")
 
         names = [v.guard for v in verdicts]
@@ -620,7 +625,7 @@ class TestExitCodes(GuardCase):
         self.assertEqual((EXIT_NO_CAPACITY, EXIT_REFUSED), (3, 4))
 
         full = self.fleet(slots=1)
-        full.worker("ciWaiter", slot="ws1", phase="awaiting-ci", pane=QUIET_PANE)
+        full.worker("ciWaiter", slot="ws1", phase="awaiting-ci", pane=WATCHED_PANE)
         self.assertEqual(full.pool.free_slots(), [])
         with self.assertRaises(NoCapacity) as no_capacity:
             enforce_all(full.ctx(), "dispatch")
@@ -630,7 +635,7 @@ class TestExitCodes(GuardCase):
 
         blocked = self.fleet(slots=2)
         blocked.worker("foldTheStack", optype="compact", slot="ws1",
-                       phase="awaiting-ci", pane=QUIET_PANE)
+                       phase="awaiting-ci", pane=WATCHED_PANE)
         self.assertTrue(blocked.pool.free_slots(), "this fixture must have capacity to be about policy")
         with self.assertRaises(Refused) as refused:
             enforce_all(blocked.ctx(), "dispatch")
@@ -710,7 +715,7 @@ class TestTheCapUnderAClaim(GuardCase):
         # is where it would silently be lost: an AWAITING-CI worker keeps its lease, so a population that
         # counted leases rather than deduplicating against records would count it again.
         fleet = self.fleet(slots=3)
-        fleet.worker("ciWaiter", slot="ws1", phase="awaiting-ci", pane=QUIET_PANE)
+        fleet.worker("ciWaiter", slot="ws1", phase="awaiting-ci", pane=WATCHED_PANE)
         self.claims(fleet, "ws2")
         verdict = self.verdict_of(evaluate_all(fleet.ctx(cap=1).under_claim("ws2"), "dispatch"),
                                   "wip-cap")

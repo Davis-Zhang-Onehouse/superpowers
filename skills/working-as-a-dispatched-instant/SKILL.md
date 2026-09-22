@@ -147,6 +147,11 @@ Your attestation is stored verbatim and `fleet brief` reports it, labelled ATTES
 an attested claim from an observed one (`i45` owns that). So the attestation is only as good as your
 honesty, and nothing downstream will catch it if it is false.
 
+**A claim nothing backs is disregarded, not believed.** With no watcher observed on your pane and none
+recorded on the declaration, `reconcile` sets the phase aside: your row is not `AWAITING-CI`, you count
+against the WIP cap again, and if your pane is quiet you age into `IDLE` like any other worker. So writing `declare.json` by hand
+buys nothing, and a `--watcher` attestation that stops being true is worth un-declaring.
+
 Do not reach for it to skip arming a monitor you could have armed. The flag exists so a *correct* claim the
 predicate cannot see stays cheap and honest — and so nobody is tempted to write `declare.json` by hand,
 which records no judgement at all.
