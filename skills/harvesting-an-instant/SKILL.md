@@ -65,7 +65,8 @@ the worker's claim on a milestone it left unfinished, so no closed instant holds
 already applied it: `running` is progress, not a final word, and closing the worker then would lose the
 outcome. The remedy is a final status through `fleet propose --instant <worker> --milestone <m> --status
 <s> --evidence <path>` — it still works on the `-complete-` folder, and you may run it on the worker's
-behalf: `done` or `awaiting-ci` for finished work, `blocked` or `ready` to return it to the queue, `dropped`
+behalf, but AS the worker (`--instant <worker>`): a row you propose as yourself does not count as its report.
+`done` or `awaiting-ci` for finished work, `blocked` or `ready` to return it to the queue, `dropped`
 to write it off. `fleet abort` does not help here; it only takes an `-inflight-` folder. A worker that
 handed off at `awaiting-ci` is closed out, and its milestone stays undispatchable until you move the status
 — that part is your call, not harvest's.

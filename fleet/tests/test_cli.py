@@ -3266,13 +3266,19 @@ class TestTheDispatchMilestoneJoin(CliCase):
         base that row at least stayed visible in the inbox and the stale owner kept the milestone loud. The
         guard's answer must not depend on who applied first, nor change across harvest's own apply (a retry)."""
         fleet = self.loaded()
-        coordinator, todo, _, _ = self._reported_and_finished(fleet, "running")
+        coordinator, todo, child, _ = self._reported_and_finished(fleet, "running")
 
         code, out, err = fleet.run(["harvest", "--id", todo, "--porcelain"])
 
         self.assertIn("harvest-refused", out,
                       f"a worker whose last word was `running` (pending) was harvested: {out}")
         self.assertIn("other than", out, "the remedy must say a `running` re-report will not clear it")
+        #: A refusal changes NOTHING: the report stays pending and visible, the milestone and the claim as
+        #: they were — which is the property that made this case loud on the base.
+        roadmap = Roadmap(coordinator)
+        self.assertEqual(["running"], [p.status for p in roadmap.proposals() if p.instant == child])
+        self.assertEqual("blocked", roadmap.milestone("M9").status)
+        self.assertEqual(child, roadmap.milestone("M9").owner, "a refused harvest released the claim")
 
     def test_harvest_dry_run_previews_the_claim_it_would_give_back_and_changes_nothing(self):
         fleet = self.loaded()
