@@ -54,6 +54,13 @@ failure reaches for the one flag that could take a slot somebody is still workin
 **`fleet harvest` exiting 1 does not mean it failed.** Read the `harvested … info` row for the outcome;
 the exit status can be dominated by an unrelated standing violation.
 
+**`fleet harvest` applies what you left.** Any proposal the worker delivered to your inbox that you have not
+applied is applied by the harvest, in the order it arrived — `harvest --id <todo> --dry-run` counts them
+first. So applying first (step 2 below) is where your judgement goes; harvest is not a way to skip a row.
+The one exception it holds back is a row that would move a `done` or `dropped` milestone: it stays pending
+and harvest reports it, because that is the silent regression step 2 exists to catch. It also gives back
+the worker's claim on a milestone it left unfinished, so that milestone can be dispatched again.
+
 ## Never close on one pane sample
 
 Require **three consecutive** non-wait samples from `fleet pane-guard`, and check attachment separately.
