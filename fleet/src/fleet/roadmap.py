@@ -789,9 +789,11 @@ class Roadmap:
                     clears_when="the coordinator applies the proposal (single writer)",
                     clears_who=COORDINATOR, **about))
 
+        #: Counted from the `ready` rows already built (`B04`), so the number and the rows agree by construction.
+        ready = sum(1 for r in rows if r.kind == READY)
         rows.append(Row(
             kind=POPULATION, subject=str(self.instant),
-            detail=(f"examined {len(milestones)} milestone(s) of which {len(self.ready())} ready, "
+            detail=(f"examined {len(milestones)} milestone(s) of which {ready} ready, "
                     f"{len(pending)} pending proposal(s) ({superseded} superseded, {stale} against a "
                     f"terminal milestone), from {self.path}"),
             severity=INFO))
