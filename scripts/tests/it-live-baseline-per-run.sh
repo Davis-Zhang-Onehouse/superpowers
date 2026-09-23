@@ -77,6 +77,25 @@ section Q2 none
 unset IT_RUN_ID
 want "a dt- loss between two sections of ONE run FAILs" Q2 Q2-enter FAIL "dt-between"
 
+# --- sourcing lib.sh in a shell does not make that shell's later sections one run (RV-25) -----------------
+# The recovery helper `it_rebaseline_live_tmux` is used by sourcing lib.sh. If sourcing EXPORTED the id it
+# mints, every section later started from that shell would share it, and FB-60 would return exactly: a dt-
+# session harvested between two of them FAILs the second. Only an explicit `export IT_RUN_ID` (run-all.sh,
+# or the Q case above) groups sections into one run.
+tmux new-session -d -s dt-harvested
+IT="$TMP/it" TMP="$TMP" bash -c '
+  . "$IT/lib.sh"
+  IT_RESULTS="$TMP/results-Y1.tsv" bash "$TMP/runner.sh" Y1 none
+  tmux kill-session -t =dt-harvested
+  IT_RESULTS="$TMP/results-Y2.tsv" bash "$TMP/runner.sh" Y2 none
+' >/dev/null 2>&1
+want "a shell that sourced lib.sh does not turn its later sections into one run" Y2 Y2-enter PASS "BETWEEN runs"
+# The other half: the orchestrator DOES join its runners into one run, or ISOLATION-ALL's between-section
+# coverage would silently become between-runs forgiveness. Asserted on the shipped file, not a copy.
+awk '/\. "\$IT_ROOT\/lib.sh"/ {src=NR} /^export IT_RUN_ID$/ && src {ok=1} END {exit !ok}' "$REPO/fleet/it/run-all.sh" \
+  && note "ok   run-all.sh exports the run id it sourced, so its runners are one run" \
+  || { note "FAIL run-all.sh does not export IT_RUN_ID after sourcing lib.sh; its sections would each be a separate run"; fails=1; }
+
 # --- a harness-prefixed session left on the live server is a FAIL across runs too, and keeps firing -------
 tmux new-session -d -s itfleet-Z-leaked
 section R1 none
