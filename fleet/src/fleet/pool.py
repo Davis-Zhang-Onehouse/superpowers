@@ -597,20 +597,23 @@ class Pool:
         held = self.lease(slot)
         return [] if held is None else list(self._cwd_probe(held.path))
 
-    def release_refusal(self, slot: str, spare=()) -> "Optional[Refused]":
+    def release_refusal(self, slot: str, spare=(), holders=None) -> "Optional[Refused]":
         """The `OBS-48` refusal `release` would raise for `slot` right now, or None — read-only.
 
         `B10`. The one gate `release` evaluates, exposed so a caller can ask it BEFORE doing anything
         irreversible, and so a `--dry-run` can evaluate the same predicate the real call does instead of
         returning above it. `spare` names pids the caller is about to end itself (`abort` kills the
         worker's own session first), which therefore will not be holding the slot when `release` runs.
+        `holders` is a scan the caller already took (`RV-21`): `spare` was computed from it, and a second
+        scan would count a child born in between as foreign.
         """
         held = self.lease(slot)
-        return None if held is None else self._cwd_refusal(slot, held, spare)
+        return None if held is None else self._cwd_refusal(slot, held, spare, holders)
 
-    def _cwd_refusal(self, slot: str, held, spare=()) -> "Optional[Refused]":
+    def _cwd_refusal(self, slot: str, held, spare=(), holders=None) -> "Optional[Refused]":
         spared = set(spare)
-        pids = [p for p in self._cwd_probe(held.path) if p not in spared]
+        scanned = self._cwd_probe(held.path) if holders is None else holders
+        pids = [p for p in scanned if p not in spared]
         if not pids:
             return None
         return Refused(

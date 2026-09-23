@@ -2336,6 +2336,24 @@ class TestAbortDryRunEvaluatesTheRealGate(CliCase):
         self.assertEqual(code, EXIT_OK, f"{out}{err}")
         self.assertIsNone(fleet.pool.lease("ws7"))
 
+    def test_a_child_born_between_two_scans_is_not_read_as_foreign(self):
+        """`RV-21`. The session's own processes and the refusal were read from two separate `/proc` scans,
+        so a busy worker's child born between them read as foreign: a spurious wait, or a spurious refusal
+        when it keeps happening. One scan now feeds both."""
+        fleet = self.loaded()
+        instant = fleet.worker("busyWorker", slot="ws7")
+        self._attributable(fleet, {7002: self.PANE, 7003: self.PANE, 7004: self.PANE})
+        scans = []
+
+        def a_new_child_every_scan(path):
+            scans.append(path)
+            return [self.PANE] + [7001 + n for n in range(1, len(scans))]
+        fleet.pool._cwd_probe = a_new_child_every_scan
+
+        code, out, err = fleet.run(["abort", "--dry-run", "--instant", str(instant), "--reason", "busy"])
+        self.assertEqual(code, EXIT_OK, f"{out}{err}")
+        self.assertEqual(fleet.slept, [], "a child born between two scans cost a wait: it read as foreign")
+
     def test_a_dead_session_leaves_every_holder_foreign(self):
         """No session to kill means nothing the abort does can free the slot: both calls refuse, alike."""
         fleet = self.loaded()

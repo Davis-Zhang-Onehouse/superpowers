@@ -3195,7 +3195,8 @@ def _slot_gate_before_kill(ctx: Ctx, record, child: Path, verb: str) -> str:
                           f"pid or parent walk), so the cwd-holder gate could not be decided before the "
                           f"kill; the real call closes the session, then releases, and names the partial "
                           f"state if a holder remains")
-        return ctx.pool.release_refusal(record.slot, spare=own), ""
+        #: `RV-21`. The same scan `own` was computed from — a second one would read a newborn child as foreign.
+        return ctx.pool.release_refusal(record.slot, spare=own, holders=pids), ""
 
     found, undecided = refusal()
     if found is None:
