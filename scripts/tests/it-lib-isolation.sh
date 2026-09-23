@@ -68,6 +68,15 @@ check "between runs, an IT-prefixed session appearing is still a LEAK" "FAIL" "$
 out="$(classify_between $'dt-live\nitfleet-W1-ghost\nzsh' $'zsh')"
 check "between runs, a harness-prefixed session vanishing is still a FAIL" "FAIL" "${out%%|*}"
 
+# --- the evidence path an ISOLATION row cites is the snapshot the comparison USED (RV-29) -----------------
+# W1-7 and W1-11 repoint LIVE_TMUX_SNAPSHOT into their own out/ directory; a row naming
+# `fleet/it/<basename>` sends the reader to a file that does not exist.
+out="$(bash -c '. "'"$REPO"'/fleet/it/lib.sh" 2>/dev/null
+  LIVE_TMUX_SNAPSHOT="$IT_ROOT/W1/out/W1-7-baseline-doctored.txt"; a="$(it_tmux_snapshot_evidence)"
+  LIVE_TMUX_SNAPSHOT="/elsewhere/x.txt"; b="$(it_tmux_snapshot_evidence)"
+  printf "%s|%s" "$a" "$b"' 2>/dev/null)"
+check "a repointed snapshot is cited by its real path" "fleet/it/W1/out/W1-7-baseline-doctored.txt|/elsewhere/x.txt" "$out"
+
 # --- a non-dt session disappearing is a note ---------------------------------------------------------
 out="$(classify $'dt-live\nzsh' $'dt-live')"
 check "a non-dt session disappearing is a NOTE" "NOTE" "${out%%|*}"
