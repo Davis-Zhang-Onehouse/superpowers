@@ -1,6 +1,6 @@
 # tests/test_identity.py
 import pathlib, tempfile, unittest
-from fleet.identity import InstantName, camel, resolve, ROOT_BASE
+from fleet.identity import InstantName, camel, resolve, same_instant, ROOT_BASE
 from fleet.errors import InstantNameError, AmbiguousId
 
 GOOD = "00000000-07300312-inflight-append-fleetInfraRebuild"
@@ -144,3 +144,21 @@ class TestResolve(unittest.TestCase):
             (self.tmp / f"00000000-07300312-{st}-append-fleetInfraRebuild").mkdir()
         with self.assertRaises(AmbiguousId):
             resolve(self.tmp / GOOD)
+
+
+class TestSameInstant(unittest.TestCase):
+    """`B08`. Two records of one instant written either side of its own rename differ in `state` alone."""
+
+    P = pathlib.Path("/x/instants")
+
+    def test_one_instant_across_a_rename(self):
+        a = self.P / "00000000-07300400-inflight-append-workerOne"
+        self.assertTrue(same_instant(a, self.P / "00000000-07300400-complete-append-workerOne"))
+        self.assertTrue(same_instant(str(a), a))
+
+    def test_different_instants_and_different_parents_are_not_one(self):
+        a = self.P / "00000000-07300400-inflight-append-workerOne"
+        self.assertFalse(same_instant(a, self.P / "00000000-07300400-inflight-append-workerTwo"))
+        self.assertFalse(same_instant(a, pathlib.Path("/y") / a.name.replace("inflight", "complete")))
+        self.assertFalse(same_instant(a, None))
+        self.assertFalse(same_instant("the worker", "the other"))
