@@ -1125,6 +1125,20 @@ class TestTheWatcherIsClassifiedFromWhatIsTrue(unittest.TestCase):
         self.assertEqual(subject.state, AWAITING_CI, f"{subject.state}: {subject.note!r}")
         self.assertIn("could not be read", subject.note)
 
+    def test_a_malformed_pid_handle_is_not_measured_and_never_crashes_the_board(self):
+        """`RV-C5`. `declare.json` is a file; one hand-edited or truncated `watcher_pid` raised TypeError out of
+        `reconcile` and took down `fleet board` for EVERY row. A handle that cannot be read is NOT MEASURED."""
+        for n, bad in enumerate(({"pid": None}, "pid:4247", {"pid": "x"}, ["pid"])):
+            self.fleet = SyntheticFleet()                  # ws9 is taken once per fleet
+            todo = f"pidbad{n}-0730062{n}"
+            self.ci_worker(todo, f"dt-pidbad{n}", 5320 + n, watchers="attested: gate pid:4247",
+                           watcher_pid=bad)
+
+            subject = self.subjects()[todo]
+
+            self.assertEqual(subject.state, AWAITING_CI, f"{bad!r}: {subject.state} {subject.note!r}")
+            self.assertIn("could not be read", subject.note, f"{bad!r}: {subject.note!r}")
+
     def test_a_free_text_attestation_stays_attested_and_says_nothing_rechecks_it(self):
         """Control: a cron has no handle fleet can check. It stays trusted, and says it is unchecked."""
         self.ci_worker("freetext-07300616", "dt-freetext", 5316,

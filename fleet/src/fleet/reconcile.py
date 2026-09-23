@@ -602,7 +602,7 @@ def pid_start(pid) -> tuple:
         raw = (Path(PROC_ROOT) / str(int(pid)) / "stat").read_text(encoding="utf-8", errors="replace")
     except FileNotFoundError:
         return PID_GONE, ""
-    except (OSError, ValueError):
+    except (OSError, ValueError, TypeError):
         return PID_UNREADABLE, ""
     #: The command name is parenthesised and may itself contain spaces or `)`, so split after the LAST `)`.
     fields = raw.rpartition(")")[2].split()
@@ -617,8 +617,13 @@ def attested_pid_status(handle) -> tuple:
     """`(status, sentence)` for an attestation's recorded pid handle (`Declarations.watcher_pid`), or
     `(None, "")` when it named none. A pid that is running but started at a different moment from the one
     recorded at the claim is a RECYCLED pid, and the watcher it named is GONE."""
-    if not handle or "pid" not in handle:
+    if not handle:
         return None, ""
+    #: `RV-C5`. `declare.json` is a file anyone can edit; a handle of the wrong shape raised TypeError out of
+    #: here and took `fleet board` down for every row. It cannot be read, so it is NOT MEASURED.
+    if not isinstance(handle, dict) or not isinstance(handle.get("pid"), int) or isinstance(handle["pid"], bool):
+        return PID_UNREADABLE, (f"its recorded pid handle {handle!r} is malformed and could not be read — NOT "
+                                f"MEASURED, so the attestation stands")
     pid = handle["pid"]
     status, start = pid_start(pid)
     if status == PID_RUNNING and handle.get("start") and start != str(handle["start"]):
