@@ -17,6 +17,7 @@ import shutil
 import tempfile
 import time
 import unittest
+from unittest import mock
 from dataclasses import fields as dataclass_fields
 
 from fleet.guards import CAP_EXCLUDED_STATES
@@ -490,7 +491,7 @@ class _FakeWatcherSessions:
 
 
 class TestAwaitingCiNote(unittest.TestCase):
-    """`_awaiting_note` directly. `working-as-a-dispatched-instant` names this gap as owned by `i45`:
+    """`_awaiting_note` directly. `i45` owned this gap, which `working-as-a-dispatched-instant` used to name:
     `reconcile` rendered every `awaiting-ci` row as the SAME constant note regardless of whether anything
     was actually observed on the pane. Measured: a Monitor that emitted zero events for 7.7h and a
     self-matching wait shell that outlived its job both rendered as a healthy wait, and the cost was
@@ -526,14 +527,21 @@ class TestAwaitingCiNote(unittest.TestCase):
         return _awaiting_note(pane, sessions, self.instant, stale_after_s=stale_after_s, now=now_epoch)
 
     def test_awaiting_ci_distinguishes_observed_attested_and_absent_watchers(self):
-        """`working-as-a-dispatched-instant` already warns that `fleet board` renders an attested claim
-        identically to an observed one, and names i45 as the owner. This is i45."""
+        """`i45`: `fleet board` rendered an attested claim identically to an observed one, which
+        `working-as-a-dispatched-instant` used to warn about. B07 made the board re-check both."""
         self.assertIn("watcher observed",
                       self.note(phase="awaiting-ci", pane="... 1 monitor ... esc to interrupt"))
+        #: `B07`. The attestation carries `declare --watcher`'s prefix: stored BARE, a record means a watcher
+        #: this tool OBSERVED at the claim, and this fixture used to depict an attestation in that shape —
+        #: one `declare` never writes, and the reason the defect had no failing case.
         self.assertIn("ATTESTED, not observable",
-                      self.note(phase="awaiting-ci", pane="no status line", attested="cron every 10m"))
+                      self.note(phase="awaiting-ci", pane="no status line",
+                                attested="attested: cron every 10m"))
         self.assertIn("NO WATCHER OBSERVABLE",
                       self.note(phase="awaiting-ci", pane="no status line"))
+        self.assertIn("NO WATCHER OBSERVABLE",
+                      self.note(phase="awaiting-ci", pane="no status line", attested="1 monitor"),
+                      "a watcher observed at the claim and gone from the pane read as trusted")
 
     def test_a_wait_older_than_the_threshold_is_flagged_stale(self):
         note = self.note(phase="awaiting-ci", pane="... 1 monitor ...",
@@ -955,6 +963,245 @@ class TestNeedsAHumanUsesKnownFacts(unittest.TestCase):
         self.assertEqual(subject.state, RUNNING,
                          f"a record with no recorded folder was reported {subject.state}: {subject.note!r}")
         self.assertEqual(subject.note, "", f"an empty folder name reached the note: {subject.note!r}")
+
+
+def _fake_proc(root, pid, state="S", start="777", comm="release gate"):
+    """A `/proc/<pid>/stat` in a private tree, so no case here starts or kills a process (module docstring).
+    Twenty-two fields: `state` is field 3 and `starttime` field 22, the two `reconcile` reads."""
+    d = pathlib.Path(root) / str(pid)
+    d.mkdir(parents=True, exist_ok=True)
+    after_comm = [state] + ["0"] * 18 + [start, "0", "0"]      # index 0 is field 3, index 19 is field 22
+    (d / "stat").write_text(f"{pid} ({comm}) " + " ".join(after_comm) + "\n")
+
+
+def _declare_json(path, **fields):
+    """Merge fields into an instant's `declare.json` directly: the shape a claim leaves on disk, so a case can
+    describe it without depending on the writer under test (and fails on an ASSERTION where the reader is wrong)."""
+    target = pathlib.Path(path) / ".fleet" / "declare.json"
+    target.parent.mkdir(parents=True, exist_ok=True)
+    data = json.loads(target.read_text()) if target.exists() else {}
+    data.update(fields)
+    target.write_text(json.dumps(data))
+
+
+class TestTheWatcherIsClassifiedFromWhatIsTrue(unittest.TestCase):
+    """`B07` + `FB-58`. An `awaiting-ci` claim's watcher was classified from what was RECORDED, not from what
+    is TRUE. Re-measure scenC C5: a watcher OBSERVED at the claim is stored bare, `_watcher_of` read only
+    whether anything was recorded, so once it vanished from the pane the row read *"watcher ATTESTED, not
+    observable: 1 monitor"* — the trusted branch, keeping the WIP-cap exemption. `FB-58` (r3 release worker
+    OI-10): an attestation outlived the harness task it named, and the claim stayed trusted until the worker
+    re-declared by hand. Each case drives the real join; each positive has its control beside it."""
+
+    def setUp(self):
+        self.fleet = SyntheticFleet()
+        scratch = tempfile.mkdtemp()
+        self.addCleanup(shutil.rmtree, scratch, True)
+        self.proc = pathlib.Path(scratch) / "proc"
+        self.proc.mkdir()
+        patcher = mock.patch("fleet.reconcile.PROC_ROOT", self.proc)
+        patcher.start()
+        self.addCleanup(patcher.stop)
+
+    def subjects(self, idle_after_s=1800):
+        return {s.identity: s for s in reconcile(
+            self.fleet.store, self.fleet.pool, self.fleet.sessions,
+            self.fleet.instants, idle_after_s=idle_after_s)}
+
+    def ci_worker(self, todo_id, tmux, pid, pane=QUIET_PANE, **declared):
+        stamp = todo_id.split("-")[1]
+        self.fleet.dispatch(todo_id, f"00000000-{stamp}-inflight-append-{todo_id.split('-')[0]}",
+                            "ws9", tmux)
+        self.fleet.launch(tmux, pid, "ws9", pane)
+        path = self.fleet.paths[todo_id]
+        Declarations(path).set_phase("awaiting-ci")
+        _declare_json(path, **declared)
+        return path
+
+    # --- B07: an OBSERVED watcher is re-checked, never promoted to ATTESTED ---------------------------
+
+    def test_an_observed_watcher_that_vanished_is_no_watcher(self):
+        """scenC C5, the falsifier. Stored bare = OBSERVED at the claim; not on the pane now = gone."""
+        self.ci_worker("vanished-07300601", "dt-vanished", 5301, watchers="1 monitor")
+
+        subject = self.subjects()["vanished-07300601"]
+
+        self.assertNotEqual(subject.state, AWAITING_CI,
+                            f"an observed watcher that vanished kept the exemption: {subject.note!r}")
+        self.assertNotIn(subject.state, CAP_EXCLUDED_STATES)
+        self.assertIn("NO WATCHER OBSERVABLE", subject.note)
+        self.assertIn("disregarded", subject.note)
+        self.assertIn("1 monitor", subject.note, "the note does not say WHICH watcher is gone")
+        self.assertNotIn("ATTESTED", subject.note,
+                         "a watcher this tool observed was relabelled as the claimant's word")
+
+    def test_an_observed_watcher_that_vanished_ages_into_idle(self):
+        self.ci_worker("vanishedold-07300602", "dt-vanishedold", 5302, watchers="1 monitor")
+        self.fleet.age("vanishedold-07300602", 2700)
+
+        subject = self.subjects()["vanishedold-07300602"]
+
+        self.assertEqual(subject.state, IDLE, f"{subject.state}: {subject.note!r}")
+        self.assertTrue(needs_a_human(subject))
+
+    def test_an_observed_watcher_still_on_the_pane_keeps_the_exemption(self):
+        """Control: the same record, the watcher still drawn."""
+        self.ci_worker("stillthere-07300603", "dt-stillthere", 5303, pane=WATCHED_PANE,
+                       watchers="1 monitor")
+        self.fleet.age("stillthere-07300603", 2700)
+
+        subject = self.subjects()["stillthere-07300603"]
+
+        self.assertEqual(subject.state, AWAITING_CI, f"{subject.state}: {subject.note!r}")
+        self.assertIn("watcher observed", subject.note)
+
+    def test_an_observed_record_with_a_failed_capture_is_not_measured(self):
+        """Control (`RV-42`/`FI-7`): the pane was never read, so nothing says the watcher is gone."""
+        self.ci_worker("obscapfail-07300604", "dt-obscapfail", 5304, pane=WATCHED_PANE,
+                       watchers="1 monitor")
+        self.fleet.panes["dt-obscapfail"] = None
+
+        subject = self.subjects()["obscapfail-07300604"]
+
+        self.assertEqual(subject.state, AWAITING_CI, f"{subject.state}: {subject.note!r}")
+        self.assertIn("capture", subject.note.lower())
+        self.assertNotIn("NO WATCHER", subject.note)
+
+    # --- FB-58: an ATTESTED watcher with a checkable handle is checked ------------------------------
+
+    def test_an_attested_watcher_whose_pid_is_gone_is_not_trusted(self):
+        self.ci_worker("pidgone-07300611", "dt-pidgone", 5311,
+                       watchers="attested: harness task running release-gate.sh pid:4242",
+                       watcher_pid={"pid": 4242, "start": "777"})
+
+        subject = self.subjects()["pidgone-07300611"]
+
+        self.assertNotEqual(subject.state, AWAITING_CI,
+                            f"an attested watcher whose pid exited kept the exemption: {subject.note!r}")
+        self.assertIn("4242", subject.note)
+        self.assertIn("GONE", subject.note)
+        self.assertIn("disregarded", subject.note)
+
+    def test_an_attested_pid_reused_by_another_process_is_gone(self):
+        """A pid alone is recycled; the start time recorded at the claim is what names THAT process."""
+        _fake_proc(self.proc, 4243, start="999")
+        self.ci_worker("pidreused-07300612", "dt-pidreused", 5312,
+                       watchers="attested: gate pid:4243", watcher_pid={"pid": 4243, "start": "777"})
+
+        subject = self.subjects()["pidreused-07300612"]
+
+        self.assertNotEqual(subject.state, AWAITING_CI, f"{subject.state}: {subject.note!r}")
+        self.assertIn("GONE", subject.note)
+
+    def test_an_attested_pid_that_is_a_zombie_is_gone(self):
+        """Exited and not yet reaped: it watches nothing."""
+        _fake_proc(self.proc, 4244, state="Z")
+        self.ci_worker("pidzombie-07300613", "dt-pidzombie", 5313,
+                       watchers="attested: gate pid:4244", watcher_pid={"pid": 4244, "start": "777"})
+
+        subject = self.subjects()["pidzombie-07300613"]
+
+        self.assertNotEqual(subject.state, AWAITING_CI, f"{subject.state}: {subject.note!r}")
+        self.assertIn("GONE", subject.note)
+
+    def test_an_attested_pid_still_running_keeps_the_exemption(self):
+        """Control: the same record while the process named is the one that was attested."""
+        _fake_proc(self.proc, 4245, start="777")
+        self.ci_worker("pidalive-07300614", "dt-pidalive", 5314,
+                       watchers="attested: gate pid:4245", watcher_pid={"pid": 4245, "start": "777"})
+        self.fleet.age("pidalive-07300614", 2700)
+
+        subject = self.subjects()["pidalive-07300614"]
+
+        self.assertEqual(subject.state, AWAITING_CI, f"{subject.state}: {subject.note!r}")
+        self.assertIn("ATTESTED", subject.note)
+        self.assertIn("running", subject.note)
+
+    def test_a_command_name_with_parentheses_and_spaces_is_parsed_after_the_last_paren(self):
+        """`RV-C6`. The comm field is free text: `sleep) Z 1 (x` would put a fake `Z` where a first-`)` split
+        reads the state, and call a running watcher a zombie."""
+        _fake_proc(self.proc, 4249, start="777", comm="gate) Z 1 (x")
+        self.ci_worker("parencomm-07300633", "dt-parencomm", 5333,
+                       watchers="attested: gate pid:4249", watcher_pid={"pid": 4249, "start": "777"})
+
+        subject = self.subjects()["parencomm-07300633"]
+
+        self.assertEqual(subject.state, AWAITING_CI, f"{subject.state}: {subject.note!r}")
+        self.assertIn("pid 4249 is running", subject.note)
+
+    def test_an_unreadable_attested_pid_is_not_measured(self):
+        """A read that FAILED is not a read that found nothing (`FI-7`): the attestation stands."""
+        (self.proc / "4246" / "stat").mkdir(parents=True)          # reading it raises, and not ENOENT
+        self.ci_worker("pidunread-07300615", "dt-pidunread", 5315,
+                       watchers="attested: gate pid:4246", watcher_pid={"pid": 4246, "start": "777"})
+
+        subject = self.subjects()["pidunread-07300615"]
+
+        self.assertEqual(subject.state, AWAITING_CI, f"{subject.state}: {subject.note!r}")
+        self.assertIn("could not be read", subject.note)
+
+    def test_the_state_and_the_note_come_from_one_classification(self):
+        """`RV-C2`. The state and the note each classified the watcher, so a pid exiting between the two `/proc`
+        reads gave an AWAITING-CI row whose note said the watcher was GONE — a note contradicting its own state
+        (`RV-43`). Simulated here by a classifier whose answer changes between calls."""
+        self.ci_worker("race-07300631", "dt-race", 5331, watchers="attested: gate pid:4248",
+                       watcher_pid={"pid": 4248, "start": "777"})
+        import fleet.reconcile as reconcile_mod
+        real = reconcile_mod._watcher_of
+        answers = [("attested", "gate pid:4248 (its pid 4248 is running)"),
+                   ("gone", "the attested watcher pid 4248 is GONE (it has exited since the claim)")]
+        calls = []
+
+        def racing(pane, sessions, instant, **kw):
+            if instant is None or "race" not in str(instant):
+                return real(pane, sessions, instant, **kw)
+            calls.append(1)
+            return answers[min(len(calls), len(answers)) - 1]
+
+        with mock.patch("fleet.reconcile._watcher_of", side_effect=racing):
+            subject = self.subjects()["race-07300631"]
+
+        if subject.state == AWAITING_CI:
+            self.assertNotIn("GONE", subject.note, f"the note contradicts its state: {subject.note!r}")
+        else:
+            self.assertIn("GONE", subject.note, f"{subject.state}: {subject.note!r}")
+
+    def test_an_attestation_recorded_before_handles_is_not_told_it_names_no_pid(self):
+        """`RV-C3`. A record written before `watcher_pid` existed can carry `pid=1234` in its TEXT with no handle
+        beside it. "it names no pid", printed next to text that names one, is false; what is true is that no
+        handle was RECORDED, so nothing re-checks it."""
+        self.ci_worker("legacypid-07300632", "dt-legacypid", 5332, watchers="attested: gate pid=1234")
+
+        subject = self.subjects()["legacypid-07300632"]
+
+        self.assertEqual(subject.state, AWAITING_CI, f"{subject.state}: {subject.note!r}")
+        self.assertNotIn("names no pid", subject.note)
+        self.assertIn("no pid handle was recorded", subject.note)
+
+    def test_a_malformed_pid_handle_is_not_measured_and_never_crashes_the_board(self):
+        """`RV-C5`. `declare.json` is a file; one hand-edited or truncated `watcher_pid` raised TypeError out of
+        `reconcile` and took down `fleet board` for EVERY row. A handle that cannot be read is NOT MEASURED."""
+        for n, bad in enumerate(({"pid": None}, "pid:4247", {"pid": "x"}, ["pid"])):
+            self.fleet = SyntheticFleet()                  # ws9 is taken once per fleet
+            todo = f"pidbad{n}-0730062{n}"
+            self.ci_worker(todo, f"dt-pidbad{n}", 5320 + n, watchers="attested: gate pid:4247",
+                           watcher_pid=bad)
+
+            subject = self.subjects()[todo]
+
+            self.assertEqual(subject.state, AWAITING_CI, f"{bad!r}: {subject.state} {subject.note!r}")
+            self.assertIn("could not be read", subject.note, f"{bad!r}: {subject.note!r}")
+
+    def test_a_free_text_attestation_stays_attested_and_says_nothing_rechecks_it(self):
+        """Control: a cron has no handle fleet can check. It stays trusted, and says it is unchecked."""
+        self.ci_worker("freetext-07300616", "dt-freetext", 5316,
+                       watchers="attested: cron 0,30 * * * * gh-run-poll")
+        self.fleet.age("freetext-07300616", 2700)
+
+        subject = self.subjects()["freetext-07300616"]
+
+        self.assertEqual(subject.state, AWAITING_CI, f"{subject.state}: {subject.note!r}")
+        self.assertIn("ATTESTED", subject.note)
+        self.assertIn("no pid handle was recorded", subject.note)
 
 
 class TestAnAttachedHumanIsNotAStuckWorker(unittest.TestCase):

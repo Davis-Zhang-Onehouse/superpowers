@@ -44,6 +44,10 @@ PATH="$IT_ROOT/bin:$PATH"; export PATH
 cleanup_F() {
   it_cleanup_tmux
   tmux -L "$IT_TMUX_SOCKET" kill-server 2>/dev/null
+  #: `RV-C7`. F2c's watcher stand-in, if a run is interrupted between its spawn and its inline kill. Only
+  #: ever this section's own `$!`, cleared the moment it is reaped, so a recycled pid is never signalled.
+  [ -n "${F2C_PID:-}" ] && kill "$F2C_PID" 2>/dev/null
+  true
 }
 trap cleanup_F EXIT
 
@@ -169,6 +173,91 @@ else
   it_fail F2b "fleet/it/F/out/F2b-dispatch.out" \
     "declare_rc=$f2b_declare_rc board_rc=$f2b_board_rc dispatch_rc=$f2b_rc state='$f2b_state' (want RUNNING or IDLE for $W1_ID) disregarded=$f2b_disregarded note='$f2b_note'"
 fi
+# ==================================================================================================
+# F2c — AN ATTESTED WATCHER WITH A PID IS CHECKED.  `FB-58` (r3 release worker OI-10): an attestation
+#      outlived the harness task it named, and the claim stayed trusted until the worker re-declared by
+#      hand. `--watcher '... pid:<n>'` records the pid with its start time; once it exits, `reconcile`
+#      disregards the claim. Both arms on one worker: trusted while the pid runs, disregarded after.
+#      Asserted on the ROW (state + note), because the cap decides from the state and F2's dispatch has
+#      already filled the cap with W2 — a "dispatch still refused" here would be true for the wrong reason.
+# ==================================================================================================
+f2_row() {  # $1 = label: board once into a file, judge its exit status, read W1's row
+  fleet board --porcelain > "$OUT/$1-board.out" 2>&1
+  eval "${1}_board_rc=$?"
+  eval "${1}_state=\"\$(awk -F'\t' -v id=\"\$W1_ID\" '\$1==id {print \$3; exit}' \"\$OUT/$1-board.out\")\""
+  eval "${1}_note=\"\$(awk -F'\t' -v id=\"\$W1_ID\" '\$1==id {print \$7; exit}' \"\$OUT/$1-board.out\")\""
+}
+sleep 100000 & F2C_PID=$!                      # ours, and the only process this section signals
+F2C_WATCHED="$F2C_PID"                         # what the assertions name; F2C_PID is cleared once reaped
+rm -f "$W1/.fleet/declare.json"
+fleet declare --instant "$W1" --phase AWAITING-CI --watcher "release gate task pid:$F2C_PID" \
+      --porcelain > "$OUT/F2c-declare.out" 2>&1
+f2c_declare_rc=$?
+f2_row F2c_live
+kill "$F2C_PID" 2>/dev/null; wait "$F2C_PID" 2>/dev/null; F2C_PID=""
+f2_row F2c_gone
+f2c_ok=1
+[ "$f2c_declare_rc" = 0 ] && command grep -q "^watcher_pid	$F2C_WATCHED " "$OUT/F2c-declare.out" || f2c_ok=0
+[ "$F2c_live_board_rc" = 0 ] && [ "$F2c_live_state" = AWAITING-CI ] || f2c_ok=0
+case "$F2c_live_note" in *ATTESTED*"pid $F2C_WATCHED is running"*) ;; *) f2c_ok=0 ;; esac
+[ "$F2c_gone_board_rc" = 0 ] || f2c_ok=0
+case "$F2c_gone_state" in RUNNING|IDLE) ;; *) f2c_ok=0 ;; esac
+case "$F2c_gone_note" in *"pid $F2C_WATCHED is GONE"*disregarded*) ;; *) f2c_ok=0 ;; esac
+if [ "$f2c_ok" = 1 ]; then
+  it_pass F2c "fleet/it/F/out/F2c_gone-board.out" \
+    "an attested watcher naming pid $F2C_WATCHED was recorded with its start time and trusted while it ran ($W1_ID AWAITING-CI, note says the pid is running); after that process exited the SAME declaration reads $F2c_gone_state with 'attested watcher pid $F2C_WATCHED is GONE' and 'disregarded' — no re-declare by hand"
+else
+  it_fail F2c "fleet/it/F/out/F2c_gone-board.out" \
+    "declare_rc=$f2c_declare_rc live: rc=$F2c_live_board_rc state='$F2c_live_state' note='$F2c_live_note' | gone: rc=$F2c_gone_board_rc state='$F2c_gone_state' note='$F2c_gone_note'"
+fi
+
+# ==================================================================================================
+# F2d — AN OBSERVED WATCHER THAT VANISHES IS NOT RELABELLED ATTESTED.  `B07`, re-measure scenC C4/C5. A
+#      watcher this tool OBSERVED at the claim is stored bare; `reconcile` read only that SOMETHING was
+#      recorded, so once it left the status line the row read "watcher ATTESTED, not observable" — the
+#      trusted branch. The stub pane renders no status line, so W1's pane CONTENT is replaced with the
+#      frame the package's fixtures use (`tests/test_cli.py` WATCHED_PANE's shape), as scenC did; the
+#      session name, the private server, the capture and every fleet read are genuine.
+# ==================================================================================================
+W1_TMUX="$(awk -F'\t' '$1=="tmux"{print $2}' "$OUT/w1.out")"
+#: The slot W1 was leased, where the stub was started: a re-rendered pane keeps the cwd the lease join reads.
+#: (`tmux display -t =<name>` exits 0 with EMPTY output (measured on tmux 3.2a), so the
+#: path comes from the dispatch's own `slot` row and the section's slot layout instead.)
+W1_CWD="$OUT/slots/$(awk -F'\t' '$1=="slot"{print $2}' "$OUT/w1.out")"
+printf 'editing src/fleet/cli.py\nThinking...\n  auto mode on · 1 monitor · esc to interrupt · for agents\n' > "$OUT/F2d-watched.txt"
+printf 'editing src/fleet/cli.py\nidle\n  auto mode on · esc to interrupt · for agents\n' > "$OUT/F2d-unwatched.txt"
+f2d_render() {
+  tmux -L "$IT_TMUX_SOCKET" kill-session -t "=$W1_TMUX" 2>/dev/null
+  #: `RV-C8`. The frame path is an ARGUMENT to the inner shell, never text spliced into its script: tmux 3.2a
+  #: runs a multi-word command as argv, so a path with a space or a quote cannot break the re-render.
+  tmux -L "$IT_TMUX_SOCKET" new-session -d -s "$W1_TMUX" -c "$W1_CWD" bash -c 'cat "$1"; exec sleep 100000' f2d "$1"
+  sleep 0.6
+}
+f2d_render "$OUT/F2d-watched.txt"
+rm -f "$W1/.fleet/declare.json"
+fleet declare --instant "$W1" --phase AWAITING-CI --porcelain > "$OUT/F2d-declare.out" 2>&1
+f2d_declare_rc=$?
+f2_row F2d_live
+f2d_render "$OUT/F2d-unwatched.txt"
+f2_row F2d_gone
+f2d_ok=1
+[ -d "$W1_CWD" ] || f2d_ok=0
+[ "$f2d_declare_rc" = 0 ] && command grep -q "^watchers	1 monitor" "$OUT/F2d-declare.out" || f2d_ok=0
+[ "$F2d_live_board_rc" = 0 ] && [ "$F2d_live_state" = AWAITING-CI ] || f2d_ok=0
+case "$F2d_live_note" in *"watcher observed (1 monitor)"*) ;; *) f2d_ok=0 ;; esac
+[ "$F2d_gone_board_rc" = 0 ] || f2d_ok=0
+case "$F2d_gone_state" in RUNNING|IDLE) ;; *) f2d_ok=0 ;; esac
+case "$F2d_gone_note" in *"NO WATCHER OBSERVABLE"*"1 monitor"*disregarded*) ;; *) f2d_ok=0 ;; esac
+case "$F2d_gone_note" in *ATTESTED*) f2d_ok=0 ;; esac
+if [ "$f2d_ok" = 1 ]; then
+  it_pass F2d "fleet/it/F/out/F2d_gone-board.out" \
+    "a watcher OBSERVED at the claim (declare stored '1 monitor', board AWAITING-CI 'watcher observed') and then gone from the status line reads $F2d_gone_state with NO WATCHER OBSERVABLE naming it and 'disregarded' — never 'ATTESTED'"
+else
+  it_fail F2d "fleet/it/F/out/F2d_gone-board.out" \
+    "cwd='$W1_CWD' declare_rc=$f2d_declare_rc live: rc=$F2d_live_board_rc state='$F2d_live_state' note='$F2d_live_note' | gone: rc=$F2d_gone_board_rc state='$F2d_gone_state' note='$F2d_gone_note'"
+fi
+#: W1's pane back to what the stub draws — nothing — so no later case reads a claude frame it did not ask for.
+f2d_render /dev/null
 #: F2's exemption is restored for everything below, which was written against a freed cap.
 rm -f "$W1/.fleet/declare.json"
 fleet declare --instant "$W1" --phase AWAITING-CI --watcher 'cron 0,30 * * * * gh-run-poll' \

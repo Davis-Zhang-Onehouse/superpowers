@@ -172,6 +172,15 @@ def _read_json(path: Path, what: str) -> dict:
             f"dispatched worker from the cap and from the board. Inspect or move the file by hand.") from exc
 
 
+#: How `declare --watcher` marks the claimant's own word in `declare.json`'s `watchers` field; a watcher this
+#: tool OBSERVED on the pane is stored bare. `B07`: read only through `is_attested`.
+ATTESTED_PREFIX = "attested: "
+
+
+def is_attested(watchers) -> bool:
+    return bool(watchers) and str(watchers).startswith(ATTESTED_PREFIX)
+
+
 class Declarations:
     """An instant's own declarations. A declaration is a VERB's product, never prose, and `set_phase`
     returns what a consumer now reads — so the declarer cannot believe a declaration landed when it did
@@ -222,7 +231,22 @@ class Declarations:
         """
         return self._load().get("watchers")
 
-    def set_watchers(self, watchers: str | None) -> None:
+    def watcher_attested(self) -> bool:
+        """Whether the recorded watcher is the claimant's WORD (`declare --watcher`) rather than one this tool
+        OBSERVED on the pane at the claim. `B07`: the two are stored in one field, told apart by
+        `ATTESTED_PREFIX`, and a reader that tests only truthiness promotes a vanished observation to the
+        trusted branch. Every reader asks here, so the writer's prefix has exactly one interpretation."""
+        return is_attested(self.watchers())
+
+    def watcher_pid(self) -> dict | None:
+        """`FB-58`. The checkable handle an attestation named — `{"pid": int, "start": str}` — or `None`.
+
+        `start` is the process's start time (`/proc/<pid>/stat` field 22) when the claim was made, so a
+        recycled pid is not read as the watcher. The attestation's text stays verbatim for humans; this is
+        the field a reader checks, so the two can never be parsed two ways."""
+        return self._load().get("watcher_pid")
+
+    def set_watchers(self, watchers: str | None, pid: dict | None = None) -> None:
         data = self._load()
         if watchers is None:
             #: Cleared, never left standing: a value from an EARLIER claim read as evidence about THIS one
@@ -230,6 +254,11 @@ class Declarations:
             data.pop("watchers", None)
         else:
             data["watchers"] = watchers
+        #: The handle belongs to THIS claim's attestation and is replaced or cleared with it, for the same reason.
+        if watchers is None or pid is None:
+            data.pop("watcher_pid", None)
+        else:
+            data["watcher_pid"] = pid
         self._save(data)
 
     def parked(self) -> str | None:
