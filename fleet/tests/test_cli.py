@@ -1154,6 +1154,11 @@ OUTWARD_CALL_SITES = {
         "os.unlink of its OWN uniquely-named tmp, on the failure path only. Removing the litter of a "
         "write that published nothing is the third property of FI-20's contract; not removing it leaves "
         "a partial file for the next reader"),
+    ("atomic", "atomic_write_if"): (
+        "os.unlink of its OWN uniquely-named staging file, on every path that does not publish it — the same "
+        "contract as atomic_write, for the conditional publish RV-18 needs: it writes only into a directory that "
+        "already exists (a released lease's claim directory is never resurrected) and only while the caller's "
+        "predicate still holds, so the staged file it declines to publish is its own litter to remove"),
     ("atomic", "atomic_symlink"): (
         "os.unlink of its OWN uniquely-named staging symlink, on the failure path only — the same "
         "contract as atomic_write one entry above, for the one thing that primitive cannot publish. A "
@@ -1170,12 +1175,6 @@ OUTWARD_CALL_SITES = {
     ("pool", "release"): (
         "unlink of a lease body and rmdir of the claim directory, both under FLEET_HOME/pool. Releasing "
         "a lease IS deleting its record — the alternative is a lease store that only grows"),
-    ("pool", "_rewrite_own_lease"): (
-        "os.unlink of its OWN uniquely-named staging file (atomic.tmp_name) inside a claim directory under "
-        "FLEET_HOME/pool, after the rename or on the path that declines to publish. RV-18: the lease note must not "
-        "use atomic_write, whose mkdir(parents) resurrects a claim released between read and write; staging in "
-        "place and declining when the claim changed is what closes that race, and the staging file it declined "
-        "to publish is its litter to remove"),
     ("pool", "unenroll"): (
         "unlink of one enrolled-slot record under FLEET_HOME/pool, after the guarded refusal that "
         "protects a slot somebody still holds"),
