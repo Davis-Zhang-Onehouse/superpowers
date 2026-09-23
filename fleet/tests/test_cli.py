@@ -6748,6 +6748,12 @@ class TestB11RefusalsNameARouteThatRuns(CliCase):
         self.assertTrue(held, out)
         self.assertIn("fleet reap", held[0], held[0])
         self.assertNotIn("fleet harvest", held[0], held[0])
+        #: RV-14. scenE2's full shape: close leaves the gone owner's slot leased, and the reap the row names
+        #: is what frees it — in a one-slot pool the re-dispatch below would otherwise be a capacity answer.
+        self.assertIsNotNone(fleet.pool.lease("ws4"), "close released the slot, so this proves nothing")
+        code, out, err = fleet.run(["reap", "--base", OURS])
+        self.assertIn(code, (EXIT_OK, EXIT_ATTENTION), err)
+        self.assertIsNone(fleet.pool.lease("ws4"), f"the reap the route names did not free the slot: {out}{err}")
         code, out, err = fleet.run(["milestone", "--instant", str(coordinator), "--id", "M9", "--disown",
                                     "--reason", "owner folder deleted"])
         self.assertEqual(EXIT_OK, code, f"close did not clear the way for --disown: {err}")
