@@ -996,7 +996,10 @@ class TestAttachmentIsCollected(unittest.TestCase):
         tmux = ["tmux", "-L", socket]
         self.addCleanup(_retire_selftest_server, socket)
         name = f"itfleet-selftest-att-{os.getpid()}-{uuid.uuid4().hex[:6]}"
-        subprocess.run(tmux + ["new-session", "-d", "-s", name, _WHILE_THIS_PROCESS_LIVES], capture_output=True)
+        created = subprocess.run(tmux + ["new-session", "-d", "-s", name, _WHILE_THIS_PROCESS_LIVES],
+                                 capture_output=True, text=True)
+        # A fixture that never landed must not be reported as a probe that read it wrongly (RV-25).
+        self.assertEqual(created.returncode, 0, f"new-session on {socket!r}: {created.stderr}")
         try:
             probes = default_probes(tmux_socket=socket)
             self.assertEqual(probes.attachment(name), (0, 0, 0),
