@@ -6740,8 +6740,14 @@ class TestB11RefusalsNameARouteThatRuns(CliCase):
         self.assertNotIn("fleet harvest", said, f"the disown refusal names harvest, which exits 2 here: {said}")
 
         # The named route, run: every step of it has to succeed in exactly this state.
-        code, out, err = fleet.run(["close", "--id", todo])
+        code, out, err = fleet.run(["close", "--porcelain", "--id", todo])
         self.assertEqual(EXIT_OK, code, f"the route the refusal names does not run: {err}")
+        #: RV-15. close leaves the slot leased and says who frees it; `harvest` exits 2 on a gone folder, so
+        #: the row that follows this route must name `reap` alone.
+        held = [l for l in out.splitlines() if l.startswith("slot_still_held")]
+        self.assertTrue(held, out)
+        self.assertIn("fleet reap", held[0], held[0])
+        self.assertNotIn("fleet harvest", held[0], held[0])
         code, out, err = fleet.run(["milestone", "--instant", str(coordinator), "--id", "M9", "--disown",
                                     "--reason", "owner folder deleted"])
         self.assertEqual(EXIT_OK, code, f"close did not clear the way for --disown: {err}")
