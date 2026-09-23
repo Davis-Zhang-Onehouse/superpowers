@@ -1668,9 +1668,16 @@ def _claim_release_route(ctx: Ctx, owner, coordinator, milestone_id) -> str:
       then `--disown`.
     """
     disown = f"`fleet milestone --instant {coordinator} --id {milestone_id} --disown --reason <why>`"
-    holder = next((r for r in ctx.store.all()
-                   if r.child_instant and same_instant(_recorded_path(ctx, r), owner)
-                   and not r.harvested_at and not r.closed_at), None)
+    try:
+        holder = next((r for r in ctx.store.all()
+                       if r.child_instant and same_instant(_recorded_path(ctx, r), owner)
+                       and not r.harvested_at and not r.closed_at), None)
+    except (FleetError, OSError) as exc:
+        #: RV-32. The lookup only chooses the route; an unreadable store must not replace the refusal.
+        return (f"the record store could not be read to find {owner}'s record ({_one_line(exc)}); by the "
+                f"owner's state: `fleet abort --instant {owner} --reason <why>` for an inflight worker "
+                f"dispatched onto it, `fleet harvest --id <its todo>` for a completed one, `fleet close --id "
+                f"<its todo>` when its folder is gone or the claim was set by hand, then {disown}")
     if holder is None:
         return f"no open record holds {owner}, so the claim is released by {disown}"
     try:
