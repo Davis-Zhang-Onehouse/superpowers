@@ -6033,6 +6033,26 @@ class TestSeedCheckExitsOnANonPass(CliCase):
         self.assertIn("population", kinds, out)
         self.assertEqual(EXIT_ATTENTION, code, err)
 
+    def test_a_seed_that_cannot_be_decoded_is_an_unreadable_row_not_a_failed_sweep(self):
+        """RV-26. A per-session read failure is that session's row, never a traceback out of the sweep."""
+        seed = self.fleet_.paths["solo"] / ".fleet" / "seed.txt"
+        seed.parent.mkdir(parents=True, exist_ok=True)
+        seed.write_bytes(b"\xff\xfe not utf-8 \x80")
+        code, kinds, out, err = self.seed_check()
+        self.assertIn("unreadable", kinds, f"the sweep died on one bad seed: {err}")
+        self.assertIn("population", kinds, out)
+        self.assertEqual(EXIT_ATTENTION, code, err)
+
+    def test_an_instant_folder_that_cannot_be_listed_is_an_unreadable_row(self):
+        """RV-26. `resolve` lists the parent folder when the recorded path is gone; an OSError there (a
+        permission error, an I/O error) is a fact about this session, not a reason to stop looking."""
+        solo = self.fleet_.paths["solo"]
+        solo.rename(solo.with_name(solo.name.replace("-inflight-", "-complete-")))
+        with mock.patch.object(cli, "resolve", side_effect=PermissionError("denied")):
+            code, kinds, out, err = self.seed_check()
+        self.assertIn("unreadable", kinds, f"the sweep died on an OSError: {err}")
+        self.assertEqual(EXIT_ATTENTION, code, err)
+
 
 class TestMilestoneEvidenceIsAdmitted(CliCase):
     """FB-44 (b03 OI-1). `milestone --evidence` stored its items verbatim — the one door B03's gate did not
