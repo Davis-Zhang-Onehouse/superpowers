@@ -15,6 +15,10 @@
 #   S11 `abort --dry-run` evaluates the cwd-holder gate the real abort does, and both refuse
 #       BEFORE the session is killed                                                  B10 (i48c/FI-281)
 #   S12 a DELETED owner's claim: the refusals name `close --id`, and that route runs   B11 (NEW-3)
+#   S13 `abort` refuses a MID-TURN pane (close's pane guard) before the kill, dry-run and real alike;
+#       `--force` is the override that runs                                            FB-88
+#   S14 `runtime --set` over records no verb can resume or revive (aborted, gone folder): they do not
+#       block; a closed -inflight- one does, names `abort`, and that route runs          FB-92
 #
 # ⚠️ RUN RED, not assumed to be red. `FI-303`: a control that cannot fire on the defect that motivated it
 # certifies its own blind spot. Every case here was run against a worktree at `fleet/v0.4.0` — the tree
@@ -713,6 +717,122 @@ elif [ "$s12_dispatch_rc$s12_disown_rc" = "44" ] && [ "$s12_names$s12_runs" = "1
 else
   it_fail S12 "fleet/it/S/out/S12.txt" \
     "child=${S12_CHILD:-none} dispatch-rc=$s12_dispatch_rc(want 4) disown-rc=$s12_disown_rc(want 4) names-close-not-abort=$s12_names close-rc=$s12_close_rc reap-named=$s12_reap_named slot-freed=$s12_slot_freed($S12_SLOT) disown-after-rc=$s12_disown2_rc redispatched=${S12_AFTER:-none}"
+fi
+
+# ==================================================================================================
+# S13 — `FB-88`. `close` refuses a mid-turn pane; `abort` killed the same pane unasked. The pane is made to
+#       read mid-turn the way a real one does — the interrupt hint on its last rows — by typing it into the
+#       stand-in's tty (the line discipline echoes it; `sleep` never reads it). Asserted: dry-run and real
+#       abort both refuse rc=4 with byte-identical output, name `--force`, and the session is STILL ALIVE and
+#       the folder still -inflight- after the real call; then `abort --force` runs and ends it.
+#       RED at 4564667a: the real abort killed the pane and renamed the folder, rc=0.
+# ==================================================================================================
+S13_CHILD="$(s_dispatch midTurnAbort -)"
+S13_TMUX="$(awk -F'\t' '$1=="tmux"{print $2; exit}' "$OUT/dispatch-midTurnAbort.out")"
+tmux -L "$IT_TMUX_SOCKET" send-keys -t "=$S13_TMUX:" -l 'Thinking...   esc to interrupt' 2> "$OUT/S13-keys.err"
+s13_busy=0
+for _ in 1 2 3 4 5 6 7 8 9 10; do
+  tmux -L "$IT_TMUX_SOCKET" capture-pane -p -t "=$S13_TMUX:" 2>/dev/null | grep -qF 'esc to interrupt' && { s13_busy=1; break; }
+  sleep 0.2
+done
+S13_ARGV=(--instant "$S13_CHILD" --reason "FB-88: a mid-turn pane")
+fleet abort --dry-run "${S13_ARGV[@]}" > "$OUT/S13-dry.out" 2>&1
+s13_dry_rc=$?
+fleet abort "${S13_ARGV[@]}" > "$OUT/S13-real.out" 2>&1
+s13_real_rc=$?
+s13_same=0; cmp -s "$OUT/S13-dry.out" "$OUT/S13-real.out" && s13_same=1
+s13_alive=0; tmux -L "$IT_TMUX_SOCKET" has-session -t "=$S13_TMUX" 2>/dev/null && s13_alive=1
+s13_inflight=0; [ -n "$S13_CHILD" ] && [ -d "$S13_CHILD" ] && s13_inflight=1
+s13_force_named=0; grep -qF -- '--force' "$OUT/S13-real.out" && grep -qF 'mid-turn' "$OUT/S13-real.out" && s13_force_named=1
+fleet abort "${S13_ARGV[@]}" --force > "$OUT/S13-force.out" 2>&1
+s13_force_rc=$?
+s13_gone=1; tmux -L "$IT_TMUX_SOCKET" has-session -t "=$S13_TMUX" 2>/dev/null && s13_gone=0
+s13_aborted=0; [ -n "$S13_CHILD" ] && [ -d "${S13_CHILD/-inflight-/-abort-}" ] && s13_aborted=1
+{ echo "child=$S13_CHILD session=$S13_TMUX pane-reads-mid-turn=$s13_busy"
+  echo "--- dry-run rc=$s13_dry_rc"; cat "$OUT/S13-dry.out"
+  echo "--- real rc=$s13_real_rc byte-identical=$s13_same session-alive-after=$s13_alive folder-inflight=$s13_inflight"; cat "$OUT/S13-real.out"
+  echo "--- --force rc=$s13_force_rc session-gone=$s13_gone aborted=$s13_aborted"; cat "$OUT/S13-force.out"; } > "$OUT/S13.txt" 2>&1
+cat "$OUT/S13.txt"
+if [ -z "$S13_CHILD" ] || [ "$s13_busy" != 1 ]; then
+  it_fail S13 "fleet/it/S/out/S13.txt" "SETUP, not a verdict: child=${S13_CHILD:-none} pane-reads-mid-turn=$s13_busy"
+elif [ "$s13_dry_rc$s13_real_rc" = "44" ] && [ "$s13_same$s13_alive$s13_inflight$s13_force_named" = "1111" ] \
+     && [ "$s13_force_rc" = 0 ] && [ "$s13_gone$s13_aborted" = "11" ]; then
+  it_pass S13 "fleet/it/S/out/S13.txt" \
+    "a real pane showing the interrupt hint: \`abort --dry-run\` and \`abort\` both refused rc=4 with byte-identical output naming the mid-turn guard and \`--force\`, and after the real call the session was STILL ALIVE and the folder still -inflight- (close's pane guard, asked before the kill); \`abort --force\` then killed the session and renamed the folder -abort-"
+else
+  it_fail S13 "fleet/it/S/out/S13.txt" \
+    "dry-rc=$s13_dry_rc real-rc=$s13_real_rc (want 4 4) same=$s13_same alive-after=$s13_alive inflight=$s13_inflight names-force=$s13_force_named force-rc=$s13_force_rc gone=$s13_gone aborted=$s13_aborted"
+fi
+
+# ==================================================================================================
+# S14 — `FB-92` (coordinator D-30). A PRIVATE store of its own (the section's store holds live workers, which
+#       rightly block), so every blocker below is one this case made. `runtime --set` used to count every
+#       unharvested record: an aborted one, or one whose folder was deleted, blocked forever or only after a
+#       fabricated review. Asserted, each through the real verbs on real sessions:
+#         control  a live dispatched worker blocks (rc 4, named running);
+#         a        after `abort`, its record no longer blocks (dry-run rc 0);
+#         b        a closed record whose folder is still -inflight- blocks, names `fleet abort --instant`,
+#                  and that route runs — then rc 0;
+#         c        a record whose folder was deleted: after `close` + `reap` (no review, no harvest) rc 0;
+#       then the real switch runs and `fleet runtime` reads it back. RED at 4564667a: (a) and (c) rc=4.
+# ==================================================================================================
+S14_HOME="$OUT/S14-home"; S14_INST="$OUT/S14-instants"; mkdir -p "$S14_HOME" "$S14_INST"
+s14() { FLEET_HOME="$S14_HOME" FLEET_INSTANTS="$S14_INST" fleet "$@"; }
+for n in 1 2 3; do
+  ( mkdir -p "$OUT/s14slot$n" && cd "$OUT/s14slot$n" && git init -q . && git commit -q --allow-empty -m base ) >/dev/null 2>&1
+  s14 enroll --slot "$OUT/s14slot$n" --porcelain >> "$OUT/S14-setup.out" 2>&1
+done
+s14 set-golden --path "$OUT/s14slot1" --porcelain >> "$OUT/S14-setup.out" 2>&1
+s14_dispatch() {                 # s14_dispatch <title> -> prints the child path
+  s14 dispatch --profile "$PROFILE" --title "$1" --base 00000000 --optype append --cap 9 --porcelain \
+      > "$OUT/S14-dispatch-$1.out" 2>&1
+  awk -F'\t' '$1=="instant"{print $2; exit}' "$OUT/S14-dispatch-$1.out"
+}
+s14_todo() { FLEET_HOME="$S14_HOME" s_todo "$1"; }
+s14_switch() { s14 runtime --set codex --dry-run > "$OUT/S14-$1.out" 2>&1; echo $?; }
+
+S14_A="$(s14_dispatch liveThenAborted)"
+s14_control_rc="$(s14_switch control)"
+s14 abort --instant "$S14_A" --reason "FB-92: aborted" > "$OUT/S14-abortA.out" 2>&1
+s14_abortA_rc=$?
+s14_a_rc="$(s14_switch a)"
+
+S14_B="$(s14_dispatch closedInflight)"
+S14_B_TODO="$(s14_todo "$S14_B")"
+s14 close --id "$S14_B_TODO" > "$OUT/S14-closeB.out" 2>&1
+s14_closeB_rc=$?
+s14_b_rc="$(s14_switch b)"
+s14_b_names=0; grep -qF "fleet abort --instant $S14_B" "$OUT/S14-b.out" && ! grep -qF 'FB-92)' "$OUT/S14-b.out" && s14_b_names=1
+s14 abort --instant "$S14_B" --reason "FB-92: the route the refusal named" > "$OUT/S14-abortB.out" 2>&1
+s14_abortB_rc=$?
+s14_b2_rc="$(s14_switch b-after)"
+
+S14_C="$(s14_dispatch folderDeleted)"
+S14_C_TODO="$(s14_todo "$S14_C")"
+[ -n "$S14_C" ] && rm -rf "$S14_C"
+s14 close --id "$S14_C_TODO" > "$OUT/S14-closeC.out" 2>&1
+s14_closeC_rc=$?
+s14 reap --base 00000000 > "$OUT/S14-reapC.out" 2>&1
+s14_reapC_rc=$?
+s14_c_rc="$(s14_switch c)"
+s14 runtime --set codex > "$OUT/S14-real.out" 2>&1
+s14_real_rc=$?
+s14_now="$(s14 runtime --porcelain 2>/dev/null | awk -F'\t' '$1=="runtime"{print $2}')"
+{ for f in control a b b-after c; do echo "--- runtime --set codex --dry-run [$f]"; cat "$OUT/S14-$f.out"; done
+  echo "--- abort A rc=$s14_abortA_rc; close B rc=$s14_closeB_rc; abort B rc=$s14_abortB_rc; close C rc=$s14_closeC_rc; reap rc=$s14_reapC_rc"
+  cat "$OUT/S14-abortB.out" "$OUT/S14-reapC.out"
+  echo "--- real switch rc=$s14_real_rc runtime now=$s14_now"; cat "$OUT/S14-real.out"; } > "$OUT/S14.txt" 2>&1
+cat "$OUT/S14.txt"
+if [ -z "$S14_A" ] || [ -z "$S14_B" ] || [ -z "$S14_C" ] || [ -z "$S14_B_TODO" ] || [ -z "$S14_C_TODO" ]; then
+  it_fail S14 "fleet/it/S/out/S14.txt" "SETUP, not a verdict: a dispatch produced no child/todo (S14-dispatch-*.out)"
+elif [ "$s14_control_rc" = 4 ] && [ "$s14_abortA_rc$s14_a_rc" = "00" ] && [ "$s14_closeB_rc$s14_b_rc$s14_b_names" = "041" ] \
+     && [ "$s14_abortB_rc$s14_b2_rc" = "00" ] && [ "$s14_closeC_rc$s14_reapC_rc$s14_c_rc" = "000" ] \
+     && [ "$s14_real_rc" = 0 ] && [ "$s14_now" = codex ]; then
+  it_pass S14 "fleet/it/S/out/S14.txt" \
+    "on a private store: a live worker blocked the switch (rc=4); once aborted its record did not (rc=0); a closed record still -inflight- blocked, named \`fleet abort --instant\`, and after that abort ran the switch was clear (rc=0); a record whose folder was deleted cleared with close + reap and no review or harvest (rc=0); the real \`runtime --set codex\` then ran and read back codex"
+else
+  it_fail S14 "fleet/it/S/out/S14.txt" \
+    "control=$s14_control_rc(want 4) abortA=$s14_abortA_rc a=$s14_a_rc(want 0) closeB=$s14_closeB_rc b=$s14_b_rc(want 4) b-names-abort=$s14_b_names abortB=$s14_abortB_rc b-after=$s14_b2_rc(want 0) closeC=$s14_closeC_rc reap=$s14_reapC_rc c=$s14_c_rc(want 0) real=$s14_real_rc now=$s14_now"
 fi
 
 it_assert_isolation S-leave
