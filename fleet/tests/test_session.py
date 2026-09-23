@@ -56,6 +56,16 @@ class TestOwnProcesses(unittest.TestCase):
         s.probes.pane_pids = lambda name: [100, 200] if name == "dt-a" else None
         self.assertEqual(s.own_processes("dt-a", [101, 201, 900]), {101, 201})
 
+    def test_the_real_parent_walk_climbs_a_real_child_to_its_parent(self):
+        """`RV-27`. The default probes' `parent_of`, against /proc, on a real child of this process."""
+        child = subprocess.Popen(["sleep", "30"])
+        try:
+            probes = default_probes(tmux_socket="itfleet-rv27-never-started")
+            self.assertEqual(probes.parent_of(child.pid), os.getpid())
+            self.assertEqual(probes.parent_of(2 ** 22 + 12345), 0, "an absent pid must read 0, not raise")
+        finally:
+            child.kill(); child.wait()
+
     def test_unobservable_is_None_not_empty(self):
         s = self._layer(None, {})
         self.assertIsNone(s.own_processes("dt-a", [5]))
