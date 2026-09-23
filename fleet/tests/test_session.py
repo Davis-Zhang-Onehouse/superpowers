@@ -353,6 +353,11 @@ class TestThePrivateTmuxServer(unittest.TestCase):
 SELFTEST_TMUX_SOCKET = f"itfleet-selftest-{os.getpid()}"
 
 
+#: What every real-tmux fixture session runs: it ends when this suite process does, so a suite killed
+#: outright cannot leave a session (and so a server) running after it — a fixed `sleep 120` could.
+_WHILE_THIS_PROCESS_LIVES = f"while kill -0 {os.getpid()} 2>/dev/null; do sleep 1; done"
+
+
 def _selftest_socket_path(name: str) -> pathlib.Path:
     """Where tmux puts the socket for `-L name`. A server that exits leaves this file behind."""
     return pathlib.Path(os.environ.get("TMUX_TMPDIR") or "/tmp") / f"tmux-{os.getuid()}" / name
@@ -399,10 +404,11 @@ class TestAgainstRealTmux(unittest.TestCase):
         # that exit is asynchronous: the next case's `new-session` can reach the exiting server and fail
         # `server exited unexpectedly` even with no other process involved (5 of 1000 under the load of two
         # suites, 0 of 2000 under that load with the server kept non-empty: `FB-5`'s "under tmux load").
-        # The anchor keeps it occupied, and it watches this process, so a suite that is killed outright
-        # still takes its server with it within a second rather than leaving one behind.
+        # The anchor keeps it occupied, and it watches this process, as every fixture session here does:
+        # a suite that is killed outright (no cleanup runs) still takes its server down within a few
+        # seconds (measured at 3 s). What it cannot take is the socket FILE, which only the cleanup removes.
         anchored = subprocess.run(cls.TMUX + ["new-session", "-d", "-s", cls.ANCHOR,
-                                              f"while kill -0 {os.getpid()} 2>/dev/null; do sleep 1; done"],
+                                              _WHILE_THIS_PROCESS_LIVES],
                                   capture_output=True, text=True)
         if anchored.returncode:
             raise AssertionError(f"could not start {SELFTEST_TMUX_SOCKET!r}: {anchored.stderr}")
@@ -414,7 +420,7 @@ class TestAgainstRealTmux(unittest.TestCase):
         # The pane PRINTS something, so "the prefix did not return the longer session's screen" can be
         # asserted on content rather than on two empty strings being equal.
         created = subprocess.run(self.TMUX + ["new-session", "-d", "-s", self.long, "-c", "/tmp",
-                                              f"printf '%s\\n' {self.marker}; sleep 120"],
+                                              f"printf '%s\\n' {self.marker}; {_WHILE_THIS_PROCESS_LIVES}"],
                                  capture_output=True, text=True)
         # A fixture that did not land is named here, not left to surface as a None pane below (`FB-49`).
         self.assertEqual(created.returncode, 0, f"new-session on {SELFTEST_TMUX_SOCKET!r}: {created.stderr}")
@@ -987,7 +993,7 @@ class TestAttachmentIsCollected(unittest.TestCase):
         tmux = ["tmux", "-L", SELFTEST_TMUX_SOCKET]
         self.addCleanup(_retire_selftest_server, SELFTEST_TMUX_SOCKET)
         name = f"itfleet-selftest-att-{os.getpid()}-{uuid.uuid4().hex[:6]}"
-        subprocess.run(tmux + ["new-session", "-d", "-s", name, "sleep 60"], capture_output=True)
+        subprocess.run(tmux + ["new-session", "-d", "-s", name, _WHILE_THIS_PROCESS_LIVES], capture_output=True)
         try:
             probes = default_probes(tmux_socket=SELFTEST_TMUX_SOCKET)
             self.assertEqual(probes.attachment(name), (0, 0, 0),
