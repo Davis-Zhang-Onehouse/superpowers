@@ -41,6 +41,10 @@ printf 'case\tverdict\tevidence\tnote\n' > "$IT_RESULTS"
 export IT_RESULTS
 # shellcheck disable=SC1091
 . "$IT_ROOT/lib.sh"
+# ONE run for the whole batch (FB-60): every runner below inherits this id, so their ISOLATION checks share
+# this run's live-session baseline and a dt- session lost BETWEEN two sections is still charged. lib.sh
+# mints it but deliberately does not export it (RV-25); the orchestrator is what joins runners into a run.
+export IT_RUN_ID
 # shellcheck disable=SC2034  # consumed by lib.sh's it_fail, sourced just above
 IT_FAILED=0
 # shellcheck disable=SC2034  # consumed by lib.sh's per-section helpers

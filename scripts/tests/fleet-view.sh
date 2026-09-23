@@ -13,9 +13,10 @@ FLEET="$REPO/bin/fleet"
 TMP="$(mktemp -d)"
 trap 'rm -rf "$TMP"' EXIT
 export FLEET_HOME="$TMP/home" FLEET_INSTANTS="$TMP/instants" FLEET_VIEW_WIDTH=100
-# The view reads `$FLEET_BIN` first, and a dispatched session inherits one pointing at the SHARED live tree —
-# so without this the view under test read a different `fleet` than the porcelain it is compared against.
-export FLEET_BIN="$FLEET"
+# The view's test seam, pinned to the same binary the porcelain below is read from. The view no longer reads
+# `$FLEET_BIN` at all (FB-56: a dispatched session inherits one naming the dispatcher's fleet), so this is
+# belt-and-braces rather than the fix it used to be.
+export FLEET_LAUNCHER_TEST_BIN="$FLEET"
 mkdir -p "$FLEET_HOME" "$FLEET_INSTANTS" "$TMP/slots/wsA" "$TMP/slots/wsB"
 
 fails=0
