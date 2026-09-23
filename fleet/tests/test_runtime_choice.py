@@ -92,6 +92,17 @@ class RecordTests(unittest.TestCase):
         self.assertNotIn('runtime_model', record.to_json())
         self.assertEqual(Record.from_json(record.to_json()).runtime_model, '')
 
+    def test_a_default_record_has_exactly_the_base_schema(self):
+        """RV-27. A record carrying `runtime_model` makes an older binary refuse the WHOLE store (its `Store.all()`
+        raises on the unknown key), so the one thing that must never happen is a DEFAULT dispatch writing it. The
+        base's key set is typed out here, not derived, so a new always-written field fails this test."""
+        base_keys = {'todo_id', 'child_instant', 'base_instant', 'slot', 'tmux', 'profile', 'golden', 'lineage_base',
+                     'lineage_mode', 'golden_base', 'title', 'override_reason', 'milestone', 'root', 'dispatched_at',
+                     'tmux_socket', 'runtime', 'runtime_executable', 'runtime_config_dir', 'launched_at',
+                     'gate_verdict', 'harvested_at', 'closed_at', 'schema_version'}
+        self.assertEqual(set(rec().to_json()), base_keys)
+        self.assertEqual(set(rec(runtime_model='gpt-x').to_json()) - base_keys, {'runtime_model'})
+
     def test_a_model_round_trips(self):
         record = rec(runtime='codex', runtime_model='gpt-x')
         self.assertEqual(Record.from_json(json.loads(json.dumps(record.to_json()))).runtime_model, 'gpt-x')
