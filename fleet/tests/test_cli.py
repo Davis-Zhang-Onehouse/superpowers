@@ -6653,6 +6653,215 @@ class TestSeedCheckExitsOnANonPass(CliCase):
                                                 sleep=lambda s: None)
         self.assertEqual(seedcheck.ATTESTED, verdict.state, verdict.detail)
 
+    def _malformed_delivery(self, body: str):
+        self.brief()
+        record = self.fleet_.paths["solo"] / ".fleet" / seedcheck.DELIVERY
+        record.write_text(body)
+        return self.seed_check()
+
+    def test_a_delivery_record_that_is_not_an_object_is_an_unreadable_row(self):
+        """`FB-74`. Valid JSON that is not an object raised AttributeError (`[].get`) straight past the
+        per-session `except FleetError`, ending the whole sweep with a traceback."""
+        code, kinds, out, err = self._malformed_delivery("[]")
+        self.assertIn("unreadable", kinds, f"the sweep died on a list-shaped delivery record: {err}")
+        self.assertIn("population", kinds, out)
+        self.assertIn(seedcheck.DELIVERY, out)
+        self.assertIn("fleet seed-delivered", out, f"the unreadable row names no route: {out}")
+        self.assertEqual(EXIT_ATTENTION, code, err)
+
+    def test_a_delivery_record_missing_a_key_is_an_unreadable_row(self):
+        """`FB-74`. A missing key raised TypeError out of `Delivery(**data)`, past the same `except`."""
+        code, kinds, out, err = self._malformed_delivery(json.dumps({"schema_version": seedcheck.SCHEMA_VERSION,
+                                                                     "at": NOW, "by": "someone"}))
+        self.assertIn("unreadable", kinds, f"the sweep died on a delivery record missing keys: {err}")
+        self.assertIn("channel", out, f"the row does not name what is missing: {out}")
+        self.assertEqual(EXIT_ATTENTION, code, err)
+
+    def test_read_delivery_refuses_a_non_object_as_bad_input(self):
+        self.brief()
+        (self.fleet_.paths["solo"] / ".fleet" / seedcheck.DELIVERY).write_text('"a string"')
+        with self.assertRaises(cli.BadInput) as caught:
+            seedcheck.read_delivery(self.fleet_.paths["solo"])
+        self.assertTrue(caught.exception.clears_when, "the refusal names no route")
+
+
+class TestB11RefusalsNameARouteThatRuns(CliCase):
+    """`B11`. A refusal names what clears it and who clears it, and the route it names has to RUN in the
+    state it describes. `test_refusal_routes` enforces the first half over the source; these cases are the
+    behavioural half, one per site the bucket found stale or missing."""
+
+    @staticmethod
+    def refusal(err: str) -> str:
+        """The refusal's own block — from its `Kind:` line on. The fixture's stale harvest source puts a
+        cadence alarm on stderr for every verb, and that alarm carries its own `clears when`, so an
+        assertion over the whole of stderr passes whether or not the refusal named anything."""
+        lines = err.splitlines()
+        at = next((i for i, line in enumerate(lines)
+                   if re.match(r"(Refused|BadInput|NoCapacity|FleetError|AmbiguousId): ", line)), None)
+        if at is None:
+            raise AssertionError(f"no refusal on stderr at all: {err!r}")
+        return "\n".join(lines[at:])
+
+    def _claimed(self, fleet, owner, milestone="M9"):
+        coordinator = fleet.paths["readyWorker"]
+        roadmap = Roadmap(coordinator)
+        roadmap.add(Milestone(id=milestone, title="carried work", status="blocked", deps=[], evidence=[]))
+        roadmap.claim(milestone, str(owner))
+        return coordinator
+
+    def _dispatch_onto(self, fleet, coordinator, title, milestone="M9"):
+        return fleet.run(["dispatch", "--porcelain", "--profile", str(fleet.profile("worker")),
+                          "--title", title, "--base", FRESH_BASE_DIGITS, "--optype", "append",
+                          "--cap", "9", "--from", str(coordinator), "--milestone", milestone])
+
+    def test_a_deleted_owners_claim_names_close_and_the_named_route_runs(self):
+        """NEW-3 (scenE/scenE2). The owner's folder is deleted outright. The refusals prescribed
+        `fleet abort --instant <gone>` and `fleet harvest --id` — both exit 2 on a folder that resolves to
+        nothing — while `fleet close --id`, the door that works, was named by neither. Each refusal must
+        name close, and the route it names must then clear the claim: close -> disown -> dispatch."""
+        fleet = self.loaded()
+        owner = fleet.worker("goner", slot="ws4", live=False)
+        todo = fleet.ids["goner"]
+        coordinator = self._claimed(fleet, owner)
+        shutil.rmtree(owner)
+
+        code, out, err = self._dispatch_onto(fleet, coordinator, "onto a gone owner")
+        self.assertEqual(EXIT_REFUSED, code, f"a claimed milestone was dispatched onto: {out}")
+        said = self.refusal(err)
+        self.assertIn(f"fleet close --id {todo}", said, f"the dispatch refusal names no working door: {said}")
+        self.assertNotIn("fleet abort", said, f"the dispatch refusal names abort, which exits 2 here: {said}")
+
+        code, out, err = fleet.run(["milestone", "--instant", str(coordinator), "--id", "M9", "--disown",
+                                    "--reason", "owner folder deleted"])
+        self.assertEqual(EXIT_REFUSED, code, f"an open record's claim was released: {out}")
+        said = self.refusal(err)
+        self.assertIn(f"fleet close --id {todo}", said, f"the disown refusal names no working door: {said}")
+        self.assertNotIn("fleet abort", said, f"the disown refusal names abort, which exits 2 here: {said}")
+        self.assertNotIn("fleet harvest", said, f"the disown refusal names harvest, which exits 2 here: {said}")
+
+        # The named route, run: every step of it has to succeed in exactly this state.
+        code, out, err = fleet.run(["close", "--id", todo])
+        self.assertEqual(EXIT_OK, code, f"the route the refusal names does not run: {err}")
+        code, out, err = fleet.run(["milestone", "--instant", str(coordinator), "--id", "M9", "--disown",
+                                    "--reason", "owner folder deleted"])
+        self.assertEqual(EXIT_OK, code, f"close did not clear the way for --disown: {err}")
+        code, out, err = self._dispatch_onto(fleet, coordinator, "after the gone owner")
+        self.assertEqual(EXIT_OK, code, f"the milestone is still not dispatchable after the route: {err}")
+
+    def test_a_living_owners_claim_still_names_abort_which_runs_there(self):
+        """The control: while the owner's folder exists, `abort` is the door that works and is still named."""
+        fleet = self.loaded()
+        coordinator = self._claimed(fleet, fleet.paths["doomed"])
+
+        code, out, err = self._dispatch_onto(fleet, coordinator, "onto a living owner")
+        self.assertEqual(EXIT_REFUSED, code, out)
+        self.assertIn(f"fleet abort --instant {fleet.paths['doomed']}", self.refusal(err), err)
+
+        code, out, err = fleet.run(["milestone", "--instant", str(coordinator), "--id", "M9", "--disown",
+                                    "--reason", "I want the slot"])
+        self.assertEqual(EXIT_REFUSED, code, out)
+        self.assertIn(f"fleet abort --instant {fleet.paths['doomed']}", self.refusal(err), err)
+        self.assertIn("clears who", self.refusal(err), err)
+
+    def test_a_claimed_milestone_with_no_record_names_disown(self):
+        """No record holds the gone owner at all, so there is nothing to close: `--disown` itself is the
+        door, and it is the one the dispatch refusal must name."""
+        fleet = self.loaded()
+        gone = fleet.instants / "00000000-07300099-abort-append-longGone"
+        coordinator = self._claimed(fleet, gone)
+
+        code, out, err = self._dispatch_onto(fleet, coordinator, "onto a recordless owner")
+        self.assertEqual(EXIT_REFUSED, code, out)
+        self.assertIn("--disown", self.refusal(err), err)
+        self.assertNotIn("fleet abort", self.refusal(err), err)
+
+    def test_raising_a_milestone_that_exists_names_retire(self):
+        """x2 G-7. "already in the roadmap; refusing to shadow it" named no way forward."""
+        fleet = self.loaded()
+        ready = str(fleet.paths["readyWorker"])
+        code, out, err = fleet.run(["milestone", "--instant", ready, "--id", "M1", "--title", "again"])
+        self.assertEqual(EXIT_BAD_INPUT, code, out)
+        self.assertIn("--retire", self.refusal(err), f"the shadowing refusal names no route: {err}")
+
+    def test_the_owner_flag_help_does_not_call_the_claim_informational(self):
+        """i48(b). `--owner` said "informational only — readiness never reads it" while `dispatch` reads
+        the owner as the EXCLUSIVE claim. Both halves were true; the conjunction was false."""
+        code, out, err = self.fleet().run(["milestone", "--help"])
+        self.assertEqual(EXIT_OK, code, err)
+        owner = [line for line in out.splitlines() if line.strip().startswith("--owner")]
+        self.assertTrue(owner, out)
+        self.assertNotIn("informational only", owner[0])
+        self.assertIn("dispatch", owner[0], f"the help does not say dispatch reads the claim: {owner[0]}")
+
+    def test_a_send_refusal_prints_what_clears_it_and_who(self):
+        """i24(b). Every refusal on the send path passed neither clause."""
+        fleet = self.loaded()
+        sent = fleet.tmp / "msg.txt"
+        sent.write_text("hello\n")
+        code, out, err = fleet.run(["send", "--id", fleet.ids["harvestable"], "--message-file", str(sent)])
+        self.assertEqual(EXIT_REFUSED, code, out)
+        self.assertIn("clears when:", self.refusal(err), err)
+        self.assertIn("clears who:", self.refusal(err), err)
+
+    def _full_pool(self, fleet):
+        for slot in list(fleet.pool.free_slots()):
+            fleet.pool.claim(todo_id=f"filler-{slot}", tmux=f"dt-{slot}", base_instant=FRESH_BASE,
+                             child_instant=f"/filler/{slot}", slot=slot)
+        self.assertEqual([], fleet.pool.free_slots(), "the pool is not full, so this case is vacuous")
+
+    def _override_into_a_full_pool(self, *extra):
+        fleet = self.loaded()
+        self._full_pool(fleet)
+        return fleet.run(["dispatch", *extra, "--profile", str(fleet.profile("worker")),
+                          "--title", "nowhere", "--base", FRESH_BASE_DIGITS, "--optype", "append",
+                          "--override", "the pool is full and I say go"])
+
+    def test_an_override_into_a_full_pool_is_a_capacity_answer_not_a_traceback(self):
+        """`FB-86`. `--override` makes every guard pass, capacity included, and `free_slots()[0]` then
+        raised IndexError out of `main`."""
+        code, out, err = self._override_into_a_full_pool()
+        self.assertEqual(EXIT_NO_CAPACITY, code, err)
+        self.assertIn("clears when:", self.refusal(err), err)
+        self.assertIn("fleet reap", self.refusal(err), err)
+
+    def test_an_override_into_a_full_pool_dry_run_answers_the_same(self):
+        code, out, err = self._override_into_a_full_pool("--dry-run")
+        self.assertEqual(EXIT_NO_CAPACITY, code, err)
+        self.assertIn("clears when:", self.refusal(err), err)
+
+    def test_apply_rows_name_the_proposer_where_it_is_now(self):
+        """`FB-87`. The would-apply / would-supersede / superseded / pending-left rows printed the
+        proposal's RAW recorded path; after the worker renamed itself (`complete` IS the rename) that path
+        resolves to nothing. `_live_session_warning` was fixed for FB-71; `_row_named` was its sibling."""
+        fleet = self.loaded()
+        coordinator = fleet.paths["readyWorker"]
+        Roadmap(coordinator).add(Milestone(id="m7", title="closing out", status="blocked", deps=[],
+                                           evidence=[]))
+        worker = fleet.worker("renamedSelf", slot="ws4", live=False)
+        for status in ("running", "done"):
+            code, _, err = fleet.run(["propose", "--instant", str(worker), "--to", str(coordinator),
+                                      "--milestone", "m7", "--status", status,
+                                      "--evidence", "evidence/INDEX.md"])
+            self.assertEqual(EXIT_OK, code, err)
+        now = worker.parent / worker.name.replace("-inflight-", "-complete-")
+        worker.rename(now)
+
+        code, out, err = fleet.run(["apply", "--porcelain", "--dry-run", "--instant", str(coordinator),
+                                    "--milestone", "m7"])
+        self.assertEqual(EXIT_OK, code, err)
+        rows = [l for l in out.splitlines() if l.startswith(("would-apply", "would-supersede"))]
+        self.assertEqual(2, len(rows), out)
+        for row in rows:
+            self.assertIn(str(now), row, f"the row does not name the folder as it is now: {row}")
+            self.assertNotIn(str(worker), row, f"the row names the stale recorded path: {row}")
+
+        code, out, err = fleet.run(["apply", "--porcelain", "--instant", str(coordinator),
+                                    "--milestone", "m7"])
+        self.assertEqual(EXIT_OK, code, err)
+        superseded = [l for l in out.splitlines() if l.startswith("superseded")]
+        self.assertTrue(superseded, out)
+        self.assertIn(str(now), superseded[0], superseded[0])
+
 
 class TestMilestoneEvidenceIsAdmitted(CliCase):
     """FB-44 (b03 OI-1). `milestone --evidence` stored its items verbatim — the one door B03's gate did not

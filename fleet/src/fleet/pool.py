@@ -464,6 +464,7 @@ class Pool:
                     f"account for is how a recovery becomes a data loss. Look at {claim_dir}, then remove "
                     f"the directory by hand if it really is litter.",
                     clears_when=f"{entry.name!r} is accounted for and {claim_dir} is removed by hand",
+                    clears_who="the operator",
                 )
         try:
             claim_dir.rmdir()
@@ -474,6 +475,7 @@ class Pool:
                 f"slot {slot!r}'s interrupted claim could not be removed after clearing "
                 f"{len(cleared)} staging file(s): {type(exc).__name__}: {exc}",
                 clears_when=f"{claim_dir} can be removed",
+                clears_who="the operator",
             )
         return (f"cleared {len(cleared)} staging file(s) left by a writer that died between the lease "
                 f"body's write and its rename" if cleared else

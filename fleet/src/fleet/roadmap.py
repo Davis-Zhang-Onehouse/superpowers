@@ -202,7 +202,12 @@ def _check_status(status: str) -> str:
 
 
 def _shadowing(m) -> BadInput:
-    return BadInput(f"milestone {m.id!r} is already in the roadmap; refusing to shadow it")
+    return BadInput(f"milestone {m.id!r} is already in the roadmap; refusing to shadow it",
+                    clears_when=f"the new work is raised under a NEW id; if {m.id!r} itself is being "
+                                f"superseded, `fleet milestone --instant <this coordinator> --id {m.id} "
+                                f"--retire --reason <why>` retires it first (its id stays spent), and a "
+                                f"status change on it goes through `fleet propose` / `fleet apply`",
+                    clears_who="the coordinator")
 
 
 def _check_evidence(evidence, milestone: str) -> list:
@@ -559,8 +564,11 @@ class Roadmap:
                     f"milestone {milestone_id!r} is already claimed by {_owner_now(found['owner'])!r}. Two "
                     f"instants on "
                     f"one milestone is not a race the roadmap can resolve — if that owner is gone, its "
-                    f"record is what says so (`fleet board`, `fleet status`), and the work is released by "
-                    f"aborting it with a reason.")
+                    f"record is what says so (`fleet board`, `fleet status`).",
+                    clears_when="the claim is given back: `fleet abort --instant <owner> --reason <why>` while "
+                                "the owner's folder exists; if it is gone, `fleet close --id <its todo>` then "
+                                "`fleet milestone --instant <the coordinator> --id <m> --disown --reason <why>`",
+                    clears_who="the coordinator")
             #: Readiness is derived from the CURRENT file, which is the one held open here.
             owners = _Owners()
             by_id = {m["id"]: _milestone(m, owners) for m in data["milestones"]}
