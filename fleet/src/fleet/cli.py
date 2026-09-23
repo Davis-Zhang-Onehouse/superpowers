@@ -3567,10 +3567,24 @@ def _proposed_by(child: Path, proposal) -> bool:
 
 
 def _harvest_evidence_refusal(ctx: Ctx, child: Path) -> str:
-    """`B03` D-5. Why harvest must not apply this worker's rows — each row it WOULD apply whose evidence no
-    longer resolves (`Roadmap.evidence_refusal`) — else "". Held rows are not asked: harvest leaves them
+    """`B03` D-5. Why harvest must not apply this worker's rows — a row `apply` would refuse outright
+    (`RV-19`), or each row it WOULD apply whose evidence no longer resolves (`Roadmap.evidence_refusal`) —
+    else "". Held rows are not asked: harvest leaves them
     pending for the coordinator anyway."""
     roadmap, mine, _, _ = _harvest_inbox(ctx, child)
+    #: `RV-19` (B10 review). `Roadmap.apply` also re-validates each stored row's status and non-empty
+    #: evidence; a row it would refuse is refused HERE, before the loop applies any earlier row and in the
+    #: dry run too, with apply's own text.
+    invalid = []
+    for p in mine:
+        try:
+            _check_status(p.status)
+            _check_evidence(p.evidence, p.milestone)
+        except BadInput as exc:
+            invalid.append(f"{_row_named(p)}: {exc}")
+    if invalid:
+        return ("apply would refuse " + "; ".join(invalid) + ". Refused before anything was applied; the "
+                "row stays pending.")
     #: RV-24. A check, then the loop that applies: a file deleted in between makes a later `apply` in that
     #: loop refuse after earlier rows landed. The window is the loop's own duration and the worker is not
     #: closed by it (the refusal aborts before the session kill); the refused row stays pending, so a re-run

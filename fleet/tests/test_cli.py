@@ -3756,6 +3756,30 @@ class TestTheDispatchMilestoneJoin(CliCase):
         self.assertIsNone(fleet.store.read(todo).harvested_at, "the refusing harvest stamped the record")
         self.assertNotIn(record.tmux, fleet.killed, "the refusing harvest killed the session first")
 
+    def test_harvest_refuses_a_row_apply_would_refuse_before_applying_anything_dry_run_too(self):
+        """`RV-19`. `Roadmap.apply` re-validates each stored row (status domain, non-empty evidence). The
+        harvest dry-run never asked, so it said `would-harvest` rc=0 while the real call refused inside the
+        apply loop — after any earlier rows of the same worker had already landed."""
+        fleet = self.loaded()
+        coordinator, todo, _, _ = self._reported_and_finished(fleet, "done", title="badRow")
+        inbox = Roadmap(coordinator).proposals_path
+        data = json.loads(inbox.read_text())
+        mine = [row for row in data["pending"] if row["milestone"] == "M9"]
+        self.assertTrue(mine, "the fixture holds no row of this worker: vacuous")
+        mine[-1]["status"] = "finished"
+        inbox.write_text(json.dumps(data))
+        before = snapshot(fleet.tmp)
+
+        dry = fleet.run(["harvest", "--id", todo, "--dry-run"])
+        self.assertEqual(snapshot(fleet.tmp), before, "the dry-run changed state")
+        real = fleet.run(["harvest", "--id", todo])
+
+        self.assertNotEqual(dry[0], EXIT_OK, f"the dry-run passed a row apply refuses: {dry[1]}{dry[2]}")
+        self.assertEqual(dry[0], real[0], f"dry-run rc={dry[0]} vs real rc={real[0]}: {real[1]}{real[2]}")
+        self.assertIn("finished", dry[1] + dry[2], "the refusal does not name the bad status")
+        self.assertIsNone(fleet.store.read(todo).harvested_at, "the refusing harvest stamped the record")
+        self.assertEqual("blocked", Roadmap(coordinator).milestone("M9").status)
+
     def test_harvest_dry_run_counts_the_rows_a_real_run_would_apply(self):
         fleet = self.loaded()
         coordinator, todo, _, _ = self._reported_and_finished(fleet, "done")
