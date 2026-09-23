@@ -2025,24 +2025,28 @@ def _do_resume(ctx: Ctx, parsed: Parsed) -> int:
     todo_id = f"{name.name}-{name.curr}"
     tmux = parsed.get("tmux", f"dt-{name.name}")
     observed = [item.runtime for item in ctx.sessions.live() if item.name == tmux]
-    if any(runtime != ctx.sessions.runtime for runtime in observed):
-        raise Refused('Cannot adopt a session whose runtime differs from the fleet selection',
-                      clears_when=f'the {observed[0]} session in {tmux} has exited and `fleet resume` is '
-                                  f're-run, which adopts the instant under the current runtime. (Switching to '
-                                  f'{observed[0]} instead is refused while that attributable session is live.)',
-                      clears_who='the operator')
     existing = None
     try:
         existing = ctx.store.read(todo_id)
     except BadInput:
         existing = None
+    #: RV-31. The route out of a record under another runtime, shared by both refusals below: with such a
+    #: record, a foreign session exiting is not enough — the re-run meets the second refusal.
+    recorded_route = (None if existing is None or existing.runtime == ctx.sessions.runtime else
+                      f'the fleet runs {existing.runtime} again — `fleet runtime --set {existing.runtime}` once '
+                      f'`fleet runtime --set {existing.runtime} --dry-run` names no blocker (every record '
+                      f'harvested, no lease held). Closing the record does not change its runtime')
+    if any(runtime != ctx.sessions.runtime for runtime in observed):
+        raise Refused('Cannot adopt a session whose runtime differs from the fleet selection',
+                      clears_when=recorded_route or (
+                          f'the {observed[0]} session in {tmux} has exited and `fleet resume` is re-run, which '
+                          f'adopts the instant under the current runtime. (Switching to {observed[0]} instead '
+                          f'is refused while that attributable session is live.)'),
+                      clears_who='the operator')
 
-    if existing is not None and existing.runtime != ctx.sessions.runtime:
+    if recorded_route is not None:
         raise Refused('Recorded runtime differs from the fleet selection; resolve the existing record first',
-                      clears_when=f'the fleet runs {existing.runtime} again — `fleet runtime --set '
-                                  f'{existing.runtime}` once `fleet runtime --set {existing.runtime} --dry-run` '
-                                  f'names no blocker (every record harvested, no lease held). Closing the '
-                                  f'record does not change its runtime',
+                      clears_when=recorded_route,
                       clears_who='the operator')
 
     #: `B10` sweep. The claim below is the first write; its refusal is asked before the dry-run returns.
