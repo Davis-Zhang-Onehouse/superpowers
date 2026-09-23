@@ -584,9 +584,10 @@ WATCHER_UNBACKED = (WATCHER_NONE, WATCHER_GONE)
 #: a private tree instead of starting and killing processes.
 PROC_ROOT = Path("/proc")
 
-PID_RUNNING = "running"
-PID_GONE = "gone"
-PID_UNREADABLE = "unreadable"
+#: What `/proc` says about an attested pid. Values distinct from the watcher kinds above: one marker, one name.
+PID_RUNNING = "pid-running"
+PID_GONE = "pid-gone"
+PID_UNREADABLE = "pid-unreadable"
 
 
 def pid_start(pid) -> tuple:
