@@ -17,7 +17,10 @@ worker as `claude --model <m>` or `codex -m <m>` (also on `codex resume`); fleet
 `.claude/settings*.json` or `CODEX_HOME/config.toml`, and does not translate model names. The chosen runtime and
 model are recorded (`runtime`, `runtime_model`): `board` shows them in its `runtime` column, `brief` in a `runtime`
 row, `revive` relaunches the same pair and `resume` adopts under the record's runtime regardless of the box.
-A record carrying a model is refused by an older fleet binary (unknown field) rather than relaunched without it.
+A record carrying a model is an unknown field to an older fleet binary, and that binary then refuses the WHOLE store
+(every verb that enumerates records: `board`, `status`, `dispatch`, `reap`, `runtime`), not just that record. Once any
+`--model` dispatch exists in a store, do not operate on it with, or roll back to, a fleet older than the release that
+introduced `runtime_model`. Default dispatches write no such field and stay readable.
 Run these commands from the updated checkout. `fleet-env.sh` normally selects the root's deployed
 release, so the next line selects this checkout's CLI for this shell.
 
