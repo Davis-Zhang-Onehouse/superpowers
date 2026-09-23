@@ -166,9 +166,12 @@ fleet runtime --set codex
 ```
 
 Start the matching coordinator CLI manually. Dispatches use this choice; model settings stay with that
-CLI. Changing back uses `fleet runtime --set claude`. Open records, held leases and live in-scope
-agents block a change, including a crashed worker with an unfinished record. Resolve that work first;
-never delete a lease or edit `runtime.json` to bypass the refusal. The operator setup is in
+CLI. Changing back uses `fleet runtime --set claude`. A record blocks a change while `resume` or `revive`
+could still act on it (an `-inflight-` folder, or an open record still holding its lease or session), and so do
+held leases and live in-scope agents — a crashed worker with unfinished work included. Each blocker names the
+verb that clears it (`abort`, `harvest --id`, `close` then `reap`); an aborted record, or one closed after it
+completed, no longer blocks, so no review has to be recorded just to switch. Never delete a lease or edit
+`runtime.json` to bypass the refusal. The operator setup is in
 `docs/README.fleet-runtimes.md`.
 
 ### Delivering text to a worker
@@ -302,7 +305,9 @@ That last sentence was false until fleet 0.6.7 (`B10`). `abort --dry-run` answer
 argv the real call refused rc=4, and by then the real call had already killed the session. Sixteen verbs had
 the same shape. A dry run can still answer rc=0 where the real call exits non-zero in these cases:
 
-- `reap`, for foreign or unfreeable leases.
+- `reap`, for a lease whose release fails while executing (its claim directory cannot be removed). A
+  foreign stale lease now refuses the dry run too, with rc 4, and a lease a cwd holder keeps is named, not
+  counted as freeable (FB-85).
 - `release-verify`, where a missing source repo is printed as `would-refuse` by design.
 - The `harvest` tick with no `--id`, for its STALE rows.
 - `abort` and `harvest --id` when the session's own processes cannot be attributed (no pane pids or
@@ -315,6 +320,14 @@ the same shape. A dry run can still answer rc=0 where the real call exits non-ze
 - `revive` on a record with no session name. `dispatch` and `resume` never write one.
 
 For these, read the dry run's rows, not only its exit code.
+
+`abort` and `harvest --id` also ask the pane guard `close` asks, before anything else they do (FB-88): a
+mid-turn pane, one holding unsubmitted text, one awaiting an operator or one whose state cannot be read is
+refused with rc 4, dry run and real alike, and the refusal names the verb's own override (`fleet abort
+--instant <w> --reason <why> --force`, `fleet harvest --id <todo> --force`). `--force` overrides that judgement
+about work in progress and nothing else — never the cwd-holder gate. A process whose cwd cannot be read counts
+as an UNDECIDED holder of a slot when it descends from one that sits there; a teardown writes such processes
+into the lease before its kill, so they keep the slot held while they live (FB-90).
 
 A dry run of `abort` or `harvest --id` can take about 2 seconds. When a process outside the session holds the
 slot, it sleeps a fixed 2 seconds, as the real call does, then scans the slot once more before answering.

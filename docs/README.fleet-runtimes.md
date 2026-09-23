@@ -30,9 +30,11 @@ normal shell:
 fleet runtime --set claude
 ```
 
-A switch refuses while an unharvested record, held/interrupted lease, or live in-scope agent remains.
-A crashed worker still owns unfinished work. Recover it or deliberately abort and close out its record;
-do not delete store files to bypass the refusal. Read and dry-run commands do not create the setting.
+A switch refuses while a record `resume` or `revive` could still act on (an `-inflight-` folder, or an open
+record holding its lease or session), a held/interrupted lease, or a live in-scope agent remains. Each blocker
+names the verb that clears it. A crashed worker still owns unfinished work: recover it, or deliberately
+`fleet abort` it. An aborted record, or one closed after it completed, no longer blocks. Do not delete store
+files to bypass the refusal. Read and dry-run commands do not create the setting.
 Admission commands wait up to five seconds for another admission to finish. A named lock-timeout
 refusal starts no worker; retry after the holder finishes.
 
