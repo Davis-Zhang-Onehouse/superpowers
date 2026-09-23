@@ -129,11 +129,18 @@ instructions in a UTF-8 file. Do not edit a shared profile while another dispatc
 ```bash
 fleet dispatch --profile "$PREPARED_PROFILE" --title "$TITLE" --base "$BASE" \
   --from "$INSTANT" --milestone "$M" --cap "$CAP" \
-  --lineage-base "repo=$SHA" --seed-extra "$TASK_BRIEF" --dry-run
+  --lineage-base "repo=$SHA" --seed-extra "$TASK_BRIEF" \
+  --runtime "$RUNTIME" ${MODEL:+--model "$MODEL"} --dry-run
 # Once the gates allow, run the same command without --dry-run.
 ```
 
-`fleet dispatch` renders the charter and seed, appends `--seed-extra` to the seed, and starts the selected
+**Pick the runtime and model per worker, in the command.** `--runtime claude|codex` and `--model <name>` win
+over the profile's `"runtime"`/`"model"`, which win over the box's `fleet runtime`; omit `--model` to run the
+CLI's configured default (for codex, its default model). The dry-run prints `runtime` and `model` with their
+source — read them before releasing: a row saying `(box …)` is an inherited default, not a choice you made.
+Never switch the box (`fleet runtime --set`) to get a different CLI for one wave; other efforts share it.
+
+`fleet dispatch` renders the charter and seed, appends `--seed-extra` to the seed, and starts the chosen
 CLI with that complete seed as one argument. It owns the launcher and delivery; there is no post-dispatch
 handoff or waiting shim. A missing or empty seed cannot start an unbriefed worker.
 

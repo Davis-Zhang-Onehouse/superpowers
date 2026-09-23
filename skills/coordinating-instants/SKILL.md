@@ -27,8 +27,10 @@ Three facts define the role, and each is a mechanism rather than a resolution:
   producer. So a status that reaches you always arrives attributed and with a path behind it.
 
 The verb surface, exit codes, porcelain schema and store environment are in **superpowers:using-fleet**.
-Read it once; this skill does not restate it. Check `fleet runtime` when entering the role and
-use its selected CLI. Change runtimes only after closing out the fleet and exiting this coordinator.
+Read it once; this skill does not restate it. Check `fleet runtime` when entering the role: it is the
+box's DEFAULT runtime. Choose each worker's runtime and model at dispatch (`--runtime claude|codex`,
+`--model <name>`; omit `--model` for the CLI's default) rather than switching the box — the box is shared with
+other efforts, and `fleet runtime --set` is for between completed runs only.
 Prepare the complete worker profile and task brief before dispatch; pass additional instructions with
 `--seed-extra`. Send corrections through `fleet send --id ... --message-file ...`.
 Codex workers remain counted while waiting for CI because no wake mechanism has been verified.

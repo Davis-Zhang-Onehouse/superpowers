@@ -92,9 +92,9 @@ Mutating. Each has `--dry-run`.
 
 | Verb | What it does |
 |---|---|
-| `fleet runtime` | read the saved runtime; `--set claude` or `--set codex` changes it between completed runs |
+| `fleet runtime` | read the saved runtime — the DEFAULT for dispatches that choose none; `--set claude` or `--set codex` changes it between completed runs |
 | `fleet send` | deliver a message file to an owned worker after observing an empty idle input |
-| `fleet revive` | resume an explicit session UUID using the record’s runtime, workspace and configuration |
+| `fleet revive` | resume an explicit session UUID using the record’s runtime, model, workspace and configuration |
 | `fleet init` | bootstrap a new instant from the layout matrix |
 | `fleet dispatch` | evaluate every gate, then dispatch one worker |
 | `fleet resume` | adopt an existing conforming instant; evaluates NO admission rule |
@@ -156,17 +156,36 @@ not, so a coordinator that sees `15` should stop polling and go answer the pane,
 this code existed a dialog fell through to `0 safe`, the same answer an idle worker gets — a scheduled
 poll saw a healthy quiet pane while the worker was blocked waiting on an operator.
 
-### Selecting the runtime
+### Choosing a worker's runtime and model at dispatch
 
-`fleet runtime` reports the saved choice; an older store without a setting defaults to Claude.
-From a normal shell, after harvesting every worker and stopping the coordinator:
+Each dispatch can choose its own CLI and model; nothing shared is changed:
+
+```bash
+fleet dispatch --profile "$P" --title "$T" --runtime codex                     # codex, its default model
+fleet dispatch --profile "$P" --title "$T" --runtime claude --model claude-fable-5-1
+```
+
+The runtime is `--runtime` > the profile's `"runtime"` (profile.json) > the saved `fleet runtime`. The model is
+`--model` > the profile's `"model"` (which applies only when its own `"runtime"` is the one chosen) > none, and
+none means no model flag — the CLI's configured default. The model reaches the worker on its argv (claude
+`--model`, codex `-m`); the slot's `.claude/settings*.json` and `CODEX_HOME` are never edited. Both land on the
+record: `board` shows a `runtime` column (`codex`, `claude/claude-fable-5-1`), `brief` a `runtime` row, and
+`revive` relaunches the same pair while `resume` adopts under the record's runtime, whatever the box says.
+`--dry-run` prints the choice and where each half came from. A codex worker on a claude box is admitted like any
+other; do not switch the box to get one.
+
+### Selecting the box's default runtime
+
+`fleet runtime` reports the saved choice; an older store without a setting defaults to Claude. It is only the
+default for a dispatch that chooses nothing. To change it, from a normal shell, after harvesting every worker and
+stopping the coordinator:
 
 ```bash
 fleet runtime --set codex
 ```
 
-Start the matching coordinator CLI manually. Dispatches use this choice; model settings stay with that
-CLI. Changing back uses `fleet runtime --set claude`. A record blocks a change while `resume` or `revive`
+Start the matching coordinator CLI manually. Dispatches that choose nothing use this runtime and the CLI's
+configured model. Changing back uses `fleet runtime --set claude`. A record blocks a change while `resume` or `revive`
 could still act on it (an `-inflight-` folder, or an open record still holding its lease or session), and so do
 held leases and live in-scope agents — a crashed worker with unfinished work included. Each blocker names the
 verb that clears it (`abort`, `harvest --id`, `close` then `reap`); an aborted record, or one closed after it
