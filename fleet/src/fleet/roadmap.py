@@ -48,9 +48,9 @@ Nothing here reads a `.md` file. The registry is JSON; `render` turns it into ma
 """
 import json
 from dataclasses import asdict, dataclass
-from typing import Optional
 from datetime import datetime, timezone
 from pathlib import Path
+from typing import Optional
 
 from fleet import evidence as evidence_mod
 from fleet.atomic import atomic_write, held_for_update
