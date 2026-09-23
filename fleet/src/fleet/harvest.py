@@ -403,6 +403,12 @@ class Harvest:
 
         return atomic_update(self.path, mutate)
 
+    def check_readable(self) -> None:
+        """Refuse exactly as `register` would on this registry's bytes — its own parse, no stricter. `RV-29`:
+        `init` asks this before it creates anything (`sources()` builds a `Source` per entry, which
+        `register` never does, and would refuse an entry carrying a key this build does not know)."""
+        self._load()
+
     def sources(self) -> list:
         return [Source(**e) for e in sorted(self._load()["sources"], key=lambda e: e["base"])]
 

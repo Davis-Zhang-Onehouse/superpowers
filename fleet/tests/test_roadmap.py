@@ -1220,3 +1220,24 @@ class TestALegacyItemAnchorsAtItsProposer(RoadmapCase):
         milestone = self.rm.apply(self.rm.propose(self.worker, "w4", "done", ["evidence/b.log"]))
         self.assertEqual([str(self.worker / "evidence" / "a.log"), "evidence/gone.log",
                           str(self.worker / "evidence" / "b.log")], milestone.evidence)
+
+
+class TestAddRefusalIsAddsOwnCheck(unittest.TestCase):
+    """`RV-25`. `milestone --dry-run` asks `add_refusal`; `add` must raise exactly that, not a copy."""
+
+    def test_add_raises_what_add_refusal_returns(self):
+        import tempfile
+        from fleet.errors import BadInput
+        from fleet.roadmap import Milestone, Roadmap
+        instant = pathlib.Path(tempfile.mkdtemp()) / "00000000-07300001-inflight-append-rv25"
+        instant.mkdir()
+        roadmap = Roadmap(instant)
+        roadmap.add(Milestone(id="M1", title="t", status="blocked", deps=[], evidence=[]))
+        for bad in (Milestone(id=" ", title="t", status="blocked", deps=[], evidence=[]),
+                    Milestone(id="M2", title="t", status="finished", deps=[], evidence=[]),
+                    Milestone(id="M1", title="t", status="blocked", deps=[], evidence=[])):
+            asked = roadmap.add_refusal(bad)
+            self.assertIsNotNone(asked, bad)
+            with self.assertRaises(BadInput) as raised:
+                roadmap.add(bad)
+            self.assertEqual(str(raised.exception), str(asked))

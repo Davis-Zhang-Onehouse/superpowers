@@ -55,7 +55,7 @@ from pathlib import Path
 from typing import Callable, Optional
 
 from fleet.atomic import TMP_SUFFIX, atomic_write
-from fleet.errors import BadInput, NoCapacity, Refused
+from fleet.errors import BadInput, FleetError, NoCapacity, Refused
 
 _LEASE_BODY = "lease.json"
 
@@ -252,8 +252,19 @@ class Pool:
 
     def enroll(self, path: Path) -> None:
         path = Path(path)
-        if not path.is_dir():
-            raise BadInput(
+        refusal = self.enroll_refusal(path)
+        if refusal is not None:
+            raise refusal
+        atomic_write(self.enrolled / f"{path.name}.json",
+                     json.dumps({"slot": path.name, "path": str(path.resolve())}, indent=2))
+
+    def enroll_refusal(self, path: Path, exists: bool = True) -> "Optional[BadInput]":
+        """The refusal `enroll` would raise for `path`, or None — read-only (`B10` sweep: the dry-runs of
+        `enroll` and `clone` ask it). `exists=False` skips the is-a-directory check, for `clone`, which
+        asks about a target it has not created yet."""
+        path = Path(path)
+        if exists and not path.is_dir():
+            return BadInput(
                 f"{path} is not an existing directory; a slot is enrolled by pointing at the workspace "
                 "that already exists. Enrolment never creates the workspace."
             )
@@ -263,33 +274,40 @@ class Pool:
         if self.fleet_root is not None:
             resolved, owner = path.resolve(), self.fleet_root.resolve()
             if owner != resolved and owner not in resolved.parents:
-                raise BadInput(
+                return BadInput(
                     f"{resolved} is outside this fleet's root {owner}, so it cannot be enrolled here. A "
                     f"pool that can lease a workspace belonging to another root is exactly the "
                     f"interference per-root isolation exists to remove. Enrol it from the root that owns "
                     f"it.")
         slot = path.name
         if not slot or "/" in slot:
-            raise BadInput(f"{path} has no usable slot name (the slot name is the directory's basename)")
-        atomic_write(self.enrolled / f"{slot}.json",
-                     json.dumps({"slot": slot, "path": str(path.resolve())}, indent=2))
+            return BadInput(f"{path} has no usable slot name (the slot name is the directory's basename)")
+        return None
 
-    def unenroll(self, slot: str, force: bool = False) -> None:
-        record = self.enrolled / f"{slot}.json"
-        if not record.is_file():
-            raise BadInput(f"slot {slot!r} is not enrolled in {self.enrolled}")
+    def unenroll_refusal(self, slot: str, force: bool = False) -> "Optional[FleetError]":
+        """`unenroll`'s refusals, read-only, for its dry-run (`B10` sweep; `RV-23` added the leased half)."""
+        if not (self.enrolled / f"{slot}.json").is_file():
+            return BadInput(f"slot {slot!r} is not enrolled in {self.enrolled}")
         held = self.lease(slot)
         if held is not None and not force:
             # The refusal says an override EXISTS and never spells it as a python kwarg: this message is
             # transported verbatim to whoever typed a command, and `cli` appends the exact token they type
             # (`FI-19b` — an error written for the wrong audience names a remedy in the wrong language).
-            raise Refused(
+            return Refused(
                 f"slot {slot!r} is leased by todo {held.todo_id!r} (tmux {held.tmux!r}) for effort "
                 f"{held.base_instant!r}; unenrolling it would strand that work. Release it first, or say "
                 "the override out loud.",
                 clears_when=f"the lease on {slot!r} is released",
                 clears_who=held.base_instant or None,
             )
+        return None
+
+    def unenroll(self, slot: str, force: bool = False) -> None:
+        record = self.enrolled / f"{slot}.json"
+        refusal = self.unenroll_refusal(slot, force=force)
+        if refusal is not None:
+            raise refusal
+        held = self.lease(slot)
         if held is not None:
             self.release(slot, force=True)
         record.unlink()
@@ -505,10 +523,7 @@ class Pool:
         if slot is not None:
             candidates = [slot]
             if slot not in self.slots():
-                raise BadInput(
-                    f"slot {slot!r} is not enrolled; enrolled slots are {self.slots()}. A pool never "
-                    "claims a workspace nobody put in it."
-                )
+                raise self._not_enrolled_for_claim(slot)
         else:
             candidates = self.free_slots()
             if not candidates:
@@ -539,25 +554,77 @@ class Pool:
             atomic_write(claim_dir / _LEASE_BODY, json.dumps(held.to_json(), indent=2))
             return held
         if slot is not None:
-            existing = self.lease(slot)
-            if existing is not None:
-                raise NoCapacity(
-                    f"slot {slot!r} is already leased by todo {existing.todo_id!r} "
-                    f"(tmux {existing.tmux!r})")
-            # No body. Either a claim is being born microseconds from now, or a writer died between the
-            # body's write and its rename — and the shipped message called both "an unnamed claim", which
-            # named neither the condition nor anything the reader could do. `SI-7`: the second case used to
-            # be permanent, so this refusal was the last thing the operator saw before losing the slot.
-            why = dict(self.interrupted_claims(min_age_s=0.0)).get(slot)
-            if why is None:
-                raise NoCapacity(
-                    f"slot {slot!r} was claimed by another process while this call was choosing, and that "
-                    f"writer is still running. Nothing is wrong: try again, or let the pool pick a slot.")
-            raise NoCapacity(
-                f"slot {slot!r} holds an INTERRUPTED claim — the directory that wins the slot exists, but "
-                f"the lease body inside it was never finished, so there is no owner to name: {why}. "
-                f"`reap` clears it and says what it cleared.")
+            raise self._taken(slot)
         raise NoCapacity("every enrolled slot was taken while claiming; nothing free to hand out")
+
+    def claim_refusal(self, slot: str) -> "Optional[FleetError]":
+        """The refusal `claim(slot=slot)` would raise right now, or None. Read-only — `B10` sweep: the
+        dry-runs of `dispatch --slot` and `resume --slot` ask it instead of returning above the claim."""
+        if slot not in self.slots():
+            return self._not_enrolled_for_claim(slot)
+        if (self.leases / slot).exists():
+            return self._taken(slot)
+        return None
+
+    def _not_enrolled_for_claim(self, slot: str) -> BadInput:
+        return BadInput(
+            f"slot {slot!r} is not enrolled; enrolled slots are {self.slots()}. A pool never "
+            "claims a workspace nobody put in it."
+        )
+
+    def _taken(self, slot: str) -> NoCapacity:
+        """Why a named slot whose claim directory exists cannot be claimed — leased, mid-birth, or interrupted."""
+        existing = self.lease(slot)
+        if existing is not None:
+            return NoCapacity(
+                f"slot {slot!r} is already leased by todo {existing.todo_id!r} "
+                f"(tmux {existing.tmux!r})")
+        # No body. Either a claim is being born microseconds from now, or a writer died between the
+        # body's write and its rename — and the shipped message called both "an unnamed claim", which
+        # named neither the condition nor anything the reader could do. `SI-7`: the second case used to
+        # be permanent, so this refusal was the last thing the operator saw before losing the slot.
+        why = dict(self.interrupted_claims(min_age_s=0.0)).get(slot)
+        if why is None:
+            return NoCapacity(
+                f"slot {slot!r} was claimed by another process while this call was choosing, and that "
+                f"writer is still running. Nothing is wrong: try again, or let the pool pick a slot.")
+        return NoCapacity(
+            f"slot {slot!r} holds an INTERRUPTED claim — the directory that wins the slot exists, but "
+            f"the lease body inside it was never finished, so there is no owner to name: {why}. "
+            f"`reap` clears it and says what it cleared.")
+
+    def cwd_holders(self, slot: str) -> list:
+        """Live pids holding `slot`'s leased path as their cwd; `[]` when it is not leased. Read-only."""
+        held = self.lease(slot)
+        return [] if held is None else list(self._cwd_probe(held.path))
+
+    def release_refusal(self, slot: str, spare=(), holders=None) -> "Optional[Refused]":
+        """The `OBS-48` refusal `release` would raise for `slot` right now, or None — read-only.
+
+        `B10`. The one gate `release` evaluates, exposed so a caller can ask it BEFORE doing anything
+        irreversible, and so a `--dry-run` can evaluate the same predicate the real call does instead of
+        returning above it. `spare` names pids the caller is about to end itself (`abort` kills the
+        worker's own session first), which therefore will not be holding the slot when `release` runs.
+        `holders` is a scan the caller already took (`RV-21`): `spare` was computed from it, and a second
+        scan would count a child born in between as foreign.
+        """
+        held = self.lease(slot)
+        return None if held is None else self._cwd_refusal(slot, held, spare, holders)
+
+    def _cwd_refusal(self, slot: str, held, spare=(), holders=None) -> "Optional[Refused]":
+        spared = set(spare)
+        scanned = self._cwd_probe(held.path) if holders is None else holders
+        pids = [p for p in scanned if p not in spared]
+        if not pids:
+            return None
+        return Refused(
+            f"slot {slot!r} ({held.path}) is held as cwd by live pid(s) "
+            f"{', '.join(str(p) for p in pids)}; releasing it would let a second worker be "
+            f"leased into a directory somebody is still working in (OBS-48). Lease is todo "
+            f"{held.todo_id!r} for effort {held.base_instant!r}.",
+            clears_when=f"pid(s) {', '.join(str(p) for p in pids)} exit {held.path}",
+            clears_who=held.base_instant or None,
+        )
 
     def release(self, slot: str, force: bool = False, expect_todo: str = None) -> bool:
         """Give a slot back. Returns True when THIS call is the one that removed the claim.
@@ -586,16 +653,9 @@ class Pool:
         if expect_todo is not None and held is not None and held.todo_id != expect_todo:
             return False                   # re-claimed under us; the lease we were asked to free is gone
         if held is not None and not force:
-            pids = list(self._cwd_probe(held.path))
-            if pids:
-                raise Refused(
-                    f"slot {slot!r} ({held.path}) is held as cwd by live pid(s) "
-                    f"{', '.join(str(p) for p in pids)}; releasing it would let a second worker be "
-                    f"leased into a directory somebody is still working in (OBS-48). Lease is todo "
-                    f"{held.todo_id!r} for effort {held.base_instant!r}.",
-                    clears_when=f"pid(s) {', '.join(str(p) for p in pids)} exit {held.path}",
-                    clears_who=held.base_instant or None,
-                )
+            refusal = self._cwd_refusal(slot, held)
+            if refusal is not None:
+                raise refusal
         (claim_dir / _LEASE_BODY).unlink(missing_ok=True)
         try:
             for leftover in sorted(claim_dir.iterdir()):

@@ -37,6 +37,47 @@ class TestLiveness(unittest.TestCase):
         s, _, _ = layer(procs=[LiveSession(9, pathlib.Path("/elsewhere"), None)])
         self.assertEqual([x.pid for x in s.live()], [9])
 
+class TestOwnProcesses(unittest.TestCase):
+    """`B10`. Which cwd holders a kill of the session ends — its pane pid and that pid's descendants."""
+
+    def _layer(self, pane, parents):
+        s, _, _ = layer(sessions=("dt-a",))
+        s.probes.pane_pid = lambda name: pane if name == "dt-a" else None
+        s.probes.parent_of = lambda pid: parents.get(pid, 1)
+        return s
+
+    def test_the_pane_and_its_descendants_are_the_sessions_own(self):
+        s = self._layer(100, {101: 100, 102: 101, 900: 1, 901: 900})
+        self.assertEqual(s.own_processes("dt-a", [100, 102, 900, 901]), {100, 102})
+
+    def test_every_pane_counts_when_the_session_has_several(self):
+        """`RV-20`. The kill ends every pane, so every pane pid roots the session's own tree."""
+        s = self._layer(100, {101: 100, 201: 200, 900: 1})
+        s.probes.pane_pids = lambda name: [100, 200] if name == "dt-a" else None
+        self.assertEqual(s.own_processes("dt-a", [101, 201, 900]), {101, 201})
+
+    def test_the_real_parent_walk_climbs_a_real_child_to_its_parent(self):
+        """`RV-27`. The default probes' `parent_of`, against /proc, on a real child of this process."""
+        child = subprocess.Popen(["sleep", "30"])
+        try:
+            probes = default_probes(tmux_socket="itfleet-rv27-never-started")
+            self.assertEqual(probes.parent_of(child.pid), os.getpid())
+            self.assertEqual(probes.parent_of(2 ** 22 + 12345), 0, "an absent pid must read 0, not raise")
+        finally:
+            child.kill(); child.wait()
+
+    def test_unobservable_is_None_not_empty(self):
+        s = self._layer(None, {})
+        self.assertIsNone(s.own_processes("dt-a", [5]))
+        s2, _, _ = layer(sessions=("dt-a",))
+        s2.probes.pane_pid = lambda name: 100          # a pane pid but no parent walk
+        self.assertIsNone(s2.own_processes("dt-a", [5]))
+
+    def test_a_cycle_in_a_racing_proc_walk_terminates(self):
+        s = self._layer(100, {5: 6, 6: 5})
+        self.assertEqual(s.own_processes("dt-a", [5]), set())
+
+
 class TestPanePredicates(unittest.TestCase):
     def test_unsubmitted_text_is_detected_from_the_LAST_lines_only(self):
         # Anchored to the tail: a prompt earlier in the buffer is scrollback, and treating history as

@@ -295,7 +295,29 @@ column (`$2=="held"`), never with `wc -l` over the whole output.
 
 Every mutating verb has one, derived from whether the verb is read-only rather than added per verb — so the
 next mutating verb anybody writes gets an interrogable form whether or not they remembered to ask for one. A
-dry run evaluates every gate and writes nothing: not a lease, not a record, not a file.
+dry run evaluates every gate and writes nothing: not a lease, not a record, not a file. When the real call would
+refuse, the dry run refuses too, with the same exit code and the same message.
+
+That last sentence was false until fleet 0.6.7 (`B10`). `abort --dry-run` answered rc=0 `would-rename` for an
+argv the real call refused rc=4, and by then the real call had already killed the session. Sixteen verbs had
+the same shape. A dry run can still answer rc=0 where the real call exits non-zero in these cases:
+
+- `reap`, for foreign or unfreeable leases.
+- `release-verify`, where a missing source repo is printed as `would-refuse` by design.
+- The `harvest` tick with no `--id`, for its STALE rows.
+- `abort` and `harvest --id` when the session's own processes cannot be attributed (no pane pids or
+  parent walk). The dry run prints a `gate` row saying it could not decide. If a holder is left after the
+  kill, the two verbs end differently. `abort` waits once more and names the partial state. `harvest --id`
+  has already applied the proposals and stamped the record by then, so it refuses with the bare OBS-48
+  message and leaves the slot for `reap`.
+- `abort` and `harvest --id` when a process of the session's own tree survives the kill. Nothing can see
+  that before the kill.
+- `revive` on a record with no session name. `dispatch` and `resume` never write one.
+
+For these, read the dry run's rows, not only its exit code.
+
+A dry run of `abort` or `harvest --id` can take about 2 seconds. When a process outside the session holds the
+slot, it sleeps a fixed 2 seconds, as the real call does, then scans the slot once more before answering.
 
 Use it to ask "would this be admitted?" A guard you cannot interrogate non-destructively gets interrogated
 destructively — twice, by two actors, one of whom had read the entry that declined to run that exact command.

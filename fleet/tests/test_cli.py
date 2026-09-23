@@ -2218,6 +2218,361 @@ class TestAbort(CliCase):
         self.assertEqual(snapshot(fleet.tmp), before, "the refused abort still mutated the tree")
 
 
+class TestAbortDryRunEvaluatesTheRealGate(CliCase):
+    """`B10` (i48c / FI-281). `abort --dry-run` returned `would-rename`/`would-release` with rc=0 from ABOVE
+    the only place the `OBS-48` cwd-holder gate runs, so the same argv then refused rc=4 for real — and the
+    real call refused only AFTER it had already killed the session. A dry-run must evaluate every gate the
+    real call does and report the refusal it would hit, and a refusal must come before any irreversible
+    step where the facts to decide it exist before that step.
+
+    The session's OWN processes are the fixture's other half, and the reason the gate cannot simply be "any
+    cwd holder": a dispatched worker's pane sits in its slot, so every ordinary abort HAS holders — the ones
+    the kill ends. Only a holder outside the session's process tree survives the kill, so only that one is
+    a refusal the real call will hit."""
+
+    PANE = 7000                          # the pid tmux started in the worker's pane
+
+    def _attributable(self, fleet, parents):
+        """Make the fixture able to say whose a pid is: a pane pid per live session, and a parent walk."""
+        fleet.sessions.probes.pane_pid = lambda name: self.PANE if name in fleet.tmux_live else None
+        fleet.sessions.probes.parent_of = lambda pid: parents.get(pid, 1)
+
+    def _states(self, fleet):
+        return (snapshot(fleet.tmp), list(fleet.killed), fleet.pool_state(), fleet.record_state())
+
+    def test_dry_run_refuses_exactly_as_the_real_call_on_a_holder_outside_the_session(self):
+        fleet = self.loaded()
+        instant, todo = fleet.worker("heldOpen", slot="ws7"), fleet.ids["heldOpen"]
+        fleet.hold_slot_cwd("ws7", pid=89420)          # a live pid the kill will NOT end (parent: init)
+        self._attributable(fleet, {})
+        argv = ["abort", "--instant", str(instant), "--reason", "superseded"]
+
+        before = self._states(fleet)
+        dry_code, dry_out, dry_err = fleet.run(argv[:1] + ["--dry-run"] + argv[1:])
+        self.assertEqual(self._states(fleet), before,
+                         "the dry-run changed the tree, a lease, a record or killed a session")
+        self.assertEqual(dry_code, EXIT_REFUSED,
+                         f"the dry-run said the abort would go through (rc={dry_code}) while the real call "
+                         f"refuses on the cwd holder it never evaluated: {dry_out}{dry_err}")
+        self.assertIn("89420", dry_err, "the dry-run refusal does not name the holder")
+
+        real_code, real_out, real_err = fleet.run(argv)
+
+        self.assertEqual((real_code, real_err), (dry_code, dry_err),
+                         "the dry-run and the real call disagree about the same argv")
+        self.assertEqual(fleet.killed, [], "the real abort killed the session and THEN refused: the "
+                                           "refusal must come before the irreversible step")
+        self.assertTrue(instant.exists(), "the folder was renamed on a refusing path")
+        self.assertIsNotNone(fleet.pool.lease("ws7"), "the slot was released on a refusing path")
+        self.assertIsNone(fleet.store.read(todo).closed_at, "the record was stamped on a refusing path")
+        self.assertFalse((instant / ".fleet" / "abort.json").exists(),
+                         "abort.json was written on a path that refused before doing anything")
+        self.assertTrue(fleet.slept, "the bounded wait was never given to the holder")
+
+    def test_a_holder_that_exits_during_the_wait_lets_both_go_through(self):
+        fleet = self.loaded()
+        instant = fleet.worker("heldBriefly", slot="ws8")
+        fleet.hold_slot_cwd("ws8", pid=90001)
+        self._attributable(fleet, {})
+        holder_path = str(fleet.pool.slot_path("ws8"))
+        fleet.sleep = lambda seconds: (fleet.slept.append(seconds), fleet.holders.pop(holder_path, None))
+
+        code, out, err = fleet.run(["abort", "--dry-run", "--instant", str(instant), "--reason", "gone"])
+        self.assertEqual(code, EXIT_OK, f"{out}{err}")
+        fleet.hold_slot_cwd("ws8", pid=90001)          # back again for the real call's own wait
+        code, out, err = fleet.run(["abort", "--instant", str(instant), "--reason", "gone"])
+        self.assertEqual(code, EXIT_OK, f"{out}{err}")
+        self.assertIsNone(fleet.pool.lease("ws8"))
+
+    def test_the_sessions_own_processes_are_not_a_refusal(self):
+        """The control, and the reason option (A) of D-1 was rejected: the worker's own pane holds the slot
+        in EVERY ordinary abort, and the kill ends it. Reporting it would flip the divergence's sign."""
+        fleet = self.loaded()
+        instant, todo = fleet.worker("ownPane", slot="ws7"), fleet.ids["ownPane"]
+        fleet.hold_slot_cwd("ws7", pid=self.PANE)              # the pane's shell itself
+        fleet.hold_slot_cwd("ws7", pid=7001)                   # claude, the pane's child
+        self._attributable(fleet, {7001: self.PANE})
+        path = str(fleet.pool.slot_path("ws7"))
+        kill = fleet.sessions.probes.kill_session
+
+        def kill_ends_the_tree(name):
+            kill(name)
+            fleet.holders.pop(path, None)
+        fleet.sessions.probes.kill_session = kill_ends_the_tree
+
+        before = self._states(fleet)
+        code, out, err = fleet.run(["abort", "--dry-run", "--instant", str(instant), "--reason", "done"])
+        self.assertEqual(code, EXIT_OK, f"the worker's own pane was reported as a refusal: {out}{err}")
+        self.assertEqual(self._states(fleet), before, "the dry-run mutated state")
+        self.assertIn("would-release", out)
+        self.assertEqual(fleet.slept, [], "the dry-run waited on the session's own processes")
+
+        code, out, err = fleet.run(["abort", "--instant", str(instant), "--reason", "done"])
+        self.assertEqual(code, EXIT_OK, f"{out}{err}")
+        self.assertIsNone(fleet.pool.lease("ws7"))
+        self.assertIsNotNone(fleet.store.read(todo).closed_at)
+
+    def test_every_pane_of_the_session_is_its_own_not_only_the_first(self):
+        """`RV-20`. `kill-session` ends EVERY pane, so a process under a second pane (or window) dies with the
+        kill too. Sparing only the first pane's tree read it as foreign — a refusal that could never clear,
+        because that process exits only when the session is killed."""
+        fleet = self.loaded()
+        instant = fleet.worker("twoPanes", slot="ws7")
+        fleet.hold_slot_cwd("ws7", pid=self.PANE)
+        fleet.hold_slot_cwd("ws7", pid=7101)                   # a child of the SECOND pane
+        self._attributable(fleet, {7101: 7100})
+        fleet.sessions.probes.pane_pids = lambda name: [self.PANE, 7100] if name in fleet.tmux_live else None
+        path = str(fleet.pool.slot_path("ws7"))
+        kill = fleet.sessions.probes.kill_session
+
+        def kill_ends_every_pane(name):
+            kill(name)
+            fleet.holders.pop(path, None)
+        fleet.sessions.probes.kill_session = kill_ends_every_pane
+
+        code, out, err = fleet.run(["abort", "--dry-run", "--instant", str(instant), "--reason", "done"])
+        self.assertEqual(code, EXIT_OK, f"a second pane's process was read as foreign: {out}{err}")
+        code, out, err = fleet.run(["abort", "--instant", str(instant), "--reason", "done"])
+        self.assertEqual(code, EXIT_OK, f"{out}{err}")
+        self.assertIsNone(fleet.pool.lease("ws7"))
+
+    def test_a_child_born_between_two_scans_is_not_read_as_foreign(self):
+        """`RV-21`. The session's own processes and the refusal were read from two separate `/proc` scans,
+        so a busy worker's child born between them read as foreign: a spurious wait, or a spurious refusal
+        when it keeps happening. One scan now feeds both."""
+        fleet = self.loaded()
+        instant = fleet.worker("busyWorker", slot="ws7")
+        self._attributable(fleet, {7002: self.PANE, 7003: self.PANE, 7004: self.PANE})
+        scans = []
+
+        def a_new_child_every_scan(path):
+            scans.append(path)
+            return [self.PANE] + [7001 + n for n in range(1, len(scans))]
+        fleet.pool._cwd_probe = a_new_child_every_scan
+
+        code, out, err = fleet.run(["abort", "--dry-run", "--instant", str(instant), "--reason", "busy"])
+        self.assertEqual(code, EXIT_OK, f"{out}{err}")
+        self.assertEqual(fleet.slept, [], "a child born between two scans cost a wait: it read as foreign")
+
+    def test_a_dead_session_leaves_every_holder_foreign(self):
+        """No session to kill means nothing the abort does can free the slot: both calls refuse, alike."""
+        fleet = self.loaded()
+        instant = fleet.worker("deadButHeld", slot="ws8", live=False)
+        fleet.hold_slot_cwd("ws8", pid=91000)
+        self._attributable(fleet, {})
+        argv = ["abort", "--instant", str(instant), "--reason", "stranded"]
+
+        before = self._states(fleet)
+        dry = fleet.run(argv[:1] + ["--dry-run"] + argv[1:])
+        self.assertEqual(self._states(fleet), before)
+        real = fleet.run(argv)
+        self.assertEqual(dry[0], EXIT_REFUSED, f"{dry}")
+        self.assertEqual((real[0], real[2]), (dry[0], dry[2]))
+        self.assertTrue(instant.exists())
+
+    def test_unattributable_holders_are_named_undecided_not_passed(self):
+        """A live session whose pane pid cannot be read: the gate cannot tell the worker's own processes
+        from anybody else's, so it does not pre-refuse (that would block every abort on a probe gap) — and
+        the dry-run SAYS it could not decide instead of implying the release will succeed."""
+        fleet = self.loaded()
+        instant = fleet.worker("blindPane", slot="ws7")
+        fleet.hold_slot_cwd("ws7", pid=89421)           # pane_pid probe left absent: unobservable
+        before = self._states(fleet)
+        code, out, err = fleet.run(["abort", "--dry-run", "--instant", str(instant), "--reason", "x"])
+        self.assertEqual(self._states(fleet), before)
+        self.assertEqual(code, EXIT_OK, f"{out}{err}")
+        self.assertIn("89421", out, "the dry-run hid the holder it could not attribute")
+        self.assertIn("could not", out.lower())
+
+
+class TestDryRunSweepB10(CliCase):
+    """`B10`'s sweep (`evidence/02-sweep/SWEEP.md` in the b10 instant): verbs whose dry-run returned above a
+    refusal the real call reaches only AFTER a side effect (`clone` copies the whole golden first; `init`
+    creates the instant first), and trivial hoists in the same functions (`complete`, `init`, `enroll`).
+    Each: the dry-run refuses with the real call's rc and text, and changes nothing."""
+
+    def _same(self, fleet, argv):
+        before = snapshot(fleet.tmp)
+        dry = fleet.run([argv[0], "--dry-run"] + argv[1:])
+        self.assertEqual(snapshot(fleet.tmp), before, f"the dry-run of {argv[0]} changed state")
+        real = fleet.run(argv)
+        self.assertEqual((dry[0], dry[2]), (real[0], real[2]),
+                         f"{argv[0]}: the dry-run answered rc={dry[0]} {dry[1]!r}{dry[2]!r}, the real call "
+                         f"rc={real[0]} {real[2]!r}")
+        self.assertNotEqual(real[0], EXIT_OK, f"the real {argv[0]} did not refuse, so this is vacuous")
+        return real
+
+    def _golden(self, fleet):
+        golden = fleet.tmp / "golden"
+        (golden / "alpha").mkdir(parents=True)
+        (golden / "alpha" / "f.txt").write_text("content\n")
+        self.assertEqual(fleet.run(["set-golden", "--path", str(golden)])[0], EXIT_OK)
+        return golden
+
+    def test_clone_onto_an_existing_target(self):
+        fleet = self.loaded()
+        self._golden(fleet)
+        (fleet.tmp / "occupied").mkdir()
+        self._same(fleet, ["clone", "--slot", str(fleet.tmp / "occupied")])
+
+    def test_clone_outside_the_root_refuses_before_copying_the_golden(self):
+        fleet = self.loaded()
+        self._golden(fleet)
+        root = fleet.tmp / "theRoot"
+        root.mkdir()
+        fleet.pool = Pool(fleet.home, cwd_probe=lambda path: [], alive=fleet.sessions.alive, fleet_root=root)
+        target = fleet.tmp / "outsideTheRoot"
+        self._same(fleet, ["clone", "--slot", str(target)])
+        self.assertFalse(target.exists(), "the golden was copied before the enrolment refused")
+
+    def test_enroll_a_path_that_is_not_a_directory(self):
+        fleet = self.loaded()
+        self._same(fleet, ["enroll", "--slot", str(fleet.tmp / "no-such-dir")])
+
+    def test_complete_onto_an_existing_target(self):
+        fleet = self.loaded()
+        child = fleet.worker("twiceDone", live=False)
+        fleet.reviewed(child)
+        (child.parent / child.name.replace("-inflight-", "-complete-")).mkdir()
+        self._same(fleet, ["complete", "--instant", str(child)])
+        self.assertTrue(child.is_dir())
+
+    def test_init_onto_an_existing_target(self):
+        fleet = self.loaded()
+        code, out, err = fleet.run(["init", "--dry-run", "--porcelain", "--name", "clash"])
+        self.assertEqual(code, EXIT_OK, err)
+        pathlib.Path(dict(l.split("\t", 1) for l in out.splitlines())["would-create"]).mkdir()
+        self._same(fleet, ["init", "--name", "clash"])
+
+    def test_init_reads_the_registry_the_way_register_does_no_stricter(self):
+        """`RV-29`. The hoisted registry read built a `Source` from every entry, which `register`'s own
+        parse never did — so an entry carrying a key this build does not know began refusing `init`."""
+        fleet = self.loaded()
+        fleet.harvest.path.parent.mkdir(parents=True, exist_ok=True)
+        data = json.loads(fleet.harvest.path.read_text()) if fleet.harvest.path.is_file() else \
+            {"schema_version": 1, "sources": []}
+        data["sources"].append({"base": "/elsewhere/x", "issues_path": "/elsewhere/x/ISSUES.md",
+                                "registered_at": "2026-01-01T00:00:00Z", "a_later_field": 1})
+        fleet.harvest.path.write_text(json.dumps(data))
+        code, out, err = fleet.run(["init", "--dry-run", "--name", "tolerant"])
+        self.assertEqual(code, EXIT_OK, f"{out}{err}")
+        code, out, err = fleet.run(["init", "--name", "tolerant"])
+        self.assertEqual(code, EXIT_OK, f"{out}{err}")
+
+    def test_init_with_an_unreadable_registry_refuses_before_creating_the_instant(self):
+        fleet = self.loaded()
+        fleet.harvest.path.parent.mkdir(parents=True, exist_ok=True)
+        fleet.harvest.path.write_text('{"schema_version": 999, "sources": []}')
+        before = sorted(p.name for p in fleet.instants.iterdir())
+        self._same(fleet, ["init", "--name", "unwatched"])
+        self.assertEqual(sorted(p.name for p in fleet.instants.iterdir()), before,
+                         "init created the instant and THEN refused to watch it")
+
+
+    # ---- the mild half: the real call refuses before writing anything, the dry-run said rc=0 ----------
+
+    def test_park_with_a_blank_question(self):
+        fleet = self.loaded()
+        self._same(fleet, ["park", "--instant", str(fleet.paths["readyWorker"]), "--question", "   "])
+
+    def test_declare_over_an_unreadable_declarations_file(self):
+        fleet = self.loaded()
+        ready = fleet.paths["readyWorker"]
+        (ready / ".fleet").mkdir(exist_ok=True)
+        (ready / ".fleet" / "declare.json").write_text("{not json")
+        self._same(fleet, ["declare", "--instant", str(ready), "--phase", "building"])
+
+    def test_declare_awaiting_ci_over_an_unreadable_review_ledger_refuses_before_writing(self):
+        """`RV-18`. `declare --phase awaiting-ci` read `review.json` AFTER writing the phase and watchers, so
+        an unreadable ledger made the real call exit 2 with the phase already changed, while the dry-run
+        (which never read it) exited 0."""
+        fleet = self.loaded()
+        ready = fleet.paths["readyWorker"]
+        (ready / ".fleet").mkdir(exist_ok=True)
+        (ready / ".fleet" / "review.json").write_text('{"schema_version": 999, "rounds": []}')
+        before = Declarations(ready).phase()
+        self._same(fleet, ["declare", "--instant", str(ready), "--phase", "awaiting-ci",
+                           "--watcher", "cron */10 * * * * poll"])
+        self.assertEqual(Declarations(ready).phase(), before, "the refusing declare wrote the phase anyway")
+
+    def test_milestone_add_of_a_duplicate_id_and_of_a_status_outside_the_domain(self):
+        fleet = self.loaded()
+        ready = str(fleet.paths["readyWorker"])
+        self._same(fleet, ["milestone", "--instant", ready, "--id", "M1", "--title", "again"])
+        self._same(fleet, ["milestone", "--instant", ready, "--id", "M-new", "--title", "t",
+                           "--status", "finished"])
+
+    def test_propose_a_status_outside_the_domain(self):
+        fleet = self.loaded()
+        ready = str(fleet.paths["readyWorker"])
+        self._same(fleet, ["propose", "--instant", ready, "--milestone", "M1", "--status", "finished",
+                           "--evidence", "evidence/02-acceptance/verify-acs.sh"])
+
+    def test_propose_asks_its_refusals_in_the_real_calls_order(self):
+        """`RV-28`. Evidence that does not resolve AND an unreadable inbox: `Roadmap.propose` admits the
+        evidence first, so that is the refusal the dry-run must name too."""
+        fleet = self.loaded()
+        ready = fleet.paths["readyWorker"]
+        Roadmap(ready).proposals_path.write_text('{"schema_version": 999, "pending": [], "closed": []}')
+        self._same(fleet, ["propose", "--instant", str(ready), "--milestone", "M1", "--status", "done",
+                           "--evidence", "evidence/no-such-file.txt"])
+
+    def test_apply_of_a_stored_row_apply_itself_would_refuse(self):
+        """A hand-built or legacy inbox row: `apply` re-validates it (`propose` is not the only writer)."""
+        fleet = self.loaded()
+        ready = fleet.paths["readyWorker"]
+        inbox = Roadmap(ready).proposals_path
+        data = json.loads(inbox.read_text())
+        self.assertTrue(data["pending"], "the fixture holds no pending row: this case is vacuous")
+        for row in data["pending"]:
+            row["status"] = "finished"
+        inbox.write_text(json.dumps(data))
+        self._same(fleet, ["apply", "--instant", str(ready), "--milestone", "M1"])
+
+    def test_review_with_a_scope_a_verdict_or_finding_ids_the_ledger_refuses(self):
+        fleet = self.loaded()
+        ready = str(fleet.paths["readyWorker"])
+        finding = "RV-1:Minor:applied:x.py:a finding:none"
+        self._same(fleet, ["review", "--instant", ready, "--scope", "everything", "--verdict", "READY",
+                           "--finding", finding])
+        self._same(fleet, ["review", "--instant", ready, "--scope", "all", "--verdict", "ready",
+                           "--finding", finding])
+        self._same(fleet, ["review", "--instant", ready, "--scope", "all", "--verdict", "READY",
+                           "--finding", finding, "--finding", finding])
+
+    def test_unenroll_a_slot_that_is_not_enrolled(self):
+        fleet = self.loaded()
+        self._same(fleet, ["unenroll", "--slot", "wsNeverEnrolled"])
+
+    def test_unenroll_a_leased_slot_without_force_names_the_refusal_in_the_dry_run_too(self):
+        """`RV-23`. The dry-run exited 4 for a leased slot but printed no refusal; the real call names the
+        work it would strand and the override token."""
+        fleet = self.loaded()
+        self.assertIsNotNone(fleet.pool.lease("ws1"), "ws1 is not leased: vacuous")
+        real = self._same(fleet, ["unenroll", "--slot", "ws1"])
+        self.assertIn("--force", real[2], "the refusal does not name the override")
+
+    def test_set_golden_to_a_path_that_is_not_a_directory(self):
+        fleet = self.loaded()
+        self._same(fleet, ["set-golden", "--path", str(fleet.tmp / "no-such-golden")])
+
+    def test_resume_into_a_slot_that_is_not_enrolled(self):
+        fleet = self.loaded()
+        orphan = fleet.orphan("adoptMe")
+        self._same(fleet, ["resume", "--instant", str(orphan), "--slot", "wsNeverEnrolled",
+                           "--tmux", "dt-adoptMe"])
+
+    def test_dispatch_twice_in_one_minute_and_into_a_leased_named_slot(self):
+        fleet = self.loaded()
+        base = ["dispatch", "--profile", str(fleet.profile("worker")), "--base", "00000000",
+                "--optype", "append", "--cap", "9"]            # the WIP cap is not what this case measures
+        code, out, err = fleet.run(base + ["--title", "twin"])
+        self.assertEqual(code, EXIT_OK, f"the first dispatch did not go through: {out}{err}")
+        self._same(fleet, base + ["--title", "twin"])
+        self.assertIsNotNone(fleet.pool.lease("ws1"), "ws1 is not leased: the named-slot case is vacuous")
+        self._same(fleet, base + ["--title", "intoTakenSlot", "--slot", "ws1"])
+
+
 class TestClose(CliCase):
     """FD-10: the external monitor is required to call `pane-guard` before any send-keys, and `close`
     disarms it. Plan 6 §J8/§N5: a busy pane and a pane holding unsubmitted input are both refused; a pane
@@ -2787,6 +3142,29 @@ class TestApplyWarnsWhileTheWorkersSessionIsStillLive(CliCase):
         self.assertEqual(code, EXIT_OK, err)
         self.assertNotIn("alive", (out + err).lower(),
                          f"apply warned about liveness for a worker with no live session: {out}{err}")
+
+
+    def test_the_warning_names_where_the_worker_is_NOW(self):
+        """`FB-71`. The worker proposes `done` and then renames itself (`complete` IS the rename); the
+        warning printed the proposal's recorded `-inflight-` path, which no longer resolves. Every other
+        proposer row resolves it through `roadmap._proposer` (`SI-40`); this one has to as well."""
+        fleet = self.loaded()
+        coordinator = self._coordinator_with(fleet)
+        worker = fleet.worker("renamedSelf", slot="ws4")
+        code, _, err = fleet.run(["propose", "--instant", str(worker), "--to", str(coordinator),
+                                  "--milestone", "m7", "--status", "done",
+                                  "--evidence", "evidence/INDEX.md"])
+        self.assertEqual(EXIT_OK, code, err)
+        now = worker.parent / worker.name.replace("-inflight-", "-complete-")
+        worker.rename(now)
+
+        code, out, err = fleet.run(["apply", "--instant", str(coordinator), "--milestone", "m7"])
+
+        self.assertEqual(code, EXIT_OK, err)
+        warning = [line for line in out.splitlines() if line.startswith("warning")]
+        self.assertTrue(warning, f"no warning row at all, so this case is vacuous: {out}")
+        self.assertIn(str(now), warning[0], f"the warning does not name the folder as it is now: {warning}")
+        self.assertNotIn(str(worker), warning[0], f"the warning names the stale recorded path: {warning}")
 
 
 class TestApplyChoosesOneRow(CliCase):
@@ -3403,6 +3781,75 @@ class TestTheDispatchMilestoneJoin(CliCase):
         self.assertIn("M9", harvested[0], "the row must name what it applied")
         self.assertEqual(bystanders, [p for p in Roadmap(coordinator).proposals() if p.instant != child],
                          "harvesting ONE worker applied proposals another instant wrote")
+
+    def test_harvest_dry_run_evaluates_the_slot_gate_and_both_refuse_before_anything(self):
+        """`B10` sweep. `harvest --id` applied the delta, disowned, killed the session and stamped the
+        record, and only THEN did `pool.release` refuse on a cwd holder — while the dry-run, which never
+        asks, said `would-harvest` rc=0. Same gate as `abort`, same fix: asked first, by both."""
+        fleet = self.loaded()
+        coordinator, todo, _, _ = self._reported_and_finished(fleet, "done", title="heldHarvest")
+        record = fleet.store.read(todo)
+        self.assertTrue(record.slot, "the fixture leased no slot: this case is vacuous")
+        fleet.hold_slot_cwd(record.slot, pid=92000)
+        argv = ["harvest", "--id", todo]
+        before = (snapshot(fleet.tmp), list(fleet.killed))
+
+        dry = fleet.run(argv + ["--dry-run"])
+        self.assertEqual((snapshot(fleet.tmp), list(fleet.killed)), before, "the dry-run changed state")
+        self.assertEqual(dry[0], EXIT_REFUSED,
+                         f"the dry-run said the harvest would go through (rc={dry[0]}): {dry[1]}{dry[2]}")
+        real = fleet.run(argv)
+
+        self.assertEqual((real[0], real[2]), (dry[0], dry[2]), "dry-run and real call disagree")
+        self.assertEqual("blocked", Roadmap(coordinator).milestone("M9").status,
+                         "the refusing harvest applied the delta anyway")
+        self.assertIsNone(fleet.store.read(todo).harvested_at, "the refusing harvest stamped the record")
+        self.assertNotIn(record.tmux, fleet.killed, "the refusing harvest killed the session first")
+
+    def test_harvest_refuses_a_row_apply_would_refuse_before_applying_anything_dry_run_too(self):
+        """`RV-19`. `Roadmap.apply` re-validates each stored row (status domain, non-empty evidence). The
+        harvest dry-run never asked, so it said `would-harvest` rc=0 while the real call refused inside the
+        apply loop — after any earlier rows of the same worker had already landed."""
+        fleet = self.loaded()
+        coordinator, todo, _, finished = self._reported_and_finished(fleet, "done", title="badRow")
+        #: `RV-36`. A VALID row first (M9, from the fixture) and the invalid one AFTER it (M8), so the real
+        #: call's loop would apply M9 before meeting M8 — the "before applying anything" half is measured.
+        Roadmap(coordinator).add(Milestone(id="M8", title="second report", status="blocked", deps=[],
+                                           evidence=[]))
+        code, out, err = fleet.run(["propose", "--instant", str(finished), "--to", str(coordinator),
+                                    "--milestone", "M8", "--status", "done", "--evidence", "evidence/INDEX.md"])
+        self.assertEqual(code, EXIT_OK, err)
+        inbox = Roadmap(coordinator).proposals_path
+        data = json.loads(inbox.read_text())
+        rows = [row for row in data["pending"] if row["milestone"] in ("M9", "M8")]
+        self.assertEqual([r["milestone"] for r in rows], ["M9", "M8"], "the rows are not in the order this case needs")
+        rows[-1]["status"] = "finished"
+        inbox.write_text(json.dumps(data))
+        before = snapshot(fleet.tmp)
+
+        dry = fleet.run(["harvest", "--id", todo, "--dry-run"])
+        self.assertEqual(snapshot(fleet.tmp), before, "the dry-run changed state")
+        real = fleet.run(["harvest", "--id", todo])
+
+        self.assertNotEqual(dry[0], EXIT_OK, f"the dry-run passed a row apply refuses: {dry[1]}{dry[2]}")
+        self.assertEqual(dry[0], real[0], f"dry-run rc={dry[0]} vs real rc={real[0]}: {real[1]}{real[2]}")
+        self.assertIn("finished", dry[1] + dry[2], "the refusal does not name the bad status")
+        self.assertIsNone(fleet.store.read(todo).harvested_at, "the refusing harvest stamped the record")
+        self.assertEqual("blocked", Roadmap(coordinator).milestone("M9").status,
+                         "the valid row ahead of the refused one was applied: the refusal came mid-loop")
+
+    def test_a_harvest_dry_run_cannot_fall_into_the_real_branch_whatever_the_gate_returns(self):
+        """`RV-24`. The dry-run branch was `elif (x := gate()) is not None and ctx.dry_run`, so a gate that
+        ever returned None would send a DRY RUN into the branch that applies, kills and stamps."""
+        from unittest import mock
+        fleet = self.loaded()
+        coordinator, todo, _, _ = self._reported_and_finished(fleet, "done", title="noneGate")
+        before = (snapshot(fleet.tmp), list(fleet.killed))
+        with mock.patch.object(cli, "_slot_gate_before_kill", return_value=None):
+            code, out, err = fleet.run(["harvest", "--id", todo, "--dry-run"])
+        self.assertEqual((snapshot(fleet.tmp), list(fleet.killed)), before,
+                         f"a dry run applied, killed or stamped: {out}{err}")
+        self.assertEqual("blocked", Roadmap(coordinator).milestone("M9").status)
 
     def test_harvest_dry_run_counts_the_rows_a_real_run_would_apply(self):
         fleet = self.loaded()

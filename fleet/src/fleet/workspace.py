@@ -24,6 +24,7 @@ filed defects got the least specification (FI-6).
 import shutil
 from dataclasses import dataclass
 from pathlib import Path
+from typing import Optional
 
 from fleet.atomic import atomic_write
 from fleet.errors import BadInput
@@ -93,16 +94,45 @@ class Workspace:
         return Path(text)
 
     def set_golden(self, path: Path) -> None:
+        refusal = self.golden_refusal(path)
+        if refusal is not None:
+            raise refusal
+        atomic_write(self._golden_file, f"{Path(path)}\n")
+
+    def golden_refusal(self, path: Path) -> "Optional[BadInput]":
+        """`set_golden`'s refusal, read-only, for its dry-run (`B10` sweep)."""
         path = Path(path)
         if not path.is_dir():
-            raise BadInput(
+            return BadInput(
                 f"{path} is not an existing directory, so it cannot be the golden workspace. "
                 "The golden is validated at SET time, because a golden that does not exist is "
                 "discovered at clone time — inside a dispatch that has already claimed a slot."
             )
-        atomic_write(self._golden_file, f"{path}\n")
+        return None
 
     # ---- clone: growing the pool FROM the declared golden ----------------------------------------
+
+    def clone_refusal(self, target: Path) -> "Optional[BadInput]":
+        """The refusal `clone` would raise for `target` before copying anything, or None. Read-only.
+
+        `B10` sweep: `clone --dry-run` printed "a real run would REFUSE" and exited 0; it now asks this.
+        `golden()` itself refuses when none is declared, and that refusal propagates from here too.
+        """
+        golden = self.golden()
+        target = Path(target)
+        if not golden.is_dir():
+            return BadInput(
+                f"the declared golden {golden} is not a directory, so there is nothing to clone. It is "
+                f"validated at SET time for exactly this reason; something has moved or removed it since.")
+        if target.exists():
+            return BadInput(
+                f"{target} already exists. A clone never overwrites: the target is either a mistake or "
+                f"somebody's leased workspace, and guessing between those is how a live slot gets erased. "
+                f"Pick a fresh path, or remove that one by hand if you are sure.")
+        if str(target).startswith(str(golden) + "/") or target == golden:
+            return BadInput(
+                f"{target} is inside the golden {golden}. Cloning a directory into itself does not terminate.")
+        return None
 
     def clone(self, target: Path) -> dict:
         """Duplicate the declared golden into `target`. -> a report dict.  `SI-19`.
@@ -120,20 +150,10 @@ class Workspace:
         Refuses rather than overwrites. A clone onto an existing directory is either a mistake or a request to
         blow away somebody's leased workspace, and neither is worth guessing between.
         """
-        golden = self.golden()
-        target = Path(target)
-        if not golden.is_dir():
-            raise BadInput(
-                f"the declared golden {golden} is not a directory, so there is nothing to clone. It is "
-                f"validated at SET time for exactly this reason; something has moved or removed it since.")
-        if target.exists():
-            raise BadInput(
-                f"{target} already exists. A clone never overwrites: the target is either a mistake or "
-                f"somebody's leased workspace, and guessing between those is how a live slot gets erased. "
-                f"Pick a fresh path, or remove that one by hand if you are sure.")
-        if str(target).startswith(str(golden) + "/") or target == golden:
-            raise BadInput(
-                f"{target} is inside the golden {golden}. Cloning a directory into itself does not terminate.")
+        refusal = self.clone_refusal(target)
+        if refusal is not None:
+            raise refusal
+        golden, target = self.golden(), Path(target)
         target.parent.mkdir(parents=True, exist_ok=True)
         shutil.copytree(golden, target, symlinks=True, ignore_dangling_symlinks=True)
         files = sum(1 for _ in target.rglob("*") if _.is_file())
