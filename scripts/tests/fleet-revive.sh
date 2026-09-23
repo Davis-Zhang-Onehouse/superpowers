@@ -61,7 +61,7 @@ def check(name, condition, detail=''):
 home = Path(tempfile.mkdtemp(prefix='fleet-revive-test-'))
 try:
     # The marker walk stops BELOW $HOME, so every fixture root lives one level under a fake HOME.
-    env_base = dict(os.environ, HOME=str(home), FLEET_BIN=str(real_fleet))
+    env_base = dict(os.environ, HOME=str(home), FLEET_LAUNCHER_TEST_BIN=str(real_fleet))
     for key in ('FLEET_HOME', 'FLEET_ROOT', 'FLEET_TMUX_SOCKET', 'FLEET_RELEASES', 'FLEET_INSTANTS', 'CLAUDE_OWNERS_MAP'):
         env_base.pop(key, None)
 
@@ -83,7 +83,7 @@ try:
     def run(cwd, mode, env=None, fleet=None, extra=None):
         e = dict(env_base if env is None else env)
         if fleet:
-            e['FLEET_BIN'] = str(fleet)
+            e['FLEET_LAUNCHER_TEST_BIN'] = str(fleet)
         if extra:
             e.update(extra)
         return subprocess.run(['bash', str(script), mode], cwd=str(cwd), env=e, capture_output=True, text=True)

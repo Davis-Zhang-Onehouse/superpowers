@@ -71,7 +71,10 @@ set --
 # Narrow on purpose -- it is the ONLY variable this script consults instead of deriving the binary from
 # `$REPO`, so a test overriding it cannot accidentally also override the paths the launch-correctness
 # assertions (no pipe, `setsid` present, `$REPO/bin/fleet` by absolute path) are checking.
-FLEET="${FLEET_BIN:-$REPO/bin/fleet}"
+# NOT `FLEET_BIN` (FB-56). `fleet dispatch` exports FLEET_BIN into every worker it starts, naming the fleet
+# that ran dispatch, so reading that name here ran the DISPATCHER'S binary (for a release worker, the deployed
+# copy) instead of the one this script ships beside. The seam has a name nothing exports.
+FLEET="${FLEET_LAUNCHER_TEST_BIN:-$REPO/bin/fleet}"
 
 # Test seam: the wait loop's poll interval. Production default stays 30s -- a real gate runs ~45 minutes,
 # so 30s costs nothing there -- but a test driving a near-instant stub would otherwise race the loop's
@@ -142,7 +145,7 @@ this_runs_verdict() { # 0 when VERDICT.tsv is present and is not the one a previ
   [ "$now" != "none" ] && [ "$now" != "$STALE_VERDICT" ]
 }
 
-echo "$(basename "$0"): launching release-verify for $V (log: $LOG)"
+echo "$(basename "$0"): launching release-verify for $V with $FLEET (log: $LOG)"
 
 # The launch line the four incidents are each a violation of: no pipe (Trap: `| tail` ate the exit
 # status), no `timeout` (Trap: rc=124 on a guessed duration), `setsid` (Trap: a harness background task's

@@ -40,7 +40,7 @@ RELEASES="$TMP/releases"
 mkdir -p "$RELEASES"
 export FLEET_TMUX_SOCKET="$SOCKET"
 export FLEET_RELEASES="$RELEASES"
-export FLEET_BIN="/nonexistent/fleet" # check 3 (slots) must degrade quietly without a real fleet binary
+export FLEET_LAUNCHER_TEST_BIN="/nonexistent/fleet" # check 3 (slots) must degrade quietly without a real fleet binary
 
 # --- an orphan whose pid is not running --------------------------------------------------------------
 # A pid this large is very unlikely to exist; if it somehow does, kill -0 would still need the cmdline to

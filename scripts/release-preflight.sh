@@ -17,7 +17,10 @@ REPO="$(cd "$HERE/.." && pwd)"
 
 # Test seam, matching scripts/release-gate.sh: the narrow variable a test overrides instead of the real
 # ~few-hundred-ms `fleet board` call, so a stubbed run cannot also mask the real thing this script checks.
-FLEET="${FLEET_BIN:-$REPO/bin/fleet}"
+# NOT `FLEET_BIN` (FB-56). `fleet dispatch` exports FLEET_BIN into every worker it starts, naming the fleet
+# that ran dispatch, so reading that name here ran the DISPATCHER'S binary (for a release worker, the deployed
+# copy) instead of the one this script ships beside. The seam has a name nothing exports.
+FLEET="${FLEET_LAUNCHER_TEST_BIN:-$REPO/bin/fleet}"
 
 REAP=0
 case "${1:-}" in
