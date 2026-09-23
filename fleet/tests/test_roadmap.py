@@ -1127,6 +1127,30 @@ class TestTheOwnerFollowsTheRename(RoadmapCase):
                 self.assertIn(str(done), str(caught.exception))
                 self.assertNotIn(str(self.tasks / WORKER), str(caught.exception))
 
+    def _listings(self, call):
+        listed = []
+        real = pathlib.Path.iterdir
+        def counting(path):
+            listed.append(path)
+            return real(path)
+        with mock.patch.object(pathlib.Path, "iterdir", counting):
+            call()
+        return listed
+
+    def test_one_read_lists_each_owners_folder_once_and_one_milestone_resolves_one_owner(self):
+        """RV-25. Resolving on every read listed the instants folder once PER STALE OWNER on every
+        `milestones()`, and `milestone(id)` resolved every owner to return one."""
+        self.complete()
+        for i in range(5):
+            gone = self.tasks / f"00000000-0730050{i}-inflight-append-gone{i}"
+            gone.mkdir()
+            self.rm.add(ms(f"g{i}", status="ready"))
+            self.rm.claim(f"g{i}", str(gone))
+            gone.rename(self.tasks / gone.name.replace("-inflight-", "-complete-"))
+        self.assertEqual(1, len(self._listings(self.rm.milestones)), "one read listed the folder per owner")
+        self.assertEqual(1, len(self._listings(lambda: self.rm.milestone("g3"))))
+        self.assertTrue(self.rm.milestone("g3").owner.endswith("-complete-append-gone3"))
+
     def test_disown_still_refuses_a_different_instant(self):
         self.complete()
         other = str(self.tasks / "00000000-07300999-inflight-append-someoneElse")
