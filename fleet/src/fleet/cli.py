@@ -964,10 +964,15 @@ def _record(ctx: Ctx, parsed: Parsed) -> Record:
     return _refuse_foreign_root(record, parsed)
 
 
-def _child_of(ctx: Ctx, record: Record) -> Path:
+def _recorded_path(ctx: Ctx, record: Record) -> Path:
+    """The record's instant path as RECORDED, anchored at the instants dir when it is relative. Not
+    resolved through a rename — that is `_child_of`; this is what an identity compare starts from."""
     path = Path(record.child_instant)
-    if not path.is_absolute():
-        path = ctx.instants_dir / path
+    return path if path.is_absolute() else ctx.instants_dir / path
+
+
+def _child_of(ctx: Ctx, record: Record) -> Path:
+    path = _recorded_path(ctx, record)
     found = resolve(path)
     if found is None:
         raise BadInput(f"record {record.todo_id!r} names {path}, which resolves to no instant on disk")
@@ -2584,7 +2589,7 @@ def _do_milestone(ctx: Ctx, parsed: Parsed) -> int:
         #: this asks the store rather than looking for a session, which would call a worker gone whenever
         #: tmux could not be reached.
         holder = next((r for r in ctx.store.all()
-                       if same_instant(r.child_instant, current.owner)
+                       if r.child_instant and same_instant(_recorded_path(ctx, r), current.owner)
                        and not r.harvested_at and not r.closed_at),
                       None)
         if holder is not None:

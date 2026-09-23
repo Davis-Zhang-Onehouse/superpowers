@@ -6107,3 +6107,38 @@ class TestDisownFindsItsOpenHolderAcrossTheRename(CliCase):
 
         self.assertEqual(EXIT_REFUSED, code, f"an OPEN worker's claim was released: {out}")
         self.assertEqual(str(done), Roadmap(coordinator).milestone("M9").owner)
+
+    def _relative_record(self, fleet, name):
+        record = fleet.store.read(fleet.ids[name])
+        record.child_instant = pathlib.Path(record.child_instant).name
+        fleet.store.write(record)
+
+    def test_a_record_that_names_its_instant_relatively_still_holds_its_claim(self):
+        """RV-27. `_child_of` accepts a RELATIVE `child_instant` (anchored at the instants dir); the holder
+        lookup compared it as recorded, so a relative record never matched and its claim was released."""
+        fleet = self.loaded()
+        coordinator, worker = fleet.paths["readyWorker"], fleet.paths["solo"]
+        self._relative_record(fleet, "solo")
+        roadmap = Roadmap(coordinator)
+        roadmap.add(Milestone(id="M9", title="carried work", status="ready", deps=[], evidence=[]))
+        roadmap.claim("M9", str(worker))
+
+        code, out, err = fleet.run(["milestone", "--instant", str(coordinator), "--id", "M9",
+                                    "--disown", "--reason", "I want the slot"])
+
+        self.assertEqual(EXIT_REFUSED, code, f"an OPEN worker's claim was released: {out}")
+
+    def test_a_relative_record_of_ANOTHER_instant_does_not_hold_a_gone_owners_claim(self):
+        """RV-27's neighbour: anchoring a relative record must not make it match every owner."""
+        fleet = self.loaded()
+        coordinator = fleet.paths["readyWorker"]
+        self._relative_record(fleet, "solo")
+        gone = fleet.instants / "00000000-07300099-abort-append-longGone"
+        roadmap = Roadmap(coordinator)
+        roadmap.add(Milestone(id="M9", title="carried work", status="ready", deps=[], evidence=[]))
+        roadmap.claim("M9", str(gone))
+
+        code, out, err = fleet.run(["milestone", "--instant", str(coordinator), "--id", "M9",
+                                    "--disown", "--reason", "owner is long gone"])
+
+        self.assertEqual(EXIT_OK, code, err)
