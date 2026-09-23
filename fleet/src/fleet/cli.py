@@ -821,21 +821,55 @@ def default_context(parsed: Parsed, out, err) -> Ctx:
                layer_for=layer_for, launch_settings=resolve_launch, launch_environment=environ)
 
 
-def _cwd_holders(path) -> list:
+def _cwd_holders(path, proc_root=Path("/proc")) -> list:
     """Live pids holding `path` as their cwd. `OBS-48`: tmux liveness cannot see a session that outlived
-    its work, so "the tmux is gone" is not freedom."""
-    holders = []
-    proc = Path("/proc")
+    its work, so "the tmux is gone" is not freedom.
+
+    `FB-90`. A pid whose cwd cannot be read used to be skipped — an unreadable holder read as absent. It is
+    reported now, as a `pool.UnreadableHolder`, when world-readable facts tie it to `path`: its parent walk
+    (`/proc/<pid>/stat`, readable by anyone) reaches a READABLE holder of `path`, i.e. it was started from
+    inside the slot. Every other unreadable pid stays unreported, and deliberately: measured on this box, 299
+    of 341 pids have an unreadable cwd (286 of them root's, 7 of them this user's sshd processes), so treating
+    all of them as undecided would refuse every release on every box. What is left — an unreadable process
+    that entered the slot by `chdir`, with no readable holder above it — is not observable by any fact this
+    user can read (the bucket's ISSUES OI-1). Exited and zombie pids hold nothing and are skipped."""
+    from fleet.pool import UnreadableHolder
+
+    proc = Path(proc_root)
     if not proc.is_dir():
-        return holders
+        return []
+    target = Path(path).resolve()
+    holders, unreadable = [], []
     for entry in proc.iterdir():
         if not entry.name.isdigit():
             continue
         try:
-            if (entry / "cwd").resolve() == Path(path).resolve():
+            if (entry / "cwd").resolve(strict=True) == target:
                 holders.append(int(entry.name))
-        except OSError:
-            continue
+        except FileNotFoundError:
+            continue                                   # exited between the listing and the read
+        except (OSError, RuntimeError):
+            unreadable.append(int(entry.name))
+
+    def parent_of(pid: int) -> int:
+        """ppid from `stat` (world-readable), 0 for an exited or zombie pid or an unreadable stat."""
+        try:
+            fields = (proc / str(pid) / "stat").read_text(
+                encoding="utf-8", errors="surrogateescape").rsplit(")", 1)[1].split()
+        except (OSError, IndexError):
+            return 0
+        if len(fields) < 2 or fields[0] in ("Z", "X") or not fields[1].isdigit():
+            return 0
+        return int(fields[1])
+
+    readable = set(holders)
+    for pid in unreadable:
+        walker, steps = parent_of(pid), 0
+        while walker > 1 and steps < 256:                 # bounded: a /proc race cannot loop us
+            if walker in readable:
+                holders.append(UnreadableHolder(pid))
+                break
+            walker, steps = parent_of(walker), steps + 1
     return holders
 
 
@@ -3376,6 +3410,8 @@ def _slot_gate_before_kill(ctx: Ctx, record, child: Path, verb: str) -> str:
         "the real call applies, closes the session and stamps the record, then releases with no wait: a "
         "holder that survives the kill refuses there, from that partial state (`reap` recovers the slot)")
 
+    spared = set()
+
     def refusal():
         pids = ctx.pool.cwd_holders(record.slot)
         if not pids:
@@ -3386,15 +3422,27 @@ def _slot_gate_before_kill(ctx: Ctx, record, child: Path, verb: str) -> str:
                           f"whether closing session {record.tmux!r} ends them could not be observed (no pane "
                           f"pid or parent walk), so the cwd-holder gate could not be decided before the "
                           f"kill; {after_an_undecided_gate}")
+        spared.clear()
+        spared.update(pid for pid in pids if pid in own)
         #: `RV-21`. The same scan `own` was computed from — a second one would read a newborn child as foreign.
         return ctx.pool.release_refusal(record.slot, spare=own, holders=pids), ""
 
+    def note_the_unreadable():
+        """`FB-90`. The session's own processes are spared because the kill ends them — but one whose cwd cannot
+        be read is tied to the slot only THROUGH that session (its parent walk), and after the kill it would be
+        reparented and read as absent. So, the gate passed and the real call about to kill, it is written into
+        the lease: while that same process lives the pool counts it as an undecided holder."""
+        if not ctx.dry_run:
+            ctx.pool.note_unreadable(record.slot, spared, expect_todo=record.todo_id)
+
     found, undecided = refusal()
     if found is None:
+        note_the_unreadable()
         return undecided
     (ctx.sleep or time.sleep)(ABORT_RELEASE_WAIT_S)
     found, undecided = refusal()
     if found is None:
+        note_the_unreadable()
         return undecided
     why = (f"Those pid(s) are not processes of session {record.tmux!r}, so closing it would not free the "
            f"slot." if live else

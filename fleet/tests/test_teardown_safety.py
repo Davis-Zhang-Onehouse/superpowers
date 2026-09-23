@@ -213,6 +213,7 @@ class UnreadableCwdHolder(unittest.TestCase):
                 except ProcessLookupError:
                     pass
             self.shell.wait(timeout=10)
+            self.shell.stdout.close()
         self.addCleanup(stop)
 
     def test_the_fixture_really_is_unreadable(self):
@@ -233,6 +234,75 @@ class UnreadableCwdHolder(unittest.TestCase):
         self.assertIsNotNone(refusal, "sparing the readable parent left the unreadable child invisible")
         self.assertIn(str(self.child), str(refusal))
         self.assertIn("could not be read", str(refusal))
+
+
+class UnreadableHolderSurvivesTheKill(CliCase):
+    """FB-90, through the verbs. An unreadable process tied to the slot only through the session being torn down
+    is spared by the gate (the kill should end it) — and if it survives the kill it is reparented and no world-
+    readable fact ties it to the slot any more. The teardown notes it in the lease first, so `abort`, its re-run
+    and `reap` all still count it while that same process lives."""
+
+    PANE, CHILD = 7000, 7005
+
+    def _setup(self, fleet):
+        from fleet.pool import UnreadableHolder
+        instant = fleet.worker("blindChild", slot="ws1", pane=IDLE_PANE)
+        path = str(fleet.pool.slot_path("ws1"))
+        fleet.holders[path] = [self.PANE, UnreadableHolder(self.CHILD)]
+        fleet.sessions.probes.pane_pid = lambda name: self.PANE if name in fleet.tmux_live else None
+        fleet.sessions.probes.parent_of = lambda pid: {self.CHILD: self.PANE}.get(pid, 1)
+        self.alive = {self.CHILD}
+        fleet.pool._pid_start = lambda pid: "4242" if pid in self.alive else None
+        kill = fleet.sessions.probes.kill_session
+
+        def kill_orphans_the_child(name):
+            kill(name)
+            fleet.holders[path] = []           # the pane is gone; the orphan is no longer tied by ancestry
+        fleet.sessions.probes.kill_session = kill_orphans_the_child
+        return instant
+
+    def test_a_surviving_unreadable_child_keeps_the_slot_held(self):
+        fleet = self.fleet()
+        instant = self._setup(fleet)
+        argv = ["abort", "--instant", str(instant), "--reason", "stuck"]
+        before = fleet.pool_state()
+        self.assertEqual(fleet.run(argv[:1] + ["--dry-run"] + argv[1:])[0], EXIT_OK)
+        self.assertEqual(fleet.pool_state(), before, "the dry-run wrote the note")
+
+        code, out, err = fleet.run(argv)
+        self.assertEqual(code, EXIT_REFUSED, f"the slot was released under a live unreadable holder: {out}{err}")
+        self.assertIn(str(self.CHILD), err)
+        self.assertIn("could not be read", err)
+        self.assertIsNotNone(fleet.pool.lease("ws1"))
+        self.assertTrue(instant.exists(), "renamed on a refusing path")
+
+        self.assertEqual(fleet.run(["reap", "--base", OURS])[0], EXIT_OK)
+        self.assertIsNotNone(fleet.pool.lease("ws1"), "reap freed a slot a noted unreadable process still holds")
+        self.assertEqual(fleet.run(argv)[0], EXIT_REFUSED, "the documented re-run released it anyway")
+
+        self.alive.clear()                      # the process exits
+        code, out, err = fleet.run(argv)
+        self.assertEqual(code, EXIT_OK, f"{out}{err}")
+        self.assertIsNone(fleet.pool.lease("ws1"))
+
+    def test_control_an_unreadable_child_the_kill_ends_is_no_obstacle(self):
+        fleet = self.fleet()
+        instant = self._setup(fleet)
+        kill = fleet.sessions.probes.kill_session
+        fleet.sessions.probes.kill_session = lambda name: (kill(name), self.alive.clear())
+        code, out, err = fleet.run(["abort", "--instant", str(instant), "--reason", "done"])
+        self.assertEqual(code, EXIT_OK, f"{out}{err}")
+        self.assertIsNone(fleet.pool.lease("ws1"))
+
+    def test_a_recycled_pid_is_not_the_noted_process(self):
+        fleet = self.fleet()
+        self._setup(fleet)
+        fleet.pool.note_unreadable("ws1", [__import__("fleet.pool", fromlist=["x"]).UnreadableHolder(self.CHILD)],
+                                   expect_todo=fleet.ids["blindChild"])
+        fleet.holders[str(fleet.pool.slot_path("ws1"))] = []
+        self.assertIn(self.CHILD, fleet.pool.cwd_holders("ws1"))
+        fleet.pool._pid_start = lambda pid: "9999"          # same pid, a different process
+        self.assertEqual(fleet.pool.cwd_holders("ws1"), [])
 
 
 class EnrollDoesNotRepoint(CliCase):
@@ -325,7 +395,7 @@ class RuntimeSwitchOverUnresumableRecords(CliCase):
         code, _, err = self._switch(fleet)
         self.assertEqual(code, EXIT_OK, err)
 
-    def test_a_gone_folder_record_clears_by_close_then_reap_with_no_review(self):
+    def test_a_gone_folder_record_clears_by_reap_with_no_review(self):
         fleet = self.fleet()
         path = fleet.worker("gone", slot="ws1", live=False)
         shutil.rmtree(path)

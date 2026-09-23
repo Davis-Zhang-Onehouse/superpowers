@@ -128,6 +128,34 @@ def _live_pid(pid: int) -> bool:
     return (Path("/proc") / str(pid)).exists()
 
 
+class UnreadableHolder(int):
+    """A pid that may hold a slot as its cwd, but whose `/proc/<pid>/cwd` this user cannot read — `FB-90`.
+
+    An `int`, so every spare set, `own_processes` walk and comparison keeps working on it unchanged; the type
+    only changes how a refusal NAMES it ("could not be read", never "holds it"). Nothing proves it is in the
+    slot and nothing proves it is not: it is UNDECIDED, and an undecided holder refuses a release exactly as a
+    proven one does (FB-53's rule — unobservable is not absent). Only a pid world-readable facts TIE to the
+    slot is ever one of these (see `cli._cwd_holders`): on a real box most pids are unreadable (another uid, a
+    non-dumpable process), and refusing on all of them would refuse every release.
+    """
+
+
+def _pid_start(pid: int, proc_root: Path = Path("/proc")) -> Optional[str]:
+    """The start time (`/proc/<pid>/stat` field 22, world-readable) of a LIVE pid, or None when it has exited or is
+    a zombie. A pid plus its start time names one process, so a recycled pid is never read as the one noted."""
+    try:
+        fields = (Path(proc_root) / str(pid) / "stat").read_text(
+            encoding="utf-8", errors="surrogateescape").rsplit(")", 1)[1].split()
+    except (OSError, IndexError):
+        return None
+    if not fields or fields[0] in ("Z", "X"):
+        return None
+    try:
+        return fields[19]
+    except IndexError:
+        return None
+
+
 @dataclass
 class Lease:
     slot: str
@@ -142,9 +170,14 @@ class Lease:
     #: exists to be an ORDER, not a time — it is what makes `rank` a total order over simultaneous
     #: claimants, and so what lets exactly `cap` of them admit instead of all or none (`FI-21`).
     claimed_ns: int = 0
+    #: `FB-90`. `[pid, start time]` of each UNREADABLE process a teardown saw tied to this slot through the
+    #: session it was about to kill. The tie (a parent walk to a readable holder) is lost the moment that
+    #: session dies and the process is reparented, so it is written down first: while the same process lives,
+    #: the pool counts it as an undecided holder of the slot.
+    unreadable_holders: list = field(default_factory=list)
 
     def to_json(self) -> dict:
-        return {
+        body = {
             "slot": self.slot,
             "path": str(self.path),
             "todo_id": self.todo_id,
@@ -154,6 +187,9 @@ class Lease:
             "claimed_at": self.claimed_at,
             "claimed_ns": self.claimed_ns,
         }
+        if self.unreadable_holders:
+            body["unreadable_holders"] = [list(item) for item in self.unreadable_holders]
+        return body
 
     @classmethod
     def from_json(cls, d: dict) -> "Lease":
@@ -161,7 +197,9 @@ class Lease:
             return cls(slot=d["slot"], path=Path(d["path"]), todo_id=d["todo_id"],
                        tmux=d["tmux"], base_instant=d.get("base_instant", ""),
                        child_instant=d.get("child_instant", ""), claimed_at=d.get("claimed_at", ""),
-                       claimed_ns=int(d.get("claimed_ns", 0) or 0))
+                       claimed_ns=int(d.get("claimed_ns", 0) or 0),
+                       unreadable_holders=[[int(pid), str(start)] for pid, start
+                                           in (d.get("unreadable_holders") or [])])
         except KeyError as exc:
             raise BadInput(f"lease body is missing the field {exc.args[0]!r}") from exc
 
@@ -247,7 +285,8 @@ class Pool:
                  cwd_probe: Callable[[Path], list] = None,
                  alive: Callable[[str], bool] = None,
                  pid_alive: Callable[[int], bool] = None,
-                 fleet_root: Path = None):
+                 fleet_root: Path = None,
+                 pid_start: Callable[[int], Optional[str]] = None):
         self.home = Path(home)
         #: `G3`. The FLEET root this pool belongs to, when there is one — not to be confused with
         #: `self.root` two lines down, which is this pool's own directory. Optional because the hermetic
@@ -264,6 +303,9 @@ class Pool:
         #: as litter and deletes a live worker's lease — so the safe default is the true answer, and a test
         #: that wants determinism injects one (`SI-7`).
         self._pid_alive = pid_alive if pid_alive is not None else _live_pid
+        #: `FB-90`. The identity of a live process, for the unreadable holders a lease notes; the real `/proc`
+        #: by default for the same reason as `pid_alive` — a default of "gone" would free a slot on a guess.
+        self._pid_start = pid_start if pid_start is not None else _pid_start
 
     # ---- enrolment -------------------------------------------------------------------------
 
@@ -644,9 +686,43 @@ class Pool:
             f"`reap` clears it and says what it cleared.")
 
     def cwd_holders(self, slot: str) -> list:
-        """Live pids holding `slot`'s leased path as their cwd; `[]` when it is not leased. Read-only."""
+        """Live pids holding `slot`'s leased path as their cwd; `[]` when it is not leased. Read-only.
+        Includes the lease's noted unreadable holders that still live (`FB-90`)."""
         held = self.lease(slot)
-        return [] if held is None else list(self._cwd_probe(held.path))
+        return [] if held is None else self._holders(held)
+
+    def _holders(self, held: Lease, scanned=None) -> list:
+        """The probe's scan (or `scanned`, one the caller already took — `RV-21`) plus every process the lease
+        NOTED as an unreadable holder that is still the same live process (`FB-90`), each once."""
+        pids = list(self._cwd_probe(held.path) if scanned is None else scanned)
+        seen = set(pids)
+        for pid, start in held.unreadable_holders:
+            if pid not in seen and self._pid_start(pid) == start:
+                pids.append(UnreadableHolder(pid))
+                seen.add(pid)
+        return pids
+
+    def note_unreadable(self, slot: str, pids, expect_todo: str) -> list:
+        """Record the `UnreadableHolder`s among `pids` in `slot`'s lease body, as `[pid, start time]` — `FB-90`.
+
+        Called by a teardown BEFORE it kills the session those processes were tied to through: after the kill
+        the tie is gone, and without the note the next release would read the slot as empty. Only for the lease
+        `expect_todo` holds (a re-claimed slot is somebody else's lease — `FB-89`). Returns what was noted."""
+        held = self.lease(slot)
+        if held is None or held.todo_id != expect_todo:
+            return []
+        known = {pid for pid, _ in held.unreadable_holders}
+        added = []
+        for pid in pids:
+            if not isinstance(pid, UnreadableHolder) or int(pid) in known:
+                continue
+            start = self._pid_start(int(pid))
+            if start is not None:
+                added.append([int(pid), start])
+        if added:
+            held.unreadable_holders = list(held.unreadable_holders) + added
+            atomic_write(self.leases / slot / _LEASE_BODY, json.dumps(held.to_json(), indent=2))
+        return added
 
     def release_refusal(self, slot: str, spare=(), holders=None) -> "Optional[Refused]":
         """The `OBS-48` refusal `release` would raise for `slot` right now, or None — read-only.
@@ -663,16 +739,27 @@ class Pool:
 
     def _cwd_refusal(self, slot: str, held, spare=(), holders=None) -> "Optional[Refused]":
         spared = set(spare)
-        scanned = self._cwd_probe(held.path) if holders is None else holders
-        pids = [p for p in scanned if p not in spared]
+        pids = [p for p in self._holders(held, holders) if p not in spared]
         if not pids:
             return None
+        seen = [p for p in pids if not isinstance(p, UnreadableHolder)]
+        blind = [p for p in pids if isinstance(p, UnreadableHolder)]
+        said = []
+        if seen:
+            said.append(f"held as cwd by live pid(s) {', '.join(str(p) for p in seen)}")
+        if blind:
+            #: `FB-90`. Named as what was observed: tied to the slot, cwd unreadable — never "holds it".
+            said.append(f"possibly held by live pid(s) {', '.join(str(p) for p in blind)}, whose cwd could not "
+                        f"be read (another user's or a non-dumpable process) but which descend from a process "
+                        f"that sat in this slot, so whether they still do is UNDECIDED — and undecided is "
+                        f"not absent")
         return Refused(
-            f"slot {slot!r} ({held.path}) is held as cwd by live pid(s) "
-            f"{', '.join(str(p) for p in pids)}; releasing it would let a second worker be "
+            f"slot {slot!r} ({held.path}) is {'; and '.join(said)}; releasing it would let a second worker be "
             f"leased into a directory somebody is still working in (OBS-48). Lease is todo "
             f"{held.todo_id!r} for effort {held.base_instant!r}.",
-            clears_when=f"pid(s) {', '.join(str(p) for p in pids)} exit {held.path}",
+            clears_when=(f"pid(s) {', '.join(str(p) for p in pids)} exit {held.path}"
+                         + (f" (for {', '.join(str(p) for p in blind)}: the process exits — its cwd cannot be "
+                            f"read, so leaving the slot cannot be observed)" if blind else "")),
             clears_who=held.base_instant or None,
         )
 
@@ -835,7 +922,7 @@ class Pool:
             if self._alive(held.tmux):
                 plan.live.append((slot, held))                   # its worker is still running
                 continue
-            pids = list(self._cwd_probe(held.path))
+            pids = self._holders(held)
             if pids:
                 plan.held.append((slot, held, pids))             # somebody is still sitting in it (OBS-48)
                 continue
