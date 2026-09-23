@@ -30,7 +30,7 @@ from dataclasses import dataclass
 from pathlib import Path
 
 from fleet.identity import InstantName, resolve
-from fleet.store import Declarations
+from fleet.store import ATTESTED_PREFIX, Declarations
 from fleet.session import SessionLayer
 
 # --- the state vocabulary. This tuple is the whole domain; a value outside it is a bug. -----------
@@ -484,9 +484,10 @@ def _state_of(rec, folder_state, live, phase, parked, pane, sessions, instant, i
 def _live_state(phase, parked, pane, sessions, instant, idle_after_s, capture_failed=False):
     waiting = sessions.unsubmitted(pane)
     busy = sessions.busy(pane)
-    unwatched = (phase == PHASE_AWAITING_CI and sessions.runtime != 'codex'
-                 and _watcher_of(pane, sessions, instant,
-                                 capture_failed=capture_failed)[0] == WATCHER_NONE)
+    watcher_kind, watcher_text = (
+        _watcher_of(pane, sessions, instant, capture_failed=capture_failed)
+        if phase == PHASE_AWAITING_CI and sessions.runtime != 'codex' else (None, ""))
+    unwatched = watcher_kind in WATCHER_UNBACKED
     on_pane = False
     if not busy and sessions.asking(pane):
         #: `B06`/`FI-55`. `pane-guard` has answered `15 awaiting-operator` for this frame since `I-16`, and
@@ -528,9 +529,13 @@ def _live_state(phase, parked, pane, sessions, instant, idle_after_s, capture_fa
         #: IDLE like any other" — false whenever the chosen state is RUNNING on a busy pane (`elif busy`
         #: precedes the idle check) or BLOCKED on a dialog. A note that says something its own state does
         #: not is exactly the defect family this bucket closes.
-        disregarded = (f"declared {PHASE_AWAITING_CI}; NO WATCHER OBSERVABLE on the pane and none recorded "
-                       f"at the claim, so the declaration is disregarded and the ordinary detector decides "
-                       f"this row — which means the worker counts against the WIP cap again")
+        #: `B07`/`FB-58`: a claim whose watcher is GONE is disregarded for the same reason, and the note
+        #: names what was there and why it no longer counts rather than saying nothing was recorded.
+        why = (f"NO WATCHER OBSERVABLE: {watcher_text}" if watcher_kind == WATCHER_GONE else
+               "NO WATCHER OBSERVABLE on the pane and none recorded at the claim")
+        disregarded = (f"declared {PHASE_AWAITING_CI}; {why}, so the declaration is disregarded and the "
+                       f"ordinary detector decides this row — which means the worker counts against the WIP "
+                       f"cap again")
         note = f"{note}; {disregarded}" if note else disregarded
 
     if parked:
@@ -563,35 +568,108 @@ def _declared_age_s(instant, now):
 
 
 #: What stands behind an `awaiting-ci` claim, as `_watcher_of` classifies it. `UNREADABLE` is NOT MEASURED
-#: and deliberately not `NONE`: the two are the same on screen and opposite in what they license.
+#: and deliberately not `NONE`: the two are the same on screen and opposite in what they license. `GONE` is
+#: `B07`/`FB-58`: something DID back the claim, and it is provably no longer there — an observed watcher no
+#: longer on the pane, or an attested pid that has exited. It licenses what `NONE` does, with a reason.
 WATCHER_OBSERVED = "observed"
 WATCHER_ATTESTED = "attested"
 WATCHER_UNREADABLE = "unreadable"
+WATCHER_GONE = "gone"
 WATCHER_NONE = "none"
+
+#: The kinds that leave nothing backing the claim, so `_live_state` disregards it.
+WATCHER_UNBACKED = (WATCHER_NONE, WATCHER_GONE)
+
+#: Where a pid named by an attestation is looked up. A module constant so the hermetic suite can point it at
+#: a private tree instead of starting and killing processes.
+PROC_ROOT = Path("/proc")
+
+PID_RUNNING = "running"
+PID_GONE = "gone"
+PID_UNREADABLE = "unreadable"
+
+
+def pid_start(pid) -> tuple:
+    """`(status, start)` for a pid, read from `/proc/<pid>/stat`: status is `PID_RUNNING`, `PID_GONE` or
+    `PID_UNREADABLE`, and `start` is field 22 (`starttime`) when running.
+
+    `FB-58`. A zombie (`Z`) or a dead task (`X`) has exited and watches nothing, so it is GONE. Only a
+    missing entry is GONE otherwise; any other failed read is UNREADABLE — NOT MEASURED (`FI-7`), because
+    reading "I could not look" as "it is gone" would take a real waiter's exemption away on a hiccup.
+    Read-only: `/proc`, never a signal (`pool._live_pid` records why not even signal 0)."""
+    try:
+        raw = (Path(PROC_ROOT) / str(int(pid)) / "stat").read_text(encoding="utf-8", errors="replace")
+    except FileNotFoundError:
+        return PID_GONE, ""
+    except (OSError, ValueError):
+        return PID_UNREADABLE, ""
+    #: The command name is parenthesised and may itself contain spaces or `)`, so split after the LAST `)`.
+    fields = raw.rpartition(")")[2].split()
+    if len(fields) < 20:
+        return PID_UNREADABLE, ""
+    if fields[0] in ("Z", "X"):
+        return PID_GONE, ""
+    return PID_RUNNING, fields[19]
+
+
+def attested_pid_status(handle) -> tuple:
+    """`(status, sentence)` for an attestation's recorded pid handle (`Declarations.watcher_pid`), or
+    `(None, "")` when it named none. A pid that is running but started at a different moment from the one
+    recorded at the claim is a RECYCLED pid, and the watcher it named is GONE."""
+    if not handle or "pid" not in handle:
+        return None, ""
+    pid = handle["pid"]
+    status, start = pid_start(pid)
+    if status == PID_RUNNING and handle.get("start") and start != str(handle["start"]):
+        return PID_GONE, (f"the attested watcher pid {pid} is GONE — that pid now belongs to a different "
+                          f"process (started at tick {start}, not {handle['start']})")
+    if status == PID_GONE:
+        return PID_GONE, f"the attested watcher pid {pid} is GONE (it has exited since the claim)"
+    if status == PID_UNREADABLE:
+        return PID_UNREADABLE, (f"its pid {pid} could not be read — NOT MEASURED, so the attestation "
+                                f"stands")
+    return PID_RUNNING, f"its pid {pid} is running"
 
 
 def _watcher_of(pane, sessions, instant, capture_failed=False) -> tuple:
     """`(kind, text)`: what backs an `awaiting-ci` claim right now. OBSERVED is on the pane's status line
-    at this moment; ATTESTED is what the claim recorded in `declare.json`; NONE is neither.
+    at this moment; ATTESTED is the claimant's word recorded in `declare.json`; GONE is a watcher that
+    backed the claim and provably no longer does; NONE is nothing either way.
 
     ONE classification, read by both the note (`_awaiting_note`) and the state (`_live_state`), so the two
-    cannot disagree about one worker. `B07` lives here too: a watcher OBSERVED at the claim is stored bare
-    and one ATTESTED is stored with an `attested:` prefix, and this reads only whether something was
-    recorded. So an observed watcher that has since vanished still classifies ATTESTED. Fixing that here
-    moves the note and the state together.
+    cannot disagree about one worker.
+
+    `B07`. A watcher OBSERVED at the claim is stored bare and one ATTESTED is stored with
+    `store.ATTESTED_PREFIX`; this used to test only whether SOMETHING was recorded, so an observed watcher
+    that had since vanished classified ATTESTED — the trusted branch (re-measure scenC C5). An observation
+    is re-checkable, and re-checking it is the point: not on the pane now means GONE. Only a genuine
+    attestation — a watcher this tool cannot see — keeps the claimant's word as its backing, and when that
+    word carries a pid (`FB-58`) the pid is checked too.
     """
     observed = sessions.watchers(pane)
     if observed:
         return WATCHER_OBSERVED, observed
-    recorded = Declarations(instant).watchers() if instant is not None else None
-    if recorded:
-        return WATCHER_ATTESTED, recorded
+    declarations = Declarations(instant) if instant is not None else None
+    recorded = declarations.watchers() if declarations is not None else None
+    if recorded and declarations.watcher_attested():
+        said = recorded[len(ATTESTED_PREFIX):]
+        status, sentence = attested_pid_status(declarations.watcher_pid())
+        if status == PID_GONE:
+            return WATCHER_GONE, f"{sentence}; it was attested as: {said}"
+        if status is None:
+            return WATCHER_ATTESTED, (f"{said} (it names no pid, so nothing re-checks it: the claimant "
+                                      f"must re-declare when it ends)")
+        return WATCHER_ATTESTED, f"{said} ({sentence})"
     #: `RV-42`/`FI-7`. The capture FAILED, so the pane was never read and nothing was observed about a
     #: watcher either way. A failed observation is not a negative observation: reported as NOT MEASURED,
     #: which leaves the declaration standing, because withdrawing a cap exemption on a tmux hiccup is a
-    #: guard whose failure mode is to punish the innocent.
+    #: guard whose failure mode is to punish the innocent. Before the bare-record branch below, for the
+    #: same reason: a watcher observed at the claim cannot be called gone from a pane nobody read.
     if capture_failed:
         return WATCHER_UNREADABLE, ""
+    if recorded:
+        return WATCHER_GONE, (f"the watcher OBSERVED on the pane at the claim ({recorded}) is no longer "
+                              f"on it")
     return WATCHER_NONE, ""
 
 
@@ -614,6 +692,8 @@ def _awaiting_note(pane, sessions, instant, stale_after_s=STALE_WAIT_S, now=None
     elif kind == WATCHER_UNREADABLE:
         note = ("declared awaiting-ci; the pane CAPTURE FAILED, so nothing was observed about a watcher "
                 "either way — NOT MEASURED, and the declaration stands until a pane can be read")
+    elif kind == WATCHER_GONE:
+        note = f"declared awaiting-ci; NO WATCHER OBSERVABLE: {watcher}"
     else:
         note = "declared awaiting-ci; NO WATCHER OBSERVABLE on the pane"
     age = _declared_age_s(instant, now if now is not None else time.time())
