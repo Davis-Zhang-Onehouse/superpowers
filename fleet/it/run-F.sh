@@ -44,6 +44,10 @@ PATH="$IT_ROOT/bin:$PATH"; export PATH
 cleanup_F() {
   it_cleanup_tmux
   tmux -L "$IT_TMUX_SOCKET" kill-server 2>/dev/null
+  #: `RV-C7`. F2c's watcher stand-in, if a run is interrupted between its spawn and its inline kill. Only
+  #: ever this section's own `$!`, cleared the moment it is reaped, so a recycled pid is never signalled.
+  [ -n "${F2C_PID:-}" ] && kill "$F2C_PID" 2>/dev/null
+  true
 }
 trap cleanup_F EXIT
 
@@ -189,7 +193,7 @@ fleet declare --instant "$W1" --phase AWAITING-CI --watcher "release gate task p
       --porcelain > "$OUT/F2c-declare.out" 2>&1
 f2c_declare_rc=$?
 f2_row F2c_live
-kill "$F2C_PID" 2>/dev/null; wait "$F2C_PID" 2>/dev/null
+kill "$F2C_PID" 2>/dev/null; wait "$F2C_PID" 2>/dev/null; F2C_PID=""
 f2_row F2c_gone
 f2c_ok=1
 [ "$f2c_declare_rc" = 0 ] && command grep -q "^watcher_pid	$F2C_PID " "$OUT/F2c-declare.out" || f2c_ok=0
