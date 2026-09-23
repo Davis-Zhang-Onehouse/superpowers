@@ -220,9 +220,30 @@ class RuntimeCliTests(unittest.TestCase):
         self.assertEqual(code, 2, err)
         self.assertEqual(snapshot(self.f.tmp), before)
 
+    def test_a_foreign_runtime_session_names_the_route_that_runs(self):
+        """RV-22. Adopting a session whose runtime is not the fleet's named `fleet runtime --set <its runtime>`,
+        which that very session blocks (its cwd is in the instants dir). The route is the session exiting,
+        and then the same resume runs."""
+        orphan = self.f.orphan()
+        self.f.procs.append(LiveSession(pid=4321, cwd=orphan, name='dt-orphanWork', runtime='codex'))
+        self.f.tmux_live.add('dt-orphanWork')
+        code, _, err = self.f.run(['resume', '--instant', str(orphan), '--slot', 'ws1'])
+        self.assertEqual(code, 4, err)
+        route = err.split('clears when:', 1)[-1]
+        self.assertNotIn('`fleet runtime --set', route, err)
+        self.assertEqual(self.f.run(['runtime', '--set', 'codex'])[0], 4, 'the old route ran after all')
+        self.f.procs.clear()
+        self.f.tmux_live.discard('dt-orphanWork')
+        code, _, err = self.f.run(['resume', '--instant', str(orphan), '--slot', 'ws1'])
+        self.assertEqual(code, 0, f"the named route does not run: {err}")
+
     def test_adoption_cannot_relabel_an_existing_runtime(self):
         self.f.worker('original', slot='ws1', live=False)
         write_runtime(self.f.home, 'codex')
         code, _, err = self.f.run(['resume', '--instant', str(self.f.paths['original'])])
         self.assertEqual(code, 4, err)
         self.assertEqual(self.f.store.read(self.f.ids['original']).runtime, 'claude')
+        #: RV-22. Closing the record does not change its runtime, so it is no route; the switch is, once drained.
+        route = err.split('clears when:', 1)[-1]
+        self.assertNotIn('fleet close', route, err)
+        self.assertIn('fleet runtime --set claude', route, err)

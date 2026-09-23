@@ -1544,10 +1544,14 @@ def _do_revive(ctx: Ctx, parsed: Parsed) -> int:
                       clears_who='the coordinator')
     current, _ = read_runtime(ctx.home)
     if current != record.runtime:
+        #: RV-22. Not `fleet runtime --set {record.runtime}`: that switch is refused while any record is
+        #: unharvested or any lease held, and this record — open, lease held, or revive would refuse it anyway —
+        #: is exactly such a blocker. There is no state in which that route runs for this record.
         raise Refused('The recorded runtime differs from the fleet selection',
-                      clears_when=f'`fleet runtime --set {record.runtime}` selects the runtime the record was '
-                                  f'dispatched under, then `fleet revive` is re-run',
-                      clears_who='the operator')
+                      clears_when=f'never, for this record under the current selection: switching back to '
+                                  f'{record.runtime} needs every record harvested, this one included. Carry the '
+                                  f'work on with a new worker under the current runtime (`fleet dispatch`)',
+                      clears_who='the coordinator')
     lease = ctx.pool.lease(record.slot) if record.slot else None
     if lease is None or lease.todo_id != record.todo_id:
         raise Refused('Revival requires the original lease to remain held',
@@ -2009,8 +2013,9 @@ def _do_resume(ctx: Ctx, parsed: Parsed) -> int:
     observed = [item.runtime for item in ctx.sessions.live() if item.name == tmux]
     if any(runtime != ctx.sessions.runtime for runtime in observed):
         raise Refused('Cannot adopt a session whose runtime differs from the fleet selection',
-                      clears_when=f'`fleet runtime --set {observed[0]}` selects the session\'s runtime, then '
-                                  f'`fleet resume` is re-run',
+                      clears_when=f'the {observed[0]} session in {tmux} has exited and `fleet resume` is '
+                                  f're-run, which adopts the instant under the current runtime. (Switching to '
+                                  f'{observed[0]} instead is refused while that attributable session is live.)',
                       clears_who='the operator')
     existing = None
     try:
@@ -2020,8 +2025,10 @@ def _do_resume(ctx: Ctx, parsed: Parsed) -> int:
 
     if existing is not None and existing.runtime != ctx.sessions.runtime:
         raise Refused('Recorded runtime differs from the fleet selection; resolve the existing record first',
-                      clears_when=f'`fleet runtime --set {existing.runtime}` selects the recorded runtime, or '
-                                  f'the record is closed (`fleet close --id {existing.todo_id}`)',
+                      clears_when=f'the fleet runs {existing.runtime} again — `fleet runtime --set '
+                                  f'{existing.runtime}` once `fleet runtime --set {existing.runtime} --dry-run` '
+                                  f'names no blocker (every record harvested, no lease held). Closing the '
+                                  f'record does not change its runtime',
                       clears_who='the operator')
 
     #: `B10` sweep. The claim below is the first write; its refusal is asked before the dry-run returns.
