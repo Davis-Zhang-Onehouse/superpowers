@@ -4772,14 +4772,7 @@ def _do_brief(ctx: Ctx, parsed: Parsed) -> int:
 
     #: pt2. Which CLI and model this instant was launched with — chosen per dispatch, so no longer answerable from
     #: `fleet runtime`, and what `revive` will relaunch it as.
-    try:
-        own = _record_for(ctx, child)
-    except BadInput as exc:
-        #: RV-31. `_record_for` refuses a record written under another root; a read-only briefing reports that as
-        #: its runtime row rather than failing whole.
-        own = None
-        rows.append(Row(kind="runtime", subject=child.name, severity=VIOLATION,
-                        detail=f"this instant's record cannot be read from here: {_one_line(exc)}"))
+    own = _record_for(ctx, child)
     if own is not None:
         rows.append(Row(kind="runtime", subject=child.name, severity=INFO,
                         detail=(f"runtime={own.runtime} model="
