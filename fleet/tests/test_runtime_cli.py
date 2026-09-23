@@ -7,6 +7,7 @@ from unittest.mock import patch
 from fleet.runtime_config import admission_lock, read_runtime, write_runtime
 from fleet.session import LiveSession, SessionLayer, default_probes
 from tests.test_cli import Fleet, snapshot
+from tests.test_runtime_discovery import probe_unreadable
 
 
 class RuntimeCliTests(unittest.TestCase):
@@ -66,6 +67,15 @@ class RuntimeCliTests(unittest.TestCase):
         self.assertEqual(code, 4, err)
         self.assertIn('unreadable', err)
         self.assertEqual(self.f.run(['board', '--porcelain'])[0], 0)
+
+    def test_an_unreadable_process_ATTRIBUTED_to_a_pane_still_blocks_the_switch(self):
+        """FB-54 keeps this consumer honest: naming the pane an unreadable pid lives in does not make its binary or its
+        cwd known, so it is still no proof of emptiness. The refusal names the session it was placed in."""
+        self.f.procs.append(probe_unreadable(self.f.tmp / 'proc', 781, 780, 'dt-someone', runtime='codex'))
+        code, _, err = self.f.run(['runtime', '--set', 'codex'])
+        self.assertEqual(code, 4, err)
+        self.assertIn('unreadable codex process 781', err)
+        self.assertIn('dt-someone', err)
 
     def test_invalid_selection_is_not_overwritten(self):
         self.f.home.mkdir(exist_ok=True)

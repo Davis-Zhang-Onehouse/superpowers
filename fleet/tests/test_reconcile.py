@@ -22,9 +22,10 @@ from dataclasses import fields as dataclass_fields
 from fleet.guards import CAP_EXCLUDED_STATES
 from fleet.pool import Pool
 from fleet.reconcile import (AWAITING_CI, BLOCKED, COMPLETE, DEAD, IDLE, KINDS, PARKED, RUNNING, STALE_WAIT_S, STATES,
-                             UNREACHABLE, Subject, _awaiting_note, needs_a_human, reconcile)
+                             UNKNOWN_SESSION, UNREACHABLE, Subject, _awaiting_note, needs_a_human, reconcile)
 from fleet.session import LiveSession, Probes, SessionLayer
 from fleet.store import Declarations, Record, Store
+from tests.test_runtime_discovery import probe_unreadable
 
 #: Every enrolled slot. `ws9` is enrolled and NOT leased — the harvested subject's slot, which is what
 #: makes `holds_slot is False` a fact about the lease rather than about enrolment.
@@ -1220,3 +1221,53 @@ class TestTheNonPaneBlockedSourcesAreNeverExcused(unittest.TestCase):
         self.assertEqual(subject.state, BLOCKED)
         self.assertIn("Codex has no verified CI wake mechanism", subject.note)
         self.assertTrue(needs_a_human(subject), subject.note)
+
+
+class UnreadableRowAttributionTests(unittest.TestCase):
+    """FB-54. A live pid whose `exe`/`cwd` refuse the read is still placed by its pane: `reconcile` must read it as the
+    session it is, not as an unknown process outside every slot. The rows come from the REAL probe over a fake `/proc`
+    (`probe_unreadable`), so these fail at the base for the reason FB-54 names: the row there carries no name."""
+
+    def setUp(self):
+        self.fleet = SyntheticFleet()
+        self.addCleanup(shutil.rmtree, self.fleet.tmp, ignore_errors=True)
+        self.proc = self.fleet.tmp / "proc"
+
+    def subjects(self):
+        return reconcile(self.fleet.store, self.fleet.pool, self.fleet.sessions, self.fleet.instants)
+
+    def test_an_unreadable_process_in_a_records_pane_is_that_records_worker(self):
+        fleet = self.fleet
+        fleet.dispatch("unread-07300310", "00000000-07300310-inflight-append-unread", "ws9", "dt-unread")
+        fleet.tmux_live.add("dt-unread")
+        fleet.panes["dt-unread"] = QUIET_PANE
+        fleet.procs.append(probe_unreadable(self.proc, 7002, 7001, "dt-unread"))
+        subjects = self.subjects()
+        self.assertEqual([s.identity for s in subjects if s.evidence.get("pid") == "7002"], ["unread-07300310"],
+                         "the unreadable pid is this record's session, not an unknown one")
+        worker = next(s for s in subjects if s.identity == "unread-07300310")
+        self.assertEqual((worker.evidence["liveness"], worker.evidence["slot"]), ("process", "ws9"))
+        self.assertEqual(worker.evidence.get("process"), "unreadable")
+        self.assertIn("unreadable", worker.note)
+
+    def test_an_unreadable_process_in_an_unrecorded_leased_pane_holds_that_lease(self):
+        """No record in this store, but a lease names the pane's session: the lease join falls back on the NAME, because
+        the cwd it would normally compare was never read. One subject for the slot, holding it — not a pid-labelled
+        unknown outside every slot beside a separate row for the lease."""
+        fleet = self.fleet
+        fleet.pool.claim(todo_id="foreign-07300311", tmux="dt-foreign", base_instant=OURS,
+                         child_instant=OURS + "/foreign", slot="ws9")
+        fleet.tmux_live.add("dt-foreign")
+        fleet.procs.append(probe_unreadable(self.proc, 7004, 7003, "dt-foreign"))
+        rows = [s for s in self.subjects() if s.evidence.get("slot") == "ws9"]
+        self.assertEqual([(s.state, s.holds_slot, s.evidence.get("pid")) for s in rows],
+                         [(UNKNOWN_SESSION, True, "7004")])
+        self.assertIn("could not be read", rows[0].note)
+
+    def test_an_unreadable_process_no_pane_owns_is_reported_as_unplaceable(self):
+        """A control on the other side: nothing names it, so it stays an unknown holding no slot — and says WHY."""
+        fleet = self.fleet
+        fleet.procs.append(probe_unreadable(self.proc, 7006, 7005, "no-such-pane", owned=False))
+        rows = [s for s in self.subjects() if s.evidence.get("pid") == "7006"]
+        self.assertEqual([(s.state, s.holds_slot, s.evidence["session"]) for s in rows], [(UNKNOWN_SESSION, False, "")])
+        self.assertIn("could not be read", rows[0].note)

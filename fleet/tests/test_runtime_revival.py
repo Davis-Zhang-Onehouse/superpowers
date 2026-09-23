@@ -5,6 +5,7 @@ import unittest
 
 from fleet.runtime_config import write_runtime
 from tests.test_cli import Fleet, snapshot
+from tests.test_runtime_discovery import probe_unreadable
 
 SESSION_ID = '12345678-1234-1234-1234-123456789abc'
 
@@ -76,4 +77,14 @@ class RevivalTests(unittest.TestCase):
         self.record.closed_at = '2026-09-11T00:00:00Z'
         self.f.store.write(self.record)
         self.assertEqual(self.f.run(self.args())[0], 4)
+        self.assertEqual(self.f.started, [])
+
+    def test_an_unreadable_process_in_the_recorded_pane_occupies_it(self):
+        """FB-54. The pane's process refuses `exe`/`cwd`, so it carries no cwd to compare with the lease; its `stat` still
+        names the pane that owns it, and that is the session this revival would start a second worker beside. The
+        session probe is made to miss (`has_session` answers no) so that only the PROCESS evidence can refuse."""
+        self.f.procs.append(probe_unreadable(self.f.tmp / 'proc', 7102, 7101, self.record.tmux, runtime='codex'))
+        code, _, err = self.f.run(self.args())
+        self.assertEqual(code, 4, err)
+        self.assertIn('occupied', err)
         self.assertEqual(self.f.started, [])
