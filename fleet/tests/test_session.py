@@ -50,6 +50,12 @@ class TestOwnProcesses(unittest.TestCase):
         s = self._layer(100, {101: 100, 102: 101, 900: 1, 901: 900})
         self.assertEqual(s.own_processes("dt-a", [100, 102, 900, 901]), {100, 102})
 
+    def test_every_pane_counts_when_the_session_has_several(self):
+        """`RV-20`. The kill ends every pane, so every pane pid roots the session's own tree."""
+        s = self._layer(100, {101: 100, 201: 200, 900: 1})
+        s.probes.pane_pids = lambda name: [100, 200] if name == "dt-a" else None
+        self.assertEqual(s.own_processes("dt-a", [101, 201, 900]), {101, 201})
+
     def test_unobservable_is_None_not_empty(self):
         s = self._layer(None, {})
         self.assertIsNone(s.own_processes("dt-a", [5]))

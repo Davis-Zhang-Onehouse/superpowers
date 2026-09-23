@@ -2312,6 +2312,30 @@ class TestAbortDryRunEvaluatesTheRealGate(CliCase):
         self.assertIsNone(fleet.pool.lease("ws7"))
         self.assertIsNotNone(fleet.store.read(todo).closed_at)
 
+    def test_every_pane_of_the_session_is_its_own_not_only_the_first(self):
+        """`RV-20`. `kill-session` ends EVERY pane, so a process under a second pane (or window) dies with the
+        kill too. Sparing only the first pane's tree read it as foreign — a refusal that could never clear,
+        because that process exits only when the session is killed."""
+        fleet = self.loaded()
+        instant = fleet.worker("twoPanes", slot="ws7")
+        fleet.hold_slot_cwd("ws7", pid=self.PANE)
+        fleet.hold_slot_cwd("ws7", pid=7101)                   # a child of the SECOND pane
+        self._attributable(fleet, {7101: 7100})
+        fleet.sessions.probes.pane_pids = lambda name: [self.PANE, 7100] if name in fleet.tmux_live else None
+        path = str(fleet.pool.slot_path("ws7"))
+        kill = fleet.sessions.probes.kill_session
+
+        def kill_ends_every_pane(name):
+            kill(name)
+            fleet.holders.pop(path, None)
+        fleet.sessions.probes.kill_session = kill_ends_every_pane
+
+        code, out, err = fleet.run(["abort", "--dry-run", "--instant", str(instant), "--reason", "done"])
+        self.assertEqual(code, EXIT_OK, f"a second pane's process was read as foreign: {out}{err}")
+        code, out, err = fleet.run(["abort", "--instant", str(instant), "--reason", "done"])
+        self.assertEqual(code, EXIT_OK, f"{out}{err}")
+        self.assertIsNone(fleet.pool.lease("ws7"))
+
     def test_a_dead_session_leaves_every_holder_foreign(self):
         """No session to kill means nothing the abort does can free the slot: both calls refuse, alike."""
         fleet = self.loaded()
