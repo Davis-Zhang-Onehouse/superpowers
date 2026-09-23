@@ -299,6 +299,50 @@ class TestOnlyTheWorkerCarriesTheBriefing(unittest.TestCase):
                           "the real comm probe invented an answer for a pid that cannot be read")
 
 
+class TestANonUtf8ArgvIsStillAWorker(unittest.TestCase):
+    """FB-53 in the seed-check seam (RV-23). `session.list_processes` reads a claude whose argv holds byte 0xe9 as a
+    recognised worker; `worker_identity` decoded that argv strictly and answered False, so seed-check reported "no
+    claude process was found" for a process `board` lists as claude — and a briefing carrying that byte could never
+    be classified at all. Identity rests on comm and exe; the argv's bytes are the payload, not the identity."""
+
+    PID = 4242
+
+    def probe(self, cmdline: bytes, comm: bytes = b'claude\n'):
+        import os
+        from unittest.mock import patch
+        root = pathlib.Path(f'/proc/{self.PID}')
+        real_bytes, real_link = pathlib.Path.read_bytes, os.readlink
+        def read_bytes(path):
+            if path == root / 'cmdline':
+                return cmdline
+            if path == root / 'comm':
+                return comm
+            return real_bytes(path)
+        def read_text(path, encoding=None, errors=None):
+            if path == root / 'comm':
+                return comm.decode(encoding or 'utf-8', errors or 'strict')
+            raise AssertionError(f'unexpected read_text {path}')
+        def readlink(path, *a, **kw):
+            return '/opt/claude/versions/2.1.268' if str(path) == str(root / 'exe') else real_link(path, *a, **kw)
+        with patch.object(pathlib.Path, 'read_bytes', read_bytes), \
+                patch.object(pathlib.Path, 'read_text', read_text), patch('os.readlink', readlink):
+            probes = seedcheck.default_probes()
+            return probes.worker_identity(self.PID), probes.comm_of(self.PID)
+
+    def test_a_worker_whose_argv_holds_a_latin1_byte_is_a_worker(self):
+        self.assertEqual(self.probe(b'claude\0--note\0caf\xe9\0'), (True, 'claude'))
+
+    def test_a_plain_argv_is_a_worker_control(self):
+        self.assertEqual(self.probe(b'claude\0--note\0cafe\0'), (True, 'claude'))
+
+    def test_a_comm_that_is_not_utf8_answers_rather_than_raising(self):
+        """The neighbour: `comm_of` read strictly and caught only OSError. A non-UTF-8 comm is not claude — and
+        says so, instead of raising out of the delivery check."""
+        identity, comm = self.probe(b'claude\0', comm=b'caf\xe9\n')
+        self.assertFalse(identity)
+        self.assertEqual(comm, 'caf\udce9')
+
+
 class TestAnAttestedDelivery(unittest.TestCase):
     """`SI-55`. The positive state was reachable by exactly one route — the briefing appearing in
     `/proc/<pid>/cmdline` — and a seed delivered by `send-keys` never appears in argv at all.

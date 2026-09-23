@@ -7,6 +7,7 @@ from unittest.mock import patch
 from fleet.runtime_config import admission_lock, read_runtime, write_runtime
 from fleet.session import LiveSession, SessionLayer, default_probes
 from tests.test_cli import Fleet, snapshot
+from tests.test_runtime_discovery import probe_unreadable
 
 
 class RuntimeCliTests(unittest.TestCase):
@@ -66,6 +67,18 @@ class RuntimeCliTests(unittest.TestCase):
         self.assertEqual(code, 4, err)
         self.assertIn('unreadable', err)
         self.assertEqual(self.f.run(['board', '--porcelain'])[0], 0)
+
+    def test_an_unreadable_process_ATTRIBUTED_to_a_pane_still_blocks_the_switch(self):
+        """FB-54 keeps this consumer honest: naming the pane an unreadable pid lives in does not make its binary or its
+        cwd known, so it is still no proof of emptiness. The refusal names the session it was placed in."""
+        self.f.procs.append(probe_unreadable(self.f.tmp / 'proc', 781, 780, 'dt-someone', runtime='codex'))
+        code, _, err = self.f.run(['runtime', '--set', 'codex'])
+        self.assertEqual(code, 4, err)
+        self.assertIn('unreadable codex process 781', err)
+        self.assertIn('dt-someone', err)
+        # RV-32: the row does not keep WHICH /proc read failed, so the text names no cause it did not observe.
+        self.assertIn('a /proc read of it failed', err)
+        self.assertNotIn('cwd unreadable', err)
 
     def test_invalid_selection_is_not_overwritten(self):
         self.f.home.mkdir(exist_ok=True)
@@ -154,6 +167,20 @@ class RuntimeCliTests(unittest.TestCase):
         self.f.procs[0].cwd = Path('/another/fleet')
         self.assertEqual(self.f.run(args)[0], 4)
         self.assertEqual(self.f.killed, [])
+
+    def test_send_to_a_pane_whose_process_is_unreadable_refuses_naming_that_cause(self):
+        """RV-27 (ISSUES OI-1). The pane's claude is alive and attributed to it, but its cwd was never read, so its
+        ownership cannot be verified: refusing is right, and "no matching live process" is the wrong reason —
+        `revive` on the same pane says it is occupied."""
+        self.f.worker('target', slot='ws1', pane='❯ \n? for shortcuts')
+        self.f.procs[:] = [probe_unreadable(self.f.tmp / 'proc', 7202, 7201, 'dt-target')]
+        path = self.f.tmp / 'message'
+        path.write_text('hello')
+        code, _, err = self.f.run(['send', '--id', self.f.ids['target'], '--message-file', str(path)])
+        self.assertEqual(code, 4, err)
+        self.assertIn('process 7202', err)
+        self.assertIn('could not be read', err)
+        self.assertNotIn('No matching live runtime process', err)
 
     def test_dry_dispatch_validates_runtime_configuration_without_claiming(self):
         from fleet.errors import BadInput
