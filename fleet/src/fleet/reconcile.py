@@ -507,7 +507,8 @@ def _live_state(phase, parked, pane, sessions, instant, idle_after_s, capture_fa
         state, note = BLOCKED, 'Codex has no verified CI wake mechanism; this worker still consumes capacity'
     elif phase == PHASE_AWAITING_CI and not unwatched:
         state, note = AWAITING_CI, _awaiting_note(pane, sessions, instant,
-                                                  capture_failed=capture_failed)
+                                                  capture_failed=capture_failed,
+                                                  watcher=(watcher_kind, watcher_text))
     elif busy:
         state, note = RUNNING, ""
     elif _idle_for(instant) > idle_after_s:
@@ -642,8 +643,8 @@ def _watcher_of(pane, sessions, instant, capture_failed=False) -> tuple:
     at this moment; ATTESTED is the claimant's word recorded in `declare.json`; GONE is a watcher that
     backed the claim and provably no longer does; NONE is nothing either way.
 
-    ONE classification, read by both the note (`_awaiting_note`) and the state (`_live_state`), so the two
-    cannot disagree about one worker.
+    ONE classification per row: `_live_state` decides the state on it and hands the same `(kind, text)` to
+    `_awaiting_note` (`RV-C2`), so the two cannot disagree about one worker.
 
     `B07`. A watcher OBSERVED at the claim is stored bare and one ATTESTED is stored with
     `store.ATTESTED_PREFIX`; this used to test only whether SOMETHING was recorded, so an observed watcher
@@ -680,7 +681,7 @@ def _watcher_of(pane, sessions, instant, capture_failed=False) -> tuple:
 
 
 def _awaiting_note(pane, sessions, instant, stale_after_s=STALE_WAIT_S, now=None,
-                   capture_failed=False) -> str:
+                   capture_failed=False, watcher=None) -> str:
     """What the board says about a worker that claims to be waiting on CI.
 
     The declaration is a claim made at ONE moment; nothing re-reads it. A Monitor that emitted zero
@@ -690,7 +691,11 @@ def _awaiting_note(pane, sessions, instant, stale_after_s=STALE_WAIT_S, now=None
     live observation is not possible — falls back to what was ATTESTED at claim time, distinguishably
     from what is actually OBSERVED now.
     """
-    kind, watcher = _watcher_of(pane, sessions, instant, capture_failed=capture_failed)
+    #: `RV-C2`. `_live_state` passes the classification it decided the STATE on. Classifying again here reads
+    #: the pane and `/proc` a second time, and a pid exiting between the two reads gave an AWAITING-CI row
+    #: whose note said the watcher was GONE.
+    kind, watcher = watcher if watcher is not None else _watcher_of(pane, sessions, instant,
+                                                                     capture_failed=capture_failed)
     if kind == WATCHER_OBSERVED:
         note = f"declared awaiting-ci; watcher observed ({watcher})"
     elif kind == WATCHER_ATTESTED:
