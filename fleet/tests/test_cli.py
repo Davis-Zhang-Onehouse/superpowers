@@ -630,7 +630,8 @@ class CliCase(unittest.TestCase):
         fleet.with_roadmap(ready)
         harvestable = fleet.worker("harvestable", state="complete", slot="ws3", live=False)
         fleet.reviewed(harvestable)
-        fleet.worker("doomed", slot="ws5")
+        #: `FB-88`: idle, because abort now asks the pane guard `close` asks, and a busy pane is refused.
+        fleet.worker("doomed", slot="ws5", pane=IDLE_PANE)
         fleet.worker("closable", slot="ws6", pane=IDLE_PANE)
         fleet.orphan()
         fleet.profile("worker")
@@ -1153,6 +1154,11 @@ OUTWARD_CALL_SITES = {
         "os.unlink of its OWN uniquely-named tmp, on the failure path only. Removing the litter of a "
         "write that published nothing is the third property of FI-20's contract; not removing it leaves "
         "a partial file for the next reader"),
+    ("atomic", "atomic_write_if"): (
+        "os.unlink of its OWN uniquely-named staging file, on every path that does not publish it — the same "
+        "contract as atomic_write, for the conditional publish RV-18 needs: it writes only into a directory that "
+        "already exists (a released lease's claim directory is never resurrected) and only while the caller's "
+        "predicate still holds, so the staged file it declines to publish is its own litter to remove"),
     ("atomic", "atomic_symlink"): (
         "os.unlink of its OWN uniquely-named staging symlink, on the failure path only — the same "
         "contract as atomic_write one entry above, for the one thing that primitive cannot publish. A "
@@ -2162,7 +2168,7 @@ class TestAbort(CliCase):
         and the board then read UNREACHABLE + UNKNOWN-SESSION — which reads like corruption and invites
         forcing the release, the one thing the refusal existed to prevent."""
         fleet = self.loaded()
-        instant, todo = fleet.worker("zombie", slot="ws7"), fleet.ids["zombie"]
+        instant, todo = fleet.worker("zombie", slot="ws7", pane=IDLE_PANE), fleet.ids["zombie"]
         fleet.hold_slot_cwd("ws7", pid=89420)      # a live pid holding the slot as cwd (OBS-48)
 
         code, out, err = fleet.run(["abort", "--instant", str(instant), "--reason", "superseded"])
@@ -2188,7 +2194,7 @@ class TestAbort(CliCase):
         released, session closed. The wait is exercised through the injected clock seam (`fleet.sleep`),
         never a real `time.sleep`, so this stays as fast as every other case in the suite."""
         fleet = self.loaded()
-        instant, todo = fleet.worker("zombie2", slot="ws8"), fleet.ids["zombie2"]
+        instant, todo = fleet.worker("zombie2", slot="ws8", pane=IDLE_PANE), fleet.ids["zombie2"]
         fleet.hold_slot_cwd("ws8", pid=90001)
         holder_path = str(fleet.pool.slot_path("ws8"))
 
@@ -2242,7 +2248,7 @@ class TestAbortDryRunEvaluatesTheRealGate(CliCase):
 
     def test_dry_run_refuses_exactly_as_the_real_call_on_a_holder_outside_the_session(self):
         fleet = self.loaded()
-        instant, todo = fleet.worker("heldOpen", slot="ws7"), fleet.ids["heldOpen"]
+        instant, todo = fleet.worker("heldOpen", slot="ws7", pane=IDLE_PANE), fleet.ids["heldOpen"]
         fleet.hold_slot_cwd("ws7", pid=89420)          # a live pid the kill will NOT end (parent: init)
         self._attributable(fleet, {})
         argv = ["abort", "--instant", str(instant), "--reason", "superseded"]
@@ -2271,7 +2277,7 @@ class TestAbortDryRunEvaluatesTheRealGate(CliCase):
 
     def test_a_holder_that_exits_during_the_wait_lets_both_go_through(self):
         fleet = self.loaded()
-        instant = fleet.worker("heldBriefly", slot="ws8")
+        instant = fleet.worker("heldBriefly", slot="ws8", pane=IDLE_PANE)
         fleet.hold_slot_cwd("ws8", pid=90001)
         self._attributable(fleet, {})
         holder_path = str(fleet.pool.slot_path("ws8"))
@@ -2288,7 +2294,7 @@ class TestAbortDryRunEvaluatesTheRealGate(CliCase):
         """The control, and the reason option (A) of D-1 was rejected: the worker's own pane holds the slot
         in EVERY ordinary abort, and the kill ends it. Reporting it would flip the divergence's sign."""
         fleet = self.loaded()
-        instant, todo = fleet.worker("ownPane", slot="ws7"), fleet.ids["ownPane"]
+        instant, todo = fleet.worker("ownPane", slot="ws7", pane=IDLE_PANE), fleet.ids["ownPane"]
         fleet.hold_slot_cwd("ws7", pid=self.PANE)              # the pane's shell itself
         fleet.hold_slot_cwd("ws7", pid=7001)                   # claude, the pane's child
         self._attributable(fleet, {7001: self.PANE})
@@ -2317,7 +2323,7 @@ class TestAbortDryRunEvaluatesTheRealGate(CliCase):
         kill too. Sparing only the first pane's tree read it as foreign — a refusal that could never clear,
         because that process exits only when the session is killed."""
         fleet = self.loaded()
-        instant = fleet.worker("twoPanes", slot="ws7")
+        instant = fleet.worker("twoPanes", slot="ws7", pane=IDLE_PANE)
         fleet.hold_slot_cwd("ws7", pid=self.PANE)
         fleet.hold_slot_cwd("ws7", pid=7101)                   # a child of the SECOND pane
         self._attributable(fleet, {7101: 7100})
@@ -2341,7 +2347,7 @@ class TestAbortDryRunEvaluatesTheRealGate(CliCase):
         so a busy worker's child born between them read as foreign: a spurious wait, or a spurious refusal
         when it keeps happening. One scan now feeds both."""
         fleet = self.loaded()
-        instant = fleet.worker("busyWorker", slot="ws7")
+        instant = fleet.worker("busyWorker", slot="ws7", pane=IDLE_PANE)
         self._attributable(fleet, {7002: self.PANE, 7003: self.PANE, 7004: self.PANE})
         scans = []
 
@@ -2375,7 +2381,7 @@ class TestAbortDryRunEvaluatesTheRealGate(CliCase):
         from anybody else's, so it does not pre-refuse (that would block every abort on a probe gap) — and
         the dry-run SAYS it could not decide instead of implying the release will succeed."""
         fleet = self.loaded()
-        instant = fleet.worker("blindPane", slot="ws7")
+        instant = fleet.worker("blindPane", slot="ws7", pane=IDLE_PANE)
         fleet.hold_slot_cwd("ws7", pid=89421)           # pane_pid probe left absent: unobservable
         before = self._states(fleet)
         code, out, err = fleet.run(["abort", "--dry-run", "--instant", str(instant), "--reason", "x"])

@@ -91,7 +91,7 @@ starts them, one after another, printing `pane-guard` for each and the board at 
 
 | Refusal | What it means | What to do |
 |---|---|---|
-| *the record ran on codex and the fleet is set to claude* (or the reverse) | The fleet selection changed under open work; `fleet revive` refuses this too | `fleet runtime` shows the selection. Set it back with `fleet runtime --set <recorded>`, or harvest the record. Never revive across runtimes |
+| *the record ran on codex and the fleet is set to claude* (or the reverse) | The fleet selection changed under open work; `fleet revive` refuses this too | `fleet runtime` shows the selection. Switching back is refused while any record can still be revived or resumed — this one too while its folder is `-inflight-` or it holds its lease — so the work goes on under the current runtime with a new worker (`fleet dispatch`), or is ended with `fleet abort`; `fleet runtime --set <recorded> --dry-run` names every blocker and the verb that clears it. Never revive across runtimes |
 | *an abort is recorded in …/.fleet/abort.json* | The worker chose to stop and the rename never completed | `fleet abort --id <id> --reason …` finishes it; then re-run |
 | *no transcript under … has cwd … and this record's seed among its first user messages* | The seed never reached a session, or the configuration directory is not the one the worker ran under | Inspect the slot's project directory yourself; `fleet revive --id <id> --session-id <uuid>` is the hand path |
 | *no lease in this store is held by <id>* | The lease was released; the work is not revivable in place | Dispatch again, or resume the instant with `fleet resume` |
@@ -168,7 +168,7 @@ re-running `revive` after you have inspected the pane picks up exactly what is s
 | Running the script from `~` or from another root's directory | It refuses: the root is the working directory's. `cd` into the fleet's root first |
 | Exporting `FLEET_HOME` or `FLEET_TMUX_SOCKET` to point it at a fleet | Dropped and reported. The directory is the only way to choose a fleet |
 | Passing a todo-id, a session or a transcript to the script | It takes none: `plan` or `revive`, and every value is derived |
-| Reviving after `fleet runtime --set` moved the fleet to the other runtime | Refused for the whole run. Set the runtime back to what the records ran on |
+| Reviving after `fleet runtime --set` moved the fleet to the other runtime | Refused for the whole run, and switching back is refused while these records can still be revived. Carry the work on with new workers, or end the records (`fleet abort`) |
 | `fleet resume` to bring a pane back | It adopts a record and starts no process. `fleet revive` (which the script calls) starts the recorded session |
 | `fleet dispatch` to "re-run" the worker | Mints a NEW instant and lease; abandons the transcript. That is replacement |
 | Reading `DEAD` as "the work failed" | It means no session is alive. The folder, `.fleet/` and transcript are intact |

@@ -1014,6 +1014,8 @@ DELETE_ALLOWLIST = {
                                             # keeps the content recoverable; this is a convenience copy.
     # SI-9 / SI-7. Four sites added deliberately, each with the reason it is safe. The list stays a
     # CEILING: it is printed when an entry disappears, so it cannot quietly grow stale.
+    ("atomic.py", "atomic_write_if", "unlink"),  # RV-18: its OWN staging file, on every path that does not
+                                                 # publish it (a vanished directory, a declined predicate).
     ("atomic.py", "atomic_write", "unlink"),  # its OWN staging file, path.parent/tmp_name(path.name),
                                               # on the failure path only. Not removing it leaves a partial
                                               # file for the next reader — FI-20's third property.
