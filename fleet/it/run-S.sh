@@ -627,10 +627,13 @@ s11_alive=0; tmux -L "$IT_TMUX_SOCKET" has-session -t "=$S11_TMUX" 2>/dev/null &
 s11_inflight=0; [ -d "$S11_CHILD" ] && s11_inflight=1
 s11_same=0; cmp -s "$OUT/S11-dry.out" "$OUT/S11-real.out" && s11_same=1
 kill "$S11_HOLDER" 2>/dev/null; wait "$S11_HOLDER" 2>/dev/null
+#: `RV-34`. Reaped: the pid is free for reuse from here on, so nothing may signal it again — not the EXIT
+#: trap, not a second kill. The reporting below reads the copy.
+S11_REAPED="$S11_HOLDER"; S11_HOLDER=""
 fleet abort "${S11_ARGV[@]}" > "$OUT/S11-rerun.out" 2>&1
 s11_rerun_rc=$?
 s11_aborted=0; [ -d "${S11_CHILD/-inflight-/-abort-}" ] && s11_aborted=1
-{ echo "slot=$S11_SLOT session=$S11_TMUX pane_pid=$S11_PANE own-holders-before=[$S11_OWN] foreign-holder=$S11_HOLDER (seen holding the slot: $s11_seen)"
+{ echo "slot=$S11_SLOT session=$S11_TMUX pane_pid=$S11_PANE own-holders-before=[$S11_OWN] foreign-holder=$S11_REAPED (seen holding the slot: $s11_seen)"
   echo "second pane=$S11_PANE2 its child=$S11_PANE2_CHILD (a descendant of a non-first pane, holding the slot)"
   echo "--- control dry-run (only the session's own trees hold the slot: both panes and the second pane's child) rc=$s11_control_rc"; cat "$OUT/S11-control-dry.out"
   echo "--- dry-run with the foreign holder rc=$s11_dry_rc (state unchanged: $([ "$s11_before" = "$s11_after_dry" ] && echo yes || echo NO))"; cat "$OUT/S11-dry.out"
@@ -650,7 +653,6 @@ else
   it_fail S11 "fleet/it/S/out/S11.txt" \
     "pane=$S11_PANE pane-held=$s11_pane_held pane2-child=$S11_PANE2_CHILD child-held=$s11_child_held control-rc=$s11_control_rc holder-seen=$s11_seen dry-rc=$s11_dry_rc(want 4) dry-unchanged=$s11_unchanged real-rc=$s11_real_rc(want 4) same-output=$s11_same session-alive=$s11_alive inflight=$s11_inflight rerun-rc=$s11_rerun_rc aborted=$s11_aborted"
 fi
-kill "$S11_HOLDER" 2>/dev/null
 
 it_assert_isolation S-leave
 bash "$IT_ROOT/bin/source-pin.sh" after "$OUT" || { echo "CONTAMINATED — no verdict" >&2; exit 3; }
