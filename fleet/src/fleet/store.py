@@ -86,8 +86,9 @@ class Record:
     #: pt2 (D-22/D-33). The model this worker was launched with, chosen at dispatch; "" = no model flag, the CLI's
     #: own configured model. `revive` relaunches with it. OMITTED from the JSON when empty (`to_json`), so a record
     #: dispatched the default way is byte-identical to one written before this field. A record that CARRIES a model
-    #: is an unknown field to an older binary, whose `Store.all()` then refuses the WHOLE store (every enumerating
-    #: verb: board, status, dispatch, reap, runtime) — not just that record. So once any `--model` dispatch exists
+    #: is an unknown field to an older binary, whose `Store.all()` then refuses the WHOLE store — everything that
+    #: enumerates records, which is most of the surface (board, status, brief, seed-check, dispatch, harvest, milestone,
+    #: reap, runtime, …) — not just that record. So once any `--model` dispatch exists
     #: in a store, no binary older than the release that introduced this field may operate on it (no rollback). Its SHAPE is checked where it reaches an argv (`runtime_launch.model_args`),
     #: because this module is a leaf and imports nothing of the package.
     runtime_model: str = ""
