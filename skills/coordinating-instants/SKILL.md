@@ -143,7 +143,7 @@ those phases look like when the effort is large enough to have waves.
 the phase is gated: either this tool saw a watcher on the worker's pane, or the worker named one it could not
 see (`--watcher`). The board's note says which — `watcher observed (…)` or `watcher ATTESTED, not
 observable: …` — and an attestation says whether anything re-checks it: `its pid N is running` when it named
-a `pid:` handle, `it names no pid, so nothing re-checks it` when it did not.
+a `pid:` handle, `no pid handle was recorded at the claim, so nothing re-checks it` when it did not.
 
 A claim with **nothing backing it now** — nothing observed on the pane and nothing recorded (a legacy
 declaration, or one the gate let through ungated), a watcher observed at the claim that is no longer on the

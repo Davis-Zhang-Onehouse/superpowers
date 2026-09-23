@@ -1151,6 +1151,18 @@ class TestTheWatcherIsClassifiedFromWhatIsTrue(unittest.TestCase):
         else:
             self.assertIn("GONE", subject.note, f"{subject.state}: {subject.note!r}")
 
+    def test_an_attestation_recorded_before_handles_is_not_told_it_names_no_pid(self):
+        """`RV-C3`. A record written before `watcher_pid` existed can carry `pid=1234` in its TEXT with no handle
+        beside it. "it names no pid", printed next to text that names one, is false; what is true is that no
+        handle was RECORDED, so nothing re-checks it."""
+        self.ci_worker("legacypid-07300632", "dt-legacypid", 5332, watchers="attested: gate pid=1234")
+
+        subject = self.subjects()["legacypid-07300632"]
+
+        self.assertEqual(subject.state, AWAITING_CI, f"{subject.state}: {subject.note!r}")
+        self.assertNotIn("names no pid", subject.note)
+        self.assertIn("no pid handle was recorded", subject.note)
+
     def test_a_malformed_pid_handle_is_not_measured_and_never_crashes_the_board(self):
         """`RV-C5`. `declare.json` is a file; one hand-edited or truncated `watcher_pid` raised TypeError out of
         `reconcile` and took down `fleet board` for EVERY row. A handle that cannot be read is NOT MEASURED."""
@@ -1175,7 +1187,7 @@ class TestTheWatcherIsClassifiedFromWhatIsTrue(unittest.TestCase):
 
         self.assertEqual(subject.state, AWAITING_CI, f"{subject.state}: {subject.note!r}")
         self.assertIn("ATTESTED", subject.note)
-        self.assertIn("names no pid", subject.note)
+        self.assertIn("no pid handle was recorded", subject.note)
 
 
 class TestAnAttachedHumanIsNotAStuckWorker(unittest.TestCase):

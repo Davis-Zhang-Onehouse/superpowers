@@ -664,7 +664,7 @@ def _watcher_of(pane, sessions, instant, capture_failed=False) -> tuple:
         if status == PID_GONE:
             return WATCHER_GONE, f"{sentence}; it was attested as: {said}"
         if status is None:
-            return WATCHER_ATTESTED, (f"{said} (it names no pid, so nothing re-checks it: the claimant "
+            return WATCHER_ATTESTED, (f"{said} (no pid handle was recorded at the claim, so nothing re-checks it: the claimant "
                                       f"must re-declare when it ends)")
         return WATCHER_ATTESTED, f"{said} ({sentence})"
     #: `RV-42`/`FI-7`. The capture FAILED, so the pane was never read and nothing was observed about a
