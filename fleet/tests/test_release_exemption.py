@@ -4,6 +4,8 @@
 two trees get classified, and what a release may do with the answer -- the places where a correct
 classifier could still be wired into an incorrect skip.
 """
+import json
+import os
 import pathlib
 import tempfile
 import unittest
@@ -13,6 +15,8 @@ from fleet.release import META_DIR, Releases, Version
 from fleet.release_verify import (EXEMPT, EXEMPT_ROSTER, FULL_ROSTER, GATE_ROSTER, GREEN,
                                   exemption_for, last_green, read_verdict, write_exemption,
                                   write_verdict)
+from fleet.root import MARKER
+from tests import hermetic_environment
 
 
 class ExemptionCase(unittest.TestCase):
@@ -490,6 +494,15 @@ class PromoteGateCase(unittest.TestCase):
         self.tmp = pathlib.Path(tempfile.mkdtemp(prefix="fleet-promotegate-"))
         self.addCleanup(__import__("shutil").rmtree, self.tmp, True)
         self.rel = Releases(self.tmp / "releases")
+        #: The fleet this fixture promotes IN, written by the fixture and named with `--root`. `promote`
+        #: needs a store like every verb, and before FB-35 it got whichever one the process happened to
+        #: be standing in: the operator's live root inside `davis_root`, a refusal from a `/tmp` export.
+        #: `$HOME` is private too, so the marker walk cannot reach the operator's tree from ANY cwd, and
+        #: the name makes the tmux socket `fleet-promotegate-<pid>` -- a server that does not exist.
+        self.home = self.tmp / "home"
+        self.root = self.home / "fleet"
+        self.root.mkdir(parents=True)
+        (self.root / MARKER).write_text(json.dumps({"name": f"promotegate-{os.getpid()}"}))
 
     def _release(self, version, verdict=None, roster=GATE_ROSTER):
         v = Version.parse(version)
@@ -512,8 +525,9 @@ class PromoteGateCase(unittest.TestCase):
 
         from fleet.cli import main
         err = io.StringIO()
-        code = main(["release-promote", "--version", str(version),
-                     "--releases", str(self.rel.root)], stdout=io.StringIO(), stderr=err)
+        with hermetic_environment(self.tmp / "instants", home=self.home):
+            code = main(["release-promote", "--version", str(version), "--root", str(self.root),
+                         "--releases", str(self.rel.root)], stdout=io.StringIO(), stderr=err)
         return code, err.getvalue()
 
     def test_an_exempt_release_promotes(self):
@@ -570,6 +584,20 @@ class PromoteGateCase(unittest.TestCase):
         self._release("0.1.0", GREEN)
         v = self._release("0.1.1", EXEMPT, EXEMPT_ROSTER)
         self.assertEqual(self._promote(v)[0], 0)
+
+    def test_the_gate_answers_the_same_from_any_directory(self):
+        """FB-30/FB-35/FB-40. These cases passed inside the operator's fleet root and failed from an export
+        under `/tmp`, because `_promote` named no root and the verb resolved the CALLER's — so P-1 was RED at
+        every tree. Started from a directory outside every root, the gate must answer exactly as it does
+        anywhere else."""
+        v = self._release("0.1.0", GREEN)
+        here = os.getcwd()
+        self.addCleanup(os.chdir, here)
+        os.chdir(self.tmp)
+        code, err = self._promote(v)
+        self.assertEqual(code, 0, err)
+        self.assertEqual(self.rel.state(v), "RELEASED")
+        self.assertIn(f"root {self.root} (--root)", err, "the verb must resolve the fixture's own root")
 
     def test_a_green_minor_bump_still_needs_the_full_roster(self):
         """The pre-existing rule, asserted here so the new EXEMPT branch cannot be seen to have
