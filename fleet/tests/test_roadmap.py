@@ -1066,3 +1066,107 @@ class TestEvidenceResolves(RoadmapCase):
         milestone = self.rm.apply(self.rm.propose(done, "k2", "done", ["evidence/final.log"]))
         self.assertEqual([url, gone, str(done / "evidence" / "proof.log"), str(done / "evidence" / "final.log")],
                          milestone.evidence)
+
+
+class TestTheOwnerFollowsTheRename(RoadmapCase):
+    """`B08` / i31 (FI-246c). `claim` records the worker's path while it is `-inflight-`, and a worker's
+    completion signal is renaming its own folder — so `owner` named a folder that no longer exists for the
+    rest of the roadmap's life: `apply` wrote status and evidence and never `owner`, `brief` printed the
+    dead path, and `--disown` string-compared it. `owner` is now read where it is NOW, rewritten by the next
+    `apply`, and compared by stable identity so the rewrite cannot make a release miss its own holder."""
+
+    DONE = WORKER.replace("-inflight-", "-complete-")
+
+    def setUp(self):
+        super().setUp()
+        self.rm.add(ms("o1", status="ready"))
+        self.rm.claim("o1", str(self.worker))
+
+    def complete(self):
+        return self.worker.rename(self.tasks / self.DONE)
+
+    def stored_owner(self):
+        return next(d for d in json.loads(self.rm.path.read_text())["milestones"] if d["id"] == "o1")["owner"]
+
+    def test_apply_after_the_owners_rename_rewrites_owner_to_where_it_is_now(self):
+        done = self.complete()
+        self.rm.apply(self.rm.propose(done, "o1", "done", ["evidence/INDEX.md"]))
+        self.assertEqual(str(done), self.stored_owner(),
+                         "apply left owner naming the -inflight- folder that no longer exists")
+
+    def test_every_read_of_a_milestone_names_the_owner_where_it_is_now(self):
+        done = self.complete()
+        self.assertEqual(str(done), self.rm.milestone("o1").owner)
+        [row] = [r for r in self.rm.report() if r.subject == "o1"]
+        self.assertEqual(str(done), row.owner)
+
+    def test_an_owner_that_resolves_nowhere_is_reported_as_recorded(self):
+        gone = str(self.tasks / "00000000-07300999-abort-append-longGone")
+        self.rm.add(ms("o2", status="running", owner=gone))
+        self.assertEqual(gone, self.rm.milestone("o2").owner)
+
+    def test_disown_recognises_its_owner_across_the_rename_in_both_directions(self):
+        """`harvest` passes the owner it READ (now `-complete-`) against a stored `-inflight-` string, and
+        `abort` passes its own recorded path against an owner `apply` already rewrote."""
+        done = self.complete()
+        self.rm.disown("o1", expect_owner=str(done), reason="harvested")
+        self.assertIsNone(self.stored_owner())
+        self.rm.claim("o1", str(done))
+        self.rm.disown("o1", expect_owner=str(self.tasks / WORKER), reason="aborted")
+        self.assertIsNone(self.stored_owner())
+
+    def test_disown_still_refuses_a_different_instant(self):
+        self.complete()
+        other = str(self.tasks / "00000000-07300999-inflight-append-someoneElse")
+        with self.assertRaises(BadInput):
+            self.rm.disown("o1", expect_owner=other)
+
+
+class TestALegacyItemAnchorsAtItsProposer(RoadmapCase):
+    """FB-45 (b03 OI-2/OI-5). Before B03 `apply` stored a relative item with no proposer, and the read side
+    anchored it at `owner` — None after a disown (the live `r1-release-five-fixes`: 7 items "does not
+    resolve"), or a different instant than the one that cited it (the owner's same-named file printed as if
+    it were the cited one). The proposer IS recorded, in the inbox's applied/closed rows."""
+
+    def legacy(self, mid, items, proposer, owner=None, where="applied"):
+        self.rm.add(ms(mid, status="dropped", evidence=items, owner=owner))
+        inbox = json.loads(self.rm.proposals_path.read_text()) if self.rm.proposals_path.is_file() else {
+            "schema_version": 1, "pending": [], "applied": [], "closed": []}
+        inbox.setdefault("closed", [])
+        inbox[where].append({"instant": str(proposer), "milestone": mid, "status": "running",
+                             "evidence": list(items), "at": "2026-09-22T07:20:43Z", "note": ""})
+        self.rm.proposals_path.parent.mkdir(parents=True, exist_ok=True)
+        self.rm.proposals_path.write_text(json.dumps(inbox))
+
+    def evidence_of(self, mid):
+        return next(r for r in self.rm.report() if r.subject == mid).evidence
+
+    def test_an_unowned_milestone_resolves_its_legacy_items_at_the_proposer(self):
+        self.legacy("r1", ["evidence/a.log", "evidence/b.log"], self.worker)
+        done = self.worker.rename(self.tasks / WORKER.replace("-inflight-", "-complete-"))
+        self.assertEqual(f"{done / 'evidence' / 'a.log'}, {done / 'evidence' / 'b.log'}", self.evidence_of("r1"))
+
+    def test_a_closed_row_is_a_proposer_too(self):
+        self.legacy("r2", ["evidence/a.log"], self.worker, where="closed")
+        self.assertEqual(str(self.worker / "evidence" / "a.log"), self.evidence_of("r2"))
+
+    def test_a_coordinator_cited_item_on_a_workers_milestone_is_the_coordinators_file(self):
+        cite(self.instant, ["evidence/INDEX.md"])
+        self.legacy("w1", ["evidence/INDEX.md"], self.instant, owner=str(self.worker))
+        self.assertEqual(str(self.instant / "evidence" / "INDEX.md"), self.evidence_of("w1"),
+                         "the item was read at the OWNER's same-named file")
+
+    def test_with_no_row_citing_it_the_owner_is_still_the_anchor(self):
+        self.rm.add(ms("w2", status="done", evidence=["evidence/a.log"], owner=str(self.worker)))
+        self.assertEqual(str(self.worker / "evidence" / "a.log"), self.evidence_of("w2"))
+
+    def test_apply_upgrades_a_legacy_item_the_proposer_cited_not_the_owners_namesake(self):
+        """RV-20's upgrade dedups by location; the location must be the proposer's, or a coordinator-cited
+        legacy item and the owner's new anchored item of the same name are merged into one."""
+        cite(self.instant, ["evidence/INDEX.md"])
+        self.legacy("w3", ["evidence/INDEX.md"], self.instant, owner=str(self.worker))
+        entry = json.loads(self.rm.path.read_text())
+        entry["milestones"][-1]["status"] = "running"
+        self.rm.path.write_text(json.dumps(entry))
+        milestone = self.rm.apply(self.rm.propose(self.worker, "w3", "done", ["evidence/INDEX.md"]))
+        self.assertEqual(["evidence/INDEX.md", str(self.worker / "evidence" / "INDEX.md")], milestone.evidence)

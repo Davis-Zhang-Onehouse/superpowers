@@ -54,7 +54,7 @@ from pathlib import Path
 from fleet import evidence as evidence_mod
 from fleet.atomic import atomic_write, held_for_update
 from fleet.errors import AmbiguousId, BadInput
-from fleet.identity import resolve
+from fleet.identity import resolve, same_instant
 from fleet.store import SCHEMA_VERSION
 
 #: The status domain. A value outside it is refused at the producer, never coerced (FD-1).
@@ -212,8 +212,31 @@ def _check_evidence(evidence, milestone: str) -> list:
 
 
 def _described(items, anchor) -> str:
-    """`B03`. A list of evidence items as the view prints them: each where it is now, comma-joined."""
-    return ", ".join(evidence_mod.describe(e, anchor) for e in items)
+    """`B03`. A list of evidence items as the view prints them: each where it is now, comma-joined.
+    `anchor` is one instant for every item, or a callable item -> instant (a milestone's legacy items)."""
+    at = anchor if callable(anchor) else (lambda item: anchor)
+    return ", ".join(evidence_mod.describe(e, at(e)) for e in items)
+
+
+def _owner_now(owner):
+    """`B08`. A milestone's `owner` where that instant is NOW. `claim` records the worker's path while it is
+    `-inflight-` and the worker's completion signal is renaming its own folder, so the stored string names
+    a folder that no longer exists for the rest of the roadmap's life. Resolved through the one resolver
+    (`identity.resolve`); an owner that resolves nowhere, or ambiguously, is reported exactly as recorded
+    rather than guessed at."""
+    if not owner:
+        return owner
+    try:
+        found = resolve(Path(str(owner)))
+    except (AmbiguousId, OSError):
+        return owner
+    return str(found) if found is not None else owner
+
+
+def _milestone(entry: dict) -> "Milestone":
+    """Every `Milestone` a reader gets is built here, so every reader — `brief`, `dispatch`'s refusal, the
+    `roadmap` rows, `--disown` — sees `owner` where it is now (`B08`)."""
+    return Milestone(**dict(entry, owner=_owner_now(entry.get("owner"))))
 
 
 def last_index(rows: list, row) -> int:
@@ -352,11 +375,11 @@ class Roadmap:
                     if doomed:
                         self._close(inbox, doomed, RETIRED, reason)
                         self._save(self.proposals_path, inbox)
-                return Milestone(**entry)
+                return _milestone(entry)
         raise BadInput(f"no milestone {milestone_id!r} in {self.path}, so there is nothing to retire")
 
     def milestones(self) -> list:
-        return [Milestone(**d) for d in self._load()["milestones"]]
+        return [_milestone(d) for d in self._load()["milestones"]]
 
     def milestone(self, milestone_id: str) -> Milestone:
         for m in self.milestones():
@@ -480,7 +503,7 @@ class Roadmap:
                     f"record is what says so (`fleet board`, `fleet status`), and the work is released by "
                     f"aborting it with a reason.")
             #: Readiness is derived from the CURRENT file, which is the one held open here.
-            by_id = {m["id"]: Milestone(**m) for m in data["milestones"]}
+            by_id = {m["id"]: _milestone(m) for m in data["milestones"]}
             blocker, _, _, _ = self._blocker(by_id[milestone_id], by_id)
             if blocker:
                 raise BadInput(
@@ -491,7 +514,7 @@ class Roadmap:
             #: would sit beside a live owner explaining why that owner does not own it.
             found["disowned_reason"] = ""
             self._save(self.path, data)
-            return Milestone(**found)
+            return _milestone(found)
 
     def disown(self, milestone_id: str, expect_owner: str = None, reason: str = "") -> None:
         """Give a claim back. `SI-21`'s lesson (a rollback must not strand state it created) applied to the
@@ -515,7 +538,10 @@ class Roadmap:
                 held = entry.get("owner")
                 if not held:
                     return
-                if expect_owner is not None and str(held) != str(expect_owner):
+                #: `B08`. By identity, not by string: `harvest` passes the owner it READ (where it is now,
+                #: `-complete-`) against a string recorded while it was `-inflight-`, and `abort` passes its
+                #: recorded path against an owner `apply` has since rewritten.
+                if expect_owner is not None and not same_instant(held, expect_owner):
                     raise BadInput(
                         f"milestone {milestone_id!r} is claimed by {held!r}, not by {str(expect_owner)!r}, "
                         f"so this release would free work somebody else is running. Refused. If {held!r} "
@@ -658,6 +684,11 @@ class Roadmap:
                     if reopen and d["status"] == "dropped" and status != "dropped":
                         d["retired_reason"] = ""
                     d["status"] = status
+                    #: `B08` (FI-246c). The owner too, where it is NOW: the coordinator's write after a
+                    #: worker's `-complete-` rename is the first moment the roadmap can learn of it, and a
+                    #: raw reader of roadmap.json should not be handed a folder that no longer exists.
+                    if d.get("owner"):
+                        d["owner"] = _owner_now(d["owner"])
                     #: `B03`. Written ANCHORED — where the item is now — because a relative string on a
                     #: milestone has no proposer left to be relative to. Deduplicated by location, so one
                     #: file cited while `-inflight-` and again after `-complete-` lands once. A legacy
@@ -671,7 +702,9 @@ class Roadmap:
                             found = evidence_mod.locate(e, None)
                             if found is not None:
                                 d["evidence"][i] = str(found)
-                    seen = {str(evidence_mod.locate(e, d.get("owner")) or e): i
+                    #: FB-45: a legacy relative item is located at the proposer that cited it, not at `owner`.
+                    anchor = self._legacy_anchor(d["id"], d.get("owner"))
+                    seen = {str(evidence_mod.locate(e, anchor(e)) or e): i
                             for i, e in enumerate(d["evidence"])}
                     for item in evidence:
                         where = evidence_mod.locate(item, proposal.instant)
@@ -684,7 +717,7 @@ class Roadmap:
                             d["evidence"][seen[key]] = stored
                     self._save(self.path, data)
                     self._consume(proposal)
-                    return Milestone(**d)
+                    return _milestone(d)
         raise BadInput(f"no milestone {proposal.milestone!r} in {self.path}; refusing to invent one")
 
     def _consume(self, proposal: Proposal) -> None:
@@ -753,8 +786,36 @@ class Roadmap:
 
     # ------------------------------------------------------------------ the report
 
+    def _legacy_anchor(self, milestone_id: str, owner, inbox: dict = None):
+        """FB-45. item -> the instant a legacy RELATIVE milestone item is relative to.
+
+        Before B03 `apply` stored a relative item with no proposer, and the read side anchored it at `owner` —
+        which is None after a disown (7 items on a real dropped milestone printed "does not resolve") or is a
+        different instant than the one that cited it (a coordinator-cited file on a worker's milestone read
+        as the OWNER's same-named file). The proposer IS recorded: the inbox's `applied` rows, then its
+        `closed` ones, newest first, whose row for this milestone cites that exact string — preferring one
+        where it resolves. `owner` stays the anchor only for an item no row cites (e.g. one typed with
+        `milestone --evidence` before FB-44). Read-time only: nothing on disk is migrated."""
+        inbox = inbox if inbox is not None else self._load_proposals()
+        cited = {}
+        for row in reversed(inbox["applied"]):
+            if row.get("milestone") == milestone_id:
+                for item in row.get("evidence") or []:
+                    cited.setdefault(item, []).append(row["instant"])
+        for row in reversed(inbox["closed"]):
+            if row.get("milestone") == milestone_id:
+                for item in row.get("evidence") or []:
+                    cited.setdefault(item, []).append(row["instant"])
+
+        def anchor(item):
+            proposers = cited.get(item)
+            if not proposers:
+                return owner
+            return next((p for p in proposers if evidence_mod.locate(item, p) is not None), proposers[0])
+        return anchor
+
     @staticmethod
-    def _ready_row(m: Milestone) -> Row:
+    def _ready_row(m: Milestone, anchor=None) -> Row:
         """`B04`. A ready milestone, as a row. INFO: ready work is the healthy state of a roadmap, and an
         `attention` row on a normal state trains the reader to scroll past the one that matters (`FI-2`).
 
@@ -772,7 +833,7 @@ class Roadmap:
         return Row(kind=READY, subject=m.id, severity=INFO,
                    detail=f"READY: {m.title!r} — {why}; status={m.status}; {state}",
                    clears_when=when, clears_who=who, title=m.title, owner=m.owner or "",
-                   evidence=_described(m.evidence, m.owner))
+                   evidence=_described(m.evidence, anchor or m.owner))
 
     def report(self) -> list:
         """Everything the coordinator has to act on, plus the population it was derived from.
@@ -780,16 +841,18 @@ class Roadmap:
         The population row is last and always present: a checker that narrows its scope silently reads as
         a pass (`OBS-49`), and a legitimately empty roadmap is reported rather than RED."""
         rows = []
+        inbox = self._load_proposals()
         for m, blocker, clears_when, clears_who, severity in self._readiness():
+            anchor = self._legacy_anchor(m.id, m.owner, inbox)
             if blocker is None:
-                rows.append(self._ready_row(m))
+                rows.append(self._ready_row(m, anchor))
                 continue
             #: `severity` comes from `_blocker`, which is the only thing that knows WHY (`FI-2`).
             rows.append(Row(kind=NOT_READY, subject=m.id, detail=blocker,
                             severity=severity,
                             clears_when=clears_when, clears_who=clears_who,
                             title=m.title, owner=m.owner or "",
-                            evidence=_described(m.evidence, m.owner)))
+                            evidence=_described(m.evidence, anchor)))
 
         milestones = self.milestones()
         by_id = {m.id: m for m in milestones}
