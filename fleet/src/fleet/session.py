@@ -543,7 +543,7 @@ def default_probes(process_name: str = "claude", tmux_socket=_FROM_ENV, *,
                     # read, whose directory is gone and whose read answered ESRCH. None holds a workspace.
                     # Anything else is reported `unreadable` like a denied read: a skip rests on what the
                     # kernel said, never on what it did not say, and a VANISHING pid never refuses the whole
-                    # inventory. (Other per-pid failures still refuse below — a different cause, not this one.)
+                    # inventory. (The generic OSError/UnicodeError arm below still refuses — a different cause.)
                     if exited_or_exiting(proc):
                         continue
                     out.append(LiveSession(pid=pid, cwd=Path(f"/proc/{pid}"), name=None, runtime=runtime,
