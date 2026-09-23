@@ -45,6 +45,12 @@ LIVE_TMUX_SNAPSHOT="$IT_ROOT/live-tmux-sessions-run-$IT_RUN_ID.txt"
 #: The live set at the START of the most recent run in this checkout: what a new run's first check compares
 #: against. It keeps the old baseline's name, so a slot's pre-fix file is read as the first handover.
 LIVE_TMUX_HANDOVER="$IT_ROOT/live-tmux-sessions.txt"
+#: Written ONLY through this: two runs may read and write the handover at once, and a truncating `>` is
+#: observable empty mid-write, after which the between-runs check compares nothing (RV-28: a stress run saw
+#: 4699 empty reads in 6000 probes with `>`, 0 with tmp+mv). `mv` within one directory is an atomic rename.
+it_write_handover() {   # it_write_handover <session-set>
+  printf '%s\n' "$1" > "$LIVE_TMUX_HANDOVER.tmp.$$" && mv -f "$LIVE_TMUX_HANDOVER.tmp.$$" "$LIVE_TMUX_HANDOVER"
+}
 #: The THIRD live resource this harness can damage, and the one `it_assert_isolation` could not see.
 #: `I2-11`/`FI-196`: `it_section` sandboxes FLEET_HOME and the tmux server, so the record store and the
 #: session set were both provably isolated — and every `fleet init` still wrote its FOLDER into whatever
@@ -460,7 +466,7 @@ it_rebaseline_live_tmux() {     # it_rebaseline_live_tmux <reason>
   moved="$(it_log_rebaseline "$reason" "$before" "$after")"
   removed="${moved%%|*}"; added="${moved#*|}"
   printf '%s\n' "$after" > "$LIVE_TMUX_SNAPSHOT"
-  printf '%s\n' "$after" > "$LIVE_TMUX_HANDOVER"
+  it_write_handover "$after"
   printf 'live-tmux baseline re-established (%s sessions). removed:%s added:%s\n' \
          "$(printf '%s' "$after" | grep -c .)" "${removed:-none}" "${added:-none}"
 }
@@ -677,7 +683,7 @@ it_establish_run_baseline() {   # it_establish_run_baseline <tag> <sessions> <no
               "${prefix}run $IT_RUN_ID's first check, with no earlier handover: ${classified#*|} No handover is written until it is gone."
       return 1
     fi
-    printf '%s\n' "$sessions" > "$LIVE_TMUX_HANDOVER"
+    it_write_handover "$sessions"
     # Not a PASS. This call ESTABLISHED the baseline and therefore compared nothing, and a baseline-setting
     # call reported as a pass is the "absence is never success" defect wearing the harness's own badge.
     it_skip "ISOLATION-$tag" "fleet/it/${LIVE_TMUX_SNAPSHOT##*/}" \
@@ -692,7 +698,7 @@ it_establish_run_baseline() {   # it_establish_run_baseline <tag> <sessions> <no
             "${prefix}run $IT_RUN_ID's first check, against the previous run's handover: ${detail} The handover is NOT advanced past it, so every run fails here until it is resolved: kill a harness session that is still on the default server, or, if the named session is already gone, re-baseline with it_rebaseline_live_tmux <reason>."
     return 1
   fi
-  printf '%s\n' "$sessions" > "$LIVE_TMUX_HANDOVER"
+  it_write_handover "$sessions"
   if [ "$verdict" = NOTE ]; then
     it_log_rebaseline "run $IT_RUN_ID began: baseline re-established from the previous run's handover (automatic, FB-60)" \
                       "$handover" "$sessions" >/dev/null
