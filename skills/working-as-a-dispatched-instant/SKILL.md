@@ -158,7 +158,9 @@ background poller — put `pid:<n>` of that process in the text:
 fleet declare --instant "$INSTANT" --phase awaiting-ci --watcher "harness task running release-gate.sh pid:48213"
 ```
 
-The pid is recorded with its start time, and once that process exits (or the pid is recycled) the board
+Take the pid from `$!` in the shell that starts the job — **never `pgrep -f`**: it matches the command line of
+the very shell running it, so it names a pid that is gone a second later, and several matches print several
+pids (`declare` refuses more than one). The pid is recorded with its start time, and once that process exits (or the pid is recycled) the board
 reads **NO WATCHER OBSERVABLE** and disregards the claim by itself — no re-declaring by hand after the
 gate. `declare` refuses a `pid:` that is not running, or two of them. Without a handle nothing re-checks the
 attestation: `declare` says so, and it is only as good as your honesty.
