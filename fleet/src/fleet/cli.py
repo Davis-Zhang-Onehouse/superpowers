@@ -2148,7 +2148,7 @@ def _watcher_for_claim(ctx: Ctx, child: Path, attested=None) -> tuple:
                       clears_when=f'never, for a codex worker: declare the phase it is actually in '
                                   f'(`fleet declare --instant {child} --phase <that phase>`) and let it count '
                                   f'against the cap',
-                      clears_who=claimed_record.todo_id)
+                      clears_who=f'the worker {claimed_record.todo_id}')
     if attested is not None:
         if not str(attested).strip():
             raise BadInput(
