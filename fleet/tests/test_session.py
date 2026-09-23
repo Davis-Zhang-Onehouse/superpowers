@@ -357,8 +357,9 @@ class TestThePrivateTmuxServer(unittest.TestCase):
 SELFTEST_TMUX_SOCKET = f"itfleet-selftest-{os.getpid()}"
 
 
-#: What every real-tmux fixture session runs: it ends when this suite process does, so a suite killed
-#: outright cannot leave a session (and so a server) running after it — a fixed `sleep 120` could.
+#: What every real-tmux fixture session runs: it ends within a second or two of this suite process, so
+#: no session (and so no server) outlives a suite killed outright by more than a few seconds — a fixed
+#: `sleep 120` could keep one for two minutes.
 _WHILE_THIS_PROCESS_LIVES = f"while kill -0 {os.getpid()} 2>/dev/null; do sleep 1; done"
 
 
