@@ -62,7 +62,7 @@ def choose_runtime(box: RuntimeName, *, flag_runtime=None, flag_model=None,
     model is `--model` > the profile's `model` > none. A profile's model belongs to the profile's runtime, so it
     applies only when that runtime is the one chosen: a `--runtime` override drops it rather than handing a
     claude model name to codex. "No model" is not a value — it is the absence of a model flag on the argv."""
-    if flag_runtime:
+    if flag_runtime is not None:
         runtime, runtime_source = validate_runtime(flag_runtime), "flag"
     elif profile_runtime:
         runtime, runtime_source = validate_runtime(profile_runtime), "profile"
