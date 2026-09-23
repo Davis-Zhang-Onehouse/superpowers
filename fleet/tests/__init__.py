@@ -99,7 +99,7 @@ def _live_destinations(environ, cwd):
     if environ.get("FLEET_RELEASES"):
         releases.add(_resolved(environ["FLEET_RELEASES"]))
     stores.discard(None)
-    instants = {store / "instants" for store in stores}
+    instants = {_resolved(store / "instants") for store in stores}
     if environ.get("FLEET_INSTANTS"):
         instants.add(_resolved(environ["FLEET_INSTANTS"]))
     return (frozenset(roots), frozenset(stores), frozenset(releases - {None}),
