@@ -8,6 +8,7 @@ import unittest
 from unittest.mock import patch
 
 from fleet.errors import BadInput, FleetError
+from fleet.runtime import recognizes_process
 from fleet.session import default_probes
 from fleet.peers import classify, from_live_sessions
 
@@ -180,6 +181,154 @@ class VanishingPidTests(unittest.TestCase):
         control = self.inventory([101, 103])
         self.healthy(102, comm='bash')
         self.assertEqual(self.inventory([101, 102, 103]), control)
+
+
+
+class UnreadablePidRowTests(unittest.TestCase):
+    """FB-53 / FB-54. What `list_processes` does with ONE `claude` pid it cannot fully read.
+
+    FB-53: a per-pid condition — a `cmdline` that is not UTF-8, or any errno the reads answer — used to refuse the WHOLE
+    inventory, taking every read verb down while that process lived. The invariant now: no per-pid condition raises out
+    of `list_processes`; only the enumeration itself (`pgrep`, the pane listing, a malformed pid list) may.
+    FB-54: an `unreadable` row was never attributed, although `stat` (world-readable) still names its parent and the
+    pane-owner walk a readable row uses can therefore place it in its tmux session."""
+
+    setUp, healthy, inventory = VanishingPidTests.setUp, VanishingPidTests.healthy, VanishingPidTests.inventory
+
+    def test_a_non_utf8_cmdline_is_read_not_refused(self):
+        """The fb41 reviewer's repro: a healthy claude beside a claude whose argv holds byte 0xe9."""
+        control = self.inventory([101, 103])
+        self.healthy(102)
+        (self.root / '102' / 'cmdline').write_bytes(b'claude\0--note\0caf\xe9\0')
+        got = self.inventory([101, 102, 103])
+        self.assertEqual([row for row in got if row[0] != 102], control)
+        # Read, recognised and placed like any other claude: the bad byte is in its PROMPT, not in its identity.
+        self.assertEqual([(p, c, u) for p, _, c, u in got if p == 102], [(102, self.root, False)])
+
+    def test_a_surrogate_escaped_argv_is_still_recognised_by_identity_alone(self):
+        argv = ['claude', '--note', 'caf\udce9']
+        self.assertTrue(recognizes_process('claude', 'claude', '/opt/claude/versions/2.1.268', argv))
+        self.assertFalse(recognizes_process('claude', 'bash', '/usr/bin/bash', argv))
+        self.assertFalse(recognizes_process('claude', 'claude', '/usr/bin/node', ['node', 'caf\udce9']))
+
+    def test_no_per_pid_condition_raises_out_of_the_inventory(self):
+        """The invariant, stated over every read the loop makes and every failure class those reads can raise."""
+        control = self.inventory([101, 103])
+        self.healthy(102)
+        failures = (OSError(5, 'Input/output error'), OSError(22, 'Invalid argument'), PermissionError(13, 'denied'),
+                    TimeoutError(110, 'timed out'), UnicodeDecodeError('utf-8', b'\xe9', 0, 1, 'invalid'),
+                    OSError('no errno at all'))
+        real_read, real_link = Path.read_text, os.readlink
+        for field in ('comm', 'cmdline', 'exe', 'cwd'):
+            for failure in failures:
+                with self.subTest(field=field, failure=repr(failure)):
+                    target = self.root / '102' / field
+                    def read_text(path, *a, **kw):
+                        if path == target:
+                            raise failure
+                        return real_read(path, *a, **kw)
+                    def readlink(path, *a, **kw):
+                        if str(path) == str(target):
+                            raise failure
+                        return real_link(path, *a, **kw)
+                    with patch.object(Path, 'read_text', read_text), patch('os.readlink', readlink):
+                        got = self.inventory([101, 102, 103])
+                    self.assertEqual([row for row in got if row[0] != 102], control)
+                    self.assertEqual([(p, u) for p, _, _, u in got if p == 102], [(102, True)])
+
+    def test_the_enumeration_level_refusals_are_kept(self):
+        """A control: what the fix must NOT turn into rows — the pid list itself failing or being malformed."""
+        def runner(answer):
+            def run(argv, **kw):
+                return subprocess.CompletedProcess(argv, *answer) if argv[0] == 'pgrep' else \
+                    subprocess.CompletedProcess(argv, 0, '', '')
+            return run
+        for answer, message in (((2, '', 'pgrep: bad'), 'Cannot enumerate claude'),
+                                ((0, '101\nnot-a-pid\n', ''), 'Invalid process inventory')):
+            with self.subTest(message=message), patch('subprocess.run', runner(answer)):
+                with self.assertRaisesRegex(FleetError, message):
+                    default_probes(tmux_socket='itfleet-fb53', proc_root=self.root).list_processes()
+
+    def unreadable(self, pid, ppid):
+        """A live claude whose `exe`/`cwd` refuse the read (another uid, or non-dumpable) but whose `stat` does not."""
+        proc = self.healthy(pid)
+        (proc / 'stat').write_text(_stat(pid, 'claude', 'S', ppid=ppid))
+        return proc
+
+    def denied(self, pid):
+        real = os.readlink
+        def readlink(path, *a, **kw):
+            if str(path) in (str(self.root / str(pid) / 'exe'), str(self.root / str(pid) / 'cwd')):
+                raise PermissionError(13, 'Permission denied')
+            return real(path, *a, **kw)
+        return patch('os.readlink', readlink)
+
+    def test_an_unreadable_pid_is_attributed_through_its_parents_pane(self):
+        """FB-54. The pane pid is 103 (`three`); 102 is its child and cannot be read. `stat` still says whose it is."""
+        self.unreadable(102, ppid=103)
+        with self.denied(102):
+            got = self.inventory([101, 102, 103])
+        self.assertIn((102, 'three', Path('/proc/102'), True), got)
+
+    def test_a_parent_whose_stat_is_not_utf8_does_not_refuse_the_walk(self):
+        """`comm` sits inside `stat` too, and the walk reads the stat of every ANCESTOR — processes the inventory never
+        chose to look at. A parent named with byte 0xe9 is walked through, not raised on."""
+        proc = self.healthy(102)
+        (proc / 'stat').write_text(_stat(102, 'claude', 'S', ppid=104))
+        (self.root / '104').mkdir()
+        (self.root / '104' / 'stat').write_bytes(b'104 (caf\xe9) S 103 104 104 0 -1 4194304 0 0 0 0')
+        got = self.inventory([101, 102, 103])
+        self.assertIn((102, 'three', self.root, False), got)
+
+    def test_an_unreadable_pid_no_pane_owns_stays_unattributed(self):
+        """A control: the walk names only what a pane owns; a pid whose ancestry reaches init is still `None`."""
+        self.unreadable(102, ppid=1)
+        with self.denied(102):
+            got = self.inventory([101, 102, 103])
+        self.assertIn((102, None, Path('/proc/102'), True), got)
+
+    def test_peers_says_an_unreadable_row_could_not_be_read_not_that_it_is_gone(self):
+        """RV-26. `peers` cross-checks each row's cwd through `/proc/<pid>/cwd`, which an unreadable row refuses by
+        definition; that used to surface as DEAD, "gone, or the pid now belongs to a different process" — now under
+        the pane's name, for a process that is alive in it. Still never addressable; the reason is the true one."""
+        row = probe_unreadable(self.root / 'p', 102, 103, 'three')
+        rows = from_live_sessions([row], socket='itfleet-fb54')
+        [peer] = classify(rows, [], self_pid=1, proc_root=str(self.root / 'p'))
+        self.assertEqual((peer['verdict'], peer['name']), ('FOREIGN', 'three'))
+        self.assertIn('could not be read', peer['why'])
+
+    def test_a_pid_found_gone_by_the_attribution_walk_keeps_its_row_unattributed(self):
+        """The walk reads `stat` AFTER the refused reads; a pid reaped in between has no parent to name."""
+        self.unreadable(102, ppid=103)
+        (self.root / '102' / 'stat').unlink()
+        with self.denied(102):
+            got = self.inventory([101, 102, 103])
+        self.assertIn((102, None, Path('/proc/102'), True), got)
+
+
+def probe_unreadable(root, pid, pane_pid, pane, runtime='claude', owned=True):
+    """FB-54. The row the REAL probe reports for a live `runtime` pid whose `exe`/`cwd` refuse the read, whose `stat`
+    names `pane_pid` as its parent, and whose parent is the pane pid of tmux session `pane` (`owned=False`: of no pane). Built through
+    `default_probes` over a fake `/proc` rather than as a hand-made `LiveSession`, so a consumer's test exercises the
+    attribution the product performs — a hand-made row would carry whatever name the test chose to give it."""
+    root = Path(root)
+    for number, comm, parent in ((pid, runtime, pane_pid), (pane_pid, 'bash', 1)):
+        proc = root / str(number)
+        proc.mkdir(parents=True)
+        (proc / 'comm').write_text(comm + '\n')
+        (proc / 'cmdline').write_text(comm + '\0')
+        (proc / 'stat').write_text(_stat(number, comm, 'S', ppid=parent))
+    denied = {str(root / str(pid) / 'exe'), str(root / str(pid) / 'cwd')}
+    def readlink(path, *a, **kw):
+        raise PermissionError(13, 'Permission denied') if str(path) in denied else FileNotFoundError(2, str(path))
+    def run(argv, **kw):
+        listed = f'{pid}\n' if argv[0] == 'pgrep' and argv[-1] == runtime else ''
+        return subprocess.CompletedProcess(argv, 0 if listed or argv[0] != 'pgrep' else 1,
+                                           listed if argv[0] == 'pgrep' else (f'{pane_pid} {pane}\n' if owned else ''), '')
+    with patch('subprocess.run', run), patch('os.readlink', readlink):
+        rows = default_probes(process_name=runtime, tmux_socket='itfleet-fb54', proc_root=root).list_processes()
+    assert [(row.pid, row.unreadable) for row in rows] == [(pid, True)], rows
+    return rows[0]
 
 
 class EmptyOrExitingTmuxServerTests(unittest.TestCase):
