@@ -1,4 +1,4 @@
-import os, pathlib, shutil, subprocess, time, unittest, uuid
+import os, pathlib, re, shutil, subprocess, sys, time, unittest, uuid
 from fleet.session import (TMUX_SOCKET_ENV, LiveSession, Probes, SessionLayer, default_probes,
                            exact_pane_target, exact_session_target)
 
@@ -343,7 +343,37 @@ class TestThePrivateTmuxServer(unittest.TestCase):
 #: isolation check only grepped that server for `dt-` names (`SI-1`), and these are not `dt-`.
 #: Deliberately not `itfleet` (the IT harness's socket): the suite and an IT section must not share a
 #: namespace either, which is the whole lesson of §M vs §E.
-SELFTEST_TMUX_SOCKET = "itfleet-selftest"
+#:
+#: `FB-49`: and not one name for the whole host either. It was the fixed `itfleet-selftest`, so two suites
+#: running at once (a P-1 beside a worker's suite, a release gate beside anything) shared ONE server, and
+#: one process's `kill-session` of its last session stopped it under the other's `new-session` — which
+#: failed `server exited unexpectedly`, so `setUp` read a None pane (`TestSelftestServerIsPerProcessAndRetired`).
+#: The pid makes it per process; `_retire_selftest_server` in each user's cleanup makes that not leak, and
+#: `TestAgainstRealTmux`'s anchor session keeps it from exiting between cases (`FB-5`).
+#: Fixed at IMPORT, like `_WHILE_THIS_PROCESS_LIVES` below, so the two agree. A runner that forks after
+#: importing (pytest-forked, `--boxed`) would give every child the parent's name; the suite's runners —
+#: `unittest discover` for `fleet selftest`, P-1 and the release gate, and pytest-xdist's workers, which
+#: import for themselves — do not.
+SELFTEST_TMUX_SOCKET = f"itfleet-selftest-{os.getpid()}"
+
+
+#: What every real-tmux fixture session runs: it ends within a second or two of this suite process, so
+#: no session (and so no server) outlives a suite killed outright by more than a few seconds — a fixed
+#: `sleep 120` could keep one for two minutes.
+_WHILE_THIS_PROCESS_LIVES = f"while kill -0 {os.getpid()} 2>/dev/null; do sleep 1; done"
+
+
+def _selftest_socket_path(name: str) -> pathlib.Path:
+    """Where tmux puts the socket for `-L name`. A server that exits leaves this file behind."""
+    return pathlib.Path(os.environ.get("TMUX_TMPDIR") or "/tmp") / f"tmux-{os.getuid()}" / name
+
+
+def _retire_selftest_server(name: str) -> None:
+    """Kill the private server and remove its socket file. Only ever called with an `itfleet-selftest-`
+    name this suite made up; never the operator's server nor the IT harness's."""
+    assert re.fullmatch(r"itfleet-selftest-\d+(-att)?", name), name
+    subprocess.run(["tmux", "-L", name, "kill-server"], capture_output=True)
+    _selftest_socket_path(name).unlink(missing_ok=True)
 
 
 def _tmux_is_available() -> bool:
@@ -368,6 +398,25 @@ class TestAgainstRealTmux(unittest.TestCase):
     """
 
     TMUX = ["tmux", "-L", SELFTEST_TMUX_SOCKET]
+    ANCHOR = "itfleet-anchor"
+
+    @classmethod
+    def setUpClass(cls):
+        # `FB-49`: the server is this process's own, so this class retires it rather than leaving one
+        # server and one socket file per suite run. A class cleanup runs even when a setUp or tearDown fails.
+        cls.addClassCleanup(_retire_selftest_server, SELFTEST_TMUX_SOCKET)
+        # And it must not EMPTY between cases. tmux exits a server when its last session is killed, and
+        # that exit is asynchronous: the next case's `new-session` can reach the exiting server and fail
+        # `server exited unexpectedly` even with no other process involved (5 of 1000 under the load of two
+        # suites, 0 of 2000 under that load with the server kept non-empty: `FB-5`'s "under tmux load").
+        # The anchor keeps it occupied, and it watches this process, as every fixture session here does:
+        # a suite that is killed outright (no cleanup runs) still takes its server down within a few
+        # seconds (measured at 3 s). What it cannot take is the socket FILE, which only the cleanup removes.
+        anchored = subprocess.run(cls.TMUX + ["new-session", "-d", "-s", cls.ANCHOR,
+                                              _WHILE_THIS_PROCESS_LIVES],
+                                  capture_output=True, text=True)
+        if anchored.returncode:
+            raise AssertionError(f"could not start {SELFTEST_TMUX_SOCKET!r}: {anchored.stderr}")
 
     def setUp(self):
         self.long = f"itfleet-selftest-{os.getpid()}-{uuid.uuid4().hex[:6]}ab"
@@ -375,8 +424,11 @@ class TestAgainstRealTmux(unittest.TestCase):
         self.marker = f"itfleet-marker-{uuid.uuid4().hex[:8]}"
         # The pane PRINTS something, so "the prefix did not return the longer session's screen" can be
         # asserted on content rather than on two empty strings being equal.
-        subprocess.run(self.TMUX + ["new-session", "-d", "-s", self.long, "-c", "/tmp",
-                                    f"printf '%s\\n' {self.marker}; sleep 120"], capture_output=True)
+        created = subprocess.run(self.TMUX + ["new-session", "-d", "-s", self.long, "-c", "/tmp",
+                                              f"printf '%s\\n' {self.marker}; {_WHILE_THIS_PROCESS_LIVES}"],
+                                 capture_output=True, text=True)
+        # A fixture that did not land is named here, not left to surface as a None pane below (`FB-49`).
+        self.assertEqual(created.returncode, 0, f"new-session on {SELFTEST_TMUX_SOCKET!r}: {created.stderr}")
         self.probes = default_probes(tmux_socket=SELFTEST_TMUX_SOCKET)
         deadline = time.monotonic() + 5
         while self.marker not in self.probes.capture_pane(self.long) and time.monotonic() < deadline:
@@ -427,12 +479,74 @@ class TestAgainstRealTmux(unittest.TestCase):
                           "capturing a session that does not exist should FAIL, not return empty text — "
                           "that distinction is what FI-7 turned on")
 
+    def test_killing_a_cases_own_session_leaves_the_server_up_for_the_next_case(self):
+        """`FB-5`, pinned. Killing the server's last session makes tmux exit it asynchronously, and the next
+        case's `new-session` can land in that exit (`server exited unexpectedly`). The anchor is what keeps
+        the server non-empty; without it this case's own `kill-session` empties the server."""
+        killed = subprocess.run(self.TMUX + ["kill-session", "-t", exact_session_target(self.long)],
+                                capture_output=True, text=True)
+        self.assertEqual(killed.returncode, 0, f"the premise did not hold, the case's own session was not "
+                                               f"killed ({killed.stderr.strip()})")
+        anchor = subprocess.run(self.TMUX + ["has-session", "-t", exact_session_target(self.ANCHOR)],
+                                capture_output=True, text=True)
+        self.assertEqual(anchor.returncode, 0,
+                         f"after a case killed its own session the server has no anchor "
+                         f"({anchor.stderr.strip()}): it is empty and exiting, so the next case's "
+                         f"new-session can fail `server exited unexpectedly` (FB-5)")
+
     def test_killing_a_prefix_does_not_destroy_the_longer_session(self):
         """The hazard itself. Before the fix this call DID destroy `itfleet-repro-ab`
         (`evidence/04-integration/N/N7c-tmux-kill-prefix.txt`, rc 0)."""
         self.probes.kill_session(self.prefix)
         self.assertTrue(self.probes.has_session(self.long),
                         f"killing the non-existent {self.prefix!r} destroyed the live {self.long!r}")
+
+
+@unittest.skipUnless(_tmux_is_available(), "tmux is not installed")
+class TestSelftestServerIsPerProcessAndRetired(unittest.TestCase):
+    """`FB-49`. Two suite processes on one box must not share the real-tmux fixtures' server, and the
+    server each one starts must not outlive it.
+
+    The name used to be the FIXED `itfleet-selftest`: one server for every suite of this user on the host.
+    With two suites running at once, one process's `kill-session` of that server's LAST session made it
+    exit while the other's `new-session` was connecting — `new-session` failed with `server exited
+    unexpectedly`, `capture_pane` returned None, and `setUp` raised `TypeError` (8 of 10 concurrent rounds
+    at `a4d2ec54`; never solo). A per-process name removes the sharing; the class cleanup removes what a
+    per-process name would otherwise leave behind, one socket per run.
+
+    Measured in a CHILD process, because both properties are about a process other than this one: its name
+    must differ from ours, and after it exits its server must be gone and its socket file removed."""
+
+    def test_a_second_suite_process_gets_its_own_server_and_leaves_none_behind(self):
+        fleet_dir = pathlib.Path(__file__).resolve().parents[1]
+        env = dict(os.environ, PYTHONPATH=os.pathsep.join(
+            [str(fleet_dir / "src")] + [p for p in os.environ.get("PYTHONPATH", "").split(os.pathsep) if p]))
+        child = ("import sys, unittest; from tests import test_session as t; "
+                 "print(t.SELFTEST_TMUX_SOCKET, flush=True); "
+                 "r = unittest.TextTestRunner(stream=sys.stderr, verbosity=0).run("
+                 "unittest.defaultTestLoader.loadTestsFromTestCase(t.TestAgainstRealTmux)); "
+                 "sys.exit(0 if r.wasSuccessful() and r.testsRun else 1)")
+        done = subprocess.run([sys.executable, "-c", child], cwd=fleet_dir, env=env, capture_output=True,
+                              text=True, timeout=120)
+        theirs = done.stdout.strip()
+        # Registered before any assertion: if this case fails, it must not be the thing that leaks.
+        socket_file = _selftest_socket_path(theirs) if theirs else None
+        if theirs:
+            self.addCleanup(_retire_selftest_server, theirs)
+        self.assertEqual(done.returncode, 0,
+                         f"the child's TestAgainstRealTmux did not pass, so nothing below is measured:\n"
+                         f"{done.stderr}")
+        self.assertNotEqual(theirs, SELFTEST_TMUX_SOCKET,
+                            "a second suite process named the SAME tmux server as this one: two suites "
+                            "running at once share it, and one's teardown stops it under the other's "
+                            "setUp (FB-49)")
+        self.assertTrue(theirs.startswith("itfleet-selftest-"), theirs)
+        after = subprocess.run(["tmux", "-L", theirs, "list-sessions"], capture_output=True, text=True)
+        self.assertNotEqual(after.returncode, 0,
+                            f"the child's server {theirs!r} outlived it with sessions:\n{after.stdout}")
+        self.assertFalse(socket_file.exists(),
+                         f"the child left its socket file {socket_file} behind; a per-process name "
+                         f"would litter one per suite run")
 
 
 class TestControl(unittest.TestCase):
@@ -883,11 +997,18 @@ class TestAttachmentIsCollected(unittest.TestCase):
     def test_against_real_tmux_a_detached_session_and_a_missing_one(self):
         """Why the target and not `display-message`: `display -p -t =nosuch:` exits 0 with an EMPTY format
         (`evidence/20-red/display-message-missing-session.txt`), which would parse as 'detached'."""
-        tmux = ["tmux", "-L", SELFTEST_TMUX_SOCKET]
+        # Its OWN server, not `TestAgainstRealTmux`'s: this case retires what it starts, and must never
+        # kill a server another class owns (`FB-49`, RV-24).
+        socket = f"{SELFTEST_TMUX_SOCKET}-att"
+        tmux = ["tmux", "-L", socket]
+        self.addCleanup(_retire_selftest_server, socket)
         name = f"itfleet-selftest-att-{os.getpid()}-{uuid.uuid4().hex[:6]}"
-        subprocess.run(tmux + ["new-session", "-d", "-s", name, "sleep 60"], capture_output=True)
+        created = subprocess.run(tmux + ["new-session", "-d", "-s", name, _WHILE_THIS_PROCESS_LIVES],
+                                 capture_output=True, text=True)
+        # A fixture that never landed must not be reported as a probe that read it wrongly (RV-25).
+        self.assertEqual(created.returncode, 0, f"new-session on {socket!r}: {created.stderr}")
         try:
-            probes = default_probes(tmux_socket=SELFTEST_TMUX_SOCKET)
+            probes = default_probes(tmux_socket=socket)
             self.assertEqual(probes.attachment(name), (0, 0, 0),
                              "a live session with no client must read as zero clients, not as not measured")
             self.assertIsNone(probes.attachment(name + "x"))
