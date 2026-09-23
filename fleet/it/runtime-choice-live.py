@@ -86,17 +86,25 @@ def wait_for(label, predicate, step=2):
     raise TimeoutError(f'{label} (after {limit:.0f}s); evidence in {root}')
 
 
-#: The ONLY screens this harness answers in its own fixture sessions, each with the row it selects. codex 0.156.0's
-#: modals end `enter continue · esc …`, which fleet does not yet recognise as a dialog (`pane-guard 14`, ISSUES PT2-I2),
-#: so they are identified here by their text. "Update now" (a global npm install) and "Skip until next version"
-#: (persisted to codex's config) are never chosen.
-SCREENS = (('trust this folder', 'yes, i trust'), ('do you trust the contents', 'yes, continue'),
-           ('trust this folder?', 'trust and continue'), ('update available', '2. skip'))
+#: The ONLY screen this harness answers in its own fixture sessions, with the row it selects: codex 0.156.0's
+#: "Update available" modal, answered "2. Skip" (measured to leave `config.toml` untouched). Its hint row
+#: `enter continue · esc …` is not yet a recognised dialog (`pane-guard 14`, ISSUES PT2-I2), so it is identified here
+#: by its text. "Update now" (a global npm install) and "Skip until next version" (persisted) are never chosen.
+#: A folder-TRUST screen is NEVER answered: both CLIs persist the answer into their configuration (`CODEX_HOME/
+#: config.toml`, claude's `.claude.json`), which here is the operator's shared config (ISSUES PT2-I3, RV-19). The
+#: attempt lives under `fleet/it/`, inside the checkout, so a trusted checkout needs no answer; an untrusted one
+#: stops the run with the path to trust by hand.
+SCREENS = (('update available', '2. skip'),)
+TRUST = ('trust this folder', 'do you trust the contents', 'trust the files in this folder')
 
 
 def answer_screen(name):
     """Answer a known startup screen in this harness's own session; False when the pane shows none of them."""
     text = plain(frame(name, 'screen')).lower()
+    if any(marker in text for marker in TRUST):
+        raise RuntimeError(f'{name} shows a folder-trust screen for {root}; this harness never answers one, because the '
+                           f'answer is persisted into the shared CLI configuration. Trust the checkout by hand once, or '
+                           f'point RTC_CLAUDE_CONFIG/RTC_CODEX_HOME at private copies, then re-run')
     wanted = [target for marker, target in SCREENS if marker in text]
     if not wanted:
         return False
