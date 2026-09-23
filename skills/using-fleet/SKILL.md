@@ -300,9 +300,19 @@ refuse, the dry run refuses too, with the same exit code and the same message.
 
 That last sentence was false until fleet 0.6.7 (`B10`). `abort --dry-run` answered rc=0 `would-rename` for an
 argv the real call refused rc=4, and by then the real call had already killed the session. Sixteen verbs had
-the same shape. Three still answer rc=0 where the real call can exit non-zero: `reap` (foreign or unfreeable
-leases), `release-verify` (a missing source repo is printed as `would-refuse`, by design) and the `harvest`
-tick with no `--id` (its STALE rows). Read those three dry runs' rows, not just their exit codes.
+the same shape. A dry run can still answer rc=0 where the real call exits non-zero in these cases:
+
+- `reap`, for foreign or unfreeable leases.
+- `release-verify`, where a missing source repo is printed as `would-refuse` by design.
+- The `harvest` tick with no `--id`, for its STALE rows.
+- `abort` and `harvest --id` when the session's own processes cannot be attributed (no pane pids or
+  parent walk). The dry run prints a `gate` row saying it could not decide. The real call then kills and
+  releases, and names the partial state if a holder is left.
+- `abort` and `harvest --id` when a process of the session's own tree survives the kill. Nothing can see
+  that before the kill.
+- `revive` on a record with no session name. `dispatch` and `resume` never write one.
+
+For these, read the dry run's rows, not only its exit code.
 
 Use it to ask "would this be admitted?" A guard you cannot interrogate non-destructively gets interrogated
 destructively — twice, by two actors, one of whom had read the entry that declined to run that exact command.
