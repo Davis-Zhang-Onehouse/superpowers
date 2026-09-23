@@ -106,6 +106,25 @@ tmux kill-session -t =itfleet-Z-leaked
 section R3 none
 want "once it is cleared, the next run is clean again" R3 R3-enter PASS
 
+# --- a checkout's FIRST run with a leak already on the server (RV-26) -------------------------------------
+# With no handover, the first check used to ESTABLISH (a SKIP) and write the leak INTO the handover; once the
+# leak was cleaned up, every later run FAILed on a harness-prefixed name "gone from the baseline", naming a
+# remedy (clear the session) that no longer existed. A leak is a FAIL whenever it is seen, and it never
+# enters the handover.
+mkdir -p "$TMP/it2"; cp "$TMP/it/lib.sh" "$TMP/it/facts.env" "$TMP/it2/"
+fresh() { IT="$TMP/it2" IT_RESULTS="$TMP/results-$1.tsv" bash "$TMP/runner.sh" "$1" none >/dev/null 2>&1; }
+tmux new-session -d -s itfleet-M-worker
+fresh X1
+want "a first-ever run that finds a harness-prefixed session FAILs rather than establishing" X1 X1-enter FAIL "itfleet-M-worker"
+if grep -qx 'itfleet-M-worker' "$TMP/it2/live-tmux-sessions.txt" 2>/dev/null; then
+  note "FAIL the leak was written into the handover"; fails=1
+else
+  note "ok   the leak never entered the handover"
+fi
+tmux kill-session -t =itfleet-M-worker
+fresh X2
+want "after the leak is cleared the next run establishes instead of failing on its ghost" X2 X2-enter SKIP "ESTABLISHED"
+
 # The automatic re-baseline writes a row on most runs, so its log must be box-local like every other
 # baseline: tracked, it dirtied the checkout on nearly every IT run and `fleet release cut` refused (RV-23).
 if git -C "$REPO" ls-files --error-unmatch fleet/it/live-tmux-rebaselines.tsv >/dev/null 2>&1; then

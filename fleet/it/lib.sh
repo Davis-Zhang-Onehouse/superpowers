@@ -668,6 +668,15 @@ it_establish_run_baseline() {   # it_establish_run_baseline <tag> <sessions> <no
   find "$IT_ROOT" -maxdepth 1 -name 'live-tmux-sessions-run-*.txt' -mmin +1440 -delete 2>/dev/null
   count="$(printf '%s' "$sessions" | grep -c . )"
   if [ ! -f "$LIVE_TMUX_HANDOVER" ]; then
+    # Even with nothing to compare against, a harness-prefixed session on the default server is a leak, and
+    # it must never be written INTO the handover: once it was cleaned up, every later run would FAIL on its
+    # ghost with no session left to clear (RV-26). An empty baseline makes every live name "appeared".
+    classified="$(it_classify_session_delta "" "$sessions" between-runs)"
+    if [ "${classified%%|*}" = FAIL ]; then
+      it_fail "ISOLATION-$tag" "fleet/it/${LIVE_TMUX_SNAPSHOT##*/}" \
+              "${prefix}run $IT_RUN_ID's first check, with no earlier handover: ${classified#*|} No handover is written until it is gone."
+      return 1
+    fi
     printf '%s\n' "$sessions" > "$LIVE_TMUX_HANDOVER"
     # Not a PASS. This call ESTABLISHED the baseline and therefore compared nothing, and a baseline-setting
     # call reported as a pass is the "absence is never success" defect wearing the harness's own badge.
@@ -680,7 +689,7 @@ it_establish_run_baseline() {   # it_establish_run_baseline <tag> <sessions> <no
   verdict="${classified%%|*}"; detail="${classified#*|}"
   if [ "$verdict" = FAIL ]; then
     it_fail "ISOLATION-$tag" "fleet/it/live-tmux-sessions.txt" \
-            "${prefix}run $IT_RUN_ID's first check, against the previous run's handover: ${detail} The handover is NOT advanced past it, so every run fails here until the session is cleared."
+            "${prefix}run $IT_RUN_ID's first check, against the previous run's handover: ${detail} The handover is NOT advanced past it, so every run fails here until it is resolved: kill a harness session that is still on the default server, or, if the named session is already gone, re-baseline with it_rebaseline_live_tmux <reason>."
     return 1
   fi
   printf '%s\n' "$sessions" > "$LIVE_TMUX_HANDOVER"
