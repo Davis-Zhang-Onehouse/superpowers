@@ -180,7 +180,7 @@ tmux -L "$GA" kill-server 2>/dev/null; tmux -L "$GB" kill-server 2>/dev/null; tr
 if diff -q "$OUT/W1-7-baseline-real.txt" "$LIVE_TMUX_SNAPSHOT" >/dev/null; then
   it_pass W1-7-restored "" "the real baseline is byte-identical: the negative control ran against a repointed COPY and never wrote the shared file"
 else
-  it_fail W1-7-restored "fleet/it/live-tmux-sessions.txt" \
+  it_fail W1-7-restored "$(it_tmux_snapshot_evidence)" \
     "the negative control left the baseline doctored — every later isolation verdict is against a fiction"
 fi
 

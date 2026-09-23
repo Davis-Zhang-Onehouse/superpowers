@@ -48,6 +48,14 @@ LIVE_TMUX_HANDOVER="$IT_ROOT/live-tmux-sessions.txt"
 #: Written ONLY through this: two runs may read and write the handover at once, and a truncating `>` is
 #: observable empty mid-write, after which the between-runs check compares nothing (RV-28: a stress run saw
 #: 4699 empty reads in 6000 probes with `>`, 0 with tmp+mv). `mv` within one directory is an atomic rename.
+#: The evidence path an ISOLATION row cites: the snapshot the comparison actually used, which W1-7 and W1-11
+#: repoint into their own out/ directory (RV-29). Repo-relative under $IT_ROOT, absolute otherwise.
+it_tmux_snapshot_evidence() {
+  case "$LIVE_TMUX_SNAPSHOT" in
+    "$IT_ROOT"/*) printf 'fleet/it/%s' "${LIVE_TMUX_SNAPSHOT#"$IT_ROOT"/}" ;;
+    *)            printf '%s' "$LIVE_TMUX_SNAPSHOT" ;;
+  esac
+}
 it_write_handover() {   # it_write_handover <session-set>
   printf '%s\n' "$1" > "$LIVE_TMUX_HANDOVER.tmp.$$" && mv -f "$LIVE_TMUX_HANDOVER.tmp.$$" "$LIVE_TMUX_HANDOVER"
 }
@@ -679,14 +687,14 @@ it_establish_run_baseline() {   # it_establish_run_baseline <tag> <sessions> <no
     # ghost with no session left to clear (RV-26). An empty baseline makes every live name "appeared".
     classified="$(it_classify_session_delta "" "$sessions" between-runs)"
     if [ "${classified%%|*}" = FAIL ]; then
-      it_fail "ISOLATION-$tag" "fleet/it/${LIVE_TMUX_SNAPSHOT##*/}" \
+      it_fail "ISOLATION-$tag" "$(it_tmux_snapshot_evidence)" \
               "${prefix}run $IT_RUN_ID's first check, with no earlier handover: ${classified#*|} No handover is written until it is gone."
       return 1
     fi
     it_write_handover "$sessions"
     # Not a PASS. This call ESTABLISHED the baseline and therefore compared nothing, and a baseline-setting
     # call reported as a pass is the "absence is never success" defect wearing the harness's own badge.
-    it_skip "ISOLATION-$tag" "fleet/it/${LIVE_TMUX_SNAPSHOT##*/}" \
+    it_skip "ISOLATION-$tag" "$(it_tmux_snapshot_evidence)" \
             "${prefix}live-session baseline ESTABLISHED on this call ($count sessions; no earlier run left a handover), so the tmux comparison is vacuous here; it binds from the next call on"
     return 0
   fi
@@ -784,13 +792,13 @@ it_assert_isolation() {
   classified="$(it_classify_session_delta "$(cat "$LIVE_TMUX_SNAPSHOT")" "$sessions")"
   verdict="${classified%%|*}"; detail="${classified#*|}"
   if [ "$verdict" = FAIL ]; then
-    it_fail "ISOLATION-$tag" "fleet/it/${LIVE_TMUX_SNAPSHOT##*/}" "${stores_note}${instants_note}${detail}"
+    it_fail "ISOLATION-$tag" "$(it_tmux_snapshot_evidence)" "${stores_note}${instants_note}${detail}"
     return 1
   fi
   if [ "$verdict" = NOTE ]; then
     # Recorded on the PASS row rather than swallowed: the run stays attributable, and `verify` reads this
     # to decide between RED and INCONCLUSIVE.
-    it_pass "ISOLATION-$tag" "fleet/it/${LIVE_TMUX_SNAPSHOT##*/}" "${stores_note}${instants_note}${detail}"
+    it_pass "ISOLATION-$tag" "$(it_tmux_snapshot_evidence)" "${stores_note}${instants_note}${detail}"
     return 0
   fi
   it_pass "ISOLATION-$tag" "" \
