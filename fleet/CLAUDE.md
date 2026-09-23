@@ -79,12 +79,13 @@ IT_RESULTS="$R" bash run-group5.sh             # §L §M §N in one process — 
 | `run-e9-leak` `run-m9-mutation` `run-rmw` | targeted regressions |
 | `run-P` | §P the real dispatch — see below |
 
-**The live-session baseline is per RUN** (FB-60). `lib.sh` mints and exports `IT_RUN_ID` once per process tree
-(`run-all.sh`'s runners share one; a standalone section is its own run) and keeps
+**The live-session baseline is per RUN** (FB-60). `lib.sh` mints `IT_RUN_ID` without exporting it, and `run-all.sh`
+exports it, so its runners share one while a standalone section, even one started from a shell that sourced
+`lib.sh`, is its own run. `lib.sh` keeps
 `it/live-tmux-sessions-run-<id>.txt`. A run's first check compares against the handover the previous run left
 (`it/live-tmux-sessions.txt`): a `dt-` session lost between runs is a NOTE, logged to `live-tmux-rebaselines.tsv`,
 not the FAIL in every later section it used to be. A loss during a run is still a FAIL, as is any `itfleet-`
-session on the default server. `scripts/tests/it-live-baseline-per-run.sh` drives all of these on a private server.
+session on the default server, which never enters the handover. `live-tmux-rebaselines.tsv` is untracked. `scripts/tests/it-live-baseline-per-run.sh` drives all of these on a private server.
 
 **`RESULTS.tsv` is current state, not an append log.** Each runner declares the case ids it owns via
 `it_own_cases` and *replaces* those rows. That is what makes "zero NOT-RUN" expressible — and it is currently
