@@ -46,7 +46,7 @@ import time
 from pathlib import Path
 from contextlib import contextmanager
 
-__all__ = ["atomic_symlink", "atomic_write", "atomic_update", "held_for_update", "tmp_name"]
+__all__ = ["atomic_symlink", "atomic_write", "atomic_write_if", "atomic_update", "held_for_update", "tmp_name"]
 
 #: The tail every staged file carries. Named here so the structural test and the writer agree by
 #: construction rather than by two people remembering the same string.
@@ -92,6 +92,40 @@ def atomic_write(path, text: str, encoding: str = "utf-8") -> Path:
             pass                           # a staging file that is already gone needs no removing
         raise
     return path
+
+
+def atomic_write_if(path, text: str, still_valid, encoding: str = "utf-8") -> bool:
+    """`atomic_write`, but only into a directory that ALREADY exists and only while `still_valid()` holds.
+
+    Returns whether `text` was published. Two differences from `atomic_write`, each the reason it exists (the
+    teardown bucket's RV-18): it never creates a parent — publishing into a directory that has vanished would
+    RESURRECT it, which for a pool claim directory is a phantom lease — and it asks `still_valid()` after the
+    bytes are staged and before the rename, so a caller rewriting something it read can decline when that thing
+    changed under it. The staging file is removed on every path that does not publish it.
+    """
+    path = Path(path)
+    tmp = path.parent / tmp_name(path.name)
+    try:
+        with open(tmp, "x", encoding=encoding) as handle:
+            handle.write(text)
+            handle.flush()
+            os.fsync(handle.fileno())
+    except (FileNotFoundError, NotADirectoryError):
+        return False                       # the directory is gone: there is nothing to publish into
+    published = False
+    try:
+        if still_valid():
+            os.replace(tmp, path)
+            published = True
+    except FileNotFoundError:
+        pass                               # the staging file or the directory vanished under us: not published
+    finally:
+        if not published:
+            try:
+                os.unlink(tmp)
+            except OSError:
+                pass                       # already swept with the directory it lived in
+    return published
 
 
 def atomic_symlink(target, link) -> Path:

@@ -1006,8 +1006,6 @@ DELETE_ALLOWLIST = {
     ("pool.py", "unenroll", "unlink"),      # <home>/pool/enrolled/<slot>.json
     ("pool.py", "release", "unlink"),       # <home>/pool/leases/<slot>/lease.json and leftovers
     ("pool.py", "release", "rmdir"),        # <home>/pool/leases/<slot>
-    ("pool.py", "_rewrite_own_lease", "unlink"),  # RV-18: its OWN tmp_name staging file inside an existing
-                                                  # claim directory, once renamed or declined
     ("roadmap.py", "_close", "remove"),     # B02: list.remove(row) from inbox["pending"], the row then
                                             # appended to `closed` — not a filesystem call
     ("release.py", "prune", "rmtree"),      # a release directory beyond the 10-release ceiling, under
@@ -1016,6 +1014,8 @@ DELETE_ALLOWLIST = {
                                             # keeps the content recoverable; this is a convenience copy.
     # SI-9 / SI-7. Four sites added deliberately, each with the reason it is safe. The list stays a
     # CEILING: it is printed when an entry disappears, so it cannot quietly grow stale.
+    ("atomic.py", "atomic_write_if", "unlink"),  # RV-18: its OWN staging file, on every path that does not
+                                                 # publish it (a vanished directory, a declined predicate).
     ("atomic.py", "atomic_write", "unlink"),  # its OWN staging file, path.parent/tmp_name(path.name),
                                               # on the failure path only. Not removing it leaves a partial
                                               # file for the next reader — FI-20's third property.
