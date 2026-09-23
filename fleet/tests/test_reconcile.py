@@ -1250,6 +1250,20 @@ class UnreadableRowAttributionTests(unittest.TestCase):
         self.assertEqual(worker.evidence.get("process"), "unreadable")
         self.assertIn("unreadable", worker.note)
 
+    def test_a_readable_worker_in_the_same_pane_speaks_for_the_record(self):
+        """RV-25. One record's pane holds a readable claude AND a lower-pid unreadable one (a descendant whose reads
+        failed). The record is represented by the process it can actually read — `evidence.pid` feeds the watchdog's
+        exclude list — and the unreadable pid, now named, must not take that place because `pgrep` listed it first."""
+        fleet = self.fleet
+        fleet.dispatch("unread-07300312", "00000000-07300312-inflight-append-unread", "ws9", "dt-both")
+        fleet.tmux_live.add("dt-both")
+        fleet.panes["dt-both"] = QUIET_PANE
+        fleet.procs.append(probe_unreadable(self.proc, 7002, 7001, "dt-both"))
+        fleet.procs.append(LiveSession(pid=7010, cwd=fleet.slots_dir / "ws9", name="dt-both"))
+        worker = next(s for s in self.subjects() if s.identity == "unread-07300312")
+        self.assertEqual((worker.evidence["pid"], worker.evidence["process"]), ("7010", ""))
+        self.assertNotIn("unreadable", worker.note)
+
     def test_an_unreadable_process_in_an_unrecorded_leased_pane_holds_that_lease(self):
         """No record in this store, but a lease names the pane's session: the lease join falls back on the NAME, because
         the cwd it would normally compare was never read. One subject for the slot, holding it — not a pid-labelled
