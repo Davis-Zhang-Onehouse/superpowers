@@ -348,7 +348,8 @@ class TestThePrivateTmuxServer(unittest.TestCase):
 #: running at once (a P-1 beside a worker's suite, a release gate beside anything) shared ONE server, and
 #: one process's `kill-session` of its last session stopped it under the other's `new-session` — which
 #: failed `server exited unexpectedly`, so `setUp` read a None pane (`TestSelftestServerIsPerProcessAndRetired`).
-#: The pid makes it per process; `_retire_selftest_server` in each user's cleanup makes that not leak.
+#: The pid makes it per process; `_retire_selftest_server` in each user's cleanup makes that not leak, and
+#: `TestAgainstRealTmux`'s anchor session keeps it from exiting between cases (`FB-5`).
 SELFTEST_TMUX_SOCKET = f"itfleet-selftest-{os.getpid()}"
 
 
@@ -393,6 +394,17 @@ class TestAgainstRealTmux(unittest.TestCase):
         # `FB-49`: the server is this process's own, so this class retires it rather than leaving one
         # server and one socket file per suite run. A class cleanup runs even when a setUp or tearDown fails.
         cls.addClassCleanup(_retire_selftest_server, SELFTEST_TMUX_SOCKET)
+        # And it must not EMPTY between cases. tmux exits a server when its last session is killed, and
+        # that exit is asynchronous: the next case's `new-session` can reach the exiting server and fail
+        # `server exited unexpectedly` even with no other process involved (5 of 1000 under the load of two
+        # suites, 0 of 1500 with the server kept non-empty: `FB-5`'s "under tmux load"). The anchor keeps
+        # it occupied, and it watches this process, so a suite that is killed outright still takes its
+        # server with it within a second rather than leaving one behind.
+        anchored = subprocess.run(cls.TMUX + ["new-session", "-d", "-s", "itfleet-anchor",
+                                              f"while kill -0 {os.getpid()} 2>/dev/null; do sleep 1; done"],
+                                  capture_output=True, text=True)
+        if anchored.returncode:
+            raise AssertionError(f"could not start {SELFTEST_TMUX_SOCKET!r}: {anchored.stderr}")
 
     def setUp(self):
         self.long = f"itfleet-selftest-{os.getpid()}-{uuid.uuid4().hex[:6]}ab"
