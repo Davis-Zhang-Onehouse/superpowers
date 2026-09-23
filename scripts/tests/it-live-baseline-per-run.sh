@@ -87,6 +87,16 @@ tmux kill-session -t =itfleet-Z-leaked
 section R3 none
 want "once it is cleared, the next run is clean again" R3 R3-enter PASS
 
+# The automatic re-baseline writes a row on most runs, so its log must be box-local like every other
+# baseline: tracked, it dirtied the checkout on nearly every IT run and `fleet release cut` refused (RV-23).
+if git -C "$REPO" ls-files --error-unmatch fleet/it/live-tmux-rebaselines.tsv >/dev/null 2>&1; then
+  note "FAIL fleet/it/live-tmux-rebaselines.tsv is TRACKED, so every logged re-baseline dirties the checkout"; fails=1
+elif ! git -C "$REPO" check-ignore -q fleet/it/live-tmux-rebaselines.tsv; then
+  note "FAIL fleet/it/live-tmux-rebaselines.tsv is not gitignored, so its box-local rows are proposed for commit"; fails=1
+else
+  note "ok   the re-baseline log is untracked and gitignored"
+fi
+
 n_runs="$(cd "$TMP/it" && ls live-tmux-sessions-run-*.txt 2>/dev/null | wc -l)"
 [ "$n_runs" -ge 6 ] && note "ok   one baseline file per run ($n_runs), none shared" \
                     || { note "FAIL expected a per-run baseline file per run, found $n_runs"; fails=1; }
