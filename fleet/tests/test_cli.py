@@ -6748,20 +6748,91 @@ class TestB11RefusalsNameARouteThatRuns(CliCase):
         code, out, err = self._dispatch_onto(fleet, coordinator, "after the gone owner")
         self.assertEqual(EXIT_OK, code, f"the milestone is still not dispatchable after the route: {err}")
 
-    def test_a_living_owners_claim_still_names_abort_which_runs_there(self):
-        """The control: while the owner's folder exists, `abort` is the door that works and is still named."""
-        fleet = self.loaded()
-        coordinator = self._claimed(fleet, fleet.paths["doomed"])
+    def _route_then_redispatch(self, fleet, coordinator, steps, title):
+        """Run the named route, step by step, then prove the milestone is dispatchable again."""
+        for argv in steps:
+            code, out, err = fleet.run(argv)
+            self.assertEqual(EXIT_OK, code, f"the named route does not run at {argv[0]}: {err}")
+        code, out, err = self._dispatch_onto(fleet, coordinator, title)
+        self.assertEqual(EXIT_OK, code, f"the milestone is still not dispatchable after the route: {err}")
 
-        code, out, err = self._dispatch_onto(fleet, coordinator, "onto a living owner")
+    def _disown(self, coordinator):
+        return ["milestone", "--instant", str(coordinator), "--id", "M9", "--disown", "--reason", "route"]
+
+    def test_a_dispatched_inflight_owner_names_abort_and_abort_releases_it(self):
+        """The control, and it RUNS the route: a worker dispatched onto the milestone has an origin.json
+        naming it, so `abort` gives the claim back by itself."""
+        fleet = self.loaded()
+        coordinator = fleet.paths["readyWorker"]
+        Roadmap(coordinator).add(Milestone(id="M9", title="carried work", status="blocked", deps=[],
+                                           evidence=[]))
+        code, out, err = self._dispatch_onto(fleet, coordinator, "the real owner")
+        self.assertEqual(EXIT_OK, code, err)
+        owner = [l.split("\t")[1] for l in out.splitlines() if l.startswith("instant\t")][0]
+
+        code, out, err = self._dispatch_onto(fleet, coordinator, "a second owner")
         self.assertEqual(EXIT_REFUSED, code, out)
-        self.assertIn(f"fleet abort --instant {fleet.paths['doomed']}", self.refusal(err), err)
+        said = self.refusal(err)
+        self.assertIn(f"fleet abort --instant {owner}", said, said)
+        self._route_then_redispatch(fleet, coordinator,
+                                    [["abort", "--instant", owner, "--reason", "abandoned for the test"]],
+                                    "after the abort")
+
+    def test_a_complete_owner_names_harvest_not_abort(self):
+        """RV-20(a). A `-complete-` owner with an open record: `abort` exits 2 there (it renames only an
+        inflight instant); `harvest` is the door, then `--disown` for a claim no origin names."""
+        fleet = self.loaded()
+        coordinator = self._claimed(fleet, fleet.paths["harvestable"])
+        todo = fleet.ids["harvestable"]
+
+        code, out, err = self._dispatch_onto(fleet, coordinator, "onto a complete owner")
+        self.assertEqual(EXIT_REFUSED, code, out)
+        said = self.refusal(err)
+        self.assertIn(f"fleet harvest --id {todo}", said, said)
+        self.assertNotIn("fleet abort", said, said)
+        #: `harvest` exits 1 in this fixture whatever it harvests — the fixture's stale watched source is a
+        #: `stale-source` VIOLATION in every harvest report — so the step is judged by what it DID.
+        code, out, err = fleet.run(["harvest", "--id", todo])
+        self.assertIn(code, (EXIT_OK, EXIT_ATTENTION), err)
+        self.assertTrue(fleet.store.read(todo).harvested_at, f"the named harvest did not run: {out}{err}")
+        self._route_then_redispatch(fleet, coordinator, [self._disown(coordinator)], "after the harvest")
+
+    def test_a_closed_owner_names_disown_not_abort(self):
+        """RV-20(b). `close` stamps the record and leaves the claim: with no open record `--disown` alone
+        runs, and naming `abort` sent the coordinator to an irreversible rename for a claim-only repair."""
+        fleet = self.loaded()
+        owner = fleet.worker("shut", slot="ws4", live=False)
+        coordinator = self._claimed(fleet, owner)
+        code, out, err = fleet.run(["close", "--id", fleet.ids["shut"]])
+        self.assertEqual(EXIT_OK, code, err)
+
+        code, out, err = self._dispatch_onto(fleet, coordinator, "onto a closed owner")
+        self.assertEqual(EXIT_REFUSED, code, out)
+        said = self.refusal(err)
+        self.assertIn("--disown", said, said)
+        self.assertNotIn("fleet abort", said, said)
+        self._route_then_redispatch(fleet, coordinator, [self._disown(coordinator)], "after the disown")
+
+    def test_a_claim_no_origin_names_is_not_routed_through_abort(self):
+        """RV-20(c). A claim set by hand (`milestone --owner`) on an open inflight record: `abort` exits 0
+        but releases nothing, because only a claim the child's origin.json names is abort's to give back."""
+        fleet = self.loaded()
+        owner = fleet.worker("handClaimed", slot="ws4", live=False)
+        todo = fleet.ids["handClaimed"]
+        coordinator = self._claimed(fleet, owner)
+
+        code, out, err = self._dispatch_onto(fleet, coordinator, "onto a hand claim")
+        self.assertEqual(EXIT_REFUSED, code, out)
+        said = self.refusal(err)
+        self.assertIn(f"fleet close --id {todo}", said, said)
+        self.assertNotIn("fleet abort", said, said)
 
         code, out, err = fleet.run(["milestone", "--instant", str(coordinator), "--id", "M9", "--disown",
-                                    "--reason", "I want the slot"])
+                                    "--reason", "hand claim"])
         self.assertEqual(EXIT_REFUSED, code, out)
-        self.assertIn(f"fleet abort --instant {fleet.paths['doomed']}", self.refusal(err), err)
-        self.assertIn("clears who", self.refusal(err), err)
+        self.assertIn(f"fleet close --id {todo}", self.refusal(err), err)
+        self._route_then_redispatch(fleet, coordinator, [["close", "--id", todo], self._disown(coordinator)],
+                                    "after the close")
 
     def test_a_claimed_milestone_with_no_record_names_disown(self):
         """No record holds the gone owner at all, so there is nothing to close: `--disown` itself is the

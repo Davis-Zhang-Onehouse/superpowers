@@ -1640,31 +1640,47 @@ def _dispatch_collision(ctx: Ctx, base, optype, title):
 
 
 def _claim_release_route(ctx: Ctx, owner, coordinator, milestone_id) -> str:
-    """`B11` (NEW-3). The command that gives back a claim on `milestone_id`, chosen by the state its owner
-    is IN — because the one written for the common state is a door that does not open in the others.
+    """`B11` (NEW-3, RV-20). The command that gives back a claim on `milestone_id`, chosen by the state the
+    owner's RECORD and FOLDER are in — because the one written for the common state is a door that does not
+    open in the others. `--disown` refuses only while an open record holds the owner, so:
 
-    * the owner's folder resolves: `abort` (it releases the claim itself);
-    * the folder is GONE and an open record still holds it: `close --id`, then `--disown`. `abort` and
-      `harvest` both resolve the folder first and exit 2 on one that resolves to nothing; `close` ends the
-      record without it (scenE2: close 0 -> disown 0 -> dispatch 0);
-    * no open record holds it: `--disown` itself.
+    * no open record holds it (never dispatched, closed, harvested): `--disown` alone;
+    * the folder is GONE: `close --id` (it needs no folder), then `--disown`. `abort` and `harvest` both
+      resolve the folder first and exit 2 on one that resolves to nothing (scenE2: close 0 -> reap 0 ->
+      disown 0 -> redispatch 0; the reap only frees the slot `close` leaves held);
+    * the folder is `-complete-`: `harvest --id` (abort renames only an inflight instant), then `--disown`
+      if no origin named the claim;
+    * `-inflight-` and its origin.json names this milestone on this roadmap: `abort`, which releases it;
+    * anything else — a claim set by hand, which `abort` exits 0 on and releases nothing: `close --id`,
+      then `--disown`.
     """
-    disown = (f"`fleet milestone --instant {coordinator} --id {milestone_id} --disown --reason <why>`")
+    disown = f"`fleet milestone --instant {coordinator} --id {milestone_id} --disown --reason <why>`"
+    holder = next((r for r in ctx.store.all()
+                   if r.child_instant and same_instant(_recorded_path(ctx, r), owner)
+                   and not r.harvested_at and not r.closed_at), None)
+    if holder is None:
+        return f"no open record holds {owner}, so the claim is released by {disown}"
     try:
         found = resolve(Path(owner))
     except (FleetError, OSError):
         found = None
-    if found is not None:
+    close_then = (f"`fleet close --id {holder.todo_id}` ends the open record (it needs no folder), then "
+                  f"{disown}")
+    if found is None:
+        return f"its folder {owner} resolves to nothing, so `abort` and `harvest` cannot run on it: {close_then}"
+    state = InstantName.parse(found.name).state
+    if state == "complete":
+        return (f"{found.name} has completed: `fleet harvest --id {holder.todo_id}` closes it out and gives "
+                f"back a claim its origin names; if the claim is still held after that, {disown}")
+    try:
+        origin = origin_mod.read(found)
+    except FleetError:
+        origin = None
+    if (state == "inflight" and origin is not None and origin.milestone == milestone_id
+            and origin.coordinator and same_instant(Path(origin.coordinator), Path(coordinator))):
         return (f"`fleet abort --instant {found} --reason <why>` gives it back when that work is being "
                 f"abandoned; a worker that finishes gives it back when it is harvested")
-    holder = next((r for r in ctx.store.all()
-                   if r.child_instant and same_instant(_recorded_path(ctx, r), owner)
-                   and not r.harvested_at and not r.closed_at), None)
-    if holder is not None:
-        return (f"its folder {owner} resolves to nothing, so `abort` and `harvest` cannot run on it: "
-                f"`fleet close --id {holder.todo_id}` ends the open record without the folder, then "
-                f"{disown} releases the claim")
-    return f"its folder {owner} resolves to nothing and no open record holds it: {disown}"
+    return f"{found.name}'s own origin does not name this claim, so `abort` would not release it: {close_then}"
 
 
 def _do_dispatch(ctx: Ctx, parsed: Parsed) -> int:
