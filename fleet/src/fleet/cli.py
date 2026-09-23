@@ -75,8 +75,8 @@ from fleet.layout import INFO, VIOLATION
 from fleet.pool import Pool, ReapReport
 from fleet.profiles import Profile
 from fleet import root as root_mod
-from fleet.reconcile import (COMPLETE, KIND_WORKER, PHASE_AWAITING_CI, RUNNING, needs_a_human,
-                             reconcile)
+from fleet.reconcile import (COMPLETE, KIND_WORKER, PHASE_AWAITING_CI, PID_RUNNING, RUNNING,
+                             attested_pid_status, needs_a_human, pid_start, reconcile)
 from fleet.release import (CANDIDATE, DEV, HISTORY_COLUMNS, META_DIR, RELEASE_RETENTION, RELEASED, Releases, Version,
                            actor, tree_sha, utc_now)
 from fleet.release_git import Repo, changelog_section
@@ -93,7 +93,7 @@ from fleet.roadmap import (ATTENTION, COORDINATOR, RETIRED, SUPERSEDED, TERMINAL
                            Proposal, Roadmap, _check_evidence, last_index)
 from fleet.session import (TMUX_SOCKET_ENV, SessionLayer, default_probes,
                            plain as pane_plain)
-from fleet.store import Declarations, Record, Store
+from fleet.store import ATTESTED_PREFIX, Declarations, Record, Store
 from fleet.workspace import GOLDEN_FILE, Workspace, default_git
 from fleet.runtime import validate_runtime, observe
 from fleet.runtime_config import admission_lock, pane_lock, read_runtime, write_runtime
@@ -1993,7 +1993,7 @@ def _watcher_for_claim(ctx: Ctx, child: Path, attested=None) -> tuple:
                 "--watcher names the watcher this tool cannot see; an empty attestation is not an "
                 "attestation. Give the mechanism — 'cron 0,30 * * * * gh-run-poll', 'coordinator "
                 "child-watchdog.sh' — or arm a Monitor and drop the flag.")
-        return f"attested: {' '.join(str(attested).split())}", ""
+        return f"{ATTESTED_PREFIX}{' '.join(str(attested).split())}", ""
     record = _record_for(ctx, child)
     pane = getattr(record, "tmux", None) if record else None
     if not pane:
@@ -2037,6 +2037,49 @@ def _watcher_for_claim(ctx: Ctx, child: Path, attested=None) -> tuple:
         clears_who="the declaring instant")
 
 
+#: `FB-58`. How an attestation names the process whose exit ends the wait: `pid:<n>` or `pid=<n>`.
+_PID_HANDLE = re.compile(r"\bpid\s*[:=]\s*(\d+)\b", re.IGNORECASE)
+
+
+def _attested_pid_handle(attested) -> dict | None:
+    """The checkable handle a `--watcher` attestation names, as `{"pid", "start"}`, or `None` if it names none.
+
+    `FB-58`, measured on the r3 release worker (OI-10): its attestation named a harness task running the
+    release gate, the gate returned at 04:30:51Z, and `declare.json` kept reading `awaiting-ci` — trusted —
+    until the worker re-declared by hand. Free text gives a reader nothing to re-check. A pid does, so when
+    one is named it is recorded with its start time and `reconcile` disregards the claim once that process
+    exits. Refused (bad input, nothing stored) when the pid is not running NOW — an attestation to a process
+    that has already exited attests to nothing — or when two are named, because the reader could only guess
+    which one's exit ends the wait. A pid that cannot be read is refused too: the claim is made from this
+    host, about this host's process, and a handle nobody can check buys nothing over the free text."""
+    pids = sorted({int(m) for m in _PID_HANDLE.findall(str(attested))})
+    if not pids:
+        return None
+    if len(pids) > 1:
+        raise BadInput(
+            f"--watcher names {len(pids)} pids ({', '.join(map(str, pids))}); name ONE — the process whose exit "
+            f"ends the wait — so the board knows which one to check.")
+    status, start = pid_start(pids[0])
+    if status != PID_RUNNING:
+        raise BadInput(
+            f"--watcher names pid {pids[0]}, which is not running here ({status}): a watcher that has already "
+            f"exited watches nothing. Name the pid of the process that is still waiting, or drop the `pid:` "
+            f"handle and attest in words.")
+    return {"pid": pids[0], "start": start}
+
+
+def _attestation_rows(pid_handle) -> list:
+    """What an attested claim is told about how it will be re-checked — `FB-58`'s answer to "re-declare by
+    hand after the gate": with a pid the product notices by itself, and without one the claim says so NOW."""
+    if pid_handle:
+        return [("watcher_pid", f"{pid_handle['pid']} (running; start tick {pid_handle['start']}) — `fleet "
+                                f"board` disregards this claim by itself once that process exits")]
+    return [("unverifiable", "this attestation names no pid, so nothing re-checks it: when the watcher ends, "
+                             "declare the phase you are then in. Include `pid:<n>` of the process whose exit "
+                             "ends the wait in --watcher, and the board disregards the claim by itself once "
+                             "it exits")]
+
+
 def _do_declare(ctx: Ctx, parsed: Parsed) -> int:
     """Write the declaration, then RE-READ IT THROUGH THE CONSUMER and print what the consumer sees.
 
@@ -2070,9 +2113,12 @@ def _do_declare(ctx: Ctx, parsed: Parsed) -> int:
     #: refuses. `--dry-run` disagreeing with the real call is a documented trap of this CLI already
     #: (`fleet milestone` exits 0 on a dry run where the real call exits 2); reproducing it in a NEW gate,
     #: whose whole purpose is to be consulted before acting, would be inexcusable.
-    watchers, ungated_because = "", ""
+    watchers, ungated_because, pid_handle, attestation_rows = "", "", None, []
     if phase == PHASE_AWAITING_CI:
         watchers, ungated_because = _watcher_for_claim(ctx, child, parsed.get("watcher"))
+        if parsed.get("watcher") is not None:
+            pid_handle = _attested_pid_handle(parsed.get("watcher"))
+            attestation_rows = _attestation_rows(pid_handle)
     elif parsed.get("watcher") is not None:
         #: Refused, not ignored. `awaiting-ci` is the only gated phase, so an attestation anywhere else
         #: answers a question nobody asked — and silently dropping it would let a worker believe it had
@@ -2087,13 +2133,14 @@ def _do_declare(ctx: Ctx, parsed: Parsed) -> int:
         _emit(ctx, "declare", [("dry-run", "nothing was declared"), ("would-declare", phase),
                                ("asked", asked)]
                               + ([("watchers", watchers)] if watchers else [])
+                              + attestation_rows
                               + ([("ungated", ungated_because)] if ungated_because else []))
         return EXIT_OK
     Declarations(child).set_phase(phase)
     #: Recorded, so the question can be answered AFTER the fact. FI-255's defect was not only that the claim
     #: was unchecked — it was that the store kept `{"phase": "awaiting-ci"}` and nothing else, so a stopped
     #: worker and a self-waking one were indistinguishable in the record as well as on the board.
-    Declarations(child).set_watchers(watchers or None)
+    Declarations(child).set_watchers(watchers or None, pid=pid_handle)
     consumer = Declarations(child)                       # a FRESH consumer, not the writer's return
     value = consumer.phase()
     if value is None:
@@ -2130,6 +2177,7 @@ def _do_declare(ctx: Ctx, parsed: Parsed) -> int:
     _emit(ctx, "declare", [("phase", value), ("asked", asked), ("consumer", str(consumer.path)),
                            ("instant", str(child))]
                           + ([("watchers", watchers)] if watchers else [])
+                          + attestation_rows
                           + ([("ungated", ungated_because)] if ungated_because else [])
                           + review_row)
     return EXIT_OK
@@ -4193,19 +4241,23 @@ def _do_brief(ctx: Ctx, parsed: Parsed) -> int:
     #: could reach it. An audit found this exact shape one field along: the value was written at claim
     #: time and had ZERO production readers.
     #:
-    #: `brief` is the honest home for it and NOT a complete fix, which the wording says out loud. This verb
-    #: answers "one row per question you would otherwise guess at", and *"was this claim observed or
-    #: merely asserted?"* is such a question. But `fleet board` — where a COORDINATOR actually looks —
-    #: still renders both identically, because that is `reconcile`'s to change and out of `i39`'s charter.
-    #: `i45` owns it. Saying so here is the difference between a scoped limitation and a silent one.
+    #: `B07`/`NEW-4`. This row used to add that `fleet board` could not show the observed/attested
+    #: distinction (`i45`). 105f741/v0.5.6 retired that and B07 made the board re-check both, so the row now
+    #: says what the board does with each — a limitation stated after it is gone is the same false comfort.
     watchers = declarations.watchers()
     if watchers:
-        seen = ("ATTESTED by the claimant, NOT observed by this tool"
-                if watchers.startswith("attested:") else "OBSERVED on the pane at claim time")
+        if declarations.watcher_attested():
+            status, sentence = attested_pid_status(declarations.watcher_pid())
+            seen = ("ATTESTED by the claimant, NOT observed by this tool; "
+                    + (f"{sentence}, and `fleet board` disregards the claim once it is gone" if status else
+                       "it names no pid, so nothing re-checks it — `fleet board` trusts it, labelled "
+                       "ATTESTED, until the claimant declares another phase"))
+        else:
+            seen = ("OBSERVED on the pane at claim time; `fleet board` re-reads the pane, and once that "
+                    "watcher is no longer on it the board disregards the claim (NO WATCHER OBSERVABLE)")
         detail = (f"phase={declarations.phase() or '(none declared)'}, "
                   f"parked={declarations.parked() or '(not parked)'}, "
-                  f"watcher={watchers} — {seen}. `fleet board` does NOT yet show this distinction (i45), "
-                  f"so a coordinator reading the board alone cannot tell the two apart")
+                  f"watcher={watchers} — {seen}")
     else:
         detail = (f"phase={declarations.phase() or '(none declared)'}, "
                   f"parked={declarations.parked() or '(not parked)'}")
@@ -5549,9 +5601,10 @@ VERBS = {spec.name: spec for spec in (
         Flag("--watcher", True, False,
              "NAME what is watching, when it is real but this tool cannot see it (a cron, an external "
              "watchdog, a peer session). The test is whether you can TRUTHFULLY name it — not whether "
-             "the refusal feels wrong. Records your attestation verbatim in declare.json and reports it "
-             "on `fleet brief`; `fleet board` does NOT yet distinguish an attested claim from an "
-             "observed one (i45)"),
+             "the refusal feels wrong. Records your attestation verbatim in declare.json; `fleet board` "
+             "and `fleet brief` label it ATTESTED. Include `pid:<n>` of the process whose exit ends the "
+             "wait and the board disregards the claim by itself once it exits; without one, nothing "
+             "re-checks it"),
     )),
     _verb("park", _do_park, False, "record a parked decision as structured state", (
         Flag("--instant", True, True, "the instant"),
