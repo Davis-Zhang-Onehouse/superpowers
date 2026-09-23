@@ -3455,6 +3455,8 @@ def _slot_gate_before_kill(ctx: Ctx, record, child: Path, verb: str) -> str:
     """
     import time
 
+    from fleet.pool import UnreadableHolder
+
     if record is None or not record.slot:
         return ""
     layer = ctx.sessions_for(record)
@@ -3469,16 +3471,19 @@ def _slot_gate_before_kill(ctx: Ctx, record, child: Path, verb: str) -> str:
     spared = set()
 
     def refusal():
+        spared.clear()
         pids = ctx.pool.cwd_holders(record.slot)
         if not pids:
             return None, ""
         own = layer.own_processes(record.tmux, pids) if live else set()
         if own is None:
+            #: RV-19. Undecided passes the gate, and the kill that follows reparents every unreadable holder it
+            #: could see — so each is noted, since which of them the kill ends cannot be told either.
+            spared.update(pid for pid in pids if isinstance(pid, UnreadableHolder))
             return None, (f"pid(s) {', '.join(str(p) for p in pids)} hold slot {record.slot!r} as cwd, and "
                           f"whether closing session {record.tmux!r} ends them could not be observed (no pane "
                           f"pid or parent walk), so the cwd-holder gate could not be decided before the "
                           f"kill; {after_an_undecided_gate}")
-        spared.clear()
         spared.update(pid for pid in pids if pid in own)
         #: `RV-21`. The same scan `own` was computed from — a second one would read a newborn child as foreign.
         return ctx.pool.release_refusal(record.slot, spare=own, holders=pids), ""
