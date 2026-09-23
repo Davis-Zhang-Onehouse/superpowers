@@ -6883,8 +6883,11 @@ class TestB11RefusalsNameARouteThatRuns(CliCase):
         sent.write_text("hello\n")
         code, out, err = fleet.run(["send", "--id", fleet.ids["harvestable"], "--message-file", str(sent)])
         self.assertEqual(EXIT_REFUSED, code, out)
-        self.assertIn("clears when:", self.refusal(err), err)
-        self.assertIn("clears who:", self.refusal(err), err)
+        said = self.refusal(err)
+        #: RV-29. Pinned to the site and its route, not to whichever send refusal happens to fire first.
+        self.assertIn("No matching live runtime process owns the recorded pane", said, said)
+        self.assertIn("clears when: `fleet pane-guard --pane dt-harvestable`", said, said)
+        self.assertIn("clears who:", said, said)
 
     def test_a_lost_lease_is_not_routed_to_revive_which_needs_that_lease(self):
         """RV-23. The send refusal said a worker whose lease is gone "is revived or re-dispatched"; revive
