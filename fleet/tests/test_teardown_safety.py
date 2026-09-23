@@ -434,6 +434,33 @@ class RuntimeSwitchOverUnresumableRecords(CliCase):
         self.assertEqual(code, EXIT_REFUSED, err)
         self.assertIn("running", err)
 
+    def test_a_running_inflight_record_names_abort_and_abort_clears_it(self):
+        """RV-17. The route named for a LIVE -inflight- worker is FOLLOWED here: `close` alone left it blocking as
+        resumable, so the route is `abort` (which asks the pane guard), and after it the switch runs."""
+        fleet = self.fleet()
+        path = fleet.worker("liveInflight", slot="ws1", pane=IDLE_PANE)
+        code, _, err = self._switch(fleet)
+        self.assertEqual(code, EXIT_REFUSED, err)
+        self.assertIn(f"fleet abort --instant {path}", err)
+        self.assertNotIn(f"`fleet close --id {fleet.ids['liveInflight']}` ends it", err)
+        self.assertEqual(fleet.run(["abort", "--instant", str(path), "--reason", "switching"])[0], EXIT_OK)
+        code, _, err = self._switch(fleet)
+        self.assertEqual(code, EXIT_OK, f"the named route ran and the switch is still refused: {err}")
+
+    def test_a_running_complete_record_names_close_then_reap_and_it_clears(self):
+        """RV-17's neighbour: a live worker whose folder is already -complete-. `close` then `reap` is named, and
+        followed, with no review."""
+        fleet = self.fleet()
+        fleet.worker("liveDone", state="complete", slot="ws1", pane=IDLE_PANE)
+        todo = fleet.ids["liveDone"]
+        code, _, err = self._switch(fleet)
+        self.assertEqual(code, EXIT_REFUSED, err)
+        self.assertIn(f"fleet close --id {todo}", err)
+        self.assertIn("fleet reap --base", err)
+        self.assertEqual(fleet.run(["close", "--id", todo])[0], EXIT_OK)
+        self.assertEqual(fleet.run(["reap", "--base", OURS])[0], EXIT_OK)
+        code, _, err = self._switch(fleet)
+        self.assertEqual(code, EXIT_OK, f"the named route ran and the switch is still refused: {err}")
 
 if __name__ == "__main__":
     unittest.main()

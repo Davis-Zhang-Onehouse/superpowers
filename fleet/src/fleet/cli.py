@@ -1481,8 +1481,14 @@ def _runtime_record_blocker(ctx: Ctx, record: Record) -> str:
     except (FleetError, OSError):
         alive = True                                         # unobservable is not dead
     if not record.closed_at and alive:
-        return (f"running record {record.todo_id} (session {record.tmux} is alive — clears when its work finishes "
-                f"and it is harvested, or `fleet close --id {record.todo_id}` ends it)")
+        #: RV-17. `close` alone does not end an -inflight- record for this predicate — it is still resumable —
+        #: so the route for a live -inflight- worker is `abort` (which asks the pane guard first).
+        if state == "inflight":
+            return (f"running record {record.todo_id} (session {record.tmux} is alive, folder -inflight- — clears "
+                    f"when its work finishes and it is harvested, or `fleet abort --instant {child} --reason <why>` "
+                    f"ends it)")
+        return (f"running record {record.todo_id} (session {record.tmux} is alive — clears when it is harvested, or "
+                f"`fleet close --id {record.todo_id}` then `fleet reap --base {record.base_instant}` ends it)")
     if state == "inflight":
         return (f"record {record.todo_id} can still be resumed (its folder is -inflight-) — `fleet abort --instant "
                 f"{child} --reason <why>` ends it and releases its lease")
