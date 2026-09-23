@@ -145,3 +145,24 @@ def resolve(recorded: Path) -> Path | None:
             + ". Refusing to guess; an instant may hold only one state."
         )
     return matches[0]
+
+
+def same_instant(a, b) -> bool:
+    """Do two recorded instant paths name ONE instant? `B08`.
+
+    A path is recorded once (`record.child_instant` at dispatch, a milestone's `owner` at claim) and the
+    instant then renames its own folder, so two correct records of one instant can differ in `state` alone.
+    Equal strings, or the same parent folder and the same full stable key — the rule `resolve` follows,
+    never a prefix. Anything unparseable is compared as the string it is.
+    """
+    if a is None or b is None:
+        return a is None and b is None
+    a, b = Path(str(a)), Path(str(b))
+    if a == b:
+        return True
+    if a.parent != b.parent:
+        return False
+    try:
+        return InstantName.parse(a.name).stable_key() == InstantName.parse(b.name).stable_key()
+    except InstantNameError:
+        return False
