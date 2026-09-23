@@ -2159,6 +2159,9 @@ def _do_declare(ctx: Ctx, parsed: Parsed) -> int:
             f"{phase!r} needs no attestation and nothing would read it, so it is refused rather than "
             f"stored where it would look like a fact. Drop the flag.")
     Declarations(child).phase()          # `B10` sweep: an unreadable declarations file refuses here too
+    #: `RV-18`. The review ledger is read for an awaiting-ci claim, and an unreadable one refuses — so it is
+    #: read HERE, before the dry-run's return and before the writes below, not after them.
+    all_rounds = Review(child, now=ctx.now).rounds() if phase == PHASE_AWAITING_CI else []
     if ctx.dry_run:
         _emit(ctx, "declare", [("dry-run", "nothing was declared"), ("would-declare", phase),
                                ("asked", asked)]
@@ -2184,7 +2187,6 @@ def _do_declare(ctx: Ctx, parsed: Parsed) -> int:
     #: worker converges its review BEFORE the next push rather than finding out at the next `propose`).
     review_row = []
     if phase == PHASE_AWAITING_CI:
-        all_rounds = Review(child, now=ctx.now).rounds()
         measured = [r for r in all_rounds if r.heads]
         current = _reviewed_heads(ctx, child)
         #: Three distinguishable states, not two. `not measured` used to stand in for BOTH "zero rounds
