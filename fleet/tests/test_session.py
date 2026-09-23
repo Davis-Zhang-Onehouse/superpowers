@@ -397,9 +397,9 @@ class TestAgainstRealTmux(unittest.TestCase):
         # And it must not EMPTY between cases. tmux exits a server when its last session is killed, and
         # that exit is asynchronous: the next case's `new-session` can reach the exiting server and fail
         # `server exited unexpectedly` even with no other process involved (5 of 1000 under the load of two
-        # suites, 0 of 1500 with the server kept non-empty: `FB-5`'s "under tmux load"). The anchor keeps
-        # it occupied, and it watches this process, so a suite that is killed outright still takes its
-        # server with it within a second rather than leaving one behind.
+        # suites, 0 of 2000 under that load with the server kept non-empty: `FB-5`'s "under tmux load").
+        # The anchor keeps it occupied, and it watches this process, so a suite that is killed outright
+        # still takes its server with it within a second rather than leaving one behind.
         anchored = subprocess.run(cls.TMUX + ["new-session", "-d", "-s", "itfleet-anchor",
                                               f"while kill -0 {os.getpid()} 2>/dev/null; do sleep 1; done"],
                                   capture_output=True, text=True)
