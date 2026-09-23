@@ -4254,7 +4254,7 @@ def _do_brief(ctx: Ctx, parsed: Parsed) -> int:
             status, sentence = attested_pid_status(declarations.watcher_pid())
             seen = ("ATTESTED by the claimant, NOT observed by this tool; "
                     + (f"{sentence}, and `fleet board` disregards the claim once it is gone" if status else
-                       "it names no pid, so nothing re-checks it — `fleet board` trusts it, labelled "
+                       "no pid handle was recorded at the claim, so nothing re-checks it — `fleet board` trusts it, labelled "
                        "ATTESTED, until the claimant declares another phase"))
         else:
             seen = ("OBSERVED on the pane at claim time; `fleet board` re-reads the pane, and once that "

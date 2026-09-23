@@ -5323,7 +5323,8 @@ class TestAwaitingCiRequiresALiveWatcher(CliCase):
 
         self.assertNotIn("i45", out, "brief still names the retired limitation")
         self.assertNotIn("does NOT yet", out)
-        self.assertIn("names no pid", out, "brief does not say nothing re-checks a free-text attestation")
+        self.assertIn("no pid handle was recorded", out,
+                      "brief does not say nothing re-checks a free-text attestation")
 
     def test_brief_says_the_board_rechecks_an_observed_watcher(self):
         fleet = self.loaded()
