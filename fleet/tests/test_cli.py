@@ -6927,6 +6927,16 @@ class TestB11RefusalsNameARouteThatRuns(CliCase):
         self.assertEqual(EXIT_BAD_INPUT, code, err)
         self.assertIn("is not an instant on disk", self.refusal(err), err)
 
+    def test_a_corrupt_record_does_not_replace_the_already_claimed_refusal(self):
+        """RV-32 (OI-6). The claim route reads the store to find an open holder; one unreadable record must
+        not replace the dispatch's "already claimed" refusal with an unrelated parse refusal."""
+        fleet = self.loaded()
+        coordinator = self._claimed(fleet, fleet.paths["doomed"])
+        (fleet.home / "records" / "zz-corrupt.json").write_text("{ not json")
+        code, out, err = self._dispatch_onto(fleet, coordinator, "onto a claim, store corrupt")
+        self.assertNotEqual(EXIT_OK, code, out)
+        self.assertIn("is already claimed by", self.refusal(err), err)
+
     def _full_pool(self, fleet):
         for slot in list(fleet.pool.free_slots()):
             fleet.pool.claim(todo_id=f"filler-{slot}", tmux=f"dt-{slot}", base_instant=FRESH_BASE,
