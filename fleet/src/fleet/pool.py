@@ -216,6 +216,23 @@ class ReapReport:
         return len(self.freed)
 
 
+@dataclass
+class ReapPlan:
+    """What a reap WOULD do right now, read without writing anything — `FB-85`.
+
+    `reap --dry-run` used to answer from session liveness alone and exit 0 where the real call exits 4 (a
+    foreign stale lease) or leaves a slot a cwd holder keeps. Both now read this one classification: the real
+    `reap` executes it, the dry-run prints it, so the two cannot disagree about which lease is whose or stale.
+    """
+
+    live: list = field(default_factory=list)          # [(slot, lease)]         its session is alive
+    held: list = field(default_factory=list)          # [(slot, lease, pids)]   a live pid holds its path
+    mine: list = field(default_factory=list)          # [(slot, lease)]         stale and this caller's to free
+    foreign: list = field(default_factory=list)       # [(slot, owner, lease)]  stale, somebody else's
+    reclaimable: list = field(default_factory=list)   # [(slot, why)]           interrupted claim, old enough
+    unattributable: list = field(default_factory=list)  # [(slot, why, wait_s)]  bodiless, too young to judge
+
+
 class Pool:
     """Enrolment is opt-in; a claim is a directory that either exists or does not.
 
@@ -728,26 +745,12 @@ class Pool:
         call freed, never every slot that ended up free, so a slot freed once is announced once. And a slot
         it could not free is named in `unfreed` rather than raised — the whole point of a reap is the report.
         """
-        freed, unfreed, skipped, reclaimed = [], [], [], []
+        plan = self.reap_plan(base_instant=base_instant, all_efforts=all_efforts, min_claim_age_s=min_claim_age_s)
+        freed, unfreed, reclaimed = [], [], []
+        skipped = list(plan.foreign)
+        unattributable = list(plan.unattributable)
 
-        # `SI-7` first, and it is FIRST on purpose: an interrupted claim makes a slot unclaimable, so
-        # clearing it is the difference between a pool that recovers and a pool that has lost a workspace
-        # for good. An interrupted claim carries no base — the body that would name one is what failed to be
-        # written — so it falls under the rule this method already applies to an untagged lease: nobody
-        # owns it, therefore it is this caller's to clear. That is why `--all` is not required; the operator
-        # is told to `reap` by the very refusal they hit, and a remedy that needs a second, undocumented
-        # flag is the unclearable alarm again (`FI-30a`).
-        # `E9` mode 2: what this call can SEE but cannot yet judge. Computed before the reclaim loop and
-        # from the same predicate at a zero floor, so the two cannot disagree about which claims exist —
-        # the difference between the lists is exactly the age floor, which is the thing being reported.
-        reclaimable = {slot for slot, _ in self.interrupted_claims(min_age_s=min_claim_age_s)}
-        unattributable = []
-        for slot, why in self.interrupted_claims(min_age_s=0.0):
-            if slot in reclaimable:
-                continue                                # this call is about to clear it; not a report
-            unattributable.append((slot, why, max(0.0, min_claim_age_s - self._claim_age_s(slot))))
-
-        for slot, why in self.interrupted_claims(min_age_s=min_claim_age_s):
+        for slot, why in plan.reclaimable:
             try:
                 what = self._reclaim(slot)
                 if what:
@@ -758,19 +761,7 @@ class Pool:
             except OSError as exc:
                 unfreed.append((slot, f"{type(exc).__name__}: {exc}"))
 
-        for slot in self.slots():
-            held = self.lease(slot)
-            if held is None:
-                continue
-            owner = held.base_instant or ""
-            mine = all_efforts or owner == "" or owner == base_instant
-            if self._alive(held.tmux):
-                continue                                    # its worker is still running
-            if list(self._cwd_probe(held.path)):
-                continue                                    # somebody is still sitting in it (OBS-48)
-            if not mine:
-                skipped.append((slot, owner, held))
-                continue
+        for slot, held in plan.mine:
             try:
                 if self.release(slot, expect_todo=held.todo_id):
                     freed.append(slot)
@@ -791,17 +782,65 @@ class Pool:
                                                   if s not in cleared
                                                   and (self.leases / s).is_dir()))
         if strict and skipped:
-            slot, owner, held = skipped[0]
-            others = "".join(f"; {s} is {o}" for s, o, _ in skipped[1:])
-            # Named in words, not in kwargs, for the same reason as `unenroll` above: `cli` quotes the
-            # `--all` token, and this sentence is read by whoever typed the command (`FI-19b`).
-            refusal = Refused(
-                f"slot {slot!r} holds a stale lease owned by {owner} (todo {held.todo_id!r}, tmux "
-                f"{held.tmux!r}), not by {base_instant!r}{others}. Not yours to clear — that is a "
-                "state, not a failure. The owner reaps it, or the every-effort override is said out loud.",
-                clears_when=f"{owner} reaps {slot!r}, or a reap across every effort is said out loud",
-                clears_who=owner,
-            )
+            refusal = self.foreign_refusal(skipped, base_instant)
             refusal.report = report
             raise refusal
         return report
+
+    @staticmethod
+    def foreign_refusal(skipped: list, base_instant) -> Refused:
+        """The strict reap's refusal over `skipped` (a `ReapPlan.foreign`), built in ONE place so `reap` and its
+        dry-run print the same sentence (`FB-85`)."""
+        slot, owner, held = skipped[0]
+        others = "".join(f"; {s} is {o}" for s, o, _ in skipped[1:])
+        # Named in words, not in kwargs, for the same reason as `unenroll` above: `cli` quotes the
+        # `--all` token, and this sentence is read by whoever typed the command (`FI-19b`).
+        return Refused(
+            f"slot {slot!r} holds a stale lease owned by {owner} (todo {held.todo_id!r}, tmux "
+            f"{held.tmux!r}), not by {base_instant!r}{others}. Not yours to clear — that is a "
+            "state, not a failure. The owner reaps it, or the every-effort override is said out loud.",
+            clears_when=f"{owner} reaps {slot!r}, or a reap across every effort is said out loud",
+            clears_who=owner,
+        )
+
+    def reap_plan(self, base_instant=None, all_efforts: bool = False,
+                  min_claim_age_s: float = INTERRUPTED_CLAIM_AGE_S) -> ReapPlan:
+        """Classify every lease and bodiless claim the way `reap` judges them, writing nothing (`FB-85`).
+
+        A lease is stale when its tmux is not alive AND no live process holds its path as cwd; it is this
+        caller's when `all_efforts` is set, it carries no base (legacy), or its base is `base_instant`.
+        An interrupted claim old enough to judge is reclaimable; a younger one is unattributable (`E9`).
+        """
+        plan = ReapPlan()
+        # `SI-7` first, and it is FIRST on purpose: an interrupted claim makes a slot unclaimable, so
+        # clearing it is the difference between a pool that recovers and a pool that has lost a workspace
+        # for good. An interrupted claim carries no base — the body that would name one is what failed to be
+        # written — so it falls under the rule this method already applies to an untagged lease: nobody
+        # owns it, therefore it is this caller's to clear. That is why `--all` is not required; the operator
+        # is told to `reap` by the very refusal they hit, and a remedy that needs a second, undocumented
+        # flag is the unclearable alarm again (`FI-30a`).
+        # `E9` mode 2: what this call can SEE but cannot yet judge, from the same predicate at a zero floor, so
+        # the two cannot disagree about which claims exist — the difference is exactly the age floor.
+        reclaimable = self.interrupted_claims(min_age_s=min_claim_age_s)
+        plan.reclaimable = list(reclaimable)
+        judged = {slot for slot, _ in reclaimable}
+        for slot, why in self.interrupted_claims(min_age_s=0.0):
+            if slot not in judged:
+                plan.unattributable.append((slot, why, max(0.0, min_claim_age_s - self._claim_age_s(slot))))
+        for slot in self.slots():
+            held = self.lease(slot)
+            if held is None:
+                continue
+            owner = held.base_instant or ""
+            if self._alive(held.tmux):
+                plan.live.append((slot, held))                   # its worker is still running
+                continue
+            pids = list(self._cwd_probe(held.path))
+            if pids:
+                plan.held.append((slot, held, pids))             # somebody is still sitting in it (OBS-48)
+                continue
+            if all_efforts or owner == "" or owner == base_instant:
+                plan.mine.append((slot, held))
+            else:
+                plan.foreign.append((slot, owner, held))
+        return plan
