@@ -38,6 +38,25 @@ class RuntimeCliTests(unittest.TestCase):
         self.assertEqual(code, 4, err)
         self.assertEqual(snapshot(self.f.home), before)
 
+    def test_a_closed_record_still_blocks_and_the_route_says_what_does_clear_it(self):
+        """RV-21. The route said "harvested or closed", but `runtime_blockers` counts every UNHARVESTED record
+        and every held lease, so a close clears nothing. The route names the predicates that do, and meeting
+        them clears the switch."""
+        self.f.worker('shut', slot='ws1', live=False)
+        code, _, err = self.f.run(['close', '--id', self.f.ids['shut']])
+        self.assertEqual(code, 0, err)
+        code, _, err = self.f.run(['runtime', '--set', 'codex'])
+        self.assertEqual(code, 4, err)
+        self.assertNotIn('or closed', err)
+        for clause in ('harvest', 'reap', 'lease'):
+            self.assertIn(clause, err.split('clears when:', 1)[-1], err)
+        record = self.f.store.read(self.f.ids['shut'])
+        record.harvested_at = '2026-07-30T12:00:00Z'
+        self.f.store.write(record)
+        self.f.pool.release('ws1')
+        code, _, err = self.f.run(['runtime', '--set', 'codex'])
+        self.assertEqual(code, 0, f"meeting the route's own condition did not clear the switch: {err}")
+
     def test_same_runtime_is_noop_with_work(self):
         self.f.worker('active', slot='ws1')
         before = snapshot(self.f.home)
