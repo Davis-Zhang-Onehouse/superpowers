@@ -11,7 +11,8 @@ fleet dispatch --profile "$P" --title "$T" --runtime claude --model claude-fable
 
 Resolution: runtime = `--runtime` > the profile's `"runtime"` (profile.json) > `fleet runtime`; model = `--model`
 > the profile's `"model"` (applied only when the profile's `"runtime"` is the one chosen; a profile `"model"`
-without a `"runtime"` is refused) > none. No model means no model flag on the argv, so the CLI uses its own
+without a `"runtime"` is refused) > none. A fleet older than the release carrying these fields ignores a profile's
+`"runtime"`/`"model"` silently and dispatches on the box runtime, so check `fleet dispatch --dry-run`'s `runtime` row. No model means no model flag on the argv, so the CLI uses its own
 configured model — the launch is then byte-identical to the one before these flags existed. A model reaches the
 worker as `claude --model <m>` or `codex -m <m>` (also on `codex resume`); fleet never edits a slot's
 `.claude/settings*.json` or `CODEX_HOME/config.toml`, and does not translate model names. The chosen runtime and
