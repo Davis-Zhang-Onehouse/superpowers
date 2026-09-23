@@ -498,7 +498,8 @@ class Roadmap:
                 raise BadInput(f"no milestone {milestone_id!r} in {self.path}")
             if found.get("owner"):
                 raise BadInput(
-                    f"milestone {milestone_id!r} is already claimed by {found['owner']!r}. Two instants on "
+                    f"milestone {milestone_id!r} is already claimed by {_owner_now(found['owner'])!r}. Two "
+                    f"instants on "
                     f"one milestone is not a race the roadmap can resolve — if that owner is gone, its "
                     f"record is what says so (`fleet board`, `fleet status`), and the work is released by "
                     f"aborting it with a reason.")
@@ -538,13 +539,15 @@ class Roadmap:
                 held = entry.get("owner")
                 if not held:
                     return
+                #: RV-24. Named where it is now in the refusal below; compared by identity either way.
+                shown = _owner_now(held)
                 #: `B08`. By identity, not by string: `harvest` passes the owner it READ (where it is now,
                 #: `-complete-`) against a string recorded while it was `-inflight-`, and `abort` passes its
                 #: recorded path against an owner `apply` has since rewritten.
                 if expect_owner is not None and not same_instant(held, expect_owner):
                     raise BadInput(
-                        f"milestone {milestone_id!r} is claimed by {held!r}, not by {str(expect_owner)!r}, "
-                        f"so this release would free work somebody else is running. Refused. If {held!r} "
+                        f"milestone {milestone_id!r} is claimed by {shown!r}, not by {str(expect_owner)!r}, "
+                        f"so this release would free work somebody else is running. Refused. If {shown!r} "
                         f"is gone, release it with `fleet milestone --instant <coordinator> --id "
                         f"{milestone_id} --disown --reason <why>`, which checks whether that owner still "
                         f"has an open record before it clears anything.")

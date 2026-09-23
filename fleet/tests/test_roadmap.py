@@ -1115,6 +1115,18 @@ class TestTheOwnerFollowsTheRename(RoadmapCase):
         self.rm.disown("o1", expect_owner=str(self.tasks / WORKER), reason="aborted")
         self.assertIsNone(self.stored_owner())
 
+    def test_the_refusals_name_the_owner_where_it_is_now(self):
+        """RV-24. `claim`'s already-claimed refusal and `disown`'s wrong-owner refusal are what dispatch,
+        harvest and abort print; both named the stored `-inflight-` string after the owner's rename."""
+        done = self.complete()
+        other = str(self.tasks / "00000000-07300999-inflight-append-someoneElse")
+        for attempt in (lambda: self.rm.claim("o1", other), lambda: self.rm.disown("o1", expect_owner=other)):
+            with self.subTest(attempt=attempt):
+                with self.assertRaises(BadInput) as caught:
+                    attempt()
+                self.assertIn(str(done), str(caught.exception))
+                self.assertNotIn(str(self.tasks / WORKER), str(caught.exception))
+
     def test_disown_still_refuses_a_different_instant(self):
         self.complete()
         other = str(self.tasks / "00000000-07300999-inflight-append-someoneElse")
