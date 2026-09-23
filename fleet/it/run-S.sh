@@ -12,6 +12,8 @@
 #   S5  `pane-guard --id` and `--pane` answer the same thing about the same pane     SI-54
 #   S6  a long-argv NON-claude pane is unverifiable, never FOREIGN                   SI-52
 #   S7  a recorded send-keys delivery reads ATTESTED, and a mismatch is refused      SI-55
+#   S11 `abort --dry-run` evaluates the cwd-holder gate the real abort does, and both refuse
+#       BEFORE the session is killed                                                  B10 (i48c/FI-281)
 #
 # ⚠️ RUN RED, not assumed to be red. `FI-303`: a control that cannot fire on the defect that motivated it
 # certifies its own blind spot. Every case here was run against a worktree at `fleet/v0.4.0` — the tree
@@ -67,12 +69,12 @@ py() { python3 - "$@"; }
 
 PROFILE="$OUT/profile"
 cp -r "$INSTANT/tests/fixtures/profiles/workerCompliant" "$PROFILE"
-for n in 1 2 3 4 5 6; do
+for n in 1 2 3 4 5 6 7; do
   ( mkdir -p "$OUT/slot$n" && cd "$OUT/slot$n" && git init -q . && git commit -q --allow-empty -m base ) \
     >/dev/null 2>&1
 done
 fleet set-golden --path "$OUT/slot1" --porcelain > "$OUT/setup.out" 2>&1
-for n in 1 2 3 4 5 6; do fleet enroll --slot "$OUT/slot$n" --porcelain >> "$OUT/setup.out" 2>&1; done
+for n in 1 2 3 4 5 6 7; do fleet enroll --slot "$OUT/slot$n" --porcelain >> "$OUT/setup.out" 2>&1; done
 
 COORD="$(s_init coordS)"
 [ -d "$COORD" ] || { echo "init produced no coordinator; nothing below is a verdict" >&2; exit 2; }
@@ -547,6 +549,88 @@ else
   it_fail S10 "fleet/it/S/out/S10.txt" \
     "resume rc=$s10_resume_rc by-id-followed=$s10_followed(verdict=$s10_id_verdict rc=$s10_id_rc) by-pane-stayed-local=$s10_pane_local(verdict=$s10_pane_verdict)"
 fi
+
+# --- S11: `B10`. `abort --dry-run` evaluates the gate the real abort evaluates ----------------------
+#
+#      Measured at `0.6.1` (remeasure `30-dispatch-abort/raw/scenB-abort-cycle.out:93,103`): with a live
+#      pid sitting in the worker's slot, the SAME argv answered `would-rename … would-release` rc=0 under
+#      --dry-run and `Refused` rc=4 for real — and the real call had already KILLED the session when it
+#      refused. The dry-run returned above the only place the OBS-48 cwd-holder gate runs.
+#
+#      The control is the first dry-run, taken while only the worker's OWN pane holds the slot: every
+#      ordinary abort has that holder, the kill ends it, and a gate that counted it would refuse every
+#      abort. So the pane's pid is shown to be a cwd holder, and the dry-run must still pass there.
+#      The holder is `setsid sleep`, started by THIS runner — outside the pane's process tree, so the kill
+#      cannot end it — and it is killed by pid, never by pattern.
+fleet milestone --instant "$COORD" --id s11 --title "abort refuses before the kill" --porcelain \
+      > "$OUT/S11-milestone.out" 2>&1
+S11_CHILD="$(s_dispatch abortHeldSlot s11)"
+s11_state() {                     # everything a dry-run must leave byte-identical, plus the session list
+  { find "$FLEET_HOME" "$FLEET_INSTANTS" "$OUT"/slot? -printf '%p %y %s %T@\n' 2>/dev/null | sort
+    tmux -L "$IT_TMUX_SOCKET" list-sessions -F '#{session_name}' 2>/dev/null | sort; } | sha256sum
+}
+S11_TMUX="$(awk -F'\t' '$1=="tmux"{print $2; exit}' "$OUT/dispatch-abortHeldSlot.out")"
+S11_SLOT="$(py "$S11_CHILD" <<'PY2'
+import os, pathlib, sys
+from fleet.store import Store
+from fleet.pool import Pool
+child = str(pathlib.Path(sys.argv[1]))
+home = pathlib.Path(os.environ["FLEET_HOME"])
+rec = [r for r in Store(home).all() if r.child_instant == child]
+lease = Pool(home).lease(rec[0].slot) if rec else None
+print(lease.path if lease else "")
+PY2
+)"
+S11_PANE="$(tmux -L "$IT_TMUX_SOCKET" list-panes -t "=$S11_TMUX:" -F '#{pane_pid}' 2>/dev/null | head -1)"
+s11_holders() { py "$1" <<'PY2'
+import sys
+from fleet.cli import _cwd_holders
+print(" ".join(str(p) for p in sorted(_cwd_holders(sys.argv[1]))))
+PY2
+}
+S11_OWN="$(s11_holders "$S11_SLOT")"
+S11_ARGV=(--instant "$S11_CHILD" --reason "B10: a live pid still sits in the slot")
+
+fleet abort --dry-run "${S11_ARGV[@]}" > "$OUT/S11-control-dry.out" 2>&1
+s11_control_rc=$?
+
+( cd "$S11_SLOT" && exec setsid sleep 300 ) > /dev/null 2>&1 &
+S11_HOLDER=$!
+for _ in 1 2 3 4 5 6 7 8 9 10; do
+  case " $(s11_holders "$S11_SLOT") " in *" $S11_HOLDER "*) break ;; esac; sleep 0.2
+done
+s11_before="$(s11_state)"
+fleet abort --dry-run "${S11_ARGV[@]}" > "$OUT/S11-dry.out" 2>&1
+s11_dry_rc=$?
+s11_after_dry="$(s11_state)"
+fleet abort "${S11_ARGV[@]}" > "$OUT/S11-real.out" 2>&1
+s11_real_rc=$?
+s11_alive=0; tmux -L "$IT_TMUX_SOCKET" has-session -t "=$S11_TMUX" 2>/dev/null && s11_alive=1
+s11_inflight=0; [ -d "$S11_CHILD" ] && s11_inflight=1
+s11_same=0; cmp -s "$OUT/S11-dry.out" "$OUT/S11-real.out" && s11_same=1
+kill "$S11_HOLDER" 2>/dev/null; wait "$S11_HOLDER" 2>/dev/null
+fleet abort "${S11_ARGV[@]}" > "$OUT/S11-rerun.out" 2>&1
+s11_rerun_rc=$?
+s11_aborted=0; [ -d "${S11_CHILD/-inflight-/-abort-}" ] && s11_aborted=1
+{ echo "slot=$S11_SLOT session=$S11_TMUX pane_pid=$S11_PANE own-holders-before=[$S11_OWN] foreign-holder=$S11_HOLDER"
+  echo "--- control dry-run (only the pane's own tree holds the slot) rc=$s11_control_rc"; cat "$OUT/S11-control-dry.out"
+  echo "--- dry-run with the foreign holder rc=$s11_dry_rc (state unchanged: $([ "$s11_before" = "$s11_after_dry" ] && echo yes || echo NO))"; cat "$OUT/S11-dry.out"
+  echo "--- real abort, same argv rc=$s11_real_rc  byte-identical-to-dry-run=$s11_same  session-alive-after=$s11_alive  folder-inflight=$s11_inflight"; cat "$OUT/S11-real.out"
+  echo "--- holder killed; re-run rc=$s11_rerun_rc aborted=$s11_aborted"; cat "$OUT/S11-rerun.out"; } > "$OUT/S11.txt" 2>&1
+cat "$OUT/S11.txt"
+
+s11_pane_held=0; case " $S11_OWN " in *" $S11_PANE "*) s11_pane_held=1 ;; esac
+s11_unchanged=0; [ -n "$s11_before" ] && [ "$s11_before" = "$s11_after_dry" ] && s11_unchanged=1
+if [ -n "$S11_PANE" ] && [ "$s11_pane_held$s11_control_rc" = "10" ] && [ "$s11_dry_rc" = 4 ] \
+   && [ "$s11_unchanged" = 1 ] && [ "$s11_real_rc" = 4 ] && [ "$s11_same$s11_alive$s11_inflight" = "111" ] \
+   && [ "$s11_rerun_rc" = 0 ] && [ "$s11_aborted" = 1 ]; then
+  it_pass S11 "fleet/it/S/out/S11.txt" \
+    "with a live setsid pid holding the worker's slot as cwd, \`abort --dry-run\` refused rc=4 leaving the store, instants, slots and tmux sessions byte-identical, and the real abort with the same argv refused with byte-identical output while the session was STILL ALIVE and the folder still -inflight- (it refused before the kill, not after). Control: the pane's own pid ($S11_PANE) held the slot too and the dry-run taken then passed rc=0, so the gate spares the session's own tree. Once the holder was killed the identical abort completed"
+else
+  it_fail S11 "fleet/it/S/out/S11.txt" \
+    "pane=$S11_PANE pane-held=$s11_pane_held control-rc=$s11_control_rc dry-rc=$s11_dry_rc(want 4) dry-unchanged=$s11_unchanged real-rc=$s11_real_rc(want 4) same-output=$s11_same session-alive=$s11_alive inflight=$s11_inflight rerun-rc=$s11_rerun_rc aborted=$s11_aborted"
+fi
+kill "$S11_HOLDER" 2>/dev/null
 
 it_assert_isolation S-leave
 bash "$IT_ROOT/bin/source-pin.sh" after "$OUT" || { echo "CONTAMINATED — no verdict" >&2; exit 3; }

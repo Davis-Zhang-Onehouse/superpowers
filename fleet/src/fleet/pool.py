@@ -559,6 +559,36 @@ class Pool:
                 f"`reap` clears it and says what it cleared.")
         raise NoCapacity("every enrolled slot was taken while claiming; nothing free to hand out")
 
+    def cwd_holders(self, slot: str) -> list:
+        """Live pids holding `slot`'s leased path as their cwd; `[]` when it is not leased. Read-only."""
+        held = self.lease(slot)
+        return [] if held is None else list(self._cwd_probe(held.path))
+
+    def release_refusal(self, slot: str, spare=()) -> "Optional[Refused]":
+        """The `OBS-48` refusal `release` would raise for `slot` right now, or None — read-only.
+
+        `B10`. The one gate `release` evaluates, exposed so a caller can ask it BEFORE doing anything
+        irreversible, and so a `--dry-run` can evaluate the same predicate the real call does instead of
+        returning above it. `spare` names pids the caller is about to end itself (`abort` kills the
+        worker's own session first), which therefore will not be holding the slot when `release` runs.
+        """
+        held = self.lease(slot)
+        return None if held is None else self._cwd_refusal(slot, held, spare)
+
+    def _cwd_refusal(self, slot: str, held, spare=()) -> "Optional[Refused]":
+        spared = set(spare)
+        pids = [p for p in self._cwd_probe(held.path) if p not in spared]
+        if not pids:
+            return None
+        return Refused(
+            f"slot {slot!r} ({held.path}) is held as cwd by live pid(s) "
+            f"{', '.join(str(p) for p in pids)}; releasing it would let a second worker be "
+            f"leased into a directory somebody is still working in (OBS-48). Lease is todo "
+            f"{held.todo_id!r} for effort {held.base_instant!r}.",
+            clears_when=f"pid(s) {', '.join(str(p) for p in pids)} exit {held.path}",
+            clears_who=held.base_instant or None,
+        )
+
     def release(self, slot: str, force: bool = False, expect_todo: str = None) -> bool:
         """Give a slot back. Returns True when THIS call is the one that removed the claim.
 
@@ -586,16 +616,9 @@ class Pool:
         if expect_todo is not None and held is not None and held.todo_id != expect_todo:
             return False                   # re-claimed under us; the lease we were asked to free is gone
         if held is not None and not force:
-            pids = list(self._cwd_probe(held.path))
-            if pids:
-                raise Refused(
-                    f"slot {slot!r} ({held.path}) is held as cwd by live pid(s) "
-                    f"{', '.join(str(p) for p in pids)}; releasing it would let a second worker be "
-                    f"leased into a directory somebody is still working in (OBS-48). Lease is todo "
-                    f"{held.todo_id!r} for effort {held.base_instant!r}.",
-                    clears_when=f"pid(s) {', '.join(str(p) for p in pids)} exit {held.path}",
-                    clears_who=held.base_instant or None,
-                )
+            refusal = self._cwd_refusal(slot, held)
+            if refusal is not None:
+                raise refusal
         (claim_dir / _LEASE_BODY).unlink(missing_ok=True)
         try:
             for leftover in sorted(claim_dir.iterdir()):

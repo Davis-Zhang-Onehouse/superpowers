@@ -37,6 +37,31 @@ class TestLiveness(unittest.TestCase):
         s, _, _ = layer(procs=[LiveSession(9, pathlib.Path("/elsewhere"), None)])
         self.assertEqual([x.pid for x in s.live()], [9])
 
+class TestOwnProcesses(unittest.TestCase):
+    """`B10`. Which cwd holders a kill of the session ends — its pane pid and that pid's descendants."""
+
+    def _layer(self, pane, parents):
+        s, _, _ = layer(sessions=("dt-a",))
+        s.probes.pane_pid = lambda name: pane if name == "dt-a" else None
+        s.probes.parent_of = lambda pid: parents.get(pid, 1)
+        return s
+
+    def test_the_pane_and_its_descendants_are_the_sessions_own(self):
+        s = self._layer(100, {101: 100, 102: 101, 900: 1, 901: 900})
+        self.assertEqual(s.own_processes("dt-a", [100, 102, 900, 901]), {100, 102})
+
+    def test_unobservable_is_None_not_empty(self):
+        s = self._layer(None, {})
+        self.assertIsNone(s.own_processes("dt-a", [5]))
+        s2, _, _ = layer(sessions=("dt-a",))
+        s2.probes.pane_pid = lambda name: 100          # a pane pid but no parent walk
+        self.assertIsNone(s2.own_processes("dt-a", [5]))
+
+    def test_a_cycle_in_a_racing_proc_walk_terminates(self):
+        s = self._layer(100, {5: 6, 6: 5})
+        self.assertEqual(s.own_processes("dt-a", [5]), set())
+
+
 class TestPanePredicates(unittest.TestCase):
     def test_unsubmitted_text_is_detected_from_the_LAST_lines_only(self):
         # Anchored to the tail: a prompt earlier in the buffer is scrollback, and treating history as

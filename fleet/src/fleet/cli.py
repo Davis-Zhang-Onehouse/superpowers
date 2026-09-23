@@ -90,7 +90,8 @@ from fleet import origin as origin_mod
 from fleet import evidence as evidence_mod
 from fleet.origin import Origin
 from fleet.roadmap import (ATTENTION, COORDINATOR, RETIRED, SUPERSEDED, TERMINAL, Milestone,
-                           Proposal, Roadmap, _check_evidence, last_index)
+                           Proposal, Roadmap, _check_evidence, _proposer as roadmap_proposer,
+                           last_index)
 from fleet.session import (TMUX_SOCKET_ENV, SessionLayer, default_probes,
                            plain as pane_plain)
 from fleet.store import ATTESTED_PREFIX, Declarations, Record, Store
@@ -2830,7 +2831,8 @@ def _live_session_warning(ctx: Ctx, proposal) -> str:
         return ""
     if not ctx.sessions_for(record).alive(record.tmux):
         return ""
-    return (f"{proposal.instant}'s session ({record.tmux}) reads ALIVE right now: this {proposal.status!r} "
+    #: `FB-71`. Where the proposer is NOW: a `done` proposal is usually followed by the worker's own rename.
+    return (f"{roadmap_proposer(proposal.instant)}'s session ({record.tmux}) reads ALIVE right now: this {proposal.status!r} "
             f"proposal may be describing a worker that has since moved past it. Not a refusal — a "
             f"finished worker may leave its pane open — and not proof either way: this reads the same "
             f"liveness signal pane-guard does, which is not fully trustworthy on its own (see "
@@ -3113,6 +3115,63 @@ def _release_slot_or_name_the_partial_state(ctx: Ctx, record, child: Path) -> No
         ) from exc
 
 
+def _abort_slot_gate(ctx: Ctx, record, child: Path) -> str:
+    """`B10`. The `OBS-48` cwd-holder gate, asked BEFORE anything is closed, released, renamed or written —
+    by the real `abort` and by its `--dry-run` alike, so the two cannot disagree about the same argv.
+
+    The gate `release` evaluates is only decidable for holders the abort will not end itself. A dispatched
+    worker's pane sits in its slot, so every ordinary abort HAS holders — the session's own processes, which
+    the kill ends; those are spared. A holder outside that tree survives the kill, so the release would
+    refuse after the session was already dead: that one is refused HERE, before the kill, after the same
+    bounded wait `_release_slot_or_name_the_partial_state` gives it. A dead session spares nothing.
+
+    Returns a note (a row for the dry-run) when the holders could not be attributed — a live session
+    whose pane pid or parent walk cannot be read — because refusing on a probe gap would block every abort,
+    and passing silently would be the dry-run claiming what it did not measure. The real call then keeps
+    the post-kill path, which names the partial state if a holder remains.
+    """
+    import time
+
+    if record is None or not record.slot:
+        return ""
+    layer = ctx.sessions_for(record)
+    live = bool(record.tmux) and layer.alive(record.tmux)
+
+    def refusal():
+        pids = ctx.pool.cwd_holders(record.slot)
+        if not pids:
+            return None, ""
+        own = layer.own_processes(record.tmux, pids) if live else set()
+        if own is None:
+            return None, (f"pid(s) {', '.join(str(p) for p in pids)} hold slot {record.slot!r} as cwd, and "
+                          f"whether closing session {record.tmux!r} ends them could not be observed (no pane "
+                          f"pid or parent walk), so the cwd-holder gate could not be decided before the "
+                          f"kill; the real call closes the session, then releases, and names the partial "
+                          f"state if a holder remains")
+        return ctx.pool.release_refusal(record.slot, spare=own), ""
+
+    found, undecided = refusal()
+    if found is None:
+        return undecided
+    (ctx.sleep or time.sleep)(ABORT_RELEASE_WAIT_S)
+    found, undecided = refusal()
+    if found is None:
+        return undecided
+    why = (f"Those pid(s) are not processes of session {record.tmux!r}, so closing it would not free the "
+           f"slot." if live else
+           f"Session {record.tmux or '(none)'} is not running, so nothing this abort closes would free "
+           f"the slot.")
+    raise Refused(
+        f"abort of {child.name} refused before doing anything: {found} {why} They were given "
+        f"{ABORT_RELEASE_WAIT_S}s to exit. Nothing was closed, released, renamed or written — session "
+        f"{record.tmux or '(none)'} {'still running' if live else 'not running'}, slot {record.slot!r} "
+        f"still leased, folder still `-inflight-` at {child}, milestone (if any) still claimed. Re-run the "
+        f"identical `abort` command once the pid(s) named above exit.",
+        clears_when=found.clears_when,
+        clears_who=found.clears_who,
+    )
+
+
 def _abort_inputs(ctx, parsed):
     child = _instant(ctx, parsed)
     name = InstantName.parse(child.name)
@@ -3202,10 +3261,16 @@ def _do_abort(ctx: Ctx, parsed: Parsed) -> int:
         origin, origin_problem = None, _one_line(exc)
     milestone_id = origin.milestone if origin is not None else None
     coordinator = Path(origin.coordinator) if (origin is not None and milestone_id) else None
+    #: `B10`. The one gate `release` evaluates, asked here — above the dry-run's return and before the
+    #: session kill — so a dry-run reports the refusal the real call would hit, and the real call refuses
+    #: before its first irreversible step instead of after it.
+    undecided = _abort_slot_gate(ctx, record, child)
 
     if ctx.dry_run:
         _emit(ctx, "abort", [
             ("dry-run", "nothing was renamed, released, closed or written"),
+            ("gate", undecided or (f"slot {record.slot!r}: no live cwd holder outside the session's own "
+                                   f"processes" if record is not None and record.slot else "(no slot)")),
             ("would-rename", f"{child.name} -> {target.name}"),
             ("would-record", f"{ABORT_FILE}: {reason}"),
             ("would-close", (record.tmux if record is not None and record.tmux else "(no session)")),
