@@ -1448,16 +1448,19 @@ def _do_runtime(ctx: Ctx, parsed: Parsed) -> int:
             blockers = runtime_blockers(ctx)
             if blockers:
                 raise Refused('Runtime switch requires a completed fleet: ' + '; '.join(blockers),
-                              #: RV-30. Measured: `harvest` sets `harvested_at` for a completed, reviewed
-                              #: worker (closed or not); for an aborted record or an unreviewed one it does
-                              #: not, and on a gone folder it exits 2. Said, rather than implied to run.
+                              #: RV-30 / RV-35. Measured: `harvest` stamps `harvested_at` once the worker has a
+                              #: review round — for a completed worker, an aborted one and a closed unreviewed
+                              #: one alike (closure 2 ran review -> harvest; rc 0, switch rc 0). On a folder that
+                              #: resolves to nothing it exits 2, and no other verb clears that record (FB-92).
                               clears_when='nothing above remains: each named record is HARVESTED — `fleet '
-                                          'harvest --id <todo>` for a completed, reviewed worker (a closed '
-                                          'record still counts until then); a record that was aborted, closed '
-                                          'without a review, or whose folder is gone cannot be harvested, and '
-                                          'no verb clears it today — each held lease is released by that '
-                                          'harvest or by `fleet reap`, and each named process has exited; '
-                                          'then the same `fleet runtime --set` is re-run',
+                                          'harvest --id <todo>` for a completed, reviewed worker; for an aborted '
+                                          'or closed-but-unreviewed record whose folder exists, `fleet review '
+                                          '--instant <its folder> --scope all --verdict READY` records the review '
+                                          'harvest requires, then `fleet harvest --id <todo>` (a closed record '
+                                          'still counts until then). A record whose folder is gone cannot be '
+                                          'harvested and no verb clears it today — a known gap (FB-92). Each held '
+                                          'lease is released by that harvest or by `fleet reap`, and each named '
+                                          'process has exited; then the same `fleet runtime --set` is re-run',
                               clears_who='the coordinator of each named record, or the operator')
             if not ctx.dry_run:
                 write_runtime(ctx.home, requested)
