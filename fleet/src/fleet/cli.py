@@ -3804,11 +3804,13 @@ def _do_close(ctx: Ctx, parsed: Parsed) -> int:
     #: RV-15 (`B11`). Who frees the slot depends on whether the folder is still there: `harvest` resolves it
     #: first and exits 2 on one that resolves to nothing, so for a gone folder `reap` is the only door.
     child, _ = _child_or_why(ctx, record)
+    #: RV-37. An untagged (legacy) record's lease belongs to no base: `reap --all` is its spelling (as in RV-20).
+    reap = f"fleet reap --base {record.base_instant}" if record.base_instant else "fleet reap --all"
     held = ("(no slot)" if not record.slot else
             (f"{record.slot} — released by `fleet harvest --id {record.todo_id}` when the delta lands, or by "
-             f"`fleet reap --base {record.base_instant}` once nothing is sitting in it") if child is not None else
-            (f"{record.slot} — its folder resolves to nothing, so `harvest` cannot run on it: `fleet reap --base "
-             f"{record.base_instant}` releases it once nothing is sitting in it"))
+             f"`{reap}` once nothing is sitting in it") if child is not None else
+            (f"{record.slot} — its folder resolves to nothing, so `harvest` cannot run on it: `{reap}` releases it "
+             f"once nothing is sitting in it"))
     _emit(ctx, "close", [
         ("record", record.todo_id),
         ("closed", record.tmux or "(no session)"),

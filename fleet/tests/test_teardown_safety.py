@@ -564,6 +564,15 @@ class RuntimeSwitchOverUnresumableRecords(CliCase):
         code, _, err = self._switch(fleet)
         self.assertEqual(code, EXIT_OK, err)
 
+    def test_close_of_an_untagged_record_names_reap_all(self):
+        """RV-37, RV-20's sibling: `close`'s slot row printed `fleet reap --base ` with nothing after it."""
+        fleet = self.fleet()
+        fleet.worker("legacyClose", state="complete", slot="ws1", live=False, base="")
+        code, out, err = fleet.run(["close", "--id", fleet.ids["legacyClose"]])
+        self.assertEqual(code, EXIT_OK, err)
+        self.assertNotIn("fleet reap --base `", out)
+        self.assertIn("fleet reap --all", out)
+
     def test_control_an_open_live_record_blocks(self):
         fleet = self.fleet()
         fleet.worker("running", slot="ws1", pane=IDLE_PANE)
