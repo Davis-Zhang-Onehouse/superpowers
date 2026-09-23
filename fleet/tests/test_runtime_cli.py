@@ -300,26 +300,36 @@ class RuntimeCliTests(unittest.TestCase):
         code, _, err = self.f.run(['resume', '--instant', str(orphan), '--slot', 'ws1'])
         self.assertEqual(code, 0, f"the named route does not run: {err}")
 
-    def test_a_foreign_session_over_an_existing_record_names_the_records_route(self):
-        """RV-31. With a record of the instant under another runtime, the session exiting is not enough: the
-        re-run meets the recorded-runtime refusal. The first refusal names that route, not a false promise."""
+    def test_a_live_session_matching_its_record_is_adopted_whatever_the_box_says(self):
+        """pt2 (D-22/D-33) replaces RV-31: the record's runtime is the one an adopted session must be. A live claude
+        session over a claude record adopts on a codex box; the record keeps its runtime."""
         path = self.f.worker('original', slot='ws1', live=True)          # record + live session, runtime claude
         write_runtime(self.f.home, 'codex')
         code, _, err = self.f.run(['resume', '--instant', str(path)])
-        self.assertEqual(code, 4, err)
-        route = err.split('clears when:', 1)[-1]
-        self.assertNotIn('adopts the instant under the current runtime', route, err)
-        self.assertIn('fleet runtime --set claude', route, err)
-        #: RV-36. The switch it names is blocked by this very record until it is harvested — said, not hidden.
-        self.assertIn('this record is itself one of those blockers', route, err)
+        self.assertEqual(code, 0, err)
+        self.assertEqual(self.f.store.read(self.f.ids['original']).runtime, 'claude')
 
     def test_adoption_cannot_relabel_an_existing_runtime(self):
         self.f.worker('original', slot='ws1', live=False)
         write_runtime(self.f.home, 'codex')
         code, _, err = self.f.run(['resume', '--instant', str(self.f.paths['original'])])
-        self.assertEqual(code, 4, err)
+        #: pt2: adopted under its RECORD's runtime rather than refused; the box selection still cannot relabel it.
+        self.assertEqual(code, 0, err)
         self.assertEqual(self.f.store.read(self.f.ids['original']).runtime, 'claude')
-        #: RV-22. Closing the record does not change its runtime, so it is no route; the switch is, once drained.
+
+    def test_a_live_session_of_another_runtime_than_its_record_names_the_route_that_runs(self):
+        """B11 for the refusal pt2 keeps: the session exiting is the route, and then the same resume runs."""
+        path = self.f.worker('original', slot='ws1', live=False)
+        record = self.f.store.read(self.f.ids['original'])
+        self.f.procs.append(LiveSession(pid=4321, cwd=path, name=record.tmux, runtime='codex'))
+        self.f.tmux_live.add(record.tmux)
+        code, _, err = self.f.run(['resume', '--instant', str(path)])
+        self.assertEqual(code, 4, err)
         route = err.split('clears when:', 1)[-1]
-        self.assertNotIn('fleet close', route, err)
-        self.assertIn('fleet runtime --set claude', route, err)
+        self.assertIn('has exited', route, err)
+        self.assertNotIn('`fleet runtime --set', route, err)
+        self.f.procs.clear()
+        self.f.tmux_live.discard(record.tmux)
+        code, _, err = self.f.run(['resume', '--instant', str(path)])
+        self.assertEqual(code, 0, f"the named route does not run: {err}")
+        self.assertEqual(self.f.store.read(record.todo_id).runtime, 'claude')

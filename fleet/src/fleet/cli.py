@@ -97,7 +97,7 @@ from fleet.session import (TMUX_SOCKET_ENV, SessionLayer, default_probes,
                            plain as pane_plain)
 from fleet.store import ATTESTED_PREFIX, Declarations, Record, Store
 from fleet.workspace import GOLDEN_FILE, Workspace, default_git
-from fleet.runtime import validate_runtime, observe
+from fleet.runtime import choose_runtime, validate_runtime, observe
 from fleet.runtime_config import admission_lock, pane_lock, read_runtime, write_runtime
 from fleet import runtime_launch, messaging
 
@@ -1180,7 +1180,7 @@ def _seed_check_window(env=None) -> float:
     return window if window >= 0 else SEED_CHECK_DEFAULT_S
 
 
-def _verify_seed_delivery(ctx: Ctx, tmux: str, rendered_seed: str, probes=None, sleep=None):
+def _verify_seed_delivery(ctx: Ctx, tmux: str, rendered_seed: str, probes=None, sleep=None, runtime=None):
     """What was this session actually started with? `None` when it cannot be asked at all.
 
     `None` is returned only when the pane pid is unobservable — an injected `Probes` with no `pane_pid`,
@@ -1194,7 +1194,9 @@ def _verify_seed_delivery(ctx: Ctx, tmux: str, rendered_seed: str, probes=None, 
     pid = ctx.sessions.pane_pid(tmux)
     if not pid:
         return None
-    probes = probes or seedcheck.default_probes(ctx.sessions.runtime)
+    #: pt2. The worker is looked for as the runtime it was LAUNCHED with; the box selection is only a default, and
+    #: a codex worker on a claude box probed as `claude` reads NOT-DELIVERED and rolls a good dispatch back.
+    probes = probes or seedcheck.default_probes(runtime or ctx.sessions.runtime)
     sleep = sleep or time.sleep
     deadline = _seed_check_window()
     waited, step = 0.0, 0.25
@@ -1651,18 +1653,9 @@ def _do_revive(ctx: Ctx, parsed: Parsed) -> int:
         raise Refused('A closed or harvested record cannot be revived',
                       clears_when='never, for this record. Dispatch a new worker to carry the work',
                       clears_who='the coordinator')
-    current, _ = read_runtime(ctx.home)
-    if current != record.runtime:
-        #: RV-22 (worded for FB-92 by the teardown bucket's RV-22). Not `fleet runtime --set {record.runtime}`: that
-        #: switch is refused while any record can still be revived or resumed, and revive needs this open record's
-        #: lease — held, it is exactly such a blocker; released, revive refuses it below anyway. There is no state
-        #: in which that route runs for this record.
-        raise Refused('The recorded runtime differs from the fleet selection',
-                      clears_when=f'never, for this record under the current selection: switching back to '
-                                  f'{record.runtime} is refused while this record can still be revived (it holds '
-                                  f'its lease), and without its lease revive refuses it anyway. Carry the work on '
-                                  f'with a new worker under the current runtime (`fleet dispatch`)',
-                      clears_who='the coordinator')
+    #: pt2 (D-22/D-33). No comparison with the box selection: the runtime and model were chosen per dispatch and
+    #: live on the RECORD, so revive relaunches exactly that pair. (RV-22's refusal of a record whose runtime
+    #: differed from the box is gone with the one-runtime-per-fleet rule it enforced.)
     lease = ctx.pool.lease(record.slot) if record.slot else None
     if lease is None or lease.todo_id != record.todo_id:
         raise Refused('Revival requires the original lease to remain held',
@@ -1683,11 +1676,14 @@ def _do_revive(ctx: Ctx, parsed: Parsed) -> int:
     if not record.runtime_executable or not record.runtime_config_dir:
         if ctx.launch_settings is None:
             raise BadInput('Legacy recovery requires an explicit launch configuration resolver')
-        settings = ctx.launch_settings(record.runtime, lease.path)
+        from fleet.runtime import LaunchSettings
+        resolved = ctx.launch_settings(record.runtime, lease.path)
+        settings = LaunchSettings(resolved.runtime, resolved.executable, resolved.config_dir, record.runtime_model)
         print('Legacy record: resolving executable and configuration from the owning workspace', file=ctx.err)
     else:
         from fleet.runtime import LaunchSettings
-        settings = LaunchSettings(record.runtime, record.runtime_executable, record.runtime_config_dir)
+        settings = LaunchSettings(record.runtime, record.runtime_executable, record.runtime_config_dir,
+                                  record.runtime_model)
     if not os.access(settings.executable, os.X_OK):
         raise Refused('Recorded runtime executable is unavailable',
                       clears_when=f'{settings.executable} exists and is executable, then `fleet revive` is '
@@ -1710,7 +1706,8 @@ def _do_revive(ctx: Ctx, parsed: Parsed) -> int:
     record.runtime_executable, record.runtime_config_dir = settings.executable, settings.config_dir
     record.launched_at = ctx.now()
     ctx.store.write(record)
-    _emit(ctx, 'revive', [('todo_id', record.todo_id), ('session_id', session_id), ('runtime', record.runtime)])
+    _emit(ctx, 'revive', [('todo_id', record.todo_id), ('session_id', session_id), ('runtime', record.runtime),
+                          ('model', record.runtime_model or "(none — the CLI's configured default model)")])
     return EXIT_OK
 
 
@@ -1902,6 +1899,13 @@ def _do_dispatch(ctx: Ctx, parsed: Parsed) -> int:
     #: second writer appending to `seed.txt` after `dispatch` wrote it is precisely the race this replaces.
     seed_extra = _read_seed_extra(parsed.get("seed-extra"))
 
+    #: pt2 (D-22/D-33). This worker's runtime and model, resolved BEFORE anything is claimed so a bad value costs a
+    #: refusal and not a slot: `--runtime`/`--model` > the profile's fields > the box's saved runtime and the CLI's
+    #: configured model. The box selection is a default for this dispatch, never a gate on it.
+    choice = choose_runtime(ctx.sessions.runtime, flag_runtime=parsed.get("runtime"),
+                            flag_model=parsed.get("model"), profile_runtime=profile.runtime or None,
+                            profile_model=profile.model or None)
+
     gctx = ctx.guard_ctx(parsed, base=base, cap=cap, profile=profile, optype=optype,
                          override_reason=parsed.get("override"))
 
@@ -1944,7 +1948,7 @@ def _do_dispatch(ctx: Ctx, parsed: Parsed) -> int:
                             "--base <its base>`; `fleet reap --all` for a claim no base owns), or another "
                             "workspace is enrolled (`fleet enroll --slot <path>`)",
                 clears_who="the base owning a stale lease, or the operator")
-        settings = ctx.launch_settings(ctx.sessions.runtime, ctx.pool.slot_path(candidate_slot))
+        settings = _dispatch_settings(ctx, choice, ctx.pool.slot_path(candidate_slot))
 
     if ctx.dry_run and all(verdict.allowed for verdict in verdicts):
         #: `B10` sweep. The real call's own refusals past the guards, asked here too: the same-minute
@@ -1962,6 +1966,7 @@ def _do_dispatch(ctx: Ctx, parsed: Parsed) -> int:
                  ("lineage_base", parsed.get("lineage-base") or "(none — no git lineage is recorded, so "
                                                                 "nothing gates a claim of done)"),
                  ("lineage_mode", lineage_mode or "(none)"),
+                 *_choice_rows(choice),
                  ("seed_extra", (f"{parsed.get('seed-extra')} ({len(seed_extra)} chars would be appended "
                                  f"to the rendered seed)") if seed_extra else
                   "(none — the seed is exactly what the profile renders)")]
@@ -1988,7 +1993,7 @@ def _do_dispatch(ctx: Ctx, parsed: Parsed) -> int:
         raise
     try:
         if lease.slot != candidate_slot:
-            settings = ctx.launch_settings(ctx.sessions.runtime, lease.path)
+            settings = _dispatch_settings(ctx, choice, lease.path)
         #: `F3`/`I-24c`. Extends the SAME shared context the dry-run path above validated, with the four
         #: keys only a won claim can supply — see `_dispatch_render_context` for why this may not be a
         #: second, hand-written dict.
@@ -2009,7 +2014,7 @@ def _do_dispatch(ctx: Ctx, parsed: Parsed) -> int:
                                 f"{seed_extra}\n")
         record = Record(todo_id=todo_id, child_instant=str(child), base_instant=base,
                         runtime=settings.runtime, runtime_executable=settings.executable,
-                        runtime_config_dir=settings.config_dir,
+                        runtime_config_dir=settings.config_dir, runtime_model=settings.model,
                         slot=lease.slot, tmux=tmux, profile=str(profile.path),
                         golden=str(lease.path), lineage_base=parsed.get("lineage-base") or "",
                         lineage_mode=lineage_mode, title=title,
@@ -2050,7 +2055,7 @@ def _do_dispatch(ctx: Ctx, parsed: Parsed) -> int:
         launcher = runtime_launch.prepare(settings, record, seed, launch_env)
         ctx.sessions.start(tmux, lease.path, shlex.join(['bash', str(launcher)]))
         started = True
-        seed_verdict = _verify_seed_delivery(ctx, tmux, rendered["seed"])
+        seed_verdict = _verify_seed_delivery(ctx, tmux, rendered["seed"], runtime=settings.runtime)
         if seed_verdict is None or not seed_verdict.ok:
             #: The record stays as `record_dispatch` wrote it (PENDING-LAUNCH); the rollback below names it
             #: and the remedy. `gate_verdict` is a GUARD NAME `harvest` reads, never a free-text note.
@@ -2115,8 +2120,26 @@ def _do_dispatch(ctx: Ctx, parsed: Parsed) -> int:
                             ("golden_base", record.golden_base or "(none recorded)"),
                             ("coordinator", str(coordinator) if coordinator else
                              "(none — this child has no origin.json, so its `propose` stays LOCAL)"),
-                            ("launched_at", record.launched_at)])
+                            ("launched_at", record.launched_at), *_choice_rows(choice)])
     return EXIT_OK
+
+
+def _dispatch_settings(ctx: Ctx, choice, slot_path):
+    """pt2. The launch settings for THIS dispatch's runtime (executable and config resolved for it, whatever the
+    box is set to), carrying its model."""
+    from fleet.runtime import LaunchSettings
+    resolved = ctx.launch_settings(choice.runtime, slot_path)
+    return LaunchSettings(resolved.runtime, resolved.executable, resolved.config_dir, choice.model)
+
+
+def _choice_rows(choice) -> list:
+    """pt2. The runtime and model a dispatch chose, each with where it came from, so a coordinator reading the
+    output can tell a deliberate choice from an inherited default."""
+    runtime_from = {"flag": "flag", "profile": "profile",
+                    "box": "box — the saved `fleet runtime`; `--runtime` overrides it"}[choice.runtime_source]
+    model = (f"{choice.model} ({choice.model_source})" if choice.model else
+             "(none — no model flag; the CLI's configured default model)")
+    return [("runtime", f"{choice.runtime} ({runtime_from})"), ("model", model)]
 
 
 # --- resume ---------------------------------------------------------------------------------------
@@ -2141,26 +2164,19 @@ def _do_resume(ctx: Ctx, parsed: Parsed) -> int:
         existing = ctx.store.read(todo_id)
     except BadInput:
         existing = None
-    #: RV-31. The route out of a record under another runtime, shared by both refusals below: with such a
-    #: record, a foreign session exiting is not enough — the re-run meets the second refusal.
-    recorded_route = (None if existing is None or existing.runtime == ctx.sessions.runtime else
-                      f'the fleet runs {existing.runtime} again — `fleet runtime --set {existing.runtime}` once '
-                      f'`fleet runtime --set {existing.runtime} --dry-run` names no blocker (no record that can '
-                      f'still be resumed or revived, no lease held). While it can still be resumed or revived, this record is '
-                      f'itself one of those blockers (FB-92), so that switch comes only after it ends; to go on '
-                      f'now, carry the work with a new worker under the current runtime (`fleet dispatch`). '
-                      f'Closing the record does not change its runtime')
-    if any(runtime != ctx.sessions.runtime for runtime in observed):
-        raise Refused('Cannot adopt a session whose runtime differs from the fleet selection',
-                      clears_when=recorded_route or (
-                          f'the {observed[0]} session in {tmux} has exited and `fleet resume` is re-run, which '
-                          f'adopts the instant under the current runtime. (Switching to {observed[0]} instead '
-                          f'is refused while that attributable session is live.)'),
-                      clears_who='the operator')
-
-    if recorded_route is not None:
-        raise Refused('Recorded runtime differs from the fleet selection; resolve the existing record first',
-                      clears_when=recorded_route,
+    #: pt2 (D-22/D-33). The runtime an adopted session must be is the RECORD's — chosen per dispatch — and the box
+    #: selection only when there is no record yet. RV-31's refusal of a record whose runtime differed from the box
+    #: is gone with the one-runtime-per-fleet rule; a live session of another runtime than that is still refused.
+    expected = existing.runtime if existing is not None else ctx.sessions.runtime
+    if any(runtime != expected for runtime in observed):
+        whose = (f"its record's runtime ({expected})" if existing is not None
+                 else f"the fleet selection ({expected}; there is no record of this instant yet)")
+        raise Refused(f'Cannot adopt a session whose runtime differs from {whose}',
+                      clears_when=(f'the {observed[0]} session in {tmux} has exited and `fleet resume` is re-run, which '
+                                   f'adopts the instant under ' + (f'its recorded runtime {expected}' if existing
+                                                                   is not None else 'the current runtime') +
+                                   (f'. (Switching to {observed[0]} instead is refused while that attributable '
+                                    f'session is live.)' if existing is None else '')),
                       clears_who='the operator')
 
     #: `B10` sweep. The claim below is the first write; its refusal is asked before the dry-run returns.
@@ -2189,6 +2205,7 @@ def _do_resume(ctx: Ctx, parsed: Parsed) -> int:
                     runtime=existing.runtime if existing else ctx.sessions.runtime,
                     runtime_executable=existing.runtime_executable if existing else '',
                     runtime_config_dir=existing.runtime_config_dir if existing else '',
+                    runtime_model=existing.runtime_model if existing else '',
                     slot=slot or "", tmux=tmux,
                     profile=parsed.get("profile", existing.profile if existing else ""),
                     golden=str(held.path) if held else (existing.golden if existing else ""),
@@ -4753,6 +4770,15 @@ def _do_brief(ctx: Ctx, parsed: Parsed) -> int:
                         detail=(f"dispatched by {recorded.coordinator} at {recorded.dispatched_at} for "
                                 f"milestone {recorded.milestone or '(none)'}")))
 
+    #: pt2. Which CLI and model this instant was launched with — chosen per dispatch, so no longer answerable from
+    #: `fleet runtime`, and what `revive` will relaunch it as.
+    own = _record_for(ctx, child)
+    if own is not None:
+        rows.append(Row(kind="runtime", subject=child.name, severity=INFO,
+                        detail=(f"runtime={own.runtime} model="
+                                f"{own.runtime_model or '(none — the CLI configured default)'} "
+                                f"(record {own.todo_id}; `fleet revive` relaunches exactly this)")))
+
     coordinator = None
     if recorded is not None:
         try:
@@ -5132,6 +5158,15 @@ def _pane_subject(ctx: Ctx, parsed: Parsed):
             "pane-guard needs a subject: `--id <todo>` (the key every other verb takes) or "
             "`--pane <session>`.")
     if named_pane:
+        #: pt2. A session name carries no runtime, but an OPEN record naming it on this server does: with runtimes
+        #: chosen per dispatch, a codex worker on a claude box read through the box's layer is `14 runtime
+        #: differs` while `--id` of the same worker reads it as codex. Exactly one open record, or the ambient layer.
+        here = getattr(ctx.sessions, "socket", "") or ""
+        owners = [record for record in ctx.store.all()
+                  if record.tmux == named_pane and not record.harvested_at and not record.closed_at
+                  and (not record.tmux_socket or record.tmux_socket == here)]
+        if len(owners) == 1 and owners[0].runtime != ctx.sessions.runtime:
+            return named_pane, SessionLayer(ctx.sessions.probes, owners[0].runtime)
         return named_pane, ctx.sessions
     record = _record(ctx, parsed)
     if not record.tmux:
@@ -6137,6 +6172,14 @@ VERBS = {spec.name: spec for spec in (
              "code (must be AT or DESCENDED FROM the base) | analysis (base fetched but not checked out is "
              "fine, and keeps the prebuilt native artifacts valid). Defaults to code"),
         Flag("--slot", True, False, "a specific enrolled slot instead of the first free one"),
+        #: pt2 (D-22/D-33). Per dispatch, never by switching the shared box (`fleet runtime --set`).
+        Flag("--runtime", True, False,
+             "claude | codex for THIS worker, whatever `fleet runtime` says. Wins over the profile's "
+             "\"runtime\", which wins over the box's saved runtime. Recorded, so revive/resume follow it"),
+        Flag("--model", True, False,
+             "the model for THIS worker (claude `--model`, codex `-m`), e.g. claude-fable-5-1. Wins over the "
+             "profile's \"model\"; omitted, no model flag is passed and the CLI uses its configured default. "
+             "The slot's own config is never edited. Recorded, so revive relaunches with it"),
         Flag("--cap", True, False, "the WIP cap, said out loud"),
         Flag("--override", True, False, "override the refusing rules WITH A STATED REASON"),
         #: `SI-53`. A FILE, not an inline string: a briefing addition with newlines typed through a shell
