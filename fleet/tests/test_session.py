@@ -388,6 +388,7 @@ class TestAgainstRealTmux(unittest.TestCase):
     """
 
     TMUX = ["tmux", "-L", SELFTEST_TMUX_SOCKET]
+    ANCHOR = "itfleet-anchor"
 
     @classmethod
     def setUpClass(cls):
@@ -400,7 +401,7 @@ class TestAgainstRealTmux(unittest.TestCase):
         # suites, 0 of 2000 under that load with the server kept non-empty: `FB-5`'s "under tmux load").
         # The anchor keeps it occupied, and it watches this process, so a suite that is killed outright
         # still takes its server with it within a second rather than leaving one behind.
-        anchored = subprocess.run(cls.TMUX + ["new-session", "-d", "-s", "itfleet-anchor",
+        anchored = subprocess.run(cls.TMUX + ["new-session", "-d", "-s", cls.ANCHOR,
                                               f"while kill -0 {os.getpid()} 2>/dev/null; do sleep 1; done"],
                                   capture_output=True, text=True)
         if anchored.returncode:
@@ -466,6 +467,19 @@ class TestAgainstRealTmux(unittest.TestCase):
         self.assertIsNone(of_prefix,
                           "capturing a session that does not exist should FAIL, not return empty text — "
                           "that distinction is what FI-7 turned on")
+
+    def test_killing_a_cases_own_session_leaves_the_server_up_for_the_next_case(self):
+        """`FB-5`, pinned. Killing the server's last session makes tmux exit it asynchronously, and the next
+        case's `new-session` can land in that exit (`server exited unexpectedly`). The anchor is what keeps
+        the server non-empty; without it this case's own `kill-session` empties the server."""
+        subprocess.run(self.TMUX + ["kill-session", "-t", exact_session_target(self.long)],
+                       capture_output=True)
+        anchor = subprocess.run(self.TMUX + ["has-session", "-t", exact_session_target(self.ANCHOR)],
+                                capture_output=True, text=True)
+        self.assertEqual(anchor.returncode, 0,
+                         f"after a case killed its own session the server has no anchor "
+                         f"({anchor.stderr.strip()}): it is empty and exiting, so the next case's "
+                         f"new-session can fail `server exited unexpectedly` (FB-5)")
 
     def test_killing_a_prefix_does_not_destroy_the_longer_session(self):
         """The hazard itself. Before the fix this call DID destroy `itfleet-repro-ab`
