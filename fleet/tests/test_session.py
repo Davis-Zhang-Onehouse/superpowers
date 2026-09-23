@@ -990,12 +990,15 @@ class TestAttachmentIsCollected(unittest.TestCase):
     def test_against_real_tmux_a_detached_session_and_a_missing_one(self):
         """Why the target and not `display-message`: `display -p -t =nosuch:` exits 0 with an EMPTY format
         (`evidence/20-red/display-message-missing-session.txt`), which would parse as 'detached'."""
-        tmux = ["tmux", "-L", SELFTEST_TMUX_SOCKET]
-        self.addCleanup(_retire_selftest_server, SELFTEST_TMUX_SOCKET)
+        # Its OWN server, not `TestAgainstRealTmux`'s: this case retires what it starts, and must never
+        # kill a server another class owns (`FB-49`, RV-24).
+        socket = f"{SELFTEST_TMUX_SOCKET}-att"
+        tmux = ["tmux", "-L", socket]
+        self.addCleanup(_retire_selftest_server, socket)
         name = f"itfleet-selftest-att-{os.getpid()}-{uuid.uuid4().hex[:6]}"
         subprocess.run(tmux + ["new-session", "-d", "-s", name, _WHILE_THIS_PROCESS_LIVES], capture_output=True)
         try:
-            probes = default_probes(tmux_socket=SELFTEST_TMUX_SOCKET)
+            probes = default_probes(tmux_socket=socket)
             self.assertEqual(probes.attachment(name), (0, 0, 0),
                              "a live session with no client must read as zero clients, not as not measured")
             self.assertIsNone(probes.attachment(name + "x"))
