@@ -5310,17 +5310,155 @@ class TestAwaitingCiRequiresALiveWatcher(CliCase):
         self.assertIn("cron gh-run-poll", out, "no production surface reports the watcher record")
         self.assertIn("ATTESTED", out, "brief does not distinguish an attested claim from an observed one")
 
-    def test_brief_admits_the_board_cannot_show_this(self):
-        """A scoped limitation must be STATED, or it is a silent one. `fleet board` renders an attested
-        claim identically to an observed one — that is `reconcile`'s to fix and out of this charter (i45).
-        The surface that CAN see the difference is the one that has to say the other cannot."""
+    def test_brief_no_longer_says_the_board_cannot_show_this(self):
+        """`NEW-4` (re-measure B07). `brief` said `fleet board` renders an attested claim identically to an
+        observed one and named `i45` as the owner; 105f741/v0.5.6 retired that, and B07 made the board tell
+        an observed watcher that vanished from a genuine attestation. A limitation that no longer exists,
+        stated as current, is the same false comfort one sentence over."""
         fleet = self.loaded()
         ready = self._ready(fleet, BUSY_PANE)
         fleet.run(["declare", "--instant", ready, "--phase", "awaiting-ci", "--watcher", "cron x"])
 
         code, out, err = fleet.run(["brief", "--instant", ready])
 
-        self.assertIn("i45", out, "the limitation is not named where a reader would meet it")
+        self.assertNotIn("i45", out, "brief still names the retired limitation")
+        self.assertNotIn("does NOT yet", out)
+        self.assertIn("no pid handle was recorded", out,
+                      "brief does not say nothing re-checks a free-text attestation")
+
+    def test_brief_says_the_board_rechecks_an_observed_watcher(self):
+        fleet = self.loaded()
+        ready = self._ready(fleet, WATCHED_PANE)
+        fleet.run(["declare", "--instant", ready, "--phase", "awaiting-ci"])
+
+        code, out, err = fleet.run(["brief", "--instant", ready])
+
+        self.assertIn("OBSERVED on the pane at claim time", out)
+        self.assertIn("disregard", out, "brief does not say what happens once that watcher is gone")
+
+    # --- FB-58: an attestation may carry a pid, which is checked ------------------------------------
+
+    def _proc(self, pid=None, start="777", state="S"):
+        scratch = tempfile.mkdtemp()
+        self.addCleanup(shutil.rmtree, scratch, True)
+        root = pathlib.Path(scratch) / "proc"
+        root.mkdir()
+        if pid is not None:
+            (root / str(pid)).mkdir()
+            fields = [state] + ["0"] * 18 + [start, "0", "0"]
+            (root / str(pid) / "stat").write_text(f"{pid} (gate) " + " ".join(fields) + "\n")
+        patcher = mock.patch("fleet.reconcile.PROC_ROOT", root)
+        patcher.start()
+        self.addCleanup(patcher.stop)
+        return root
+
+    def test_an_attested_pid_is_recorded_with_its_start_time(self):
+        """The handle is stored as a structured field the reader checks, with the process's start time so a
+        recycled pid is not mistaken for the watcher (the verbatim text stays for humans)."""
+        self._proc(4242, start="777")
+        fleet = self.loaded()
+        ready = self._ready(fleet, BUSY_PANE)
+
+        code, out, err = fleet.run(["declare", "--instant", ready, "--phase", "awaiting-ci",
+                                    "--watcher", "harness task running release-gate.sh pid:4242"])
+
+        self.assertEqual(EXIT_OK, code, err)
+        self.assertEqual({"pid": 4242, "start": "777"},
+                         Declarations(fleet.paths["readyWorker"]).watcher_pid())
+        self.assertIn("4242", out)
+
+    def test_an_attested_pid_that_is_not_running_is_refused(self):
+        """Attesting to a process that has already exited is attesting to nothing: bad input, not stored."""
+        self._proc(None)
+        fleet = self.loaded()
+        ready = self._ready(fleet, BUSY_PANE)
+
+        code, out, err = fleet.run(["declare", "--instant", ready, "--phase", "awaiting-ci",
+                                    "--watcher", "gate pid=4242"])
+
+        self.assertEqual(EXIT_BAD_INPUT, code, f"a dead pid was accepted as a watcher: {out!r}")
+        self.assertIsNone(Declarations(fleet.paths["readyWorker"]).phase())
+        self.assertIn("4242", out + err)
+
+    def test_two_pid_handles_are_ambiguous_and_refused(self):
+        root = self._proc(4242)
+        (root / "4243").mkdir()
+        (root / "4243" / "stat").write_text((root / "4242" / "stat").read_text().replace("4242", "4243", 1))
+        fleet = self.loaded()
+        ready = self._ready(fleet, BUSY_PANE)
+
+        code, out, err = fleet.run(["declare", "--instant", ready, "--phase", "awaiting-ci",
+                                    "--watcher", "gate pid:4242 and poller pid:4243"])
+
+        self.assertEqual(EXIT_BAD_INPUT, code, out)
+
+    def test_a_pid_handle_followed_by_more_pids_is_ambiguous_and_refused(self):
+        """`RV-C1`. `--watcher "gate pid:$(pgrep -f gate)"` puts several pids on separate lines, and only the
+        first carries the prefix; the claim normalises whitespace, so it reads `pid:4242 4243`. Taking the first
+        silently would accept exactly the ambiguity the two-pid refusal exists for."""
+        root = self._proc(4242)
+        (root / "4243").mkdir()
+        (root / "4243" / "stat").write_text((root / "4242" / "stat").read_text().replace("4242", "4243", 1))
+        fleet = self.loaded()
+        ready = self._ready(fleet, BUSY_PANE)
+
+        for text in ("gate pid:4242\n4243", "gate pid:4242 4243", "gate pid=4242,4243"):
+            code, out, err = fleet.run(["declare", "--instant", ready, "--phase", "awaiting-ci",
+                                        "--watcher", text])
+            self.assertEqual(EXIT_BAD_INPUT, code, f"{text!r} was accepted: {out!r}")
+
+    def test_a_pid_handle_followed_by_words_or_a_time_is_one_pid(self):
+        """The neighbours `RV-C1`'s refusal must not turn away: text after the handle that is not another bare
+        integer — a label, a clock time — names one pid."""
+        self._proc(4242)
+        fleet = self.loaded()
+        ready = self._ready(fleet, BUSY_PANE)
+
+        for text in ("gate pid:4242 (release gate)", "gate pid:4242 started 09:30", "pid=4242"):
+            code, out, err = fleet.run(["declare", "--instant", ready, "--phase", "awaiting-ci",
+                                        "--watcher", text])
+            self.assertEqual(EXIT_OK, code, f"{text!r} was refused: {out!r} {err!r}")
+            self.assertEqual(4242, Declarations(fleet.paths["readyWorker"]).watcher_pid()["pid"])
+
+    def test_a_free_text_attestation_is_told_nothing_rechecks_it(self):
+        """FB-58's second half: without a handle fleet cannot tell when the watcher ends, so the claim says
+        so AT the claim — name a pid, or re-declare when it ends — instead of the charter having to."""
+        self._proc(None)
+        fleet = self.loaded()
+        ready = self._ready(fleet, BUSY_PANE)
+
+        code, out, err = fleet.run(["declare", "--instant", ready, "--phase", "awaiting-ci",
+                                    "--watcher", "cron 0,30 * * * * gh-run-poll"])
+
+        self.assertEqual(EXIT_OK, code, err)
+        self.assertIsNone(Declarations(fleet.paths["readyWorker"]).watcher_pid())
+        self.assertIn("pid:", out, "the claim does not say how to make the attestation checkable")
+
+    def test_brief_reports_an_attested_pid_that_is_gone(self):
+        root = self._proc(4242)
+        fleet = self.loaded()
+        ready = self._ready(fleet, BUSY_PANE)
+        fleet.run(["declare", "--instant", ready, "--phase", "awaiting-ci", "--watcher", "gate pid:4242"])
+        shutil.rmtree(root / "4242")
+
+        code, out, err = fleet.run(["brief", "--instant", ready])
+
+        self.assertIn("4242", out)
+        self.assertIn("GONE", out)
+        #: `RV-C4`. Already true, so said as present: the board is disregarding the claim NOW.
+        self.assertIn("disregards the claim now", out)
+        self.assertNotIn("once it is gone", out)
+
+    def test_a_re_declare_clears_the_pid_handle(self):
+        """A handle from an EARLIER claim read as evidence about this one is the stale-record lie again."""
+        self._proc(4242)
+        fleet = self.loaded()
+        ready = self._ready(fleet, BUSY_PANE)
+        fleet.run(["declare", "--instant", ready, "--phase", "awaiting-ci", "--watcher", "gate pid:4242"])
+
+        fleet.run(["declare", "--instant", ready, "--phase", "running"])
+
+        self.assertIsNone(Declarations(fleet.paths["readyWorker"]).watcher_pid())
 
     def test_the_hatch_buys_permission_and_NOT_silence(self):
         """The whole reason the hatch is safe. It must be impossible to tell a claim apart from one that

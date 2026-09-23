@@ -139,18 +139,21 @@ those phases look like when the effort is large enough to have waves.
 
 ## Two judgements the tool cannot make
 
-**An `AWAITING-CI` row now means a watcher was armed *or attested* — and the board cannot tell you which.**
-Entering the phase is gated: either this tool saw a watcher on the worker's pane, or the worker named one it
-could not see (`--watcher`). Both are recorded on the declaration, but ⚠️ **`fleet board` renders them
-identically** — the distinction lives on `fleet brief --instant <worker>`, and `i45` owns surfacing it here.
+**An `AWAITING-CI` row means a watcher is on the worker's pane now, *or* the worker attested one.** Entering
+the phase is gated: either this tool saw a watcher on the worker's pane, or the worker named one it could not
+see (`--watcher`). The board's note says which — `watcher observed (…)` or `watcher ATTESTED, not
+observable: …` — and an attestation says whether anything re-checks it: `its pid N is running` when it named
+a `pid:` handle, `no pid handle was recorded at the claim, so nothing re-checks it` when it did not.
 
-A claim with **nothing observed on the pane and nothing recorded on the declaration** — a legacy
-declaration, or one the gate let through ungated — is no longer an `AWAITING-CI` row at all: `reconcile`
+A claim with **nothing backing it now** — nothing observed on the pane and nothing recorded (a legacy
+declaration, or one the gate let through ungated), a watcher observed at the claim that is no longer on the
+pane, or an attested pid that has exited — is no longer an `AWAITING-CI` row at all: `reconcile`
 disregards it, so the worker counts against the cap again and the ordinary detector decides the row — a quiet
 one ages into `IDLE`. The note says so. Writing `declare.json` by hand therefore buys nothing.
 
-So the row buys you less than it appears to. It does **not** promise the watcher is still alive, that it
-watches the right run, or that an attestation was true. A row sitting in `awaiting-ci` far longer than its CI
+So the row buys you less than it appears to. For a free-text attestation it does **not** promise the watcher
+is still alive, and for none does it promise the watcher watches the right run or that an attestation was
+true. A row sitting in `awaiting-ci` far longer than its CI
 takes is still yours to question — `brief` it before you assume either way. Do not read the phase as
 supervision; that assumption is what created this hazard in the first place.
 
