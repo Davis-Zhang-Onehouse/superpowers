@@ -3286,7 +3286,25 @@ def _refuse_a_session_on_another_server(ctx: Ctx, record) -> None:
 ABORT_RELEASE_WAIT_S = 2.0
 
 
-def _release_slot_or_name_the_partial_state(ctx: Ctx, record, child: Path) -> None:
+def _released_or_why_not(ctx: Ctx, record) -> str:
+    """Release `record.slot` as THIS record's lease, and say what happened, for the verb's `released` row.
+
+    `FB-89`. `abort` and `harvest --id` read the record, then kill, then release — and released with no
+    identity, so a slot re-claimed in between had the NEW claim freed: a live worker losing its slot, the
+    destructive double free `Pool.release`'s `expect_todo` exists to close. Passing the record's todo makes
+    the release a no-op on anybody else's claim, and the row then says whose claim it left alone rather than
+    announcing a release that did not happen. A `Refused` (a cwd holder) propagates to the caller.
+    """
+    if ctx.pool.release(record.slot, expect_todo=record.todo_id):
+        return record.slot
+    now = ctx.pool.lease(record.slot)
+    if now is not None and now.todo_id != record.todo_id:
+        return (f"no — slot {record.slot!r} was re-claimed by todo {now.todo_id!r} (effort "
+                f"{now.base_instant or 'untagged'}) after this call read it; that claim was left alone")
+    return f"no — slot {record.slot!r} was already free"
+
+
+def _release_slot_or_name_the_partial_state(ctx: Ctx, record, child: Path) -> str:
     """Release `record.slot`, waiting out a live cwd-holder once before giving up.
 
     `pool.release` refuses when a live pid still holds the slot as its cwd (`OBS-48`) — and by the time
@@ -3301,14 +3319,13 @@ def _release_slot_or_name_the_partial_state(ctx: Ctx, record, child: Path) -> No
     import time
 
     try:
-        ctx.pool.release(record.slot)
-        return
+        return _released_or_why_not(ctx, record)
     except Refused:
         pass
     sleep = ctx.sleep or time.sleep
     sleep(ABORT_RELEASE_WAIT_S)
     try:
-        ctx.pool.release(record.slot)
+        return _released_or_why_not(ctx, record)
     except Refused as exc:
         raise Refused(
             f"abort of {child.name} could not finish: the session was closed, but releasing slot "
@@ -3510,8 +3527,9 @@ def _do_abort(ctx: Ctx, parsed: Parsed) -> int:
     reason_path.write_text(json.dumps(body, indent=2, ensure_ascii=False))
     if record is not None and record.tmux:
         ctx.sessions_for(record).kill(record.tmux)
+    released = "(no slot)"
     if record is not None and record.slot:
-        _release_slot_or_name_the_partial_state(ctx, record, child)
+        released = _release_slot_or_name_the_partial_state(ctx, record, child)
     child.rename(target)                       # THE state transition, and the last irreversible step
     if record is not None:
         record.closed_at = ctx.now()
@@ -3520,14 +3538,14 @@ def _do_abort(ctx: Ctx, parsed: Parsed) -> int:
     #: `SI-51`, and the LAST thing this transaction does — see the docstring on why this one fallible step
     #: follows both irreversible steps.
     if coordinator is None:
-        released = ("(nothing claimed)" if not origin_problem
+        milestone_released = ("(nothing claimed)" if not origin_problem
                     else f"no — this instant's origin could not be read: {origin_problem}")
     else:
         try:
             Roadmap(coordinator).disown(milestone_id, expect_owner=claim_owner, reason=reason)
-            released = f"yes — {milestone_id} on {coordinator} is unowned again"
+            milestone_released = f"yes — {milestone_id} on {coordinator} is unowned again"
         except Exception as exc:  # noqa: BLE001 - the abort has already happened; never mask it
-            released = f"no — {_one_line(exc)}"
+            milestone_released = f"no — {_one_line(exc)}"
             print(f"WARNING: {child.name} was aborted, but milestone {milestone_id!r} on {coordinator} "
                   f"could NOT be released ({_one_line(exc)}). It stays claimed by an instant that no "
                   f"longer exists, so nothing may be dispatched onto it until the claim is cleared: "
@@ -3541,10 +3559,10 @@ def _do_abort(ctx: Ctx, parsed: Parsed) -> int:
         ("from", child.name), ("to", target.name), ("path", str(target)),
         ("reason", reason), ("recorded_in", str(target / ".fleet" / ABORT_FILE)),
         ("closed", (record.tmux if record is not None and record.tmux else "(no session)")),
-        ("released", (record.slot if record is not None and record.slot else "(no slot)")),
+        ("released", released),
         ("record", (record.todo_id if record is not None else "(none in this store)")),
         ("milestone", milestone_id or "(none)"),
-        ("milestone_released", released)])
+        ("milestone_released", milestone_released)])
     return EXIT_OK
 
 
@@ -3974,8 +3992,7 @@ def _do_harvest(ctx: Ctx, parsed: Parsed) -> int:
                 record.harvested_at = ctx.now()
                 record.closed_at = ctx.now()
                 ctx.store.write(record)
-                if record.slot:
-                    ctx.pool.release(record.slot)
+                released = _released_or_why_not(ctx, record) if record.slot else "(none)"
                 rows.append(Row(kind="harvested", subject=record.todo_id, severity=INFO,
                                 detail=(f"delta applied at {roadmap.instant.name} "
                                         f"({', '.join(applied) or 'none pending'})"
@@ -3984,7 +4001,7 @@ def _do_harvest(ctx: Ctx, parsed: Parsed) -> int:
                                         + (f", claim on {stranded.id} given back (status={stranded.status})"
                                            if stranded is not None else "")
                                         + f", session "
-                                        f"{record.tmux} closed, slot {record.slot or '(none)'} released, "
+                                        f"{record.tmux} closed, slot released: {released}, "
                                         f"record stamped at {record.harvested_at}; the row has left the "
                                         f"board (FD-5)")))
                 rows += _held_rows(record, roadmap, held)
