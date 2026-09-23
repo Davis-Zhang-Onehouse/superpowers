@@ -55,7 +55,7 @@ from pathlib import Path
 from typing import Callable, Optional
 
 from fleet.atomic import TMP_SUFFIX, atomic_write
-from fleet.errors import BadInput, NoCapacity, Refused
+from fleet.errors import BadInput, FleetError, NoCapacity, Refused
 
 _LEASE_BODY = "lease.json"
 
@@ -284,10 +284,17 @@ class Pool:
             return BadInput(f"{path} has no usable slot name (the slot name is the directory's basename)")
         return None
 
+    def unenroll_refusal(self, slot: str) -> "Optional[BadInput]":
+        """`unenroll`'s not-enrolled refusal, read-only, for its dry-run (`B10` sweep)."""
+        if not (self.enrolled / f"{slot}.json").is_file():
+            return BadInput(f"slot {slot!r} is not enrolled in {self.enrolled}")
+        return None
+
     def unenroll(self, slot: str, force: bool = False) -> None:
         record = self.enrolled / f"{slot}.json"
-        if not record.is_file():
-            raise BadInput(f"slot {slot!r} is not enrolled in {self.enrolled}")
+        refusal = self.unenroll_refusal(slot)
+        if refusal is not None:
+            raise refusal
         held = self.lease(slot)
         if held is not None and not force:
             # The refusal says an override EXISTS and never spells it as a python kwarg: this message is
@@ -515,10 +522,7 @@ class Pool:
         if slot is not None:
             candidates = [slot]
             if slot not in self.slots():
-                raise BadInput(
-                    f"slot {slot!r} is not enrolled; enrolled slots are {self.slots()}. A pool never "
-                    "claims a workspace nobody put in it."
-                )
+                raise self._not_enrolled_for_claim(slot)
         else:
             candidates = self.free_slots()
             if not candidates:
@@ -549,25 +553,44 @@ class Pool:
             atomic_write(claim_dir / _LEASE_BODY, json.dumps(held.to_json(), indent=2))
             return held
         if slot is not None:
-            existing = self.lease(slot)
-            if existing is not None:
-                raise NoCapacity(
-                    f"slot {slot!r} is already leased by todo {existing.todo_id!r} "
-                    f"(tmux {existing.tmux!r})")
-            # No body. Either a claim is being born microseconds from now, or a writer died between the
-            # body's write and its rename — and the shipped message called both "an unnamed claim", which
-            # named neither the condition nor anything the reader could do. `SI-7`: the second case used to
-            # be permanent, so this refusal was the last thing the operator saw before losing the slot.
-            why = dict(self.interrupted_claims(min_age_s=0.0)).get(slot)
-            if why is None:
-                raise NoCapacity(
-                    f"slot {slot!r} was claimed by another process while this call was choosing, and that "
-                    f"writer is still running. Nothing is wrong: try again, or let the pool pick a slot.")
-            raise NoCapacity(
-                f"slot {slot!r} holds an INTERRUPTED claim — the directory that wins the slot exists, but "
-                f"the lease body inside it was never finished, so there is no owner to name: {why}. "
-                f"`reap` clears it and says what it cleared.")
+            raise self._taken(slot)
         raise NoCapacity("every enrolled slot was taken while claiming; nothing free to hand out")
+
+    def claim_refusal(self, slot: str) -> "Optional[FleetError]":
+        """The refusal `claim(slot=slot)` would raise right now, or None. Read-only — `B10` sweep: the
+        dry-runs of `dispatch --slot` and `resume --slot` ask it instead of returning above the claim."""
+        if slot not in self.slots():
+            return self._not_enrolled_for_claim(slot)
+        if (self.leases / slot).exists():
+            return self._taken(slot)
+        return None
+
+    def _not_enrolled_for_claim(self, slot: str) -> BadInput:
+        return BadInput(
+            f"slot {slot!r} is not enrolled; enrolled slots are {self.slots()}. A pool never "
+            "claims a workspace nobody put in it."
+        )
+
+    def _taken(self, slot: str) -> NoCapacity:
+        """Why a named slot whose claim directory exists cannot be claimed — leased, mid-birth, or interrupted."""
+        existing = self.lease(slot)
+        if existing is not None:
+            return NoCapacity(
+                f"slot {slot!r} is already leased by todo {existing.todo_id!r} "
+                f"(tmux {existing.tmux!r})")
+        # No body. Either a claim is being born microseconds from now, or a writer died between the
+        # body's write and its rename — and the shipped message called both "an unnamed claim", which
+        # named neither the condition nor anything the reader could do. `SI-7`: the second case used to
+        # be permanent, so this refusal was the last thing the operator saw before losing the slot.
+        why = dict(self.interrupted_claims(min_age_s=0.0)).get(slot)
+        if why is None:
+            return NoCapacity(
+                f"slot {slot!r} was claimed by another process while this call was choosing, and that "
+                f"writer is still running. Nothing is wrong: try again, or let the pool pick a slot.")
+        return NoCapacity(
+            f"slot {slot!r} holds an INTERRUPTED claim — the directory that wins the slot exists, but "
+            f"the lease body inside it was never finished, so there is no owner to name: {why}. "
+            f"`reap` clears it and says what it cleared.")
 
     def cwd_holders(self, slot: str) -> list:
         """Live pids holding `slot`'s leased path as their cwd; `[]` when it is not leased. Read-only."""

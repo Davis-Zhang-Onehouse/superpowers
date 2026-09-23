@@ -264,9 +264,17 @@ class Declarations:
     def parked(self) -> str | None:
         return self._load().get("parked")
 
-    def park(self, question: str) -> None:
+    def park_refusal(self, question: str) -> "BadInput | None":
+        """`park`'s refusals, read-only, for its dry-run (`B10` sweep). An unreadable file raises, as `park` does."""
         if not question.strip():
-            raise BadInput("a parked decision needs a question; an empty park is not a park")
+            return BadInput("a parked decision needs a question; an empty park is not a park")
+        self._load()
+        return None
+
+    def park(self, question: str) -> None:
+        refusal = self.park_refusal(question)
+        if refusal is not None:
+            raise refusal
         data = self._load(); data["parked"] = question; self._save(data)
 
     def unpark(self) -> None:
