@@ -38,48 +38,72 @@ class LauncherBinaryCase(unittest.TestCase):
     def setUp(self):
         self.tmp = pathlib.Path(tempfile.mkdtemp(prefix="fleet-launchers-"))
         self.addCleanup(shutil.rmtree, self.tmp, True)
-        self.calls = self.tmp / "decoy.calls"
-        self.decoy = self.tmp / "decoy-fleet"
-        self.decoy.write_text(f'#!/usr/bin/env bash\nprintf "%s\\n" "$*" >> "{self.calls}"\nexit 0\n')
-        self.decoy.chmod(0o755)
+        self.ambient = self.decoy("ambient")
+        self.named = self.decoy("named")
         self.home = self.tmp / "home"
         self.root = self.home / "root"
         (self.root / ".fleet").mkdir(parents=True)
         (self.root / ".fleet-root").write_text('{"name": "launcherprobe"}\n')
         (self.tmp / "rel" / "fleet-v9.9.9" / ".release" / "evidence").mkdir(parents=True)
 
+    def decoy(self, name):
+        """A fake `fleet` that records its argv and prints nothing. Returns (binary, calls file)."""
+        calls = self.tmp / f"{name}.calls"
+        binary = self.tmp / f"{name}-fleet"
+        binary.write_text(f'#!/usr/bin/env bash\nprintf "%s\\n" "$*" >> "{calls}"\nexit 0\n')
+        binary.chmod(0o755)
+        return binary, calls
+
     def run_launcher(self, argv, **extra):
-        """Run one launcher from the private root. The environment is BUILT, not inherited, so nothing the
-        person running the suite exported (a dispatched session's FLEET_ROOT, FLEET_BIN …) can reach it."""
+        """Run one launcher from the private root and return `{decoy name: argv lines it recorded}`. The
+        environment is BUILT, not inherited, so nothing the person running the suite exported (a dispatched
+        session's FLEET_ROOT, FLEET_BIN …) can reach it."""
         env = {"PATH": os.environ.get("PATH", "/usr/bin:/bin"), "HOME": str(self.home),
                "FLEET_HOME": str(self.root / ".fleet"), "FLEET_RELEASES": str(self.tmp / "rel"),
                "FLEET_TMUX_SOCKET": "itfleet-launchers-nobody", "RELEASE_GATE_POLL": "0.05",
-               "TMUX_TMPDIR": str(self.tmp)}
+               "TMUX_TMPDIR": str(self.tmp),
+               # preflight's own seam for the socket directories it scans; its default globs every
+               # /tmp/tmux-*/ server on the box, which a test has no business listing
+               "RELEASE_PREFLIGHT_TMUX_DIRS": str(self.tmp) + "/"}
         env.update(extra)
-        if self.calls.exists():
-            self.calls.unlink()
+        for _, calls in (self.ambient, self.named):
+            if calls.exists():
+                calls.unlink()
         argv = [argv[0], str(REPO / argv[1]), *argv[2:]]
         subprocess.run(argv, cwd=self.root, env=env, stdin=subprocess.DEVNULL,
                        stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, timeout=60)
-        return self.calls.read_text() if self.calls.exists() else ""
+        return {name: calls.read_text() if calls.exists() else ""
+                for name, (_, calls) in (("ambient", self.ambient), ("named", self.named))}
 
     def test_an_ambient_fleet_bin_is_never_executed(self):
+        """Both variables set, as in a dispatched session running a test: the ambient decoy must not run,
+        and the named one must. The second half is the positive control. Without it this case would also
+        pass for a launcher whose driven path never reaches a fleet call at all. It also means no case here
+        ever runs a REAL fleet: for `release-gate.sh` that would be a detached `release-verify`."""
         for label, argv in LAUNCHERS:
             with self.subTest(launcher=label):
-                ran = self.run_launcher(argv, FLEET_BIN=str(self.decoy))
-                self.assertEqual(ran, "", f"{label} executed the ambient FLEET_BIN ({ran.strip()!r}); a "
-                                          f"dispatched session's FLEET_BIN names the dispatcher's fleet, not "
-                                          f"the one this launcher ships beside")
+                ran = self.run_launcher(argv, FLEET_BIN=str(self.ambient[0]),
+                                        FLEET_LAUNCHER_TEST_BIN=str(self.named[0]))
+                self.assertEqual(ran["ambient"], "",
+                                 f"{label} executed the ambient FLEET_BIN ({ran['ambient'].strip()!r}); a "
+                                 f"dispatched session's FLEET_BIN names the dispatcher's fleet, not the one "
+                                 f"this launcher ships beside")
+                self.assertNotEqual(ran["named"], "",
+                                    f"{label} never ran FLEET_LAUNCHER_TEST_BIN, so this driven path does "
+                                    f"not reach a fleet call and the assertion above is vacuous")
 
-    def test_the_named_seam_still_selects_the_binary(self):
-        """The positive control. Without it the case above would also pass for a launcher whose driven
-        path never reaches a fleet call at all, and it would then prove nothing."""
+    def test_with_only_an_ambient_fleet_bin_the_sibling_binary_acts(self):
+        """The dispatched shape exactly: `FLEET_BIN` set, no seam. The launcher runs `$REPO/bin/fleet`
+        against this private store with read-only verbs. `release-gate.sh` is left out on purpose: its
+        sibling binary would launch a real, detached `release-verify`. Its resolution is covered by the
+        case above and by the `FLEET=` line its launch message now prints."""
         for label, argv in LAUNCHERS:
+            if label == "release-gate.sh":
+                continue
             with self.subTest(launcher=label):
-                ran = self.run_launcher(argv, FLEET_LAUNCHER_TEST_BIN=str(self.decoy),
-                                        FLEET_BIN="/nonexistent/ambient-fleet")
-                self.assertNotEqual(ran, "", f"{label} never ran FLEET_LAUNCHER_TEST_BIN, so this driven "
-                                             f"path does not reach a fleet call and the case above is vacuous")
+                ran = self.run_launcher(argv, FLEET_BIN=str(self.ambient[0]))
+                self.assertEqual(ran["ambient"], "",
+                                 f"{label} executed the ambient FLEET_BIN ({ran['ambient'].strip()!r})")
 
 
 def tracked_files(prefixes):
