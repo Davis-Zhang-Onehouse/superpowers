@@ -979,7 +979,9 @@ def _child_or_why(ctx: Ctx, record: Record):
     over every record must report the one it could not place as that record's own row, not die on it."""
     try:
         return _child_of(ctx, record), None
-    except FleetError as exc:
+    except (FleetError, OSError) as exc:
+        #: RV-26. OSError too: `resolve` lists the parent when the recorded path is gone, and a folder this
+        #: user cannot read is a fact about one record, not a reason to stop the sweep.
         return None, _one_line(exc)
 
 
@@ -1272,7 +1274,15 @@ def _do_seed_check(ctx: Ctx, parsed: Parsed) -> int:
             unreadable.append((session, f"a delivery record exists and could not be read: "
                                         f"{_one_line(exc)}"))
             continue
-        verdict = seedcheck.check_session(session, pid, seed_file.read_text(),
+        try:
+            rendered = seed_file.read_text()
+        except (OSError, UnicodeDecodeError) as exc:
+            #: RV-26. One seed that cannot be read or decoded is this session's row, never a traceback.
+            unreadable.append((session, f"the rendered seed at {seed_file} could not be read "
+                                        f"({_one_line(exc)}). This is NOT a pass — it is a check that "
+                                        f"could not run"))
+            continue
+        verdict = seedcheck.check_session(session, pid, rendered,
                                           seedcheck.default_probes(record.runtime), delivery=delivery)
         verdicts.append(verdict)
         #: Only FOREIGN is a VIOLATION. NOT-DELIVERED is reported at INFO because `fleet` renders the seed
