@@ -335,6 +335,13 @@ class TestANonUtf8ArgvIsStillAWorker(unittest.TestCase):
     def test_a_plain_argv_is_a_worker_control(self):
         self.assertEqual(self.probe(b'claude\0--note\0cafe\0'), (True, 'claude'))
 
+    def test_a_comm_that_is_not_utf8_answers_rather_than_raising(self):
+        """The neighbour: `comm_of` read strictly and caught only OSError. A non-UTF-8 comm is not claude — and
+        says so, instead of raising out of the delivery check."""
+        identity, comm = self.probe(b'claude\0', comm=b'caf\xe9\n')
+        self.assertFalse(identity)
+        self.assertEqual(comm, 'caf\udce9')
+
 
 class TestAnAttestedDelivery(unittest.TestCase):
     """`SI-55`. The positive state was reachable by exactly one route — the briefing appearing in
