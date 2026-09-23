@@ -1448,19 +1448,21 @@ def _do_runtime(ctx: Ctx, parsed: Parsed) -> int:
             blockers = runtime_blockers(ctx)
             if blockers:
                 raise Refused('Runtime switch requires a completed fleet: ' + '; '.join(blockers),
-                              #: RV-30 / RV-35. Measured: `harvest` stamps `harvested_at` once the worker has a
-                              #: review round — for a completed worker, an aborted one and a closed unreviewed
-                              #: one alike (closure 2 ran review -> harvest; rc 0, switch rc 0). On a folder that
-                              #: resolves to nothing it exits 2, and no other verb clears that record (FB-92).
-                              clears_when='nothing above remains: each named record is HARVESTED — `fleet '
-                                          'harvest --id <todo>` for a completed, reviewed worker; for an aborted '
-                                          'or closed-but-unreviewed record whose folder exists, `fleet review '
-                                          '--instant <its folder> --scope all --verdict READY` records the review '
-                                          'harvest requires, then `fleet harvest --id <todo>` (a closed record '
-                                          'still counts until then). A record whose folder is gone cannot be '
-                                          'harvested and no verb clears it today — a known gap (FB-92). Each held '
-                                          'lease is released by that harvest or by `fleet reap`, and each named '
-                                          'process has exited; then the same `fleet runtime --set` is re-run',
+                              #: `B11`, coordinator D-31. Three closures found this route wrong for some record
+                              #: state (RV-30, RV-35, RV-37): the chain that clears a record depends on its state
+                              #: (abort if -inflight-, a final report if dispatched for a milestone, review,
+                              #: harvest), and designing it is FB-92's. So the text names a route ONLY where it is
+                              #: measured to run — a `-complete-` record (review if unreviewed, then harvest) —
+                              #: and says, for every other state, that no single verb clears it today.
+                              clears_when='nothing above remains: each named record is HARVESTED. For a record '
+                                          'whose folder is `-complete-`, `fleet harvest --id <todo>` does it — '
+                                          'after `fleet review --instant <its folder> --scope all --verdict READY` '
+                                          'if it has no review round yet, and after its final report if it was '
+                                          'dispatched for a milestone. For a record in any other state (its '
+                                          'folder still -inflight-, aborted, or gone) no single verb clears it '
+                                          'today — a known gap (FB-92). Each held lease is released by that '
+                                          'harvest or by `fleet reap`, and each named process has exited; then '
+                                          'the same `fleet runtime --set` is re-run',
                               clears_who='the coordinator of each named record, or the operator')
             if not ctx.dry_run:
                 write_runtime(ctx.home, requested)
