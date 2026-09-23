@@ -1444,9 +1444,11 @@ def _do_runtime(ctx: Ctx, parsed: Parsed) -> int:
             blockers = runtime_blockers(ctx)
             if blockers:
                 raise Refused('Runtime switch requires a completed fleet: ' + '; '.join(blockers),
-                              clears_when='every worker named above is harvested or closed (`fleet board` '
-                                          'lists them), then the same `fleet runtime --set` is re-run',
-                              clears_who='the coordinator of each named worker')
+                              clears_when='nothing above remains: each named record is HARVESTED (a closed '
+                                          'record still counts), each held lease is released by that '
+                                          'harvest or by `fleet reap`, and each named process has exited; '
+                                          'then the same `fleet runtime --set` is re-run',
+                              clears_who='the coordinator of each named record, or the operator')
             if not ctx.dry_run:
                 write_runtime(ctx.home, requested)
                 current, source = read_runtime(ctx.home)
