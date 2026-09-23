@@ -30,6 +30,7 @@ import json
 import time
 from dataclasses import dataclass, field
 from pathlib import Path
+from typing import Optional
 
 from fleet import EXIT_ATTENTION, EXIT_BAD_INPUT, EXIT_OK
 from fleet.atomic import atomic_write, held_for_update
@@ -205,19 +206,26 @@ class Review:
             )
         return [Round.from_json(entry) for entry in data.get("rounds", [])]
 
-    def add_round(self, scope: str, verdict: str, findings: list, heads=None) -> Round:
+    def round_refusal(self, scope: str, verdict: str, findings) -> "Optional[BadInput]":
+        """`add_round`'s input refusals, read-only, for `review --dry-run` (`B10` sweep)."""
         if scope not in SCOPES:
-            raise BadInput(f"scope={scope!r} is outside {SCOPES}; a scope nobody defined can neither "
-                           "satisfy nor fail a gate, so it is refused rather than coerced.")
+            return BadInput(f"scope={scope!r} is outside {SCOPES}; a scope nobody defined can neither "
+                            "satisfy nor fail a gate, so it is refused rather than coerced.")
         if verdict not in VERDICTS:
-            raise BadInput(f"verdict={verdict!r} is outside {VERDICTS}. Case and spelling are part of "
-                           "the domain: this value is compared, never parsed out of prose.")
-        findings = list(findings)
+            return BadInput(f"verdict={verdict!r} is outside {VERDICTS}. Case and spelling are part of "
+                            "the domain: this value is compared, never parsed out of prose.")
         ids = [f.id for f in findings]
         if len(set(ids)) != len(ids):
-            raise BadInput(f"round findings repeat an id within one round: {sorted(ids)}. A later "
-                           "ROUND restates a finding to change its status; a round does not argue "
-                           "with itself.")
+            return BadInput(f"round findings repeat an id within one round: {sorted(ids)}. A later "
+                            "ROUND restates a finding to change its status; a round does not argue "
+                            "with itself.")
+        return None
+
+    def add_round(self, scope: str, verdict: str, findings: list, heads=None) -> Round:
+        findings = list(findings)
+        refusal = self.round_refusal(scope, verdict, findings)
+        if refusal is not None:
+            raise refusal
         # FI-30c: read, number, append and write as ONE step. The round NUMBER is derived from the
         # existing ledger, so this was worse than a lost append — two concurrent rounds each read n
         # rounds, each called itself n+1, and the survivor's numbering silently skipped. Measured before

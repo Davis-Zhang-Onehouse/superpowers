@@ -90,7 +90,9 @@ from fleet import origin as origin_mod
 from fleet import evidence as evidence_mod
 from fleet.origin import Origin
 from fleet.roadmap import (ATTENTION, COORDINATOR, RETIRED, SUPERSEDED, TERMINAL, Milestone,
-                           Proposal, Roadmap, _check_evidence, last_index)
+                           Proposal, Roadmap, _check_evidence, _check_status,
+                           _proposer as roadmap_proposer,
+                           last_index)
 from fleet.session import (TMUX_SOCKET_ENV, SessionLayer, default_probes,
                            plain as pane_plain)
 from fleet.store import ATTESTED_PREFIX, Declarations, Record, Store
@@ -1079,14 +1081,18 @@ def _do_init(ctx: Ctx, parsed: Parsed) -> int:
                            title=parsed.get("name"))
     target = ctx.instants_dir / name.format()
     register = target / REGISTER_NAME
+    #: `B10` sweep. Both refusals the real call can meet, asked before it creates anything — and by the
+    #: dry-run, which used to exit 0 above them. An unreadable watched-source registry used to be met only
+    #: at `register`, AFTER the instant had been bootstrapped: an instant created and left unwatched.
+    if target.exists():
+        raise BadInput(f"{target} already exists; `init` never overwrites an instant")
+    ctx.harvest.check_readable()
     if ctx.dry_run:
         _emit(ctx, "init", [("dry-run", "nothing was created and nothing was registered"),
                             ("would-create", str(target)),
                             ("would-register", str(register)),
                             ("instant", name.format())])
         return EXIT_OK
-    if target.exists():
-        raise BadInput(f"{target} already exists; `init` never overwrites an instant")
     created = layout.bootstrap(target, name)
     source = ctx.harvest.register(str(target), str(register))
     rows = [("instant", name.format()), ("path", str(target)), ("created", str(len(created))),
@@ -1539,6 +1545,46 @@ def _do_revive(ctx: Ctx, parsed: Parsed) -> int:
     return EXIT_OK
 
 
+def _dispatch_collision(ctx: Ctx, base, optype, title):
+    """-> (name, child, todo_id, tmux) for this dispatch, or the `SI-20` collision refusal. Read-only, and
+    asked by the dry-run as well as the real call (`B10` sweep)."""
+    name = InstantName.new(base=base, now=_stamp(ctx.now()), optype=optype, title=title)
+    child = ctx.instants_dir / name.format()
+    todo_id, tmux = f"{name.name}-{name.curr}", f"dt-{name.name}"
+    # `SI-20`, and it is refused BEFORE the claim so there is nothing to roll back.
+    #
+    # The child path, the `todo_id` and the tmux name all derive from `(base, MMDDHHMM, camel(title))` and
+    # nothing else — the non-uniqueness `identity.stable_key`'s own docstring records as `OBS-14`. Two
+    # dispatches of the same title in one UTC minute therefore collide, and measured with a LIVE worker in
+    # the first slot the second one:
+    #   * overwrote `CHARTER.md` and `.fleet/seed.txt` unconditionally, destroying the running worker's own
+    #     charter edits — `layout.bootstrap` is non-clobbering, but the two writes after it were not;
+    #   * overwrote the record by `todo_id`, so the surviving record named the SECOND slot with
+    #     `launched_at=null` while the FIRST slot was the one actually held;
+    #   * then failed at `sessions.start` on the duplicate session name and rolled back only its OWN lease.
+    # Net: `board` — "every subject holding a slot" — showed ZERO rows while a live pane held a slot, and
+    # that slot was held by a lease no record named. None of it appeared in the rollback sentence.
+    #
+    # A collision is refused rather than uniquified: silently appending a suffix would hand the operator a
+    # second instant they did not ask for and cannot distinguish, which is a worse outcome than being told
+    # to wait a minute or change the title. `resolve` is not used here — the question is not "does some
+    # instant of this identity exist in any state" but the narrower "would this dispatch write over
+    # something", so the exact path and the exact `todo_id` are what get checked.
+    if child.exists():
+        raise Refused(
+            f"a dispatch this minute already produced {child}, so this one would write over it: the child "
+            f"path, the todo id and the session name all derive from (base, minute, title) and nothing "
+            f"else. Refused before anything was claimed. Change the title, or wait for the next minute.",
+            clears_when=f"{child} no longer exists, or the title or minute differs")
+    if any(r.todo_id == todo_id for r in ctx.store.all()):
+        raise Refused(
+            f"a record already exists for todo {todo_id!r}, and a dispatch writes records by todo id — so "
+            f"this one would overwrite the record of work that may still be running. Refused before "
+            f"anything was claimed. Change the title, or wait for the next minute.",
+            clears_when=f"no record is stored under todo {todo_id!r}")
+    return name, child, todo_id, tmux
+
+
 def _do_dispatch(ctx: Ctx, parsed: Parsed) -> int:
     """Gates → claim → **gates again, holding the claim** → render → write the tree → record → launch.
 
@@ -1659,6 +1705,14 @@ def _do_dispatch(ctx: Ctx, parsed: Parsed) -> int:
         candidate_slot = parsed.get('slot') or ctx.pool.free_slots()[0]
         settings = ctx.launch_settings(ctx.sessions.runtime, ctx.pool.slot_path(candidate_slot))
 
+    if ctx.dry_run and all(verdict.allowed for verdict in verdicts):
+        #: `B10` sweep. The real call's own refusals past the guards, asked here too: the same-minute
+        #: collision and a named `--slot` the pool would refuse. They used to sit below this return.
+        _dispatch_collision(ctx, base, optype, title)
+        if parsed.get("slot"):
+            refusal = ctx.pool.claim_refusal(parsed.get("slot"))
+            if refusal is not None:
+                raise refusal
     if ctx.dry_run:
         rows = [("dry-run", "every gate evaluated; nothing was claimed, created or started")]
         rows += [("coordinator", str(coordinator) if coordinator else
@@ -1676,42 +1730,7 @@ def _do_dispatch(ctx: Ctx, parsed: Parsed) -> int:
 
     guards.enforce_all(gctx, "dispatch")
     assert settings is not None
-
-    name = InstantName.new(base=base, now=_stamp(ctx.now()), optype=optype, title=title)
-    child = ctx.instants_dir / name.format()
-    todo_id, tmux = f"{name.name}-{name.curr}", f"dt-{name.name}"
-
-    # `SI-20`, and it is refused BEFORE the claim so there is nothing to roll back.
-    #
-    # The child path, the `todo_id` and the tmux name all derive from `(base, MMDDHHMM, camel(title))` and
-    # nothing else — the non-uniqueness `identity.stable_key`'s own docstring records as `OBS-14`. Two
-    # dispatches of the same title in one UTC minute therefore collide, and measured with a LIVE worker in
-    # the first slot the second one:
-    #   * overwrote `CHARTER.md` and `.fleet/seed.txt` unconditionally, destroying the running worker's own
-    #     charter edits — `layout.bootstrap` is non-clobbering, but the two writes after it were not;
-    #   * overwrote the record by `todo_id`, so the surviving record named the SECOND slot with
-    #     `launched_at=null` while the FIRST slot was the one actually held;
-    #   * then failed at `sessions.start` on the duplicate session name and rolled back only its OWN lease.
-    # Net: `board` — "every subject holding a slot" — showed ZERO rows while a live pane held a slot, and
-    # that slot was held by a lease no record named. None of it appeared in the rollback sentence.
-    #
-    # A collision is refused rather than uniquified: silently appending a suffix would hand the operator a
-    # second instant they did not ask for and cannot distinguish, which is a worse outcome than being told
-    # to wait a minute or change the title. `resolve` is not used here — the question is not "does some
-    # instant of this identity exist in any state" but the narrower "would this dispatch write over
-    # something", so the exact path and the exact `todo_id` are what get checked.
-    if child.exists():
-        raise Refused(
-            f"a dispatch this minute already produced {child}, so this one would write over it: the child "
-            f"path, the todo id and the session name all derive from (base, minute, title) and nothing "
-            f"else. Refused before anything was claimed. Change the title, or wait for the next minute.",
-            clears_when=f"{child} no longer exists, or the title or minute differs")
-    if any(r.todo_id == todo_id for r in ctx.store.all()):
-        raise Refused(
-            f"a record already exists for todo {todo_id!r}, and a dispatch writes records by todo id — so "
-            f"this one would overwrite the record of work that may still be running. Refused before "
-            f"anything was claimed. Change the title, or wait for the next minute.",
-            clears_when=f"no record is stored under todo {todo_id!r}")
+    name, child, todo_id, tmux = _dispatch_collision(ctx, base, optype, title)
 
     workspace = Workspace(ctx.home, git=ctx.git)
     claimed_milestone = None
@@ -1887,6 +1906,12 @@ def _do_resume(ctx: Ctx, parsed: Parsed) -> int:
     if existing is not None and existing.runtime != ctx.sessions.runtime:
         raise Refused('Recorded runtime differs from the fleet selection; resolve the existing record first')
 
+    #: `B10` sweep. The claim below is the first write; its refusal is asked before the dry-run returns.
+    asked_slot = existing.slot if (existing is not None and existing.slot) else parsed.get("slot")
+    if asked_slot and ctx.pool.lease(asked_slot) is None:
+        refusal = ctx.pool.claim_refusal(asked_slot)
+        if refusal is not None:
+            raise refusal
     if ctx.dry_run:
         rows = [("dry-run", "nothing was adopted, claimed or written"),
                 ("instant", str(child)), ("todo_id", todo_id),
@@ -2114,9 +2139,9 @@ def _do_declare(ctx: Ctx, parsed: Parsed) -> int:
             f"cap. Declare a real phase, or leave the instant undeclared.")
     #: `FI-255`/`i39`. Gated BEFORE `--dry-run` returns, so `--dry-run` answers the question a caller asks
     #: it — "would this be accepted?" — rather than reporting `would-declare` on a claim the real call
-    #: refuses. `--dry-run` disagreeing with the real call is a documented trap of this CLI already
-    #: (`fleet milestone` exits 0 on a dry run where the real call exits 2); reproducing it in a NEW gate,
-    #: whose whole purpose is to be consulted before acting, would be inexcusable.
+    #: refuses. `--dry-run` disagreeing with the real call was a documented trap of this CLI (`fleet
+    #: milestone` exited 0 on a dry run where the real call exited 2, until the `B10` sweep); reproducing it
+    #: in a gate whose whole purpose is to be consulted before acting would be inexcusable.
     watchers, ungated_because, pid_handle, attestation_rows = "", "", None, []
     if phase == PHASE_AWAITING_CI:
         watchers, ungated_because = _watcher_for_claim(ctx, child, parsed.get("watcher"))
@@ -2133,6 +2158,10 @@ def _do_declare(ctx: Ctx, parsed: Parsed) -> int:
             f"--watcher attests to a watcher, and only `--phase awaiting-ci` is gated on one. Declaring "
             f"{phase!r} needs no attestation and nothing would read it, so it is refused rather than "
             f"stored where it would look like a fact. Drop the flag.")
+    Declarations(child).phase()          # `B10` sweep: an unreadable declarations file refuses here too
+    #: `RV-18`. The review ledger is read for an awaiting-ci claim, and an unreadable one refuses — so it is
+    #: read HERE, before the dry-run's return and before the writes below, not after them.
+    all_rounds = Review(child, now=ctx.now).rounds() if phase == PHASE_AWAITING_CI else []
     if ctx.dry_run:
         _emit(ctx, "declare", [("dry-run", "nothing was declared"), ("would-declare", phase),
                                ("asked", asked)]
@@ -2158,7 +2187,6 @@ def _do_declare(ctx: Ctx, parsed: Parsed) -> int:
     #: worker converges its review BEFORE the next push rather than finding out at the next `propose`).
     review_row = []
     if phase == PHASE_AWAITING_CI:
-        all_rounds = Review(child, now=ctx.now).rounds()
         measured = [r for r in all_rounds if r.heads]
         current = _reviewed_heads(ctx, child)
         #: Three distinguishable states, not two. `not measured` used to stand in for BOTH "zero rounds
@@ -2190,6 +2218,9 @@ def _do_declare(ctx: Ctx, parsed: Parsed) -> int:
 def _do_park(ctx: Ctx, parsed: Parsed) -> int:
     child = _instant(ctx, parsed)
     question = parsed.get("question")
+    refusal = Declarations(child).park_refusal(question)            # `B10` sweep: both paths
+    if refusal is not None:
+        raise refusal
     if ctx.dry_run:
         _emit(ctx, "park", [("dry-run", "nothing was parked"), ("would-park", question)])
         return EXIT_OK
@@ -2696,6 +2727,9 @@ def _do_milestone(ctx: Ctx, parsed: Parsed) -> int:
                   status=parsed.get("status") or "blocked", deps=deps,
                   evidence=evidence, owner=parsed.get("owner"))
     if ctx.dry_run:
+        refusal = roadmap.add_refusal(m)                                   # `B10` sweep
+        if refusal is not None:
+            raise refusal
         _emit(ctx, "milestone", [("dry-run", "the roadmap was not written"), ("id", m.id),
                                  ("title", m.title), ("status", m.status),
                                  ("deps", ", ".join(m.deps) or "(none)"), ("roadmap", str(roadmap.path))])
@@ -2779,12 +2813,16 @@ def _do_propose(ctx: Ctx, parsed: Parsed) -> int:
     extra = [("dispatched-for", dispatched_for)] if dispatched_for else []
     if ctx.dry_run:
         #: `B03`. The dry run judges the evidence the way the real run does — an item that does not resolve
-        #: against the proposer is refused here too — and prints the form that would be stored.
+        #: against the proposer is refused here too — and prints the form that would be stored. `B10` sweep:
+        #: and the status domain and the inbox's readability, in the order `Roadmap.propose` asks them:
+        #: status, then the evidence admitted, then the inbox (read under its lock there) — `RV-28`.
+        _check_status(status)
+        admitted = evidence_mod.admit(_check_evidence(evidence, milestone), proposer)
+        roadmap.proposals()
         _emit(ctx, "propose", [("dry-run", "no proposal was written"), ("milestone", milestone),
                                ("status", status), ("proposer", str(proposer)),
                                ("roadmap", str(destination)), ("destination-chosen", chosen),
-                               ("evidence", ", ".join(evidence_mod.admit(
-                                   _check_evidence(evidence, milestone), proposer)))] + extra)
+                               ("evidence", ", ".join(admitted))] + extra)
         return EXIT_OK
     proposal = roadmap.propose(proposer, milestone, status, evidence, note=parsed.get("note") or "")
     _emit(ctx, "propose", [("milestone", proposal.milestone), ("status", proposal.status),
@@ -2830,7 +2868,8 @@ def _live_session_warning(ctx: Ctx, proposal) -> str:
         return ""
     if not ctx.sessions_for(record).alive(record.tmux):
         return ""
-    return (f"{proposal.instant}'s session ({record.tmux}) reads ALIVE right now: this {proposal.status!r} "
+    #: `FB-71`. Where the proposer is NOW: a `done` proposal is usually followed by the worker's own rename.
+    return (f"{roadmap_proposer(proposal.instant)}'s session ({record.tmux}) reads ALIVE right now: this {proposal.status!r} "
             f"proposal may be describing a worker that has since moved past it. Not a refusal — a "
             f"finished worker may leave its pane open — and not proof either way: this reads the same "
             f"liveness signal pane-guard does, which is not fully trustworthy on its own (see "
@@ -2862,6 +2901,9 @@ def _do_apply(ctx: Ctx, parsed: Parsed) -> int:
     left = ([("pending-left", f"{len(newer)} newer row(s) for {milestone} stay pending — "
                               + "; ".join(_row_named(p) for p in newer))] if newer else [])
     if ctx.dry_run:
+        #: `B10` sweep. `Roadmap.apply` re-validates the stored row (it may be hand-built or legacy).
+        _check_status(chosen.status)
+        _check_evidence(chosen.evidence, chosen.milestone)
         rows = [("dry-run", "the roadmap was not written"), ("would-apply", _row_named(chosen))]
         rows += [("would-supersede", _row_named(p)) for p in earlier]
         _emit(ctx, "apply", rows + left)
@@ -2926,6 +2968,10 @@ def _do_review(ctx: Ctx, parsed: Parsed) -> int:
     verdict_asked = parsed.get("verdict")
     findings = [_finding_of(text) for text in parsed.all("finding")]
     rows = []
+    if verdict_asked and ctx.dry_run:
+        refusal = review.round_refusal(parsed.get("scope", "all"), verdict_asked, findings)   # `B10` sweep
+        if refusal is not None:
+            raise refusal
     if verdict_asked and not ctx.dry_run:
         made = review.add_round(parsed.get("scope", "all"), verdict_asked, findings,
                                 heads=_reviewed_heads(ctx, child))
@@ -2968,8 +3014,9 @@ def _do_review(ctx: Ctx, parsed: Parsed) -> int:
     #: Found by a real dispatched worker in `§P`, which is the only place it could have been found: every
     #: hermetic test asserted the recorded path.
     #:
-    #: The findings were parsed above (`_finding_of` refuses a malformed one at exit 2 before this point), so
-    #: reaching here on a dry run means the input IS valid and the round WOULD be recorded.
+    #: The findings were parsed above (`_finding_of` refuses a malformed one at exit 2 before this point) and
+    #: the round's own refusals were asked (`B10` sweep), so reaching here on a dry run means the input IS
+    #: valid and the round WOULD be recorded.
     if ctx.dry_run and verdict_asked:
         return EXIT_OK
     return exit_code_for(gate)
@@ -2998,12 +3045,12 @@ def _do_complete(ctx: Ctx, parsed: Parsed) -> int:
                                 ("clears_when", gate.clears_when or ""),
                                 ("clears_who", gate.clears_who or "")])
         return exit_code_for(gate)
+    if target.exists():                            # `B10` sweep: above the dry-run's return, not below it
+        raise BadInput(f"{target} already exists; an instant may hold only one state (OBS-14)")
     if ctx.dry_run:
         _emit(ctx, "complete", [("dry-run", "the folder was not renamed"), ("gate", gate.guard),
                                 ("allowed", "true"), ("would-rename", f"{child.name} -> {target.name}")])
         return EXIT_OK
-    if target.exists():
-        raise BadInput(f"{target} already exists; an instant may hold only one state (OBS-14)")
     child.rename(target)
     _emit(ctx, "complete", [("gate", gate.guard), ("from", child.name), ("to", target.name),
                             ("path", str(target))])
@@ -3113,6 +3160,74 @@ def _release_slot_or_name_the_partial_state(ctx: Ctx, record, child: Path) -> No
         ) from exc
 
 
+def _slot_gate_before_kill(ctx: Ctx, record, child: Path, verb: str) -> str:
+    """`B10`. The `OBS-48` cwd-holder gate, asked BEFORE anything is closed, released, renamed or written —
+    by the real `abort`/`harvest --id` and by its `--dry-run` alike, so the two cannot disagree about the
+    same argv. Both verbs kill the session and then release its slot; both used to meet this refusal only
+    after the kill (`harvest` after applying the delta and stamping the record too).
+
+    The gate `release` evaluates is only decidable for holders the abort will not end itself. A dispatched
+    worker's pane sits in its slot, so every ordinary abort HAS holders — the session's own processes, which
+    the kill ends; those are spared. A holder outside that tree survives the kill, so the release would
+    refuse after the session was already dead: that one is refused HERE, before the kill, after the same
+    bounded wait `_release_slot_or_name_the_partial_state` gives it. A dead session spares nothing.
+
+    Returns a note (a row for the dry-run) when the holders could not be attributed — a live session
+    whose pane pids or parent walk cannot be read — because refusing on a probe gap would block every abort,
+    and passing silently would be the dry-run claiming what it did not measure. The real call then goes on
+    to its own post-kill release, which differs by verb (`RV-22`): `abort` waits once more and names the
+    partial state (`_release_slot_or_name_the_partial_state`); `harvest --id` calls `pool.release` with no
+    wait, after it has already applied, killed and stamped, so a holder that survives the kill there still
+    refuses from a partial state (the one `reap` recovers).
+    """
+    import time
+
+    if record is None or not record.slot:
+        return ""
+    layer = ctx.sessions_for(record)
+    live = bool(record.tmux) and layer.alive(record.tmux)
+    #: `RV-33`. What the real call then does is the verb's own, and the two differ (see the docstring).
+    after_an_undecided_gate = (
+        "the real call closes the session, waits once more, releases, and names the partial state if a "
+        "holder remains" if verb == "abort" else
+        "the real call applies, closes the session and stamps the record, then releases with no wait: a "
+        "holder that survives the kill refuses there, from that partial state (`reap` recovers the slot)")
+
+    def refusal():
+        pids = ctx.pool.cwd_holders(record.slot)
+        if not pids:
+            return None, ""
+        own = layer.own_processes(record.tmux, pids) if live else set()
+        if own is None:
+            return None, (f"pid(s) {', '.join(str(p) for p in pids)} hold slot {record.slot!r} as cwd, and "
+                          f"whether closing session {record.tmux!r} ends them could not be observed (no pane "
+                          f"pid or parent walk), so the cwd-holder gate could not be decided before the "
+                          f"kill; {after_an_undecided_gate}")
+        #: `RV-21`. The same scan `own` was computed from — a second one would read a newborn child as foreign.
+        return ctx.pool.release_refusal(record.slot, spare=own, holders=pids), ""
+
+    found, undecided = refusal()
+    if found is None:
+        return undecided
+    (ctx.sleep or time.sleep)(ABORT_RELEASE_WAIT_S)
+    found, undecided = refusal()
+    if found is None:
+        return undecided
+    why = (f"Those pid(s) are not processes of session {record.tmux!r}, so closing it would not free the "
+           f"slot." if live else
+           f"Session {record.tmux or '(none)'} is not running, so nothing this abort closes would free "
+           f"the slot.")
+    raise Refused(
+        f"{verb} of {child.name} refused before doing anything: {found} {why} They were given "
+        f"{ABORT_RELEASE_WAIT_S}s to exit. Nothing was closed, released, renamed, applied or written — "
+        f"session {record.tmux or '(none)'} {'still running' if live else 'not running'}, slot "
+        f"{record.slot!r} still leased, {child} unchanged, the roadmap untouched. Re-run the identical "
+        f"`{verb}` command once the pid(s) named above exit.",
+        clears_when=found.clears_when,
+        clears_who=found.clears_who,
+    )
+
+
 def _abort_inputs(ctx, parsed):
     child = _instant(ctx, parsed)
     name = InstantName.parse(child.name)
@@ -3161,6 +3276,12 @@ def _do_abort(ctx: Ctx, parsed: Parsed) -> int:
     step this call could not. The rename is never reached on that path, which is what keeps the re-run
     possible: a folder already renamed `-abort-` would make the documented recovery refuse too.
 
+    **`B10`: the gate comes first, for the dry-run too.** A cwd holder OUTSIDE the session's own process
+    tree survives the kill, so it is knowable before the kill — and `_slot_gate_before_kill` refuses it there,
+    with nothing done, in the real call and in `--dry-run` alike (the dry-run used to return above the only
+    place the gate ran and said rc=0 for an argv the real call refused). The post-kill wait above remains
+    for what cannot be known beforehand: a process of the session's own tree that survives its kill.
+
     **`SI-51`: the milestone goes back too, and it goes back LAST.** `abort` released the session, the
     lease and the record and left the roadmap alone, so a milestone claimed by a dispatch that was later
     aborted stayed owned by an `-abort-` folder permanently — while `claim`'s own refusal named aborting as
@@ -3202,10 +3323,16 @@ def _do_abort(ctx: Ctx, parsed: Parsed) -> int:
         origin, origin_problem = None, _one_line(exc)
     milestone_id = origin.milestone if origin is not None else None
     coordinator = Path(origin.coordinator) if (origin is not None and milestone_id) else None
+    #: `B10`. The one gate `release` evaluates, asked here — above the dry-run's return and before the
+    #: session kill — so a dry-run reports the refusal the real call would hit, and the real call refuses
+    #: before its first irreversible step instead of after it.
+    undecided = _slot_gate_before_kill(ctx, record, child, "abort")
 
     if ctx.dry_run:
         _emit(ctx, "abort", [
             ("dry-run", "nothing was renamed, released, closed or written"),
+            ("gate", undecided or (f"slot {record.slot!r}: no live cwd holder outside the session's own "
+                                   f"processes" if record is not None and record.slot else "(no slot)")),
             ("would-rename", f"{child.name} -> {target.name}"),
             ("would-record", f"{ABORT_FILE}: {reason}"),
             ("would-close", (record.tmux if record is not None and record.tmux else "(no session)")),
@@ -3449,10 +3576,24 @@ def _proposed_by(child: Path, proposal) -> bool:
 
 
 def _harvest_evidence_refusal(ctx: Ctx, child: Path) -> str:
-    """`B03` D-5. Why harvest must not apply this worker's rows — each row it WOULD apply whose evidence no
-    longer resolves (`Roadmap.evidence_refusal`) — else "". Held rows are not asked: harvest leaves them
+    """`B03` D-5. Why harvest must not apply this worker's rows — a row `apply` would refuse outright
+    (`RV-19`), or each row it WOULD apply whose evidence no longer resolves (`Roadmap.evidence_refusal`) —
+    else "". Held rows are not asked: harvest leaves them
     pending for the coordinator anyway."""
     roadmap, mine, _, _ = _harvest_inbox(ctx, child)
+    #: `RV-19` (B10 review). `Roadmap.apply` also re-validates each stored row's status and non-empty
+    #: evidence; a row it would refuse is refused HERE, before the loop applies any earlier row and in the
+    #: dry run too, with apply's own text.
+    invalid = []
+    for p in mine:
+        try:
+            _check_status(p.status)
+            _check_evidence(p.evidence, p.milestone)
+        except BadInput as exc:
+            invalid.append(f"{_row_named(p)}: {exc}")
+    if invalid:
+        return ("apply would refuse " + "; ".join(invalid) + ". Refused before anything was applied; the "
+                "row stays pending.")
     #: RV-24. A check, then the loop that applies: a file deleted in between makes a later `apply` in that
     #: loop refuse after earlier rows landed. The window is the loop's own duration and the worker is not
     #: closed by it (the refusal aborts before the session kill); the refused row stays pending, so a re-run
@@ -3600,76 +3741,84 @@ def _do_harvest(ctx: Ctx, parsed: Parsed) -> int:
                              "withdraw` closes the row instead only when it is residue: withdrawing a "
                              "worker's only report leaves it unreported, which harvest also refuses"),
                 clears_who="the dispatched instant, or the coordinator on its behalf"))
-        elif ctx.dry_run:
-            roadmap, mine, held, recorded = _harvest_inbox(ctx, child)
-            #: The status the real run would judge the claim on: the last row it would apply for the origin
-            #: milestone, else the milestone's current status (`_stranded_claim` reads that itself).
-            left = [p.status for p in mine if recorded is not None and p.milestone == recorded.milestone]
-            stranded = _stranded_claim(roadmap, recorded, child, status=(left[-1] if left else None))
-            superseding = _superseded_by(roadmap, mine)
-            rows.append(Row(kind="would-harvest", subject=record.todo_id, severity=INFO,
-                            detail=(f"the gate allows ({gate.guard}) and the folder is {child.name}; a "
-                                    f"real run would apply {len(mine)} proposal(s) this instant wrote to "
-                                    f"{roadmap.instant.name}"
-                                    + (f" (superseding {superseding} earlier row(s))" if superseding else "")
-                                    + (f", give back the claim on {stranded.id} (it would be left at "
-                                       f"status={left[-1] if left else stranded.status})"
-                                       if stranded is not None else "")
-                                    + f", close {record.tmux}, "
-                                    f"release {record.slot or '(no slot)'} and stamp the record. "
-                                    f"Nothing was changed.")))
-            rows += _held_rows(record, roadmap, held)
         else:
-            roadmap, mine, held, recorded = _harvest_inbox(ctx, child)
-            superseding = _superseded_by(roadmap, mine)
-            applied = []
-            for proposal in mine:
-                applied.append(roadmap.apply(proposal).id)
-            #: After the apply, so the status the release is judged on is the one this worker reported.
-            stranded = _stranded_claim(roadmap, recorded, child)
-            if stranded is not None:
-                roadmap.disown(stranded.id, expect_owner=stranded.owner,
-                               reason=(f"harvested: {child.name} was closed with {stranded.id} at "
-                                       f"status={stranded.status}"))
-            if record.tmux:
-                ctx.sessions_for(record).kill(record.tmux)
-            # `SI-31`. STAMP BEFORE RELEASING. The order used to be release-then-stamp, and `J9` measured
-            # what that costs: `SIGKILL` between the two left `slot_held: False` with `harvested_at: None` —
-            # a FREE slot and a record that still reads in-flight. That state is both invisible and
-            # unrecoverable: `board` shows a worker holding a slot it does not hold, the WIP cap counts it
-            # forever, and there is no lease left for `reap` to reclaim, so nothing can ever clear it. It is
-            # `SI-21`'s leaked-cap-slot arrived at by crash instead of by exception.
-            #
-            # True atomicity across a filesystem, a tmux server and a lease directory would need a journal.
-            # The achievable property — and the one asserted — is that NO crash window leaves an
-            # unrecoverable or invisible state, and ordering alone buys it:
-            #
-            #   crash before the stamp  -> session dead, record in-flight, slot STILL HELD. `status` reads
-            #                              DEAD and `reap` reclaims the slot, because the writer is gone.
-            #   crash after the stamp   -> record harvested, slot still held. Same recovery, and the cap no
-            #                              longer counts a closed record.
-            #   crash after the release -> fully committed.
-            #
-            # Every window is visible in `board`/`status` and cleared by a verb that already exists. The one
-            # ordering that was NOT recoverable is the one that was in place.
-            record.gate_verdict = gate.guard
-            record.harvested_at = ctx.now()
-            record.closed_at = ctx.now()
-            ctx.store.write(record)
-            if record.slot:
-                ctx.pool.release(record.slot)
-            rows.append(Row(kind="harvested", subject=record.todo_id, severity=INFO,
-                            detail=(f"delta applied at {roadmap.instant.name} "
-                                    f"({', '.join(applied) or 'none pending'})"
-                                    + (f", {superseding} earlier row(s) closed as superseded"
-                                       if superseding else "")
-                                    + (f", claim on {stranded.id} given back (status={stranded.status})"
-                                       if stranded is not None else "")
-                                    + f", session "
-                                    f"{record.tmux} closed, slot {record.slot or '(none)'} released, "
-                                    f"record stamped at {record.harvested_at}; the row has left the "
-                                    f"board (FD-5)")))
-            rows += _held_rows(record, roadmap, held)
+            #: `B10` sweep. The gate is asked on BOTH paths, before either branch (a refusal raises): the real
+            #: harvest used to apply, disown, kill and stamp before `pool.release` refused, and the dry-run
+            #: said `would-harvest` rc=0 over it. `RV-24`: the branch below is chosen by `ctx.dry_run` alone,
+            #: never by the gate's return value, so no return of it can send a dry run into the real branch.
+            undecided = _slot_gate_before_kill(ctx, record, child, "harvest")
+            if ctx.dry_run:
+                if undecided:
+                    rows.append(Row(kind="gate", subject=record.todo_id, severity=INFO, detail=undecided))
+                roadmap, mine, held, recorded = _harvest_inbox(ctx, child)
+                #: The status the real run would judge the claim on: the last row it would apply for the origin
+                #: milestone, else the milestone's current status (`_stranded_claim` reads that itself).
+                left = [p.status for p in mine if recorded is not None and p.milestone == recorded.milestone]
+                stranded = _stranded_claim(roadmap, recorded, child, status=(left[-1] if left else None))
+                superseding = _superseded_by(roadmap, mine)
+                rows.append(Row(kind="would-harvest", subject=record.todo_id, severity=INFO,
+                                detail=(f"the gate allows ({gate.guard}) and the folder is {child.name}; a "
+                                        f"real run would apply {len(mine)} proposal(s) this instant wrote to "
+                                        f"{roadmap.instant.name}"
+                                        + (f" (superseding {superseding} earlier row(s))" if superseding else "")
+                                        + (f", give back the claim on {stranded.id} (it would be left at "
+                                           f"status={left[-1] if left else stranded.status})"
+                                           if stranded is not None else "")
+                                        + f", close {record.tmux}, "
+                                        f"release {record.slot or '(no slot)'} and stamp the record. "
+                                        f"Nothing was changed.")))
+                rows += _held_rows(record, roadmap, held)
+            else:
+                roadmap, mine, held, recorded = _harvest_inbox(ctx, child)
+                superseding = _superseded_by(roadmap, mine)
+                applied = []
+                for proposal in mine:
+                    applied.append(roadmap.apply(proposal).id)
+                #: After the apply, so the status the release is judged on is the one this worker reported.
+                stranded = _stranded_claim(roadmap, recorded, child)
+                if stranded is not None:
+                    roadmap.disown(stranded.id, expect_owner=stranded.owner,
+                                   reason=(f"harvested: {child.name} was closed with {stranded.id} at "
+                                           f"status={stranded.status}"))
+                if record.tmux:
+                    ctx.sessions_for(record).kill(record.tmux)
+                # `SI-31`. STAMP BEFORE RELEASING. The order used to be release-then-stamp, and `J9` measured
+                # what that costs: `SIGKILL` between the two left `slot_held: False` with `harvested_at: None` —
+                # a FREE slot and a record that still reads in-flight. That state is both invisible and
+                # unrecoverable: `board` shows a worker holding a slot it does not hold, the WIP cap counts it
+                # forever, and there is no lease left for `reap` to reclaim, so nothing can ever clear it. It is
+                # `SI-21`'s leaked-cap-slot arrived at by crash instead of by exception.
+                #
+                # True atomicity across a filesystem, a tmux server and a lease directory would need a journal.
+                # The achievable property — and the one asserted — is that NO crash window leaves an
+                # unrecoverable or invisible state, and ordering alone buys it:
+                #
+                #   crash before the stamp  -> session dead, record in-flight, slot STILL HELD. `status` reads
+                #                              DEAD and `reap` reclaims the slot, because the writer is gone.
+                #   crash after the stamp   -> record harvested, slot still held. Same recovery, and the cap no
+                #                              longer counts a closed record.
+                #   crash after the release -> fully committed.
+                #
+                # Every window is visible in `board`/`status` and cleared by a verb that already exists. The one
+                # ordering that was NOT recoverable is the one that was in place.
+                record.gate_verdict = gate.guard
+                record.harvested_at = ctx.now()
+                record.closed_at = ctx.now()
+                ctx.store.write(record)
+                if record.slot:
+                    ctx.pool.release(record.slot)
+                rows.append(Row(kind="harvested", subject=record.todo_id, severity=INFO,
+                                detail=(f"delta applied at {roadmap.instant.name} "
+                                        f"({', '.join(applied) or 'none pending'})"
+                                        + (f", {superseding} earlier row(s) closed as superseded"
+                                           if superseding else "")
+                                        + (f", claim on {stranded.id} given back (status={stranded.status})"
+                                           if stranded is not None else "")
+                                        + f", session "
+                                        f"{record.tmux} closed, slot {record.slot or '(none)'} released, "
+                                        f"record stamped at {record.harvested_at}; the row has left the "
+                                        f"board (FD-5)")))
+                rows += _held_rows(record, roadmap, held)
 
     if ctx.dry_run:
         sources = ctx.harvest.sources()
@@ -3861,12 +4010,16 @@ def _do_clone(ctx: Ctx, parsed: Parsed) -> int:
     #: sha to state — the golden's own HEAD is the expectation.
     repos = [r.strip() for r in str(parsed.get("verify-repos") or "").split(",") if r.strip()]
 
+    #: `B10` sweep. Every refusal knowable before the copy, asked before it — by the dry-run too, which used
+    #: to print "a real run would REFUSE" and exit 0. The enrolment half (a target outside this root) was
+    #: met only AFTER the whole golden had been copied.
+    refusal = workspace.clone_refusal(target) or ctx.pool.enroll_refusal(target, exists=False)
+    if refusal is not None:
+        raise refusal
     if ctx.dry_run:
         golden = workspace.golden()
         _emit(ctx, "clone", [("dry-run", "nothing was copied or enrolled"), ("golden", str(golden)),
-                             ("target", str(target)),
-                             ("target_exists", "true — a real run would REFUSE" if target.exists()
-                              else "false"),
+                             ("target", str(target)), ("target_exists", "false"),
                              ("verify_repos", ", ".join(sorted(repos)) or "(none named)")])
         return EXIT_OK
 
@@ -3913,6 +4066,10 @@ def _do_enroll(ctx: Ctx, parsed: Parsed) -> int:
     """
     path = Path(parsed.get("slot"))
     if ctx.dry_run:
+        #: `B10` sweep: the dry-run asks the validator the real call raises from, instead of exiting 0.
+        refusal = ctx.pool.enroll_refusal(path)
+        if refusal is not None:
+            raise refusal
         _emit(ctx, "enroll", [
             ("dry-run", "nothing was enrolled"),
             ("would-enroll", str(path)),
@@ -3933,22 +4090,32 @@ def _do_unenroll(ctx: Ctx, parsed: Parsed) -> int:
     forced = parsed.on("force")
     held = ctx.pool.lease(slot)
 
-    if ctx.dry_run:
-        rows = [("dry-run", "nothing was unenrolled"), ("slot", slot),
-                ("leased", f"{held.todo_id} for {held.base_instant}" if held else "false"),
-                ("would-unenroll", "false — refused" if (held and not forced) else "true")]
-        _emit(ctx, "unenroll", rows)
-        return EXIT_REFUSED if (held and not forced) else EXIT_OK
-
-    try:
-        ctx.pool.unenroll(slot, force=forced)
-    except Refused as exc:
+    def with_the_override(exc: Refused) -> Refused:
         # The pool's message names the work it would strand and says an override exists; this adds the
         # exact token a CALLER types. The two halves are split on purpose — the pool cannot know it was
         # reached from a command line, so it never spells the override in a language it cannot verify
         # (`FI-19b`: it used to say `pass force=True`, which is python quoted at an operator).
-        raise Refused(f"{exc} Override: `fleet unenroll --slot {slot} {FORCE}`.",
-                      clears_when=exc.clears_when, clears_who=exc.clears_who) from None
+        return Refused(f"{exc} Override: `fleet unenroll --slot {slot} {FORCE}`.",
+                       clears_when=exc.clears_when, clears_who=exc.clears_who)
+
+    if ctx.dry_run:
+        #: `B10` sweep / `RV-23`: the real call's refusals, with its text — the dry-run used to exit 4 for a
+        #: leased slot while printing no refusal at all.
+        refusal = ctx.pool.unenroll_refusal(slot, force=forced)
+        if isinstance(refusal, Refused):
+            raise with_the_override(refusal)
+        if refusal is not None:
+            raise refusal
+        rows = [("dry-run", "nothing was unenrolled"), ("slot", slot),
+                ("leased", f"{held.todo_id} for {held.base_instant}" if held else "false"),
+                ("would-unenroll", "true")]
+        _emit(ctx, "unenroll", rows)
+        return EXIT_OK
+
+    try:
+        ctx.pool.unenroll(slot, force=forced)
+    except Refused as exc:
+        raise with_the_override(exc) from None
     _emit(ctx, "unenroll", [("slot", slot), ("forced", "true" if forced else "false"),
                             ("released", held.todo_id if held else "(was free)"),
                             ("enrolled", str(len(ctx.pool.slots()))),
@@ -4087,6 +4254,9 @@ def _do_set_golden(ctx: Ctx, parsed: Parsed) -> int:
     path = Path(parsed.get("path"))
     workspace = Workspace(ctx.home, git=ctx.git)
     if ctx.dry_run:
+        refusal = workspace.golden_refusal(path)                           # `B10` sweep
+        if refusal is not None:
+            raise refusal
         _emit(ctx, "set-golden", [("dry-run", "the golden was not declared"),
                                   ("would-set", str(path)),
                                   ("directory-exists", "true" if path.is_dir() else "false")])

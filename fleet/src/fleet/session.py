@@ -109,6 +109,14 @@ class Probes:
     #: be observed. Defaulted like `pane_pid`, so every
     #: hand-built `Probes` keeps working and reads as NOT MEASURED rather than as "nobody attached".
     attachment: Optional[Callable[[str], Optional[tuple]]] = None
+    #: `B10`. A pid's parent pid, `0` when it cannot be read. With `pane_pid` it answers "is this process
+    #: one of this session's own" — what `abort` needs to know before a kill it cannot take back. Defaulted
+    #: like `pane_pid`, and absence reads as NOT OBSERVABLE, never as "nobody's".
+    parent_of: Optional[Callable[[int], int]] = None
+    #: `RV-20`. Every pane pid of the session — every window, every pane — or None when unobservable.
+    #: `kill-session` ends all of them, so each one roots the session's own process tree; `pane_pid` above
+    #: answers for the first pane of the current window only. Defaulted like the fields above.
+    pane_pids: Optional[Callable[[str], Optional[list]]] = None
 
 
 @dataclass(frozen=True)
@@ -390,6 +398,34 @@ class SessionLayer:
             raise BadInput("a session needs a name to be killed")
         self.probes.kill_session(name)
 
+    def own_processes(self, name: str, pids) -> Optional[set]:
+        """The subset of `pids` that belong to session `name` — one of its pane pids or a descendant of one
+        — or None when that cannot be observed (no pane pids, or no parent walk). Every pane counts
+        (`RV-20`): the kill ends every pane, not only the first.
+
+        `B10`. These are the processes a kill of `name` ends, so they are NOT a reason to expect a slot
+        to stay held after the kill. A process that left the tree (double-forked, reparented to init) is
+        not counted: it survives the kill, which is exactly why it is not the session's to spare.
+        """
+        if self.probes.pane_pids is not None:
+            listed = self.probes.pane_pids(name) if name else None
+            roots = set(listed) if listed else None
+        else:
+            first = self.pane_pid(name)
+            roots = None if first is None else {first}
+        walk = self.probes.parent_of
+        if roots is None or walk is None:
+            return None
+        own = set()
+        for pid in pids:
+            current, steps = pid, 0
+            while current and current > 1 and steps < 256:     # bounded: a /proc race cannot loop us
+                if current in roots:
+                    own.add(pid)
+                    break
+                current, steps = walk(current), steps + 1
+        return own
+
     def pane_pid(self, name: str) -> Optional[int]:
         """The pid tmux started in this session's pane, or None if it cannot be observed.
 
@@ -658,6 +694,13 @@ def default_probes(process_name: str = "claude", tmux_socket=_FROM_ENV, *,
                 return int(token)
         return None
 
+    def pane_pids(name: str):
+        """`RV-20`. Every pane pid of the session: `list-panes -s` spans every window, not only the current."""
+        done = run(tmux + ["list-panes", "-s", "-t", exact_session_target(name), "-F", "#{pane_pid}"])
+        if done.returncode != 0:
+            return None
+        return [int(token) for token in done.stdout.split() if token.isdigit()] or None
+
     def session_servers(name: str) -> list:
         """Every tmux server on this box with a session called `name`, socket names, sorted.
 
@@ -747,4 +790,6 @@ def default_probes(process_name: str = "claude", tmux_socket=_FROM_ENV, *,
                   start_session=start_session,
                   kill_session=kill_session,
                   pane_pid=pane_pid,
+                  pane_pids=pane_pids,
+                  parent_of=parent_of,
                   attachment=attachment)

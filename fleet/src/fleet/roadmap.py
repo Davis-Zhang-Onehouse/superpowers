@@ -50,6 +50,7 @@ import json
 from dataclasses import asdict, dataclass
 from datetime import datetime, timezone
 from pathlib import Path
+from typing import Optional
 
 from fleet import evidence as evidence_mod
 from fleet.atomic import atomic_write, held_for_update
@@ -200,6 +201,10 @@ def _check_status(status: str) -> str:
     return status
 
 
+def _shadowing(m) -> BadInput:
+    return BadInput(f"milestone {m.id!r} is already in the roadmap; refusing to shadow it")
+
+
 def _check_evidence(evidence, milestone: str) -> list:
     """The one gate, called by both writers. A status change with no evidence is the claim without the
     artifact, and the reason this is a refusal rather than a warning is that the warning was ignored."""
@@ -342,17 +347,32 @@ class Roadmap:
 
     # ------------------------------------------------------------------ milestones
 
-    def add(self, m: Milestone) -> None:
+    def add_refusal(self, m: Milestone) -> "Optional[BadInput]":
+        """`add`'s refusals, read-only, for `milestone --dry-run` (`B10` sweep). The duplicate check reads
+        without the lock: a dry-run answers for NOW, and `add` re-checks under it."""
         if not m.id or not m.id.strip():
-            raise BadInput("a milestone needs an id")
-        _check_status(m.status)
+            return BadInput("a milestone needs an id")
+        try:
+            _check_status(m.status)
+        except BadInput as exc:
+            return exc
+        if any(d["id"] == m.id for d in self._load()["milestones"]):
+            return _shadowing(m)
+        return None
+
+    def add(self, m: Milestone) -> None:
+        #: `RV-25`. The dry-run's predicate IS add's check — one text, not a copy that can drift. The
+        #: duplicate half is asked again below under the lock, which is where it is decided.
+        refusal = self.add_refusal(m)
+        if refusal is not None:
+            raise refusal
         # FI-30c: the load/validate/append/write below is ONE step. Six concurrent adds left 1 of 6
         # milestones in every one of 8 iterations before this — the duplicate check also read stale state,
         # so two writers could each pass it for the same id.
         with held_for_update(self.path):
             data = self._load()
             if any(d["id"] == m.id for d in data["milestones"]):
-                raise BadInput(f"milestone {m.id!r} is already in the roadmap; refusing to shadow it")
+                raise _shadowing(m)
             data["milestones"].append(asdict(m))
             self._save(self.path, data)
 
