@@ -19,7 +19,8 @@ worker as `claude --model <m>` or `codex -m <m>` (also on `codex resume`); fleet
 model are recorded (`runtime`, `runtime_model`): `board` shows them in its `runtime` column, `brief` in a `runtime`
 row, `revive` relaunches the same pair and `resume` adopts under the record's runtime regardless of the box.
 A record carrying a model is an unknown field to an older fleet binary, and that binary then refuses the WHOLE store
-(every verb that enumerates records: `board`, `status`, `dispatch`, `reap`, `runtime`), not just that record. Once any
+(everything that enumerates records, which is most of the surface — `board`, `status`, `brief`, `seed-check`,
+`dispatch`, `harvest`, `milestone`, `reap`, `runtime`, …), not just that record. Once any
 `--model` dispatch exists in a store, do not operate on it with, or roll back to, a fleet older than the release that
 introduced `runtime_model`. Default dispatches write no such field and stay readable.
 Run these commands from the updated checkout. `fleet-env.sh` normally selects the root's deployed
