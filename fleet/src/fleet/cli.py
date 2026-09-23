@@ -3736,81 +3736,84 @@ def _do_harvest(ctx: Ctx, parsed: Parsed) -> int:
                              "withdraw` closes the row instead only when it is residue: withdrawing a "
                              "worker's only report leaves it unreported, which harvest also refuses"),
                 clears_who="the dispatched instant, or the coordinator on its behalf"))
-        elif (undecided := _slot_gate_before_kill(ctx, record, child, "harvest")) is not None and ctx.dry_run:
-            #: `B10` sweep. The gate is asked on BOTH paths above (the walrus runs before `ctx.dry_run` is
-            #: read, and a refusal raises): the real harvest used to apply, disown, kill and stamp before
-            #: `pool.release` refused, and this dry-run said `would-harvest` rc=0 over it.
-            if undecided:
-                rows.append(Row(kind="gate", subject=record.todo_id, severity=INFO, detail=undecided))
-            roadmap, mine, held, recorded = _harvest_inbox(ctx, child)
-            #: The status the real run would judge the claim on: the last row it would apply for the origin
-            #: milestone, else the milestone's current status (`_stranded_claim` reads that itself).
-            left = [p.status for p in mine if recorded is not None and p.milestone == recorded.milestone]
-            stranded = _stranded_claim(roadmap, recorded, child, status=(left[-1] if left else None))
-            superseding = _superseded_by(roadmap, mine)
-            rows.append(Row(kind="would-harvest", subject=record.todo_id, severity=INFO,
-                            detail=(f"the gate allows ({gate.guard}) and the folder is {child.name}; a "
-                                    f"real run would apply {len(mine)} proposal(s) this instant wrote to "
-                                    f"{roadmap.instant.name}"
-                                    + (f" (superseding {superseding} earlier row(s))" if superseding else "")
-                                    + (f", give back the claim on {stranded.id} (it would be left at "
-                                       f"status={left[-1] if left else stranded.status})"
-                                       if stranded is not None else "")
-                                    + f", close {record.tmux}, "
-                                    f"release {record.slot or '(no slot)'} and stamp the record. "
-                                    f"Nothing was changed.")))
-            rows += _held_rows(record, roadmap, held)
         else:
-            roadmap, mine, held, recorded = _harvest_inbox(ctx, child)
-            superseding = _superseded_by(roadmap, mine)
-            applied = []
-            for proposal in mine:
-                applied.append(roadmap.apply(proposal).id)
-            #: After the apply, so the status the release is judged on is the one this worker reported.
-            stranded = _stranded_claim(roadmap, recorded, child)
-            if stranded is not None:
-                roadmap.disown(stranded.id, expect_owner=stranded.owner,
-                               reason=(f"harvested: {child.name} was closed with {stranded.id} at "
-                                       f"status={stranded.status}"))
-            if record.tmux:
-                ctx.sessions_for(record).kill(record.tmux)
-            # `SI-31`. STAMP BEFORE RELEASING. The order used to be release-then-stamp, and `J9` measured
-            # what that costs: `SIGKILL` between the two left `slot_held: False` with `harvested_at: None` —
-            # a FREE slot and a record that still reads in-flight. That state is both invisible and
-            # unrecoverable: `board` shows a worker holding a slot it does not hold, the WIP cap counts it
-            # forever, and there is no lease left for `reap` to reclaim, so nothing can ever clear it. It is
-            # `SI-21`'s leaked-cap-slot arrived at by crash instead of by exception.
-            #
-            # True atomicity across a filesystem, a tmux server and a lease directory would need a journal.
-            # The achievable property — and the one asserted — is that NO crash window leaves an
-            # unrecoverable or invisible state, and ordering alone buys it:
-            #
-            #   crash before the stamp  -> session dead, record in-flight, slot STILL HELD. `status` reads
-            #                              DEAD and `reap` reclaims the slot, because the writer is gone.
-            #   crash after the stamp   -> record harvested, slot still held. Same recovery, and the cap no
-            #                              longer counts a closed record.
-            #   crash after the release -> fully committed.
-            #
-            # Every window is visible in `board`/`status` and cleared by a verb that already exists. The one
-            # ordering that was NOT recoverable is the one that was in place.
-            record.gate_verdict = gate.guard
-            record.harvested_at = ctx.now()
-            record.closed_at = ctx.now()
-            ctx.store.write(record)
-            if record.slot:
-                ctx.pool.release(record.slot)
-            rows.append(Row(kind="harvested", subject=record.todo_id, severity=INFO,
-                            detail=(f"delta applied at {roadmap.instant.name} "
-                                    f"({', '.join(applied) or 'none pending'})"
-                                    + (f", {superseding} earlier row(s) closed as superseded"
-                                       if superseding else "")
-                                    + (f", claim on {stranded.id} given back (status={stranded.status})"
-                                       if stranded is not None else "")
-                                    + f", session "
-                                    f"{record.tmux} closed, slot {record.slot or '(none)'} released, "
-                                    f"record stamped at {record.harvested_at}; the row has left the "
-                                    f"board (FD-5)")))
-            rows += _held_rows(record, roadmap, held)
+            #: `B10` sweep. The gate is asked on BOTH paths, before either branch (a refusal raises): the real
+            #: harvest used to apply, disown, kill and stamp before `pool.release` refused, and the dry-run
+            #: said `would-harvest` rc=0 over it. `RV-24`: the branch below is chosen by `ctx.dry_run` alone,
+            #: never by the gate's return value, so no return of it can send a dry run into the real branch.
+            undecided = _slot_gate_before_kill(ctx, record, child, "harvest")
+            if ctx.dry_run:
+                if undecided:
+                    rows.append(Row(kind="gate", subject=record.todo_id, severity=INFO, detail=undecided))
+                roadmap, mine, held, recorded = _harvest_inbox(ctx, child)
+                #: The status the real run would judge the claim on: the last row it would apply for the origin
+                #: milestone, else the milestone's current status (`_stranded_claim` reads that itself).
+                left = [p.status for p in mine if recorded is not None and p.milestone == recorded.milestone]
+                stranded = _stranded_claim(roadmap, recorded, child, status=(left[-1] if left else None))
+                superseding = _superseded_by(roadmap, mine)
+                rows.append(Row(kind="would-harvest", subject=record.todo_id, severity=INFO,
+                                detail=(f"the gate allows ({gate.guard}) and the folder is {child.name}; a "
+                                        f"real run would apply {len(mine)} proposal(s) this instant wrote to "
+                                        f"{roadmap.instant.name}"
+                                        + (f" (superseding {superseding} earlier row(s))" if superseding else "")
+                                        + (f", give back the claim on {stranded.id} (it would be left at "
+                                           f"status={left[-1] if left else stranded.status})"
+                                           if stranded is not None else "")
+                                        + f", close {record.tmux}, "
+                                        f"release {record.slot or '(no slot)'} and stamp the record. "
+                                        f"Nothing was changed.")))
+                rows += _held_rows(record, roadmap, held)
+            else:
+                roadmap, mine, held, recorded = _harvest_inbox(ctx, child)
+                superseding = _superseded_by(roadmap, mine)
+                applied = []
+                for proposal in mine:
+                    applied.append(roadmap.apply(proposal).id)
+                #: After the apply, so the status the release is judged on is the one this worker reported.
+                stranded = _stranded_claim(roadmap, recorded, child)
+                if stranded is not None:
+                    roadmap.disown(stranded.id, expect_owner=stranded.owner,
+                                   reason=(f"harvested: {child.name} was closed with {stranded.id} at "
+                                           f"status={stranded.status}"))
+                if record.tmux:
+                    ctx.sessions_for(record).kill(record.tmux)
+                # `SI-31`. STAMP BEFORE RELEASING. The order used to be release-then-stamp, and `J9` measured
+                # what that costs: `SIGKILL` between the two left `slot_held: False` with `harvested_at: None` —
+                # a FREE slot and a record that still reads in-flight. That state is both invisible and
+                # unrecoverable: `board` shows a worker holding a slot it does not hold, the WIP cap counts it
+                # forever, and there is no lease left for `reap` to reclaim, so nothing can ever clear it. It is
+                # `SI-21`'s leaked-cap-slot arrived at by crash instead of by exception.
+                #
+                # True atomicity across a filesystem, a tmux server and a lease directory would need a journal.
+                # The achievable property — and the one asserted — is that NO crash window leaves an
+                # unrecoverable or invisible state, and ordering alone buys it:
+                #
+                #   crash before the stamp  -> session dead, record in-flight, slot STILL HELD. `status` reads
+                #                              DEAD and `reap` reclaims the slot, because the writer is gone.
+                #   crash after the stamp   -> record harvested, slot still held. Same recovery, and the cap no
+                #                              longer counts a closed record.
+                #   crash after the release -> fully committed.
+                #
+                # Every window is visible in `board`/`status` and cleared by a verb that already exists. The one
+                # ordering that was NOT recoverable is the one that was in place.
+                record.gate_verdict = gate.guard
+                record.harvested_at = ctx.now()
+                record.closed_at = ctx.now()
+                ctx.store.write(record)
+                if record.slot:
+                    ctx.pool.release(record.slot)
+                rows.append(Row(kind="harvested", subject=record.todo_id, severity=INFO,
+                                detail=(f"delta applied at {roadmap.instant.name} "
+                                        f"({', '.join(applied) or 'none pending'})"
+                                        + (f", {superseding} earlier row(s) closed as superseded"
+                                           if superseding else "")
+                                        + (f", claim on {stranded.id} given back (status={stranded.status})"
+                                           if stranded is not None else "")
+                                        + f", session "
+                                        f"{record.tmux} closed, slot {record.slot or '(none)'} released, "
+                                        f"record stamped at {record.harvested_at}; the row has left the "
+                                        f"board (FD-5)")))
+                rows += _held_rows(record, roadmap, held)
 
     if ctx.dry_run:
         sources = ctx.harvest.sources()
