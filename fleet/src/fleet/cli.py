@@ -75,7 +75,7 @@ from fleet.layout import INFO, VIOLATION
 from fleet.pool import Pool, ReapReport
 from fleet.profiles import Profile
 from fleet import root as root_mod
-from fleet.reconcile import (COMPLETE, KIND_WORKER, PHASE_AWAITING_CI, PID_RUNNING, RUNNING,
+from fleet.reconcile import (COMPLETE, KIND_WORKER, PHASE_AWAITING_CI, PID_GONE, PID_RUNNING, RUNNING,
                              attested_pid_status, needs_a_human, pid_start, reconcile)
 from fleet.release import (CANDIDATE, DEV, HISTORY_COLUMNS, META_DIR, RELEASE_RETENTION, RELEASED, Releases, Version,
                            actor, tree_sha, utc_now)
@@ -4252,10 +4252,15 @@ def _do_brief(ctx: Ctx, parsed: Parsed) -> int:
     if watchers:
         if declarations.watcher_attested():
             status, sentence = attested_pid_status(declarations.watcher_pid())
-            seen = ("ATTESTED by the claimant, NOT observed by this tool; "
-                    + (f"{sentence}, and `fleet board` disregards the claim once it is gone" if status else
-                       "no pid handle was recorded at the claim, so nothing re-checks it — `fleet board` trusts it, labelled "
-                       "ATTESTED, until the claimant declares another phase"))
+            #: `RV-C4`. A pid already GONE is said in the present: the board is disregarding the claim NOW.
+            if status == PID_GONE:
+                checked = f"{sentence}, so `fleet board` disregards the claim now"
+            elif status:
+                checked = f"{sentence}, and `fleet board` disregards the claim once it is gone"
+            else:
+                checked = ("no pid handle was recorded at the claim, so nothing re-checks it — `fleet board` "
+                           "trusts it, labelled ATTESTED, until the claimant declares another phase")
+            seen = f"ATTESTED by the claimant, NOT observed by this tool; {checked}"
         else:
             seen = ("OBSERVED on the pane at claim time; `fleet board` re-reads the pane, and once that "
                     "watcher is no longer on it the board disregards the claim (NO WATCHER OBSERVABLE)")

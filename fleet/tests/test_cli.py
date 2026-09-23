@@ -5443,6 +5443,9 @@ class TestAwaitingCiRequiresALiveWatcher(CliCase):
 
         self.assertIn("4242", out)
         self.assertIn("GONE", out)
+        #: `RV-C4`. Already true, so said as present: the board is disregarding the claim NOW.
+        self.assertIn("disregards the claim now", out)
+        self.assertNotIn("once it is gone", out)
 
     def test_a_re_declare_clears_the_pid_handle(self):
         """A handle from an EARLIER claim read as evidence about this one is the stale-record lie again."""
