@@ -17,7 +17,7 @@
 #   legacy-config     a Claude record with no recorded configuration resolves the slot's owner
 #   revive-all        `revive` dry-runs every record, then starts every record, then reports pane-guard
 #   partial-failure   one start fails → rc 1, the other is still started, the failure is named
-#   runtime-mismatch  the fleet set to codex while the records ran on claude → rc 2, no start
+#   runtime-per-record the fleet set to codex while the records ran on claude → planned as claude, rc 0 (pt2)
 #   abort-recorded    an abort.json in one instant → rc 2, no start (the other record is not started either)
 #   no-seed-match     a seed no transcript received → rc 2, no start
 #   codex-seed-match  a DEAD Codex record whose rollout has the real shape (developer messages, a
@@ -266,12 +266,15 @@ try:
           and 'FAILED' in r.stdout, r.stderr + r.stdout)
     log.unlink()
 
-    # runtime-mismatch
+    # runtime-per-record (pt2: each record revives under its own recorded runtime; the selection is a default)
     write_runtime(A / '.fleet', 'codex')
-    r = run(A, 'revive', fleet=shim)
-    check('runtime-mismatch: rc 2', r.returncode == 2, r.stderr)
-    check('runtime-mismatch: says so for both records', r.stdout.count('the record ran on claude and the fleet is set to codex') == 2, r.stdout)
-    check('runtime-mismatch: nothing started', not calls(), calls())
+    r = run(A, 'plan', fleet=shim)
+    check('runtime-per-record: rc 0', r.returncode == 0, r.stderr + r.stdout)
+    check('runtime-per-record: each record planned under its own runtime',
+          r.stdout.count("claude   (the record's own; fleet selection: codex)") == 2, r.stdout)
+    check('runtime-per-record: dry-run only, nothing started', not [l for l in calls() if '--dry-run' not in l], calls())
+    if log.exists():
+        log.unlink()
     (A / '.fleet/runtime.json').unlink()
 
     # abort-recorded
@@ -299,7 +302,7 @@ try:
     r = run(B, 'plan')
     check('codex-seed-match: rc 0', r.returncode == 0, r.stderr + r.stdout)
     check('codex-seed-match: record two → U2 past the injected user blocks', re.search(r'transcript\s+' + U2, r.stdout) is not None, r.stdout)
-    check('codex-seed-match: runtime line', 'codex   (fleet selection: codex)' in r.stdout, r.stdout)
+    check('codex-seed-match: runtime line', "codex   (the record's own; fleet selection: codex)" in r.stdout, r.stdout)
 
     # ---- root D: the verb's own refusal ---------------------------------------------------------------
     D = make_root('revived')
@@ -340,5 +343,5 @@ finally:
 if failures:
     print('FAIL: ' + ', '.join(failures))
     sys.exit(1)
-print('PASS: fleet-revive.sh derives root, server, slot, configuration and transcript from the directory and the records on either runtime, refuses outside a root, on a runtime mismatch, on a recorded abort, on an unmatched seed, on a verb refusal and on two records sharing a transcript without starting anything, and revives every DEAD record of the root otherwise')
+print('PASS: fleet-revive.sh derives root, server, slot, configuration and transcript from the directory and the records on either runtime (each record under its own), refuses outside a root, on a recorded abort, on an unmatched seed, on a verb refusal and on two records sharing a transcript without starting anything, and revives every DEAD record of the root otherwise')
 PY
