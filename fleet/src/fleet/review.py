@@ -29,8 +29,8 @@ Three further properties are requirements rather than implementation details:
 import json
 import time
 from dataclasses import dataclass, field
-from typing import Optional
 from pathlib import Path
+from typing import Optional
 
 from fleet import EXIT_ATTENTION, EXIT_BAD_INPUT, EXIT_OK
 from fleet.atomic import atomic_write, held_for_update
