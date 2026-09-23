@@ -1,5 +1,78 @@
 # fleet — changelog
 
+## fleet/v0.6.6 — 2026-09-23T10:32:17Z
+Cut from 35d6173 on `live` (upstream base snapshot/2026-09-22-152849). 65 commit(s) since fleet/v0.6.5.
+
+Every release ships the whole repository — all skills, `commands/`, `hooks/` and the plugin manifest, not only `fleet/`.
+Payload: fleet (27 files), skills (4 files), scripts (15 files), docs (1 file), other (1 file).
+Skills changed: coordinating-instants, releasing-fleet, using-fleet, working-as-a-dispatched-instant.
+
+- 2ac699e fleet tests: per-process selftest tmux server, retired in cleanup (FB-49)
+- 7c64972 fleet tests: keep the selftest tmux server non-empty between cases (FB-5)
+- 50b62ea fleet tests: FB-5 comment states the measured non-empty-server count
+- 142cb28 fleet tests: pin the anchor that keeps the selftest server up between cases (RV-22)
+- cff97b1 fleet tests: fixture sessions end with the suite process, comment states the measured bound (RV-23)
+- 9371c26 fleet tests: the attachment case retires only a server of its own (RV-24)
+- 35a722d fleet tests: the attachment fixture checks that its session landed (RV-25)
+- 4af7448 fleet tests: state that the selftest server name is fixed per importing process (RV-26)
+- c9723c9 fleet tests: retire only server names this module mints (RV-28)
+- 58d609d fleet tests: the anchor pin asserts its own kill-session landed (RV-30)
+- 9eb79ed fleet tests: the pid-loop comment states the measured bound (RV-31)
+- e8ee5cc fix(launchers): stop running a dispatch-exported FLEET_BIN (FB-56)
+- 0d39f9f fix(scripts): make every shebang script executable (FB-31)
+- 74aaf72 fix(it): key the live-session baseline per run (FB-60, FB-34, FB-47)
+- 2d928b4 test(launchers): never run a real fleet from the FB-56 cases
+- 58d609c docs: launchers ignore FLEET_BIN; the IT live-session baseline is per run
+- 2cd4e86 fix(it): untrack the live-tmux re-baseline log (RV-23)
+- e70d7a1 test(launchers): assert the sibling bin/fleet acts under an ambient FLEET_BIN (RV-24)
+- 6d8e1df fix(it): lib.sh no longer exports the run id; run-all.sh does (RV-25)
+- 7baf9c1 fix(it): a leak seen at a checkout's first run FAILs and never enters the handover (RV-26)
+- 0553b51 fix(it): A8's write census counts the handover and the per-run prune (RV-27)
+- 1763dc1 fix(it): write the live-tmux handover atomically (RV-28)
+- b2cd790 fix(it): ISOLATION rows cite the snapshot the comparison used (RV-29)
+- 6bea8d4 test(runtime-helpers): drop a seam the dispatch launcher never reads (RV-30)
+- e6d3014 fix(it): W1's negative controls repoint the handover too (RV-31)
+- 7c1ff86 docs(fleet): the run id is exported by run-all.sh, not lib.sh (RV-25 follow-up)
+- 7272bd5 fleet: pin FB-53/FB-54 — no per-pid condition refuses the process inventory, and an unreadable row is placed by its pane
+- 12203d9 fleet: FB-53/FB-54 — report one unreadable pid instead of refusing the inventory, and attribute it through stat
+- 64427c7 fleet: seed-check reads a claude whose argv is not UTF-8 as the worker it is (RV-23)
+- 226ad75 fleet: seed-check's comm probe answers for a comm that is not UTF-8 instead of raising (RV-31)
+- deee581 fleet: reconcile lets a record's readable process speak for it over an unreadable one in the same pane (RV-25)
+- b60e184 fleet: peers refuses an unreadable row as unreadable, not as a dead or recycled pid (RV-26)
+- 62966e8 fleet: send refuses a pane whose process is unreadable by saying so, not 'no matching process' (RV-27)
+- 0dd49cb fleet: an unreadable row never takes a lease held by a record on another tmux server (RV-29)
+- e6225f2 fleet: unreadable-row texts say a /proc read failed instead of naming exe/cwd (RV-24)
+- cece2f8 fleet: say what is_claude_process/is_agent_process prove for an unreadable row (RV-28)
+- d5c3f8b fleet: pin the runtime --set text for an unreadable row (RV-32)
+- ba93d0d fleet identity: same_instant compares two recorded paths by stable key (B08)
+- 9c54ada fleet: seed-check exits 1 on a non-pass; owner and legacy evidence follow the rename (B09, B08, FB-44, FB-45)
+- 4c9186b fleet it: H13, the re-measure's scenA on a real dispatched worker (B09, B08, FB-44)
+- d1866ce skills using-fleet: seed-check's exit code, milestone --evidence gate, owner where it is now
+- 10337f0 fleet seed-check: an OSError or an undecodable seed is that session's unreadable row (RV-26)
+- dc35369 fleet milestone --disown: a relative child_instant is anchored before the identity compare (RV-27)
+- 63e6a7c fleet roadmap: claim and disown refusals name the owner where it is now (RV-24)
+- 576e43e fleet roadmap: one read lists each owner folder once; milestone(id) resolves one owner (RV-25)
+- f4b2007 fleet roadmap: apply stores a legacy item anchored where its proposer row locates it (RV-28)
+- ab65392 fleet tests: dispatch's own seed check reads the delivery through the renamed folder (RV-29)
+- 9b2f231 fleet seed-check: the NOT-DELIVERED comment agrees with the exit code (RV-23)
+- 9fffbe1 fleet milestone --evidence: the refusal names the coordinator's folder as the anchor (RV-30)
+- 284536e skills using-fleet: legacy evidence is anchored from applied or closed rows (RV-37)
+- d19eb68 fleet reconcile: an awaiting-ci watcher is classified from what is true, not from what was recorded (B07, FB-58)
+- 16e68a6 fleet declare/brief: an attestation may name pid:<n>; brief stops saying the board cannot tell (B07, FB-58)
+- ad055b0 skills: the board labels and re-checks awaiting-ci watchers; attest with pid:<n> (B07, FB-58, NEW-4)
+- 6e9d35c fleet/it: §F F2c/F2d - an attested pid that exits and an observed watcher that vanishes are disregarded (B07, FB-58)
+- 4294c1d fleet reconcile: the pid statuses get marker values of their own (test_contracts one-marker-one-name)
+- ad0f8f7 fleet declare: a pid handle followed by more bare pids is ambiguous and refused; the skill names $! and warns off pgrep -f (RV-C1)
+- 37c9131 fleet reconcile: a malformed watcher_pid handle is NOT MEASURED instead of crashing the board (RV-C5)
+- e51e560 fleet reconcile: the awaiting-ci note reuses the classification the state was decided on (RV-C2)
+- 0af02e4 fleet reconcile/brief: an attestation without a recorded handle says so, not that it names no pid (RV-C3)
+- 0ebcdfb fleet brief: an attested pid already GONE is disregarded now, said in the present (RV-C4)
+- 12960cb fleet tests: PROC_ROOT is patched without create=True, and a comm holding ') Z' is pinned (RV-C6)
+- 54d5cc7 fleet/it: §F's cleanup kills F2c's sleep if a run is interrupted before the inline kill (RV-C7)
+- c7fc981 fleet/it + tests: F2d passes the frame path to the inner shell as an argument; the fake /proc trees are removed (RV-C8)
+- ad49fb2 fleet tests: TestAwaitingCiNote's docstrings speak of the retired i45 warning in the past tense (RV-A3)
+- 650203f fleet/it: F2c's assertions name the pid through F2C_WATCHED, since RV-C7 clears F2C_PID once reaped (RV-C7)
+
 ## fleet/v0.6.5 — 2026-09-23T03:45:38Z
 Cut from 2d59609 on `live` (upstream base snapshot/2026-09-22-152849). 63 commit(s) since fleet/v0.6.4.
 
