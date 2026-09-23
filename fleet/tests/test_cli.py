@@ -3811,12 +3811,19 @@ class TestTheDispatchMilestoneJoin(CliCase):
         harvest dry-run never asked, so it said `would-harvest` rc=0 while the real call refused inside the
         apply loop — after any earlier rows of the same worker had already landed."""
         fleet = self.loaded()
-        coordinator, todo, _, _ = self._reported_and_finished(fleet, "done", title="badRow")
+        coordinator, todo, _, finished = self._reported_and_finished(fleet, "done", title="badRow")
+        #: `RV-36`. A VALID row first (M9, from the fixture) and the invalid one AFTER it (M8), so the real
+        #: call's loop would apply M9 before meeting M8 — the "before applying anything" half is measured.
+        Roadmap(coordinator).add(Milestone(id="M8", title="second report", status="blocked", deps=[],
+                                           evidence=[]))
+        code, out, err = fleet.run(["propose", "--instant", str(finished), "--to", str(coordinator),
+                                    "--milestone", "M8", "--status", "done", "--evidence", "evidence/INDEX.md"])
+        self.assertEqual(code, EXIT_OK, err)
         inbox = Roadmap(coordinator).proposals_path
         data = json.loads(inbox.read_text())
-        mine = [row for row in data["pending"] if row["milestone"] == "M9"]
-        self.assertTrue(mine, "the fixture holds no row of this worker: vacuous")
-        mine[-1]["status"] = "finished"
+        rows = [row for row in data["pending"] if row["milestone"] in ("M9", "M8")]
+        self.assertEqual([r["milestone"] for r in rows], ["M9", "M8"], "the rows are not in the order this case needs")
+        rows[-1]["status"] = "finished"
         inbox.write_text(json.dumps(data))
         before = snapshot(fleet.tmp)
 
@@ -3828,7 +3835,8 @@ class TestTheDispatchMilestoneJoin(CliCase):
         self.assertEqual(dry[0], real[0], f"dry-run rc={dry[0]} vs real rc={real[0]}: {real[1]}{real[2]}")
         self.assertIn("finished", dry[1] + dry[2], "the refusal does not name the bad status")
         self.assertIsNone(fleet.store.read(todo).harvested_at, "the refusing harvest stamped the record")
-        self.assertEqual("blocked", Roadmap(coordinator).milestone("M9").status)
+        self.assertEqual("blocked", Roadmap(coordinator).milestone("M9").status,
+                         "the valid row ahead of the refused one was applied: the refusal came mid-loop")
 
     def test_a_harvest_dry_run_cannot_fall_into_the_real_branch_whatever_the_gate_returns(self):
         """`RV-24`. The dry-run branch was `elif (x := gate()) is not None and ctx.dry_run`, so a gate that
