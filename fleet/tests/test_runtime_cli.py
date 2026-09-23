@@ -292,6 +292,8 @@ class RuntimeCliTests(unittest.TestCase):
         route = err.split('clears when:', 1)[-1]
         self.assertNotIn('adopts the instant under the current runtime', route, err)
         self.assertIn('fleet runtime --set claude', route, err)
+        #: RV-36. The switch it names is blocked by this very record until it is harvested — said, not hidden.
+        self.assertIn('this record is itself one of those blockers', route, err)
 
     def test_adoption_cannot_relabel_an_existing_runtime(self):
         self.f.worker('original', slot='ws1', live=False)

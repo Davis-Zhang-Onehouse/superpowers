@@ -2045,7 +2045,10 @@ def _do_resume(ctx: Ctx, parsed: Parsed) -> int:
     recorded_route = (None if existing is None or existing.runtime == ctx.sessions.runtime else
                       f'the fleet runs {existing.runtime} again — `fleet runtime --set {existing.runtime}` once '
                       f'`fleet runtime --set {existing.runtime} --dry-run` names no blocker (every record '
-                      f'harvested, no lease held). Closing the record does not change its runtime')
+                      f'harvested, no lease held). While unharvested, this record is itself one of those '
+                      f'blockers, so that switch comes only after its work finishes and is harvested; to go on '
+                      f'now, carry the work with a new worker under the current runtime (`fleet dispatch`). '
+                      f'Closing the record does not change its runtime')
     if any(runtime != ctx.sessions.runtime for runtime in observed):
         raise Refused('Cannot adopt a session whose runtime differs from the fleet selection',
                       clears_when=recorded_route or (
