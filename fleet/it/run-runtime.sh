@@ -33,7 +33,29 @@ case "$mode" in
     bash "$IT_ROOT/bin/source-pin.sh" after "$EV" || exit 3
     exit "$IT_FAILED"
     ;;
-  *) echo 'usage: run-runtime.sh --stubs | --live --runtime claude|codex' >&2; exit 2 ;;
+  --choice-live)
+    # RTC (pt2): real native CLIs, trivial seeds, on a private server and store whose box runtime is claude.
+    # (a) claude on claude-fable-5-1, (b) codex on its default model, (d) each revived with its runtime and model.
+    . "$IT_ROOT/lib.sh"
+    IT_FAILED=0
+    it_own_cases 'RTC[0-9]+|ISOLATION-RTC-.*'
+    it_section "RTC-$$"
+    export RT_ATTEMPT
+    RT_ATTEMPT="$(mktemp -d "$EV/attempt-XXXXXX")"
+    bash "$IT_ROOT/bin/source-pin.sh" before "$EV" || exit 2
+    trap 'it_tmux kill-server 2>/dev/null || true' EXIT
+    echo "Native runtime-choice test: $RT_ATTEMPT (inspect: tmux -L $FLEET_TMUX_SOCKET attach)"
+    if python3 "$IT_ROOT/runtime-choice-live.py" > "$RT_ATTEMPT/steps.log" 2>&1; then
+      it_pass RTC1 "fleet/it/$SECTION/$(basename "$RT_ATTEMPT")/evidence/verdict.json" 'on a claude box: a claude-fable-5-1 worker and a codex default-model worker each start, answer, pass seed-check and pane-guard, and revive with the same runtime and model'
+    else
+      it_fail RTC1 "fleet/it/$SECTION/$(basename "$RT_ATTEMPT")/steps.log" 'native runtime-choice lifecycle incomplete; inspect the step log and frames'
+    fi
+    it_tmux kill-server 2>/dev/null || true
+    it_assert_isolation "RTC-leave"
+    bash "$IT_ROOT/bin/source-pin.sh" after "$EV" || exit 3
+    exit "$IT_FAILED"
+    ;;
+  *) echo 'usage: run-runtime.sh --stubs | --live --runtime claude|codex | --choice-live' >&2; exit 2 ;;
 esac
 . "$IT_ROOT/lib.sh"
 IT_FAILED=0
@@ -57,6 +79,15 @@ if python3 "$IT_ROOT/runtime-checks.py" > "$EV/out/runtime.json" 2> "$EV/out/run
   it_pass RT1 'fleet/it/RT/out/runtime.json' 'both runtimes launch with attested seed bytes, refuse an early switch, and switch back after close-out'
 else
   it_fail RT1 'fleet/it/RT/out/runtime.stderr' 'runtime CLI lifecycle failed; inspect the attributed step log'
+fi
+# RT2 (pt2): per-dispatch runtime/model on a claude box, in a store of its own (RT1's asserts it starts empty).
+RT2_ATTEMPT="$(mktemp -d "$EV/attempt-XXXXXX")"
+mkdir -p "$RT2_ATTEMPT/home"
+if FLEET_HOME="$RT2_ATTEMPT/home" FLEET_INSTANTS="$RT2_ATTEMPT/instants" \
+   python3 "$IT_ROOT/runtime-choice-checks.py" > "$EV/out/runtime-choice.json" 2> "$EV/out/runtime-choice.stderr"; then
+  it_pass RT2 'fleet/it/RT/out/runtime-choice.json' 'on a claude box: no flags launch the base argv exactly; --model reaches the claude argv and the record; --runtime codex launches codex with no model flag and leaves the box selection untouched'
+else
+  it_fail RT2 'fleet/it/RT/out/runtime-choice.stderr' 'per-dispatch runtime/model choice failed; inspect the step log'
 fi
 it_tmux kill-server 2>/dev/null || true
 it_assert_isolation RT-leave
