@@ -226,6 +226,15 @@ class UnreadableCwdHolder(unittest.TestCase):
         self.assertIn(self.shell.pid, holders, "control: the readable holder was not found")
         self.assertIn(self.child, holders, "the unreadable holder was skipped as if absent")
 
+    def test_control_a_readable_holder_alone_refuses(self):
+        """RV-29. The control that passes before and after FB-90: the readable parent, not spared, refuses."""
+        pool = Pool(self.tmp / "home", cwd_probe=cli._cwd_holders)
+        pool.enroll(self.slot)
+        pool.claim(todo_id="t-1", tmux="dt-t", base_instant=OURS, child_instant="/x", slot="ws1")
+        refusal = pool.release_refusal("ws1")
+        self.assertIsNotNone(refusal)
+        self.assertIn(str(self.shell.pid), str(refusal))
+
     def test_the_release_refusal_names_it_undecided(self):
         pool = Pool(self.tmp / "home", cwd_probe=cli._cwd_holders)
         pool.enroll(self.slot)
@@ -245,7 +254,12 @@ class UnreadableHolderSurvivesTheKill(CliCase):
     PANE, CHILD = 7000, 7005
 
     def _setup(self, fleet):
-        from fleet.pool import UnreadableHolder
+        try:
+            from fleet.pool import UnreadableHolder
+        except ImportError:
+            #: RV-29. Before FB-90 the type did not exist; a plain int keeps the scenario RUNNABLE on that tree, so
+            #: the case fails there on its assertion (the slot released under the orphan), not on an import.
+            UnreadableHolder = int
         instant = fleet.worker("blindChild", slot="ws1", pane=IDLE_PANE)
         path = str(fleet.pool.slot_path("ws1"))
         fleet.holders[path] = [self.PANE, UnreadableHolder(self.CHILD)]
