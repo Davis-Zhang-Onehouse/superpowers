@@ -1250,6 +1250,21 @@ class UnreadableRowAttributionTests(unittest.TestCase):
         self.assertEqual(worker.evidence.get("process"), "unreadable")
         self.assertIn("unreadable", worker.note)
 
+    def test_the_texts_do_not_name_a_cause_nobody_observed(self):
+        """RV-24. Since FB-53 an unreadable row also stands for a `comm`/`cmdline` read that failed (EIO, EINVAL, …) with
+        `exe` and `cwd` perfectly readable, and the row does not keep which read failed. The notes say what is known."""
+        fleet = self.fleet
+        fleet.dispatch("unread-07300314", "00000000-07300314-inflight-append-unread", "ws9", "dt-unread")
+        fleet.tmux_live.add("dt-unread")
+        fleet.panes["dt-unread"] = QUIET_PANE
+        fleet.procs.append(probe_unreadable(self.proc, 7002, 7001, "dt-unread"))
+        fleet.procs.append(probe_unreadable(self.proc / "b", 7006, 7005, "nobody", owned=False))
+        notes = [s.note for s in self.subjects() if s.evidence.get("pid") in ("7002", "7006")]
+        self.assertEqual(len(notes), 2)
+        for note in notes:
+            self.assertIn("a /proc read of it failed", note)
+            self.assertNotIn("exe/cwd", note)
+
     def test_a_readable_worker_in_the_same_pane_speaks_for_the_record(self):
         """RV-25. One record's pane holds a readable claude AND a lower-pid unreadable one (a descendant whose reads
         failed). The record is represented by the process it can actually read — `evidence.pid` feeds the watchdog's
