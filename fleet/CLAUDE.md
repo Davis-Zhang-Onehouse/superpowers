@@ -36,6 +36,18 @@ PYTHONPATH=src python3 -m unittest tests.test_cli.TestBrief  # one class
 Run this before every commit. It is fast and it is the only tier that will catch a logic regression in
 seconds rather than minutes.
 
+**A test that reaches the fleet you are standing in fails.** `tests/__init__.py` records, before any test
+runs, the root the marker walk finds from your cwd, whatever `FLEET_ROOT`/`FLEET_HOME`/`FLEET_RELEASES`/
+`FLEET_INSTANTS` name, and each such store's `instants/`. It raises `LiveFleetReached` if a test resolves one of them. A test that drives `cli.main` names its
+own: `hermetic_environment(instants, home=<tmp>)` plus a `--root`/`--home` the fixture wrote. Before this,
+nine promote cases passed inside `davis_root` by reading the live root and failed from any `/tmp` export,
+so `assert-head-green.sh` was RED at every tree (FB-35).
+The guard is installed when the `tests` package is imported. That always happens for `discover -s tests`
+over the whole suite, which is how P-1, `selftest` and `release-verify` run it, and for any
+`tests.<module>` target. A `-p` subset whose modules never import `tests` runs unguarded.
+It does not watch a tmux SERVER. A test that inherits `FLEET_TMUX_SOCKET` and resolves no root can still
+probe the live server, and nothing fails. `hermetic_environment` clears that variable.
+
 ## Running the integration sections
 
 Each `it/run-*.sh` is one section, self-contained, and safe to run individually. Every runner writes its

@@ -45,7 +45,7 @@ from fleet import (EXIT_ATTENTION, EXIT_BAD_INPUT, EXIT_CODES, EXIT_NO_CAPACITY,
 from fleet.runtime import LaunchSettings
 from fleet import cli
 from fleet import render
-from tests import hermetic_environment
+from tests import FLEET_ENV, hermetic_environment
 from fleet import seedcheck
 from fleet.harvest import NO_ISSUES_FILED, REGISTER_NAME, UNREADABLE, VACUOUS, Harvest
 from fleet.identity import InstantName, resolve
@@ -5559,20 +5559,15 @@ class TestANamedDestinationIsWholeNotHalf(unittest.TestCase):
     def _instants(self, argv, env):
         """`default_context`'s answer for one argv under one environment, and nothing else."""
         parsed = cli.parse(cli.VERBS["init"], list(argv))
-        keep = {name: os.environ.get(name) for name in ("FLEET_HOME", "FLEET_INSTANTS")}
-
-        def restore():
-            for name, was in keep.items():
-                if was is None:
-                    os.environ.pop(name, None)
-                else:
-                    os.environ[name] = was
-
-        self.addCleanup(restore)
-        for name in keep:
-            os.environ.pop(name, None)
-        os.environ.update(env)
-        return cli.default_context(parsed, io.StringIO(), io.StringIO()).instants_dir
+        #: Every fleet variable cleared and `$HOME` private, not just the two under test: `default_context`
+        #: also resolves a ROOT, and with `FLEET_ROOT` inherited or the suite standing inside a fleet root
+        #: it resolved the operator's live one (FB-35, found by the live-fleet guard in `tests/__init__`).
+        with mock.patch.dict(os.environ, {}, clear=False):
+            for name in FLEET_ENV:
+                os.environ.pop(name, None)
+            os.environ["HOME"] = str(self.tmp)
+            os.environ.update(env)
+            return cli.default_context(parsed, io.StringIO(), io.StringIO()).instants_dir
 
     def test_an_explicit_home_flag_outranks_an_inherited_FLEET_INSTANTS(self):
         """THE KNOWN-BAD INPUT. This is the case that minted the ten strays, and the only one of the four
