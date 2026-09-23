@@ -38,76 +38,87 @@ class RuntimeCliTests(unittest.TestCase):
         self.assertEqual(code, 4, err)
         self.assertEqual(snapshot(self.f.home), before)
 
-    def test_a_closed_record_still_blocks_and_the_route_says_what_does_clear_it(self):
-        """RV-21 / RV-30. The route said "harvested or closed", but `runtime_blockers` counts every UNHARVESTED
-        record and every held lease, so a close clears nothing. The route names harvest — and the test RUNS
-        harvest (a stub that stamped `harvested_at` by hand hid that harvest cannot run for every record) —
-        and it says, rather than hides, that an aborted or unreviewed record cannot be harvested."""
+    def test_a_closed_complete_record_is_not_a_blocker_and_its_lease_names_reap(self):
+        """RV-21 / RV-30, re-decided by FB-92 (D-30). A record closed after it completed can be neither revived
+        (closed) nor resumed (-complete-), so it no longer blocks; the lease `close` leaves held still does, and
+        the route it names — `fleet reap` — is RUN here, with no harvest and no review."""
         done = self.f.worker('shut', state='complete', slot='ws1', live=False)
         self.f.reviewed(done)
         code, _, err = self.f.run(['close', '--id', self.f.ids['shut']])
         self.assertEqual(code, 0, err)
         code, _, err = self.f.run(['runtime', '--set', 'codex'])
         self.assertEqual(code, 4, err)
-        route = err.split('clears when:', 1)[-1]
-        self.assertNotIn('harvested or closed', err)             # the withdrawn value, exactly
-        for clause in ('fleet harvest --id', 'fleet reap'):
-            self.assertIn(clause, route, err)
-        code, out, err = self.f.run(['harvest', '--id', self.f.ids['shut']])
-        self.assertTrue(self.f.store.read(self.f.ids['shut']).harvested_at, f"the named harvest did not run: {out}{err}")
+        self.assertNotIn(self.f.ids['shut'], err.split('clears when:', 1)[0], err)
+        self.assertIn('held lease ws1', err)
+        self.assertIn('fleet reap', err.split('clears when:', 1)[-1], err)
+        code, _, err = self.f.run(['reap', '--base', self.f.store.read(self.f.ids['shut']).base_instant])
+        self.assertEqual(code, 0, err)
         code, _, err = self.f.run(['runtime', '--set', 'codex'])
         self.assertEqual(code, 0, f"the named route ran and the switch is still refused: {err}")
 
-    def test_a_closed_unreviewed_complete_record_is_cleared_by_the_named_review_then_harvest(self):
-        """RV-35 / D-31. The one state the route names beyond a reviewed record: a `-complete-` folder with no
-        review round. The test RUNS review -> harvest and sees the switch clear."""
-        path = self.f.worker('unreviewed', state='complete', slot='ws1', live=False)
-        self.assertEqual(self.f.run(['close', '--id', self.f.ids['unreviewed']])[0], 0)
+    def test_an_open_complete_record_with_its_lease_names_harvest_and_close_then_reap(self):
+        """RV-35 / D-31 / FB-92. Open, its lease held, folder -complete-: `revive` could still act, so it blocks,
+        and the text names both doors. Each is RUN: review -> harvest on one record, close -> reap on another."""
+        for name in ('viaHarvest', 'viaClose'):
+            self.f.worker(name, state='complete', slot='ws1' if name == 'viaHarvest' else 'ws2', live=False)
         code, _, err = self.f.run(['runtime', '--set', 'codex'])
         self.assertEqual(code, 4, err)
-        route = err.split('clears when:', 1)[-1]
-        for clause in ('`-complete-`', 'fleet review --instant', 'fleet harvest --id'):
-            self.assertIn(clause, route, err)
+        for clause in (f"fleet harvest --id {self.f.ids['viaHarvest']}", f"fleet close --id {self.f.ids['viaClose']}",
+                       'fleet reap --base'):
+            self.assertIn(clause, err)
+        path = self.f.paths['viaHarvest']
         code, _, err = self.f.run(['review', '--instant', str(path), '--scope', 'all', '--verdict', 'READY'])
         self.assertIn(code, (0, 1), err)                 # 1 = the gate's own exit when it has something to say
-        code, out, err = self.f.run(['harvest', '--id', self.f.ids['unreviewed']])
-        self.assertTrue(self.f.store.read(self.f.ids['unreviewed']).harvested_at,
-                        f"review -> harvest, the named route, did not harvest: {out}{err}")
+        code, out, err = self.f.run(['harvest', '--id', self.f.ids['viaHarvest']])
+        self.assertTrue(self.f.store.read(self.f.ids['viaHarvest']).harvested_at, f"harvest did not run: {out}{err}")
+        self.assertEqual(self.f.run(['close', '--id', self.f.ids['viaClose']])[0], 0)
+        base = self.f.store.read(self.f.ids['viaClose']).base_instant
+        self.assertEqual(self.f.run(['reap', '--base', base])[0], 0)
         code, _, err = self.f.run(['runtime', '--set', 'codex'])
-        self.assertEqual(code, 0, f"the named route ran and the switch is still refused: {err}")
+        self.assertEqual(code, 0, f"both named routes ran and the switch is still refused: {err}")
 
-    def _no_single_verb(self, err):
-        route = err.split('clears when:', 1)[-1]
-        self.assertIn('no single verb clears it today', route, err)
-        self.assertIn('FB-92', route, err)
-
-    def test_an_inflight_closed_record_is_named_no_single_verb_not_a_route_that_fails(self):
-        """RV-37 / D-31. Closed while `-inflight-`: review -> harvest does NOT clear it (harvest refuses on the
-        inflight folder), so the refusal names no route for it — it says no single verb does, FB-92."""
-        self.f.worker('halfway', slot='ws1', live=False)
+    def test_an_inflight_closed_record_names_abort_and_abort_clears_it(self):
+        """RV-37 / D-31 / FB-92. Closed while `-inflight-`: `resume` can still adopt it, so it blocks — and the
+        route is `abort`, which is RUN."""
+        path = self.f.worker('halfway', slot='ws1', live=False)
         self.assertEqual(self.f.run(['close', '--id', self.f.ids['halfway']])[0], 0)
         code, _, err = self.f.run(['runtime', '--set', 'codex'])
         self.assertEqual(code, 4, err)
-        self._no_single_verb(err)
-        self.assertIn('still -inflight-', err.split('clears when:', 1)[-1], err)
+        self.assertIn(f'fleet abort --instant {path}', err)
+        self.assertNotIn('no single verb clears it today', err)
+        self.assertEqual(self.f.run(['abort', '--instant', str(path), '--reason', 'switching'])[0], 0)
+        code, _, err = self.f.run(['runtime', '--set', 'codex'])
+        self.assertEqual(code, 0, err)
 
-    def test_an_aborted_record_is_named_no_single_verb(self):
+    def test_an_aborted_record_does_not_block(self):
         path = self.f.worker('dropped', slot='ws1', live=False)
         self.assertEqual(self.f.run(['abort', '--instant', str(path), '--reason', 'abandoned for the test'])[0], 0)
         code, _, err = self.f.run(['runtime', '--set', 'codex'])
-        self.assertEqual(code, 4, err)
-        self._no_single_verb(err)
+        self.assertEqual(code, 0, err)
 
-    def test_a_gone_folder_record_is_said_to_have_no_clearing_verb(self):
-        """RV-35 / FB-92. Harvest exits 2 on a folder that resolves to nothing; the refusal says so."""
+    def test_a_gone_folder_record_needs_only_its_lease_reaped(self):
+        """RV-35 / FB-92. Harvest still exits 2 on a folder that resolves to nothing, and it no longer has to run:
+        the record cannot be resumed or revived, so only its lease blocks, and `reap` frees it."""
         path = self.f.worker('gone', slot='ws1', live=False)
         self.assertEqual(self.f.run(['close', '--id', self.f.ids['gone']])[0], 0)
         shutil.rmtree(path)
         code, _, err = self.f.run(['runtime', '--set', 'codex'])
         self.assertEqual(code, 4, err)
-        self._no_single_verb(err)
-        self.assertEqual(self.f.run(['harvest', '--id', self.f.ids['gone']])[0], 2,
-                         'harvest ran on a gone folder, so the refusal is no longer true')
+        self.assertNotIn(self.f.ids['gone'], err.split('clears when:', 1)[0])
+        self.assertEqual(self.f.run(['harvest', '--id', self.f.ids['gone']])[0], 2)
+        self.assertEqual(self.f.run(['reap', '--base', self.f.store.read(self.f.ids['gone']).base_instant])[0], 0)
+        self.assertEqual(self.f.run(['runtime', '--set', 'codex'])[0], 0)
+
+    def test_an_unreadable_folder_is_undecided_and_blocks(self):
+        """FB-53's rule for the new predicate: a folder that cannot be read is not a folder that is gone."""
+        path = self.f.worker('sealed', state='complete', slot='ws1', live=False)
+        self.assertEqual(self.f.run(['close', '--id', self.f.ids['sealed']])[0], 0)
+        self.assertEqual(self.f.run(['reap', '--base', self.f.store.read(self.f.ids['sealed']).base_instant])[0], 0)
+        with patch('fleet.cli.resolve', side_effect=PermissionError(13, 'Permission denied')):
+            code, _, err = self.f.run(['runtime', '--set', 'codex'])
+        self.assertEqual(code, 4, err)
+        self.assertIn('could not be read', err)
+        self.assertIn(self.f.ids['sealed'], err)
 
     def test_same_runtime_is_noop_with_work(self):
         self.f.worker('active', slot='ws1')

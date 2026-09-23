@@ -1440,6 +1440,63 @@ def _read_seed_extra(path) -> str:
     return text.strip()
 
 
+def _runtime_record_blocker(ctx: Ctx, record: Record) -> str:
+    """Why this record forbids a runtime switch — naming the verb that clears ITS state — or "" when it does not.
+
+    `FB-92`, coordinator D-30. The switch used to count every record without `harvested_at`, so a record nothing
+    could ever bring back — its folder gone, or aborted, or closed after it completed — blocked the switch
+    forever, or cleared only through a review somebody fabricated so `harvest` would stamp it. What a switch can
+    strand is a record `revive` or `resume` could still act on, because both refuse a record of another runtime.
+    So a record blocks only while one of them could:
+
+      * REVIVABLE — not closed, its folder there, and its lease still held by it or its session alive;
+      * RESUMABLE — its folder resolves and is `-inflight-` (`resume` adopts an inflight instant);
+      * UNDECIDED — its folder could not be read, so neither can be ruled out (FB-53: unreadable is not absent).
+
+    Anything else strands nothing. A lease it still holds and a live process it still has are blockers of their
+    own (below), with their own routes, so dropping the record here never lets a switch run over live work.
+    """
+    if record.harvested_at:
+        return ""
+    try:
+        child, _ = _child_or_why(ctx, record)
+    except Exception:                                        # noqa: BLE001 - an unreadable record is undecided
+        child = None
+    recorded = _recorded_path(ctx, record)
+    if child is None:
+        try:
+            gone = resolve(recorded) is None
+        except (FleetError, OSError):
+            gone = False
+        if not gone:
+            return (f"record {record.todo_id} (its folder {recorded} could not be read, so whether it can still be "
+                    f"resumed is undecided — clears when the folder is readable again and this is re-run)")
+        state = None
+    else:
+        state = InstantName.parse(child.name).state
+    held = ctx.pool.lease(record.slot) if record.slot else None
+    lease_is_its = held is not None and held.todo_id == record.todo_id
+    try:
+        alive = bool(record.tmux) and ctx.sessions_for(record).alive(record.tmux)
+    except (FleetError, OSError):
+        alive = True                                         # unobservable is not dead
+    if not record.closed_at and alive:
+        return (f"running record {record.todo_id} (session {record.tmux} is alive — clears when its work finishes "
+                f"and it is harvested, or `fleet close --id {record.todo_id}` ends it)")
+    if state == "inflight":
+        return (f"record {record.todo_id} can still be resumed (its folder is -inflight-) — `fleet abort --instant "
+                f"{child} --reason <why>` ends it and releases its lease")
+    #: `revive` resolves the folder too, so a gone folder is not revivable even with its lease held (the lease
+    #: is a blocker of its own, cleared by `reap`).
+    if not record.closed_at and lease_is_its and child is not None:
+        return (f"record {record.todo_id} can still be revived (open, its lease on {record.slot} held; its folder "
+                f"is -{state}-) — "
+                f"`fleet harvest --id {record.todo_id}` closes it out after its review and final report, or "
+                f"`fleet close --id {record.todo_id}` then `fleet reap --base {record.base_instant}` ends it with "
+                f"no review")
+    return ""
+
+
 def runtime_blockers(ctx: Ctx) -> list[str]:
     """What forbids changing the saved runtime right now, each named so the operator can clear it.
 
@@ -1449,9 +1506,9 @@ def runtime_blockers(ctx: Ctx) -> list[str]:
     project under the root, and an operator's own interactive session in an unrelated checkout would
     forbid `runtime --set` forever (the spec's "foreign fleets never block", read one level closer).
     """
-    blockers = [f"unharvested record {record.todo_id}" for record in ctx.store.all()
-                if not record.harvested_at]
-    names = {record.tmux for record in ctx.store.all() if record.tmux and not record.harvested_at}
+    records = ctx.store.all()
+    blockers = [why for why in (_runtime_record_blocker(ctx, record) for record in records) if why]
+    names = {record.tmux for record in records if record.tmux and not record.harvested_at}
     paths = [Path(ctx.instants_dir).resolve()]
     for slot in ctx.pool.slots():
         paths.append(ctx.pool.slot_path(slot).resolve())
@@ -1485,21 +1542,14 @@ def _do_runtime(ctx: Ctx, parsed: Parsed) -> int:
             blockers = runtime_blockers(ctx)
             if blockers:
                 raise Refused('Runtime switch requires a completed fleet: ' + '; '.join(blockers),
-                              #: `B11`, coordinator D-31. Three closures found this route wrong for some record
-                              #: state (RV-30, RV-35, RV-37): the chain that clears a record depends on its state
-                              #: (abort if -inflight-, a final report if dispatched for a milestone, review,
-                              #: harvest), and designing it is FB-92's. So the text names a route ONLY where it is
-                              #: measured to run — a `-complete-` record (review if unreviewed, then harvest) —
-                              #: and says, for every other state, that no single verb clears it today.
-                              clears_when='nothing above remains: each named record is HARVESTED. For a record '
-                                          'whose folder is `-complete-`, `fleet harvest --id <todo>` does it — '
-                                          'after `fleet review --instant <its folder> --scope all --verdict READY` '
-                                          'if it has no review round yet, and after its final report if it was '
-                                          'dispatched for a milestone. For a record in any other state (its '
-                                          'folder still -inflight-, aborted, or gone) no single verb clears it '
-                                          'today — a known gap (FB-92). Each held lease is released by that '
-                                          'harvest or by `fleet reap`, and each named process has exited; then '
-                                          'the same `fleet runtime --set` is re-run',
+                              #: `FB-92` (D-30). Each record blocker above names the verb that clears ITS state
+                              #: (abort / harvest / close then reap / its work finishing); a record no verb can
+                              #: resume or revive is not listed at all, so no review has to be fabricated. B11's
+                              #: "no single verb clears it today" is gone with the gap it described.
+                              clears_when='nothing above remains: each named record is ended by the verb named '
+                                          'beside it, each held lease is released (`fleet reap --base <its base>` '
+                                          'once its session is gone and nothing sits in it), and each named '
+                                          'process has exited; then the same `fleet runtime --set` is re-run',
                               clears_who='the coordinator of each named record, or the operator')
             if not ctx.dry_run:
                 write_runtime(ctx.home, requested)
@@ -2083,9 +2133,9 @@ def _do_resume(ctx: Ctx, parsed: Parsed) -> int:
     #: record, a foreign session exiting is not enough — the re-run meets the second refusal.
     recorded_route = (None if existing is None or existing.runtime == ctx.sessions.runtime else
                       f'the fleet runs {existing.runtime} again — `fleet runtime --set {existing.runtime}` once '
-                      f'`fleet runtime --set {existing.runtime} --dry-run` names no blocker (every record '
-                      f'harvested, no lease held). While unharvested, this record is itself one of those '
-                      f'blockers, so that switch comes only after its work finishes and is harvested; to go on '
+                      f'`fleet runtime --set {existing.runtime} --dry-run` names no blocker (no record that can '
+                      f'still be resumed or revived, no lease held). While it can still be resumed or revived, this record is '
+                      f'itself one of those blockers (FB-92), so that switch comes only after it ends; to go on '
                       f'now, carry the work with a new worker under the current runtime (`fleet dispatch`). '
                       f'Closing the record does not change its runtime')
     if any(runtime != ctx.sessions.runtime for runtime in observed):
