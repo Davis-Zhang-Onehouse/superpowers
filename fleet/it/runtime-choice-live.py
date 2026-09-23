@@ -54,9 +54,13 @@ def private_codex_home():
         if line.lstrip().startswith('['):
             break                                    # only the top-level keys; no [projects.*] or other tables
         top.append(line)
-    toplevel = subprocess.run(['git', '-C', str(root), 'rev-parse', '--show-toplevel'],
-                              capture_output=True, text=True).stdout.strip()
-    trusted = [path for path in (toplevel, str(root)) if path]
+    git = lambda *a: subprocess.run(['git', '-C', str(root), 'rev-parse', *a], capture_output=True, text=True).stdout.strip()
+    toplevel = git('--show-toplevel')
+    #: Measured (codex-cli 0.156.1): inside a git WORKTREE the trust screen says "Trusting will apply to the repository
+    #: root" and names the MAIN repository — the parent of `--git-common-dir` — not the worktree's toplevel.
+    common = git('--path-format=absolute', '--git-common-dir')
+    repository = str(Path(common).parent) if common else ''
+    trusted = list(dict.fromkeys(path for path in (repository, toplevel, str(root)) if path))
     body = '\n'.join(top).rstrip() + '\n\n' + ''.join(f'[projects."{path}"]\ntrust_level = "trusted"\n\n' for path in trusted)
     (home / 'config.toml').write_text(body)
     return home
