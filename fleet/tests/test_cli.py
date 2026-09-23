@@ -6993,6 +6993,22 @@ class TestB11RefusalsNameARouteThatRuns(CliCase):
             self.assertIn(str(now), row, f"the row does not name the folder as it is now: {row}")
             self.assertNotIn(str(worker), row, f"the row names the stale recorded path: {row}")
 
+        #: RV-19. The pending-left row goes through the same `_row_named`: choose the OLDER row with `--at`.
+        #: Both rows were proposed within one second, so the older one is backdated to make `--at` unique.
+        inbox = coordinator / ".fleet" / "proposals.json"
+        data = json.loads(inbox.read_text())
+        for row in data["pending"]:
+            if row.get("milestone") == "m7" and row.get("status") == "running":
+                row["at"] = "2026-07-30T11:00:00Z"
+        inbox.write_text(json.dumps(data, indent=2))
+        code, out, err = fleet.run(["apply", "--porcelain", "--dry-run", "--instant", str(coordinator),
+                                    "--milestone", "m7", "--at", "2026-07-30T11:00:00Z"])
+        self.assertEqual(EXIT_OK, code, err)
+        left = [l for l in out.splitlines() if l.startswith("pending-left")]
+        self.assertTrue(left, out)
+        self.assertIn(str(now), left[0], left[0])
+        self.assertNotIn(str(worker), left[0], left[0])
+
         code, out, err = fleet.run(["apply", "--porcelain", "--instant", str(coordinator),
                                     "--milestone", "m7"])
         self.assertEqual(EXIT_OK, code, err)
