@@ -2218,6 +2218,131 @@ class TestAbort(CliCase):
         self.assertEqual(snapshot(fleet.tmp), before, "the refused abort still mutated the tree")
 
 
+class TestAbortDryRunEvaluatesTheRealGate(CliCase):
+    """`B10` (i48c / FI-281). `abort --dry-run` returned `would-rename`/`would-release` with rc=0 from ABOVE
+    the only place the `OBS-48` cwd-holder gate runs, so the same argv then refused rc=4 for real — and the
+    real call refused only AFTER it had already killed the session. A dry-run must evaluate every gate the
+    real call does and report the refusal it would hit, and a refusal must come before any irreversible
+    step where the facts to decide it exist before that step.
+
+    The session's OWN processes are the fixture's other half, and the reason the gate cannot simply be "any
+    cwd holder": a dispatched worker's pane sits in its slot, so every ordinary abort HAS holders — the ones
+    the kill ends. Only a holder outside the session's process tree survives the kill, so only that one is
+    a refusal the real call will hit."""
+
+    PANE = 7000                          # the pid tmux started in the worker's pane
+
+    def _attributable(self, fleet, parents):
+        """Make the fixture able to say whose a pid is: a pane pid per live session, and a parent walk."""
+        fleet.sessions.probes.pane_pid = lambda name: self.PANE if name in fleet.tmux_live else None
+        fleet.sessions.probes.parent_of = lambda pid: parents.get(pid, 1)
+
+    def _states(self, fleet):
+        return (snapshot(fleet.tmp), list(fleet.killed), fleet.pool_state(), fleet.record_state())
+
+    def test_dry_run_refuses_exactly_as_the_real_call_on_a_holder_outside_the_session(self):
+        fleet = self.loaded()
+        instant, todo = fleet.worker("heldOpen", slot="ws7"), fleet.ids["heldOpen"]
+        fleet.hold_slot_cwd("ws7", pid=89420)          # a live pid the kill will NOT end (parent: init)
+        self._attributable(fleet, {})
+        argv = ["abort", "--instant", str(instant), "--reason", "superseded"]
+
+        before = self._states(fleet)
+        dry_code, dry_out, dry_err = fleet.run(argv[:1] + ["--dry-run"] + argv[1:])
+        self.assertEqual(self._states(fleet), before,
+                         "the dry-run changed the tree, a lease, a record or killed a session")
+        self.assertEqual(dry_code, EXIT_REFUSED,
+                         f"the dry-run said the abort would go through (rc={dry_code}) while the real call "
+                         f"refuses on the cwd holder it never evaluated: {dry_out}{dry_err}")
+        self.assertIn("89420", dry_err, "the dry-run refusal does not name the holder")
+
+        real_code, real_out, real_err = fleet.run(argv)
+
+        self.assertEqual((real_code, real_err), (dry_code, dry_err),
+                         "the dry-run and the real call disagree about the same argv")
+        self.assertEqual(fleet.killed, [], "the real abort killed the session and THEN refused: the "
+                                           "refusal must come before the irreversible step")
+        self.assertTrue(instant.exists(), "the folder was renamed on a refusing path")
+        self.assertIsNotNone(fleet.pool.lease("ws7"), "the slot was released on a refusing path")
+        self.assertIsNone(fleet.store.read(todo).closed_at, "the record was stamped on a refusing path")
+        self.assertFalse((instant / ".fleet" / "abort.json").exists(),
+                         "abort.json was written on a path that refused before doing anything")
+        self.assertTrue(fleet.slept, "the bounded wait was never given to the holder")
+
+    def test_a_holder_that_exits_during_the_wait_lets_both_go_through(self):
+        fleet = self.loaded()
+        instant = fleet.worker("heldBriefly", slot="ws8")
+        fleet.hold_slot_cwd("ws8", pid=90001)
+        self._attributable(fleet, {})
+        holder_path = str(fleet.pool.slot_path("ws8"))
+        fleet.sleep = lambda seconds: (fleet.slept.append(seconds), fleet.holders.pop(holder_path, None))
+
+        code, out, err = fleet.run(["abort", "--dry-run", "--instant", str(instant), "--reason", "gone"])
+        self.assertEqual(code, EXIT_OK, f"{out}{err}")
+        fleet.hold_slot_cwd("ws8", pid=90001)          # back again for the real call's own wait
+        code, out, err = fleet.run(["abort", "--instant", str(instant), "--reason", "gone"])
+        self.assertEqual(code, EXIT_OK, f"{out}{err}")
+        self.assertIsNone(fleet.pool.lease("ws8"))
+
+    def test_the_sessions_own_processes_are_not_a_refusal(self):
+        """The control, and the reason option (A) of D-1 was rejected: the worker's own pane holds the slot
+        in EVERY ordinary abort, and the kill ends it. Reporting it would flip the divergence's sign."""
+        fleet = self.loaded()
+        instant, todo = fleet.worker("ownPane", slot="ws7"), fleet.ids["ownPane"]
+        fleet.hold_slot_cwd("ws7", pid=self.PANE)              # the pane's shell itself
+        fleet.hold_slot_cwd("ws7", pid=7001)                   # claude, the pane's child
+        self._attributable(fleet, {7001: self.PANE})
+        path = str(fleet.pool.slot_path("ws7"))
+        kill = fleet.sessions.probes.kill_session
+
+        def kill_ends_the_tree(name):
+            kill(name)
+            fleet.holders.pop(path, None)
+        fleet.sessions.probes.kill_session = kill_ends_the_tree
+
+        before = self._states(fleet)
+        code, out, err = fleet.run(["abort", "--dry-run", "--instant", str(instant), "--reason", "done"])
+        self.assertEqual(code, EXIT_OK, f"the worker's own pane was reported as a refusal: {out}{err}")
+        self.assertEqual(self._states(fleet), before, "the dry-run mutated state")
+        self.assertIn("would-release", out)
+        self.assertEqual(fleet.slept, [], "the dry-run waited on the session's own processes")
+
+        code, out, err = fleet.run(["abort", "--instant", str(instant), "--reason", "done"])
+        self.assertEqual(code, EXIT_OK, f"{out}{err}")
+        self.assertIsNone(fleet.pool.lease("ws7"))
+        self.assertIsNotNone(fleet.store.read(todo).closed_at)
+
+    def test_a_dead_session_leaves_every_holder_foreign(self):
+        """No session to kill means nothing the abort does can free the slot: both calls refuse, alike."""
+        fleet = self.loaded()
+        instant = fleet.worker("deadButHeld", slot="ws8", live=False)
+        fleet.hold_slot_cwd("ws8", pid=91000)
+        self._attributable(fleet, {})
+        argv = ["abort", "--instant", str(instant), "--reason", "stranded"]
+
+        before = self._states(fleet)
+        dry = fleet.run(argv[:1] + ["--dry-run"] + argv[1:])
+        self.assertEqual(self._states(fleet), before)
+        real = fleet.run(argv)
+        self.assertEqual(dry[0], EXIT_REFUSED, f"{dry}")
+        self.assertEqual((real[0], real[2]), (dry[0], dry[2]))
+        self.assertTrue(instant.exists())
+
+    def test_unattributable_holders_are_named_undecided_not_passed(self):
+        """A live session whose pane pid cannot be read: the gate cannot tell the worker's own processes
+        from anybody else's, so it does not pre-refuse (that would block every abort on a probe gap) — and
+        the dry-run SAYS it could not decide instead of implying the release will succeed."""
+        fleet = self.loaded()
+        instant = fleet.worker("blindPane", slot="ws7")
+        fleet.hold_slot_cwd("ws7", pid=89421)           # pane_pid probe left absent: unobservable
+        before = self._states(fleet)
+        code, out, err = fleet.run(["abort", "--dry-run", "--instant", str(instant), "--reason", "x"])
+        self.assertEqual(self._states(fleet), before)
+        self.assertEqual(code, EXIT_OK, f"{out}{err}")
+        self.assertIn("89421", out, "the dry-run hid the holder it could not attribute")
+        self.assertIn("could not", out.lower())
+
+
 class TestClose(CliCase):
     """FD-10: the external monitor is required to call `pane-guard` before any send-keys, and `close`
     disarms it. Plan 6 §J8/§N5: a busy pane and a pane holding unsubmitted input are both refused; a pane
@@ -2787,6 +2912,29 @@ class TestApplyWarnsWhileTheWorkersSessionIsStillLive(CliCase):
         self.assertEqual(code, EXIT_OK, err)
         self.assertNotIn("alive", (out + err).lower(),
                          f"apply warned about liveness for a worker with no live session: {out}{err}")
+
+
+    def test_the_warning_names_where_the_worker_is_NOW(self):
+        """`FB-71`. The worker proposes `done` and then renames itself (`complete` IS the rename); the
+        warning printed the proposal's recorded `-inflight-` path, which no longer resolves. Every other
+        proposer row resolves it through `roadmap._proposer` (`SI-40`); this one has to as well."""
+        fleet = self.loaded()
+        coordinator = self._coordinator_with(fleet)
+        worker = fleet.worker("renamedSelf", slot="ws4")
+        code, _, err = fleet.run(["propose", "--instant", str(worker), "--to", str(coordinator),
+                                  "--milestone", "m7", "--status", "done",
+                                  "--evidence", "evidence/INDEX.md"])
+        self.assertEqual(EXIT_OK, code, err)
+        now = worker.parent / worker.name.replace("-inflight-", "-complete-")
+        worker.rename(now)
+
+        code, out, err = fleet.run(["apply", "--instant", str(coordinator), "--milestone", "m7"])
+
+        self.assertEqual(code, EXIT_OK, err)
+        warning = [line for line in out.splitlines() if line.startswith("warning")]
+        self.assertTrue(warning, f"no warning row at all, so this case is vacuous: {out}")
+        self.assertIn(str(now), warning[0], f"the warning does not name the folder as it is now: {warning}")
+        self.assertNotIn(str(worker), warning[0], f"the warning names the stale recorded path: {warning}")
 
 
 class TestApplyChoosesOneRow(CliCase):

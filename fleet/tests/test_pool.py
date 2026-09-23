@@ -33,6 +33,22 @@ class TestPool(unittest.TestCase):
         with self.assertRaises(NoCapacity):
             self.claim("t3")
 
+    def test_release_refusal_is_the_gate_release_raises_and_it_writes_nothing(self):
+        """`B10`. The predicate `abort` asks before its kill IS the one `release` evaluates: same text, and
+        a spared pid (one the caller is about to end) is not counted. Read-only either way."""
+        lease = self.claim("t1", slot="ws1")
+        self.holders[str(lease.path)] = [41, 42]
+        asked = self.pool.release_refusal("ws1")
+        with self.assertRaises(Refused) as raised:
+            self.pool.release("ws1")
+        self.assertEqual(str(asked), str(raised.exception))
+        self.assertIsNotNone(self.pool.lease("ws1"), "asking the gate released the slot")
+        self.assertEqual(self.pool.cwd_holders("ws1"), [41, 42])
+        self.assertNotIn("41", str(self.pool.release_refusal("ws1", spare=[41])).split("pid(s)")[1][:8])
+        self.assertIsNone(self.pool.release_refusal("ws1", spare=[41, 42]))
+        self.assertIsNone(self.pool.release_refusal("ws2"), "an unleased slot has nothing to refuse")
+        self.assertEqual(self.pool.cwd_holders("ws2"), [])
+
     def test_release_is_idempotent(self):
         self.claim("t1", slot="ws1")
         self.pool.release("ws1"); self.pool.release("ws1")
