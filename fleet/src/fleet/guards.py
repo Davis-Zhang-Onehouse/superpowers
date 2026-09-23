@@ -185,12 +185,8 @@ class Guard:
     def raise_for(self, verdict: Verdict) -> None:
         if verdict.allowed:
             return
-        if issubclass(self.raises, Refused):
-            error = self.raises(verdict.reason, clears_when=verdict.clears_when,
-                                clears_who=verdict.clears_who)
-        else:
-            error = self.raises(verdict.reason)
-            error.clears_when, error.clears_who = verdict.clears_when, verdict.clears_who
+        #: Every `FleetError` takes the route since `B11`, so `NoCapacity` needs no after-the-fact assignment.
+        error = self.raises(verdict.reason, clears_when=verdict.clears_when, clears_who=verdict.clears_who)
         error.verdict = verdict
         error.blocker = verdict.blocker
         raise error
