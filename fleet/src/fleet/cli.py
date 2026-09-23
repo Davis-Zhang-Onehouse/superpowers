@@ -1834,8 +1834,8 @@ def _do_dispatch(ctx: Ctx, parsed: Parsed) -> int:
             raise NoCapacity(
                 f"--override waives admission rules, but it cannot create a slot: no slot is free "
                 f"({'enrolled: ' + enrolled if enrolled else 'none is enrolled'})"
-                + (f"; {', '.join(interrupted)} hold an interrupted claim (a claim with no lease body — a "
-                   f"dead writer, not work in progress)" if interrupted else "") + ".",
+                + (f"; {', '.join(interrupted)} hold an interrupted claim (a claim with no lease body — an "
+                   f"interrupted writer, or one mid-birth if it is seconds old)" if interrupted else "") + ".",
                 clears_when="a lease is released, a stale lease or an interrupted claim is reaped (`fleet reap "
                             "--base <its base>`; `fleet reap --all` for a claim no base owns), or another "
                             "workspace is enrolled (`fleet enroll --slot <path>`)",

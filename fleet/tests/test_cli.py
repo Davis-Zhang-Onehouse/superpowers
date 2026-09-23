@@ -6975,6 +6975,9 @@ class TestB11RefusalsNameARouteThatRuns(CliCase):
         self.assertNotIn("every enrolled slot is leased", said, said)
         self.assertIn(f"interrupted claim", said, said)
         self.assertIn(free[0], said, said)
+        #: RV-33. A bodiless claim seconds old may be mid-birth (`pool.interrupted_claims`); it is not called dead.
+        self.assertNotIn("dead writer, not work in progress", said, said)
+        self.assertIn("mid-birth", said, said)
 
     def test_a_full_pool_with_an_interrupted_claim_names_it_on_the_plain_dispatch_too(self):
         """RV-25's survivor. The pool-capacity GUARD — the common, non-override path — still said "every
