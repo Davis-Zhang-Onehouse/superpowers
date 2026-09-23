@@ -38,6 +38,77 @@ class RuntimeCliTests(unittest.TestCase):
         self.assertEqual(code, 4, err)
         self.assertEqual(snapshot(self.f.home), before)
 
+    def test_a_closed_record_still_blocks_and_the_route_says_what_does_clear_it(self):
+        """RV-21 / RV-30. The route said "harvested or closed", but `runtime_blockers` counts every UNHARVESTED
+        record and every held lease, so a close clears nothing. The route names harvest — and the test RUNS
+        harvest (a stub that stamped `harvested_at` by hand hid that harvest cannot run for every record) —
+        and it says, rather than hides, that an aborted or unreviewed record cannot be harvested."""
+        done = self.f.worker('shut', state='complete', slot='ws1', live=False)
+        self.f.reviewed(done)
+        code, _, err = self.f.run(['close', '--id', self.f.ids['shut']])
+        self.assertEqual(code, 0, err)
+        code, _, err = self.f.run(['runtime', '--set', 'codex'])
+        self.assertEqual(code, 4, err)
+        route = err.split('clears when:', 1)[-1]
+        self.assertNotIn('harvested or closed', err)             # the withdrawn value, exactly
+        for clause in ('fleet harvest --id', 'fleet reap'):
+            self.assertIn(clause, route, err)
+        code, out, err = self.f.run(['harvest', '--id', self.f.ids['shut']])
+        self.assertTrue(self.f.store.read(self.f.ids['shut']).harvested_at, f"the named harvest did not run: {out}{err}")
+        code, _, err = self.f.run(['runtime', '--set', 'codex'])
+        self.assertEqual(code, 0, f"the named route ran and the switch is still refused: {err}")
+
+    def test_a_closed_unreviewed_complete_record_is_cleared_by_the_named_review_then_harvest(self):
+        """RV-35 / D-31. The one state the route names beyond a reviewed record: a `-complete-` folder with no
+        review round. The test RUNS review -> harvest and sees the switch clear."""
+        path = self.f.worker('unreviewed', state='complete', slot='ws1', live=False)
+        self.assertEqual(self.f.run(['close', '--id', self.f.ids['unreviewed']])[0], 0)
+        code, _, err = self.f.run(['runtime', '--set', 'codex'])
+        self.assertEqual(code, 4, err)
+        route = err.split('clears when:', 1)[-1]
+        for clause in ('`-complete-`', 'fleet review --instant', 'fleet harvest --id'):
+            self.assertIn(clause, route, err)
+        code, _, err = self.f.run(['review', '--instant', str(path), '--scope', 'all', '--verdict', 'READY'])
+        self.assertIn(code, (0, 1), err)                 # 1 = the gate's own exit when it has something to say
+        code, out, err = self.f.run(['harvest', '--id', self.f.ids['unreviewed']])
+        self.assertTrue(self.f.store.read(self.f.ids['unreviewed']).harvested_at,
+                        f"review -> harvest, the named route, did not harvest: {out}{err}")
+        code, _, err = self.f.run(['runtime', '--set', 'codex'])
+        self.assertEqual(code, 0, f"the named route ran and the switch is still refused: {err}")
+
+    def _no_single_verb(self, err):
+        route = err.split('clears when:', 1)[-1]
+        self.assertIn('no single verb clears it today', route, err)
+        self.assertIn('FB-92', route, err)
+
+    def test_an_inflight_closed_record_is_named_no_single_verb_not_a_route_that_fails(self):
+        """RV-37 / D-31. Closed while `-inflight-`: review -> harvest does NOT clear it (harvest refuses on the
+        inflight folder), so the refusal names no route for it — it says no single verb does, FB-92."""
+        self.f.worker('halfway', slot='ws1', live=False)
+        self.assertEqual(self.f.run(['close', '--id', self.f.ids['halfway']])[0], 0)
+        code, _, err = self.f.run(['runtime', '--set', 'codex'])
+        self.assertEqual(code, 4, err)
+        self._no_single_verb(err)
+        self.assertIn('still -inflight-', err.split('clears when:', 1)[-1], err)
+
+    def test_an_aborted_record_is_named_no_single_verb(self):
+        path = self.f.worker('dropped', slot='ws1', live=False)
+        self.assertEqual(self.f.run(['abort', '--instant', str(path), '--reason', 'abandoned for the test'])[0], 0)
+        code, _, err = self.f.run(['runtime', '--set', 'codex'])
+        self.assertEqual(code, 4, err)
+        self._no_single_verb(err)
+
+    def test_a_gone_folder_record_is_said_to_have_no_clearing_verb(self):
+        """RV-35 / FB-92. Harvest exits 2 on a folder that resolves to nothing; the refusal says so."""
+        path = self.f.worker('gone', slot='ws1', live=False)
+        self.assertEqual(self.f.run(['close', '--id', self.f.ids['gone']])[0], 0)
+        shutil.rmtree(path)
+        code, _, err = self.f.run(['runtime', '--set', 'codex'])
+        self.assertEqual(code, 4, err)
+        self._no_single_verb(err)
+        self.assertEqual(self.f.run(['harvest', '--id', self.f.ids['gone']])[0], 2,
+                         'harvest ran on a gone folder, so the refusal is no longer true')
+
     def test_same_runtime_is_noop_with_work(self):
         self.f.worker('active', slot='ws1')
         before = snapshot(self.f.home)
@@ -201,9 +272,43 @@ class RuntimeCliTests(unittest.TestCase):
         self.assertEqual(code, 2, err)
         self.assertEqual(snapshot(self.f.tmp), before)
 
+    def test_a_foreign_runtime_session_names_the_route_that_runs(self):
+        """RV-22. Adopting a session whose runtime is not the fleet's named `fleet runtime --set <its runtime>`,
+        which that very session blocks (its cwd is in the instants dir). The route is the session exiting,
+        and then the same resume runs."""
+        orphan = self.f.orphan()
+        self.f.procs.append(LiveSession(pid=4321, cwd=orphan, name='dt-orphanWork', runtime='codex'))
+        self.f.tmux_live.add('dt-orphanWork')
+        code, _, err = self.f.run(['resume', '--instant', str(orphan), '--slot', 'ws1'])
+        self.assertEqual(code, 4, err)
+        route = err.split('clears when:', 1)[-1]
+        self.assertNotIn('`fleet runtime --set', route, err)
+        self.assertEqual(self.f.run(['runtime', '--set', 'codex'])[0], 4, 'the old route ran after all')
+        self.f.procs.clear()
+        self.f.tmux_live.discard('dt-orphanWork')
+        code, _, err = self.f.run(['resume', '--instant', str(orphan), '--slot', 'ws1'])
+        self.assertEqual(code, 0, f"the named route does not run: {err}")
+
+    def test_a_foreign_session_over_an_existing_record_names_the_records_route(self):
+        """RV-31. With a record of the instant under another runtime, the session exiting is not enough: the
+        re-run meets the recorded-runtime refusal. The first refusal names that route, not a false promise."""
+        path = self.f.worker('original', slot='ws1', live=True)          # record + live session, runtime claude
+        write_runtime(self.f.home, 'codex')
+        code, _, err = self.f.run(['resume', '--instant', str(path)])
+        self.assertEqual(code, 4, err)
+        route = err.split('clears when:', 1)[-1]
+        self.assertNotIn('adopts the instant under the current runtime', route, err)
+        self.assertIn('fleet runtime --set claude', route, err)
+        #: RV-36. The switch it names is blocked by this very record until it is harvested — said, not hidden.
+        self.assertIn('this record is itself one of those blockers', route, err)
+
     def test_adoption_cannot_relabel_an_existing_runtime(self):
         self.f.worker('original', slot='ws1', live=False)
         write_runtime(self.f.home, 'codex')
         code, _, err = self.f.run(['resume', '--instant', str(self.f.paths['original'])])
         self.assertEqual(code, 4, err)
         self.assertEqual(self.f.store.read(self.f.ids['original']).runtime, 'claude')
+        #: RV-22. Closing the record does not change its runtime, so it is no route; the switch is, once drained.
+        route = err.split('clears when:', 1)[-1]
+        self.assertNotIn('fleet close', route, err)
+        self.assertIn('fleet runtime --set claude', route, err)

@@ -49,7 +49,10 @@ def _lock(path: Path, timeout_s: float):
                 break
             except BlockingIOError:
                 if time.monotonic() >= deadline:
-                    raise Refused(f'Another operation holds {path}; retry when it finishes')
+                    raise Refused(f'Another operation holds {path}; retry when it finishes',
+                                  clears_when=f'the operation holding the lock on {path} finishes; re-run '
+                                              f'the same command',
+                                  clears_who='whichever fleet call holds the lock')
                 time.sleep(0.02)
         try:
             yield

@@ -464,6 +464,7 @@ class Pool:
                     f"account for is how a recovery becomes a data loss. Look at {claim_dir}, then remove "
                     f"the directory by hand if it really is litter.",
                     clears_when=f"{entry.name!r} is accounted for and {claim_dir} is removed by hand",
+                    clears_who="the operator",
                 )
         try:
             claim_dir.rmdir()
@@ -474,6 +475,7 @@ class Pool:
                 f"slot {slot!r}'s interrupted claim could not be removed after clearing "
                 f"{len(cleared)} staging file(s): {type(exc).__name__}: {exc}",
                 clears_when=f"{claim_dir} can be removed",
+                clears_who="the operator",
             )
         return (f"cleared {len(cleared)} staging file(s) left by a writer that died between the lease "
                 f"body's write and its rename" if cleared else
@@ -532,14 +534,23 @@ class Pool:
                 # the count is stated so an exhausted pool does not read the same whether the slots are
                 # doing work or merely lost.
                 interrupted = self.interrupted_claims(min_age_s=0.0)
-                detail = ""
+                #: `B11` RV-25. With a bodiless claim present "every enrolled slot is leased" is false, and a
+                #: claim listed at `min_age_s=0.0` may be seconds old — mid-birth, not dead (see
+                #: `interrupted_claims`). `run-C.sh` C4 pins the two substrings kept below.
                 if interrupted:
+                    head = f"no slot is free ({', '.join(self.slots())} enrolled)."
                     detail = (f" {len(interrupted)} of them hold an INTERRUPTED claim with no lease body — "
-                              f"{', '.join(repr(s) for s, _ in interrupted)} — which is a dead writer and "
-                              f"not work in progress; a reap clears those and names them.")
+                              f"{', '.join(repr(s) for s, _ in interrupted)} — an interrupted writer, or one "
+                              f"mid-birth if it is seconds old; a reap clears those and names them.")
+                else:
+                    head = f"every enrolled slot is leased ({', '.join(self.slots()) or 'none enrolled'})."
+                    detail = ""
                 raise NoCapacity(
-                    f"every enrolled slot is leased ({', '.join(self.slots()) or 'none enrolled'}).{detail} "
-                    "Release or reap one, or enroll another workspace."
+                    f"{head}{detail} Release or reap one, or enroll another workspace.",
+                    clears_when="a lease is released, a stale lease or an interrupted claim is reaped (`fleet "
+                                "reap --base <its base>`; `fleet reap --all` for a claim no base owns), or "
+                                "another workspace is enrolled (`fleet enroll --slot <path>`)",
+                    clears_who="the base owning a stale lease, or the operator"
                 )
         self.leases.mkdir(parents=True, exist_ok=True)
         for candidate in candidates:

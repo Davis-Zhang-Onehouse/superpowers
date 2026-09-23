@@ -428,7 +428,11 @@ class Verify:
                 f"the tree being tested does not match the artifact: MANIFEST records {recorded[:12]}…, "
                 f"the copy at {copy_root} hashes to {actual[:12]}…. Refused rather than reported as RED — "
                 f"a mismatch here means the harness tested something other than the release, so the run "
-                f"says nothing about the code.")
+                f"says nothing about the code.",
+                clears_when=f"the verify copy is rebuilt from the tag of {self.version} untouched (re-run "
+                            f"`fleet release-verify --version {self.version}`); if the MANIFEST itself is "
+                            f"wrong, the version is cut again",
+                clears_who="the release instant")
 
     # --- the pieces ----------------------------------------------------------------------------------
 

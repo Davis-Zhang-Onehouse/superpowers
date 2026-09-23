@@ -5,7 +5,17 @@ from fleet import EXIT_ATTENTION, EXIT_BAD_INPUT, EXIT_NO_CAPACITY, EXIT_REFUSED
 
 
 class FleetError(Exception):
+    """Every fleet error can carry its route: what clears it and who clears it, which `cli._report_error`
+    prints under the message. Mandatory on `Refused` — enforced over the source by
+    `tests/test_refusal_routes.py`, not by this signature, because a refusal that raised `TypeError` for a
+    missing route would turn the defect into a traceback at the moment it refuses (`B11`)."""
+
     exit_code = EXIT_ATTENTION
+
+    def __init__(self, message="", *, clears_when=None, clears_who=None):
+        super().__init__(message)
+        self.clears_when = clears_when
+        self.clears_who = clears_who
 
 
 class BadInput(FleetError):
@@ -21,11 +31,6 @@ class Refused(FleetError):
     'not yours to clear' is a state and not a failure (RI-31)."""
 
     exit_code = EXIT_REFUSED
-
-    def __init__(self, message, *, clears_when=None, clears_who=None):
-        super().__init__(message)
-        self.clears_when = clears_when
-        self.clears_who = clears_who
 
 
 class AmbiguousId(BadInput):

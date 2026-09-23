@@ -54,7 +54,10 @@ exits do not). A claimed `ready` row is **stranded** only when BOTH hold: no `fl
 that milestone in its `milestone` column (`$6`; the board has no instant-path column, so never match `$8`
 against it), AND the roadmap has no `pending-proposal` row for it. A harvested worker whose `done` report is
 still pending is not stranded — `fleet apply` it. Only a truly stranded claim is released with
-`fleet milestone --instant "$INSTANT" --id <m> --disown --reason "<why>"`, after which it is dispatchable.
+`fleet milestone --instant "$INSTANT" --id <m> --disown --reason "<why>"`, after which it is dispatchable. If
+the owner's folder was deleted while its record is still open, a board row may still carry the milestone and
+`--disown` will not release it yet: `fleet close --id <todo>` ends that record first (`abort` and `harvest`
+cannot resolve a gone folder). The refusals name the door for the owner's state; take the one they name.
 
 ## Step 2 — the base comes from the manifest, then from the remote
 
