@@ -55,6 +55,11 @@ class ResolutionTests(unittest.TestCase):
     def test_bad_values_are_refused(self):
         with self.assertRaises(BadInput):
             choose_runtime('claude', flag_runtime='gemini')
+        #: RV-29. An EMPTY `--runtime` (an unset `$RUNTIME` in a recipe) is refused like an empty `--model`, never
+        #: read as "not given" — that silently dispatched on the box runtime.
+        for empty in ('', ' '):
+            with self.subTest(runtime=empty), self.assertRaises(BadInput):
+                choose_runtime('claude', flag_runtime=empty)
         for bad in ('', ' ', '-m', '--dangerously-skip-permissions', 'a b', 'x;y', 'a\nb'):
             with self.subTest(model=bad), self.assertRaises(BadInput):
                 validate_model(bad)
