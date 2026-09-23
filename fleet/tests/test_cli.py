@@ -6899,6 +6899,20 @@ class TestB11RefusalsNameARouteThatRuns(CliCase):
         self.assertIn("no longer owns its recorded lease", said, said)
         self.assertNotIn("revive", said.split("clears when:", 1)[-1], said)
 
+    def test_the_dry_run_and_the_real_send_refuse_a_busy_pane_identically(self):
+        """RV-24. The dry-run built its own not-idle refusal in `cli` and the real send another in
+        `messaging`, with different words and a different actor: a dry-run that answers differently
+        from the real call."""
+        fleet = self.loaded()
+        sent = fleet.tmp / "msg.txt"
+        sent.write_text("hello\n")
+        argv = ["send", "--id", fleet.ids["solo"], "--message-file", str(sent)]
+        dry_code, _, dry_err = fleet.run([argv[0], "--dry-run", *argv[1:]])
+        code, _, err = fleet.run(argv)
+        self.assertEqual((EXIT_REFUSED, EXIT_REFUSED), (dry_code, code), err)
+        self.assertEqual(self.refusal(dry_err), self.refusal(err))
+        self.assertIn("clears who:", self.refusal(err))
+
     def _full_pool(self, fleet):
         for slot in list(fleet.pool.free_slots()):
             fleet.pool.claim(todo_id=f"filler-{slot}", tmux=f"dt-{slot}", base_instant=FRESH_BASE,

@@ -1507,10 +1507,7 @@ def _do_send(ctx: Ctx, parsed: Parsed) -> int:
     record, layer = _message_target(ctx, parsed)
     if ctx.dry_run:
         if layer.observe(record.tmux).state != 'idle':
-            raise Refused('Message not sent: the worker input is not observed idle',
-                          clears_when=f'`fleet pane-guard --pane {record.tmux}` exits 0 (idle, empty input), '
-                                      f'then `fleet send` is re-run',
-                          clears_who=f'the worker {record.todo_id}, by finishing its turn')
+            raise messaging.not_idle(record)
         result = 'would-submit'
     else:
         result = messaging.send(ctx.home, layer, record, text,
