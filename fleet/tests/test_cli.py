@@ -2444,6 +2444,21 @@ class TestDryRunSweepB10(CliCase):
         pathlib.Path(dict(l.split("\t", 1) for l in out.splitlines())["would-create"]).mkdir()
         self._same(fleet, ["init", "--name", "clash"])
 
+    def test_init_reads_the_registry_the_way_register_does_no_stricter(self):
+        """`RV-29`. The hoisted registry read built a `Source` from every entry, which `register`'s own
+        parse never did — so an entry carrying a key this build does not know began refusing `init`."""
+        fleet = self.loaded()
+        fleet.harvest.path.parent.mkdir(parents=True, exist_ok=True)
+        data = json.loads(fleet.harvest.path.read_text()) if fleet.harvest.path.is_file() else \
+            {"schema_version": 1, "sources": []}
+        data["sources"].append({"base": "/elsewhere/x", "issues_path": "/elsewhere/x/ISSUES.md",
+                                "registered_at": "2026-01-01T00:00:00Z", "a_later_field": 1})
+        fleet.harvest.path.write_text(json.dumps(data))
+        code, out, err = fleet.run(["init", "--dry-run", "--name", "tolerant"])
+        self.assertEqual(code, EXIT_OK, f"{out}{err}")
+        code, out, err = fleet.run(["init", "--name", "tolerant"])
+        self.assertEqual(code, EXIT_OK, f"{out}{err}")
+
     def test_init_with_an_unreadable_registry_refuses_before_creating_the_instant(self):
         fleet = self.loaded()
         fleet.harvest.path.parent.mkdir(parents=True, exist_ok=True)

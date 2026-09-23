@@ -1086,7 +1086,7 @@ def _do_init(ctx: Ctx, parsed: Parsed) -> int:
     #: at `register`, AFTER the instant had been bootstrapped: an instant created and left unwatched.
     if target.exists():
         raise BadInput(f"{target} already exists; `init` never overwrites an instant")
-    ctx.harvest.sources()
+    ctx.harvest.check_readable()
     if ctx.dry_run:
         _emit(ctx, "init", [("dry-run", "nothing was created and nothing was registered"),
                             ("would-create", str(target)),
