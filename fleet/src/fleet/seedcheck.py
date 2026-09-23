@@ -41,7 +41,7 @@ for every caller that delivers by send-keys, and it is reported as unverifiable 
 import hashlib
 import json
 import re
-from dataclasses import asdict, dataclass, field
+from dataclasses import MISSING, asdict, dataclass, field
 from pathlib import Path
 from typing import Callable, Optional
 
@@ -192,22 +192,36 @@ def read_delivery(instant) -> Optional[Delivery]:
     target = delivery_path(instant)
     if not target.is_file():
         return None
+    reroute = dict(clears_when=f"`fleet seed-delivered --id <its todo> --delivered <the file sent>` records it "
+                               f"afresh (it overwrites), or {target} is removed",
+                   clears_who="whoever delivered the seed, or the coordinator")
     try:
         data = json.loads(target.read_text())
     except (OSError, ValueError) as exc:
         raise BadInput(
             f"{target} exists but could not be read as JSON ({exc}). Refused rather than treated as "
             f"absent: absent means 'nobody recorded a delivery', and guessing that for a file that IS "
-            f"there would report a worker as unverifiable when something did record one.") from exc
+            f"there would report a worker as unverifiable when something did record one.", **reroute) from exc
+    #: `FB-74`. Every shape past "is JSON" is checked HERE: an AttributeError or TypeError out of this
+    #: function escapes `seed-check`'s per-session `except FleetError` and ends the whole sweep.
+    if not isinstance(data, dict):
+        raise BadInput(f"{target} holds a JSON {type(data).__name__}, not an object; refusing to interpret "
+                       f"it.", **reroute)
     version = data.get("schema_version")
     if version != SCHEMA_VERSION:
         raise BadInput(
             f"{target} has schema_version={version!r}, this build knows {SCHEMA_VERSION}. Refusing to "
-            f"interpret it (FD-1).")
+            f"interpret it (FD-1).", **reroute)
     known = set(Delivery.__dataclass_fields__)
     unknown = set(data) - known
     if unknown:
-        raise BadInput(f"{target} carries unknown key(s) {sorted(unknown)}; refusing to interpret it.")
+        raise BadInput(f"{target} carries unknown key(s) {sorted(unknown)}; refusing to interpret it.",
+                       **reroute)
+    required = {name for name, spec in Delivery.__dataclass_fields__.items()
+                if spec.default is MISSING and spec.default_factory is MISSING}
+    missing = required - set(data)
+    if missing:
+        raise BadInput(f"{target} lacks key(s) {sorted(missing)}; refusing to interpret it.", **reroute)
     return Delivery(**data)
 
 

@@ -27,7 +27,10 @@ def send(home, sessions, record, text, *, timeout_s=10.0, clock=time.monotonic,
         if validate:
             validate()
         if sessions.observe(record.tmux).state != 'idle':
-            raise Refused('Message not sent: the worker must have an observed empty idle input')
+            raise Refused('Message not sent: the worker must have an observed empty idle input',
+                          clears_when=f'`fleet pane-guard --pane {record.tmux}` exits 0 (idle, empty input), '
+                                      f'then `fleet send` is re-run',
+                          clears_who=f'the worker in {record.tmux}, by finishing its turn')
         try:
             sessions.send_literal(record.tmux, text)
             deadline = clock() + timeout_s
