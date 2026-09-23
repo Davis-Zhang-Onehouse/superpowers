@@ -165,6 +165,20 @@ class RuntimeCliTests(unittest.TestCase):
         self.assertEqual(self.f.run(args)[0], 4)
         self.assertEqual(self.f.killed, [])
 
+    def test_send_to_a_pane_whose_process_is_unreadable_refuses_naming_that_cause(self):
+        """RV-27 (ISSUES OI-1). The pane's claude is alive and attributed to it, but its cwd was never read, so its
+        ownership cannot be verified: refusing is right, and "no matching live process" is the wrong reason —
+        `revive` on the same pane says it is occupied."""
+        self.f.worker('target', slot='ws1', pane='❯ \n? for shortcuts')
+        self.f.procs[:] = [probe_unreadable(self.f.tmp / 'proc', 7202, 7201, 'dt-target')]
+        path = self.f.tmp / 'message'
+        path.write_text('hello')
+        code, _, err = self.f.run(['send', '--id', self.f.ids['target'], '--message-file', str(path)])
+        self.assertEqual(code, 4, err)
+        self.assertIn('process 7202', err)
+        self.assertIn('could not be read', err)
+        self.assertNotIn('No matching live runtime process', err)
+
     def test_dry_dispatch_validates_runtime_configuration_without_claiming(self):
         from fleet.errors import BadInput
         original = self.f.context

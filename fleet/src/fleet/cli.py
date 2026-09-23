@@ -1407,6 +1407,12 @@ def _message_target(ctx, parsed):
         raise Refused('Worker no longer owns its recorded lease')
     layer = ctx.sessions_for(record)
     matches = [item for item in layer.live() if item.name == record.tmux]
+    unreadable = [item for item in matches if getattr(item, "unreadable", False)]
+    if unreadable:
+        #: RV-27. Attributed to this pane through `stat`, but its cwd was never read, so ownership cannot be proven.
+        #: Refused like any unproven owner — with the reason that is true, not "no process".
+        raise Refused(f'The recorded pane holds {unreadable[0].runtime} process {unreadable[0].pid}, whose /proc '
+                      f'could not be read, so its workspace cannot be verified; inspect it before sending')
     roots = (Path(lease.path).resolve(), _child_of(ctx, record).resolve())
     if (not matches or any(item.runtime != record.runtime or
                            not any(item.cwd.resolve() == root or root in item.cwd.resolve().parents
