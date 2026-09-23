@@ -50,7 +50,9 @@ it_section S
 #: S8 stands up a SECOND server — the defect needs a session reachable somewhere and not from where the
 #: command runs — so the trap kills both. A section that leaves a server behind fails the next section's
 #: isolation assertion, which is the correct outcome and an expensive way to learn it.
-trap 'it_cleanup_tmux; tmux -L "$IT_TMUX_SOCKET" kill-server 2>/dev/null; tmux -L "${TMUX_PREFIX}-otherserver" kill-server 2>/dev/null' EXIT
+#: S11 starts a holder process of its own; the trap kills it BY PID if the runner dies first (`RV-26`).
+S11_HOLDER=""
+trap 'it_cleanup_tmux; tmux -L "$IT_TMUX_SOCKET" kill-server 2>/dev/null; tmux -L "${TMUX_PREFIX}-otherserver" kill-server 2>/dev/null; [ -n "$S11_HOLDER" ] && kill "$S11_HOLDER" 2>/dev/null' EXIT
 OUT="$EV/out"; rm -rf "$OUT"; mkdir -p "$OUT"
 export FLEET_INSTANTS="$EV/instants"; rm -rf "$FLEET_INSTANTS"; mkdir -p "$FLEET_INSTANTS"
 it_fresh_store
@@ -596,8 +598,11 @@ s11_control_rc=$?
 
 ( cd "$S11_SLOT" && exec setsid sleep 300 ) > /dev/null 2>&1 &
 S11_HOLDER=$!
+#: `RV-26`. Measured, not assumed: the holder must be SEEN holding the slot under the pid this runner will
+#: kill (were `setsid` to fork, `$!` would name a pid that is not the holder, and the kill would miss it).
+s11_seen=0
 for _ in 1 2 3 4 5 6 7 8 9 10; do
-  case " $(s11_holders "$S11_SLOT") " in *" $S11_HOLDER "*) break ;; esac; sleep 0.2
+  case " $(s11_holders "$S11_SLOT") " in *" $S11_HOLDER "*) s11_seen=1; break ;; esac; sleep 0.2
 done
 s11_before="$(s11_state)"
 fleet abort --dry-run "${S11_ARGV[@]}" > "$OUT/S11-dry.out" 2>&1
@@ -612,7 +617,7 @@ kill "$S11_HOLDER" 2>/dev/null; wait "$S11_HOLDER" 2>/dev/null
 fleet abort "${S11_ARGV[@]}" > "$OUT/S11-rerun.out" 2>&1
 s11_rerun_rc=$?
 s11_aborted=0; [ -d "${S11_CHILD/-inflight-/-abort-}" ] && s11_aborted=1
-{ echo "slot=$S11_SLOT session=$S11_TMUX pane_pid=$S11_PANE own-holders-before=[$S11_OWN] foreign-holder=$S11_HOLDER"
+{ echo "slot=$S11_SLOT session=$S11_TMUX pane_pid=$S11_PANE own-holders-before=[$S11_OWN] foreign-holder=$S11_HOLDER (seen holding the slot: $s11_seen)"
   echo "--- control dry-run (only the pane's own tree holds the slot) rc=$s11_control_rc"; cat "$OUT/S11-control-dry.out"
   echo "--- dry-run with the foreign holder rc=$s11_dry_rc (state unchanged: $([ "$s11_before" = "$s11_after_dry" ] && echo yes || echo NO))"; cat "$OUT/S11-dry.out"
   echo "--- real abort, same argv rc=$s11_real_rc  byte-identical-to-dry-run=$s11_same  session-alive-after=$s11_alive  folder-inflight=$s11_inflight"; cat "$OUT/S11-real.out"
@@ -621,14 +626,14 @@ cat "$OUT/S11.txt"
 
 s11_pane_held=0; case " $S11_OWN " in *" $S11_PANE "*) s11_pane_held=1 ;; esac
 s11_unchanged=0; [ -n "$s11_before" ] && [ "$s11_before" = "$s11_after_dry" ] && s11_unchanged=1
-if [ -n "$S11_PANE" ] && [ "$s11_pane_held$s11_control_rc" = "10" ] && [ "$s11_dry_rc" = 4 ] \
+if [ -n "$S11_PANE" ] && [ "$s11_pane_held$s11_control_rc" = "10" ] && [ "$s11_seen" = 1 ] && [ "$s11_dry_rc" = 4 ] \
    && [ "$s11_unchanged" = 1 ] && [ "$s11_real_rc" = 4 ] && [ "$s11_same$s11_alive$s11_inflight" = "111" ] \
    && [ "$s11_rerun_rc" = 0 ] && [ "$s11_aborted" = 1 ]; then
   it_pass S11 "fleet/it/S/out/S11.txt" \
     "with a live setsid pid holding the worker's slot as cwd, \`abort --dry-run\` refused rc=4 leaving the store, instants, slots and tmux sessions byte-identical, and the real abort with the same argv refused with byte-identical output while the session was STILL ALIVE and the folder still -inflight- (it refused before the kill, not after). Control: the pane's own pid ($S11_PANE) held the slot too and the dry-run taken then passed rc=0, so the gate spares the session's own tree. Once the holder was killed the identical abort completed"
 else
   it_fail S11 "fleet/it/S/out/S11.txt" \
-    "pane=$S11_PANE pane-held=$s11_pane_held control-rc=$s11_control_rc dry-rc=$s11_dry_rc(want 4) dry-unchanged=$s11_unchanged real-rc=$s11_real_rc(want 4) same-output=$s11_same session-alive=$s11_alive inflight=$s11_inflight rerun-rc=$s11_rerun_rc aborted=$s11_aborted"
+    "pane=$S11_PANE pane-held=$s11_pane_held control-rc=$s11_control_rc holder-seen=$s11_seen dry-rc=$s11_dry_rc(want 4) dry-unchanged=$s11_unchanged real-rc=$s11_real_rc(want 4) same-output=$s11_same session-alive=$s11_alive inflight=$s11_inflight rerun-rc=$s11_rerun_rc aborted=$s11_aborted"
 fi
 kill "$S11_HOLDER" 2>/dev/null
 
