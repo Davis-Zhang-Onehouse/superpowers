@@ -1290,9 +1290,10 @@ def _do_seed_check(ctx: Ctx, parsed: Parsed) -> int:
         verdict = seedcheck.check_session(session, pid, rendered,
                                           seedcheck.default_probes(record.runtime), delivery=delivery)
         verdicts.append(verdict)
-        #: Only FOREIGN is a VIOLATION. NOT-DELIVERED is reported at INFO because `fleet` renders the seed
-        #: and does not deliver it, so it is the ordinary appearance of a send-keys delivery — but its
-        #: DETAIL says so in words, because a severity alone would let it read as clean.
+        #: Only FOREIGN is a VIOLATION. NOT-DELIVERED stays at INFO severity — it is not evidence of a
+        #: misdelivery, only of a delivery nothing verified — but since `SI-55` it is no longer the ordinary
+        #: appearance of a healthy worker (a launcher's delivery reads VERIFIED or ATTESTED), so it DOES
+        #: reach the exit code (`B09`, DECISIONS D-1) and its detail names the remedy, `fleet seed-delivered`.
         rows.append(Row(kind=verdict.state.lower(), subject=session,
                         severity=VIOLATION if verdict.state == seedcheck.FOREIGN else INFO,
                         detail=(f"pid={verdict.pid} todo={record.todo_id} "
