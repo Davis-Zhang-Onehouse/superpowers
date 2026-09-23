@@ -258,7 +258,7 @@ class Pool:
         atomic_write(self.enrolled / f"{path.name}.json",
                      json.dumps({"slot": path.name, "path": str(path.resolve())}, indent=2))
 
-    def enroll_refusal(self, path: Path, exists: bool = True) -> "Optional[BadInput]":
+    def enroll_refusal(self, path: Path, exists: bool = True) -> "Optional[FleetError]":
         """The refusal `enroll` would raise for `path`, or None — read-only (`B10` sweep: the dry-runs of
         `enroll` and `clone` ask it). `exists=False` skips the is-a-directory check, for `clone`, which
         asks about a target it has not created yet."""
@@ -282,6 +282,28 @@ class Pool:
         slot = path.name
         if not slot or "/" in slot:
             return BadInput(f"{path} has no usable slot name (the slot name is the directory's basename)")
+        #: `FB-91`. The slot NAME is the basename, and the enrolment file is keyed by it — so enrolling (or
+        #: cloning to) `/elsewhere/ws1` used to overwrite `ws1.json` and silently re-point an enrolled slot,
+        #: possibly under a live lease whose worker still sits in the old path. The same path again is fine.
+        record = self.enrolled / f"{slot}.json"
+        if record.is_file():
+            try:
+                current = Path(json.loads(record.read_text())["path"])
+            except (OSError, ValueError, KeyError, TypeError) as exc:
+                return Refused(
+                    f"slot {slot!r} is already enrolled, and its enrolment file {record} could not be read "
+                    f"({type(exc).__name__}: {exc}); enrolling {path} would overwrite it unread.",
+                    clears_when=f"{record} is readable again, or the slot is unenrolled (`fleet unenroll --slot {slot}`)",
+                    clears_who="the operator")
+            if current.resolve() != path.resolve():
+                return Refused(
+                    f"slot {slot!r} is already enrolled at {current}; enrolling {path.resolve()} would re-point "
+                    f"it, and a lease on {slot!r} would then name a directory its worker is not in. The slot "
+                    f"name is the directory's basename, so two workspaces cannot share one.",
+                    clears_when=(f"the enrolled {slot!r} is taken out first (`fleet unenroll --slot {slot}`, "
+                                 f"refused while it is leased), or the new workspace gets a basename no enrolled "
+                                 f"slot uses"),
+                    clears_who="the operator")
         return None
 
     def unenroll_refusal(self, slot: str, force: bool = False) -> "Optional[FleetError]":
