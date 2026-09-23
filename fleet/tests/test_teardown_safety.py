@@ -481,6 +481,20 @@ class RuntimeSwitchOverUnresumableRecords(CliCase):
         code, _, err = self._switch(fleet)
         self.assertEqual(code, EXIT_OK, f"the named route ran and the switch is still refused: {err}")
 
+    def test_an_untagged_record_names_a_reap_that_runs(self):
+        """RV-20. A legacy record with no base printed `fleet reap --base ` with nothing after it."""
+        fleet = self.fleet()
+        fleet.worker("legacy", state="complete", slot="ws1", live=False, base="")
+        todo = fleet.ids["legacy"]
+        code, _, err = self._switch(fleet)
+        self.assertEqual(code, EXIT_REFUSED, err)
+        self.assertNotIn("fleet reap --base `", err)
+        self.assertIn("fleet reap --all", err)
+        self.assertEqual(fleet.run(["close", "--id", todo])[0], EXIT_OK)
+        self.assertEqual(fleet.run(["reap", "--all"])[0], EXIT_OK)
+        code, _, err = self._switch(fleet)
+        self.assertEqual(code, EXIT_OK, err)
+
     def test_control_an_open_live_record_blocks(self):
         fleet = self.fleet()
         fleet.worker("running", slot="ws1", pane=IDLE_PANE)
