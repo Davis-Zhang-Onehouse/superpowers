@@ -1651,13 +1651,15 @@ def _do_revive(ctx: Ctx, parsed: Parsed) -> int:
                       clears_who='the coordinator')
     current, _ = read_runtime(ctx.home)
     if current != record.runtime:
-        #: RV-22. Not `fleet runtime --set {record.runtime}`: that switch is refused while any record is
-        #: unharvested or any lease held, and this record — open, lease held, or revive would refuse it anyway —
-        #: is exactly such a blocker. There is no state in which that route runs for this record.
+        #: RV-22 (worded for FB-92 by the teardown bucket's RV-22). Not `fleet runtime --set {record.runtime}`: that
+        #: switch is refused while any record can still be revived or resumed, and revive needs this open record's
+        #: lease — held, it is exactly such a blocker; released, revive refuses it below anyway. There is no state
+        #: in which that route runs for this record.
         raise Refused('The recorded runtime differs from the fleet selection',
                       clears_when=f'never, for this record under the current selection: switching back to '
-                                  f'{record.runtime} needs every record harvested, this one included. Carry the '
-                                  f'work on with a new worker under the current runtime (`fleet dispatch`)',
+                                  f'{record.runtime} is refused while this record can still be revived (it holds '
+                                  f'its lease), and without its lease revive refuses it anyway. Carry the work on '
+                                  f'with a new worker under the current runtime (`fleet dispatch`)',
                       clears_who='the coordinator')
     lease = ctx.pool.lease(record.slot) if record.slot else None
     if lease is None or lease.todo_id != record.todo_id:
