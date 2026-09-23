@@ -3607,14 +3607,20 @@ def _do_close(ctx: Ctx, parsed: Parsed) -> int:
         ctx.sessions_for(record).kill(record.tmux)
     record.closed_at = ctx.now()
     ctx.store.write(record)
+    #: RV-15 (`B11`). Who frees the slot depends on whether the folder is still there: `harvest` resolves it
+    #: first and exits 2 on one that resolves to nothing, so for a gone folder `reap` is the only door.
+    child, _ = _child_or_why(ctx, record)
+    held = ("(no slot)" if not record.slot else
+            (f"{record.slot} — released by `fleet harvest --id {record.todo_id}` when the delta lands, or by "
+             f"`fleet reap --base {record.base_instant}` once nothing is sitting in it") if child is not None else
+            (f"{record.slot} — its folder resolves to nothing, so `harvest` cannot run on it: `fleet reap --base "
+             f"{record.base_instant}` releases it once nothing is sitting in it"))
     _emit(ctx, "close", [
         ("record", record.todo_id),
         ("closed", record.tmux or "(no session)"),
         ("closed_at", record.closed_at),
         ("forced", "true" if parsed.on("force") else "false"),
-        ("slot_still_held", (f"{record.slot} — released by `fleet harvest --id {record.todo_id}` when "
-                             f"the delta lands, or by `fleet reap --base {record.base_instant}` once "
-                             f"nothing is sitting in it") if record.slot else "(no slot)"),
+        ("slot_still_held", held),
         ("disarmed", "the monitor's arm set is recomputed from the join; this pane is no longer in it")])
     return EXIT_OK
 
