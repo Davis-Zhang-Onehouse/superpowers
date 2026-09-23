@@ -164,6 +164,9 @@ tmux -L "$GA" kill-server 2>/dev/null; tmux -L "$GB" kill-server 2>/dev/null; tr
   { cat "$OUT/W1-7-baseline-real.txt"; echo "itfleet-W1-a-session-that-does-not-exist"; } | sort \
     > "$OUT/W1-7-baseline-doctored.txt"
   LIVE_TMUX_SNAPSHOT="$OUT/W1-7-baseline-doctored.txt"
+  # The handover too (FB-60), so that no path through it_assert_isolation can reach the shared files from
+  # inside a negative control, even the establish path, which today is unreachable here (RV-31).
+  LIVE_TMUX_HANDOVER="$OUT/W1-7-handover.txt"
   it_assert_isolation W1-7-injected >/dev/null 2>&1
   RESULTS="$REAL_RESULTS"
   if grep -q '^ISOLATION-W1-7-injected	FAIL' "$OUT/W1-7-negative-control.tsv"; then
@@ -264,6 +267,7 @@ mkdir -p "$OUT/w1-11"
   LIVE_INSTANTS_SNAPSHOT="$OUT/w1-11/instants-baseline.txt"; rm -f "$LIVE_INSTANTS_SNAPSHOT"
   LIVE_TMUX_SNAPSHOT_REAL="$LIVE_TMUX_SNAPSHOT"   # this run's own baseline (FB-60: per run), set by it_section above
   LIVE_TMUX_SNAPSHOT="$OUT/w1-11/tmux-baseline.txt"; cp "$LIVE_TMUX_SNAPSHOT_REAL" "$LIVE_TMUX_SNAPSHOT"
+  LIVE_TMUX_HANDOVER="$OUT/w1-11/tmux-handover.txt"   # never the shared handover from a negative control (RV-31)
   LIVE_SNAPSHOT="$OUT/w1-11/stores-baseline.sha256"; cp "$IT_ROOT/live-stores.sha256" "$LIVE_SNAPSHOT"
 
   it_assert_isolation W1-11-baseline >/dev/null 2>&1     # establishes over the EMPTY pretend tree
