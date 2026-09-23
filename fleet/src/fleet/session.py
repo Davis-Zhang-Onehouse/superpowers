@@ -455,6 +455,8 @@ def default_probes(process_name: str = "claude", tmux_socket=_FROM_ENV, *,
             flags = int(fields[6])
         except (IndexError, ValueError):
             flags = 0
+        # The last clause is a race, not a redundancy: a pid reaped after its `stat` was read is gone, and
+        # reporting it `unreadable` would put a phantom blocker in front of dispatch.
         return fields[:1] in (["Z"], ["X"]) or bool(flags & pf_exiting) or not proc.exists()
 
     where = f"socket {tmux_socket!r}" if tmux_socket else "the default socket"
