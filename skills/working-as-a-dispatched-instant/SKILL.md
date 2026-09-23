@@ -150,13 +150,25 @@ fleet declare --instant "$INSTANT" --phase awaiting-ci --watcher "cron */10 * * 
 your situation.** Those are different questions, and only the first one is yours to answer. If nothing is
 watching because there is nothing left to watch, the honest move is a different phase, not an attestation.
 
-Your attestation is stored verbatim and `fleet brief` reports it, labelled ATTESTED rather than observed.
-⚠️ **`fleet board` does not yet show that distinction** — a coordinator reading the board alone cannot tell
-an attested claim from an observed one (`i45` owns that). So the attestation is only as good as your
-honesty, and nothing downstream will catch it if it is false.
+Your attestation is stored verbatim, and `fleet board` and `fleet brief` both label it ATTESTED rather than
+observed. **Give it a handle when there is one:** if the wait ends when a process exits — a gate script, a
+background poller — put `pid:<n>` of that process in the text:
 
-**A claim nothing backs is disregarded, not believed.** With no watcher observed on your pane and none
-recorded on the declaration, `reconcile` sets the phase aside: your row is not `AWAITING-CI`, you count
+```bash
+fleet declare --instant "$INSTANT" --phase awaiting-ci --watcher "harness task running release-gate.sh pid:48213"
+```
+
+The pid is recorded with its start time, and once that process exits (or the pid is recycled) the board
+reads **NO WATCHER OBSERVABLE** and disregards the claim by itself — no re-declaring by hand after the
+gate. `declare` refuses a `pid:` that is not running, or two of them. Without a handle nothing re-checks the
+attestation: `declare` says so, and it is only as good as your honesty.
+
+A watcher this tool OBSERVED on your pane is re-checked the same way: once it is no longer on the status
+line, the board reads NO WATCHER OBSERVABLE and disregards the claim — it is never relabelled ATTESTED.
+
+**A claim nothing backs is disregarded, not believed.** With no watcher on your pane and no genuine
+attestation standing — nothing recorded, an observed watcher since gone, or an attested pid that exited —
+`reconcile` sets the phase aside: your row is not `AWAITING-CI`, you count
 against the WIP cap again, and if your pane is quiet you age into `IDLE` like any other worker. So writing `declare.json` by hand
 buys nothing, and a `--watcher` attestation that stops being true is worth un-declaring.
 
@@ -165,7 +177,7 @@ predicate cannot see stays cheap and honest — and so nobody is tempted to writ
 which records no judgement at all.
 
 **If your attestation stops being true, say so.** It is a statement about the moment you made it; a cron or
-a peer's monitor can die afterwards, and nothing re-reads your claim to notice.
+a peer's monitor can die afterwards, and without a `pid:` handle nothing re-reads your claim to notice.
 
 **Two ways a watcher looks armed and is not.** Both were measured in one wave, and both cost hours.
 
