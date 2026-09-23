@@ -1205,4 +1205,18 @@ class TestALegacyItemAnchorsAtItsProposer(RoadmapCase):
         entry["milestones"][-1]["status"] = "running"
         self.rm.path.write_text(json.dumps(entry))
         milestone = self.rm.apply(self.rm.propose(self.worker, "w3", "done", ["evidence/INDEX.md"]))
-        self.assertEqual(["evidence/INDEX.md", str(self.worker / "evidence" / "INDEX.md")], milestone.evidence)
+        self.assertEqual([str(self.instant / "evidence" / "INDEX.md"), str(self.worker / "evidence" / "INDEX.md")],
+                         milestone.evidence)
+
+    def test_apply_stores_a_legacy_item_anchored_where_its_proposer_row_locates_it(self):
+        """RV-28. The write `apply` is already making anchors a legacy relative item its proposer row
+        locates, so a raw reader of roadmap.json no longer needs proposals.json to open it. An item no row
+        cites is left as written (`test_a_legacy_relative_item_for_another_file_is_left_as_written`), and so
+        is one its proposer no longer locates."""
+        self.legacy("w4", ["evidence/a.log", "evidence/gone.log"], self.worker)
+        entry = json.loads(self.rm.path.read_text())
+        entry["milestones"][-1]["status"] = "running"
+        self.rm.path.write_text(json.dumps(entry))
+        milestone = self.rm.apply(self.rm.propose(self.worker, "w4", "done", ["evidence/b.log"]))
+        self.assertEqual([str(self.worker / "evidence" / "a.log"), "evidence/gone.log",
+                          str(self.worker / "evidence" / "b.log")], milestone.evidence)
