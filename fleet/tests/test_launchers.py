@@ -54,7 +54,7 @@ class LauncherBinaryCase(unittest.TestCase):
         binary.chmod(0o755)
         return binary, calls
 
-    def run_launcher(self, argv, **extra):
+    def run_launcher(self, argv, _repo=REPO, **extra):
         """Run one launcher from the private root and return `{decoy name: argv lines it recorded}`. The
         environment is BUILT, not inherited, so nothing the person running the suite exported (a dispatched
         session's FLEET_ROOT, FLEET_BIN …) can reach it."""
@@ -69,7 +69,7 @@ class LauncherBinaryCase(unittest.TestCase):
         for _, calls in (self.ambient, self.named):
             if calls.exists():
                 calls.unlink()
-        argv = [argv[0], str(REPO / argv[1]), *argv[2:]]
+        argv = [argv[0], str(_repo / argv[1]), *argv[2:]]
         subprocess.run(argv, cwd=self.root, env=env, stdin=subprocess.DEVNULL,
                        stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, timeout=60)
         return {name: calls.read_text() if calls.exists() else ""
@@ -93,17 +93,29 @@ class LauncherBinaryCase(unittest.TestCase):
                                     f"not reach a fleet call and the assertion above is vacuous")
 
     def test_with_only_an_ambient_fleet_bin_the_sibling_binary_acts(self):
-        """The dispatched shape exactly: `FLEET_BIN` set, no seam. The launcher runs `$REPO/bin/fleet`
-        against this private store with read-only verbs. `release-gate.sh` is left out on purpose: its
-        sibling binary would launch a real, detached `release-verify`. Its resolution is covered by the
-        case above and by the `FLEET=` line its launch message now prints."""
+        """The dispatched shape exactly: `FLEET_BIN` set, no seam. The binary that must act is the one the
+        launcher ships beside, so each launcher runs from a scratch COPY of `scripts/` and `bin/fleet-view`
+        whose `bin/fleet` is a recording decoy. Asserting only that the ambient decoy stayed silent would
+        also pass for a default quietly changed to the deployed copy, or for a launcher that exits before
+        any fleet call (RV-24). The copy also means `release-gate.sh` is safe to include here: its sibling
+        is the decoy, not a real `release-verify`."""
+        copy = self.tmp / "copy"
+        shutil.copytree(REPO / "scripts", copy / "scripts", symlinks=True)
+        (copy / "bin").mkdir()
+        shutil.copy2(REPO / "bin" / "fleet-view", copy / "bin" / "fleet-view")
+        sibling_calls = self.tmp / "sibling.calls"
+        sibling = copy / "bin" / "fleet"
+        sibling.write_text(f'#!/usr/bin/env bash\nprintf "%s\\n" "$*" >> "{sibling_calls}"\nexit 0\n')
+        sibling.chmod(0o755)
         for label, argv in LAUNCHERS:
-            if label == "release-gate.sh":
-                continue
             with self.subTest(launcher=label):
-                ran = self.run_launcher(argv, FLEET_BIN=str(self.ambient[0]))
+                if sibling_calls.exists():
+                    sibling_calls.unlink()
+                ran = self.run_launcher(argv, _repo=copy, FLEET_BIN=str(self.ambient[0]))
                 self.assertEqual(ran["ambient"], "",
                                  f"{label} executed the ambient FLEET_BIN ({ran['ambient'].strip()!r})")
+                self.assertNotEqual(sibling_calls.read_text() if sibling_calls.exists() else "", "",
+                                    f"{label} never ran the bin/fleet it ships beside")
 
 
 def tracked_files(prefixes):
