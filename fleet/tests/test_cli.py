@@ -5339,7 +5339,9 @@ class TestAwaitingCiRequiresALiveWatcher(CliCase):
     # --- FB-58: an attestation may carry a pid, which is checked ------------------------------------
 
     def _proc(self, pid=None, start="777", state="S"):
-        root = pathlib.Path(tempfile.mkdtemp()) / "proc"
+        scratch = tempfile.mkdtemp()
+        self.addCleanup(shutil.rmtree, scratch, True)
+        root = pathlib.Path(scratch) / "proc"
         root.mkdir()
         if pid is not None:
             (root / str(pid)).mkdir()

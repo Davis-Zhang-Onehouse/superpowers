@@ -994,7 +994,9 @@ class TestTheWatcherIsClassifiedFromWhatIsTrue(unittest.TestCase):
 
     def setUp(self):
         self.fleet = SyntheticFleet()
-        self.proc = pathlib.Path(tempfile.mkdtemp()) / "proc"
+        scratch = tempfile.mkdtemp()
+        self.addCleanup(shutil.rmtree, scratch, True)
+        self.proc = pathlib.Path(scratch) / "proc"
         self.proc.mkdir()
         patcher = mock.patch("fleet.reconcile.PROC_ROOT", self.proc)
         patcher.start()

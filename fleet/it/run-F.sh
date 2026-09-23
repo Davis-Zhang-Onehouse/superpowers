@@ -227,7 +227,9 @@ printf 'editing src/fleet/cli.py\nThinking...\n  auto mode on · 1 monitor · es
 printf 'editing src/fleet/cli.py\nidle\n  auto mode on · esc to interrupt · for agents\n' > "$OUT/F2d-unwatched.txt"
 f2d_render() {
   tmux -L "$IT_TMUX_SOCKET" kill-session -t "=$W1_TMUX" 2>/dev/null
-  tmux -L "$IT_TMUX_SOCKET" new-session -d -s "$W1_TMUX" -c "$W1_CWD" "bash -c 'cat $1; exec sleep 100000'"
+  #: `RV-C8`. The frame path is an ARGUMENT to the inner shell, never text spliced into its script: tmux 3.2a
+  #: runs a multi-word command as argv, so a path with a space or a quote cannot break the re-render.
+  tmux -L "$IT_TMUX_SOCKET" new-session -d -s "$W1_TMUX" -c "$W1_CWD" bash -c 'cat "$1"; exec sleep 100000' f2d "$1"
   sleep 0.6
 }
 f2d_render "$OUT/F2d-watched.txt"
