@@ -350,6 +350,10 @@ class TestThePrivateTmuxServer(unittest.TestCase):
 #: failed `server exited unexpectedly`, so `setUp` read a None pane (`TestSelftestServerIsPerProcessAndRetired`).
 #: The pid makes it per process; `_retire_selftest_server` in each user's cleanup makes that not leak, and
 #: `TestAgainstRealTmux`'s anchor session keeps it from exiting between cases (`FB-5`).
+#: Fixed at IMPORT, like `_WHILE_THIS_PROCESS_LIVES` below, so the two agree. A runner that forks after
+#: importing (pytest-forked, `--boxed`) would give every child the parent's name; the suite's runners —
+#: `unittest discover` for `fleet selftest`, P-1 and the release gate, and pytest-xdist's workers, which
+#: import for themselves — do not.
 SELFTEST_TMUX_SOCKET = f"itfleet-selftest-{os.getpid()}"
 
 
