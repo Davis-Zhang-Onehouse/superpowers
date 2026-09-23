@@ -214,7 +214,7 @@ def reconcile(store, pool, sessions, instants_dir: Path, idle_after_s: int = 180
                 accounted_slots.add(rec.slot)
             subjects.append(subject)
         else:
-            slot = _slot_holding(pool, sess.cwd)
+            slot = _slot_holding(pool, sess.cwd) or _slot_leased_to_pane(pool, sess)
             if slot:
                 accounted_slots.add(slot)
             subjects.append(_unknown_subject(sess, slot))
@@ -279,6 +279,11 @@ def _worker_subject(rec, pool, sessions, instants_dir: Path, idle_after_s: int, 
     if sess is not None and sess.runtime != rec.runtime:
         state, note = BLOCKED, f'live runtime {sess.runtime} differs from record runtime {rec.runtime}'
         on_pane = False
+    unreadable = sess is not None and getattr(sess, "unreadable", False)
+    if unreadable:
+        #: FB-54. This record's session, placed by its pane through `stat`; what `/proc` refused is said, not hidden.
+        note = (f"{note}; " if note else "") + (f"this record's session, unreadable: its process {sess.pid} "
+                                                f"refused exe/cwd, and was placed by the pane that owns it")
     attachment = sessions.attachment(rec.tmux) if (live and rec.tmux) else None
     #: `RV-32`. ONE clock read for the attachment, so the note and `evidence.attached` state one age.
     now = time.time()
@@ -308,6 +313,8 @@ def _worker_subject(rec, pool, sessions, instants_dir: Path, idle_after_s: int, 
         "tmux_socket": rec.tmux_socket,
         "asked_server": getattr(sessions, "socket", "") or "",
         "pid": str(sess.pid) if sess is not None else (str(holder) if holder else ""),
+        #: FB-54. `unreadable` when the process holding this record's pane refused `exe`/`cwd`; "" otherwise.
+        "process": "unreadable" if unreadable else "",
         "slot": rec.slot if holds else "",
         #: `SI-27`. Joined here rather than looked up per view, so `board` and `status` cannot disagree
         #: about which milestone an instant is on.
@@ -632,6 +639,7 @@ def _unknown_subject(sess, slot: str):
     will leave armed, and some of those sessions are people's"* (D-6).
     """
     label = sess.name or f"pid{sess.pid}"
+    unreadable = getattr(sess, "unreadable", False)
     evidence = {
         "pid": str(sess.pid),
         "cwd": str(sess.cwd),
@@ -639,9 +647,15 @@ def _unknown_subject(sess, slot: str):
         "session": sess.name or "",
         "record": "none",
         "slot": slot or "",
+        "process": "unreadable" if unreadable else "",
     }
     note = ("no dispatch record claims this session; it is reported so a human can decide, and this "
             "tool does nothing to it")
+    if unreadable:
+        #: FB-54. Say WHY it cannot be placed further, so "no record claims it" is not read as "nothing is there".
+        where = (f"placed by the tmux pane of session {sess.name}" if sess.name
+                 else "no tmux pane on this server owns it or any ancestor, so it cannot be placed")
+        note = (f"its process {sess.pid} could not be read (exe/cwd refused) and is {where}; " + note)
     return Subject(kind=KIND_UNKNOWN, identity=f"session:{label}:{sess.pid}",
                    state=UNKNOWN_SESSION, holds_slot=bool(slot), evidence=evidence, note=note)
 
@@ -655,6 +669,21 @@ def _slot_holding(pool, cwd: Path) -> str:
             continue
         path = Path(lease.path)
         if cwd == path or path in cwd.parents:
+            return slot
+    return ""
+
+
+def _slot_leased_to_pane(pool, sess) -> str:
+    """FB-54. The slot whose lease names this session's tmux pane — for an UNREADABLE row only, "" otherwise.
+
+    An unreadable process carries no cwd (`/proc/<pid>` stands in for the one the kernel refused), so the cwd
+    join above cannot place it; the pane walk still named its session through `stat`. A readable row is never
+    placed this way: its cwd is the stronger fact, and a process that left its slot has left it."""
+    if not getattr(sess, "unreadable", False) or not sess.name:
+        return ""
+    for slot in pool.slots():
+        lease = pool.lease(slot)
+        if lease is not None and lease.tmux == sess.name:
             return slot
     return ""
 

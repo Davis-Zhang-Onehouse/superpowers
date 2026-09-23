@@ -1358,7 +1358,10 @@ def runtime_blockers(ctx: Ctx) -> list[str]:
     blockers.extend(f"interrupted claim {item}" for item in ctx.pool.interrupted_claims(min_age_s=0))
     for session in ctx.sessions.live():
         if getattr(session, "unreadable", False):
-            blockers.append(f"unreadable {session.runtime} process {session.pid} (cannot be attributed)")
+            #: FB-54: a pane may now NAME it, but its binary and cwd are still unknown — a blocker either way.
+            where = (f"in session {session.name}, its binary and cwd unreadable" if session.name
+                     else "cannot be attributed")
+            blockers.append(f"unreadable {session.runtime} process {session.pid} ({where})")
             continue
         cwd = session.cwd.resolve()
         if session.name in names or any(cwd == path or path in cwd.parents for path in paths):
