@@ -482,8 +482,10 @@ class TestAgainstRealTmux(unittest.TestCase):
         """`FB-5`, pinned. Killing the server's last session makes tmux exit it asynchronously, and the next
         case's `new-session` can land in that exit (`server exited unexpectedly`). The anchor is what keeps
         the server non-empty; without it this case's own `kill-session` empties the server."""
-        subprocess.run(self.TMUX + ["kill-session", "-t", exact_session_target(self.long)],
-                       capture_output=True)
+        killed = subprocess.run(self.TMUX + ["kill-session", "-t", exact_session_target(self.long)],
+                                capture_output=True, text=True)
+        self.assertEqual(killed.returncode, 0, f"the premise did not hold, the case's own session was not "
+                                               f"killed ({killed.stderr.strip()})")
         anchor = subprocess.run(self.TMUX + ["has-session", "-t", exact_session_target(self.ANCHOR)],
                                 capture_output=True, text=True)
         self.assertEqual(anchor.returncode, 0,
