@@ -338,7 +338,8 @@ def default_probes(process_name: str = WORKER_COMM) -> Probes:
 
     def comm_of(pid: int):
         try:
-            return Path(f"/proc/{pid}/comm").read_text().strip() or None
+            # RV-31. `comm` is free bytes too (prctl, or an exec'd file's name); a strict read raised out of here.
+            return Path(f"/proc/{pid}/comm").read_text(encoding="utf-8", errors="surrogateescape").strip() or None
         except OSError:
             return None
 
