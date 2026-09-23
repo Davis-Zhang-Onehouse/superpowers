@@ -6053,6 +6053,21 @@ class TestSeedCheckExitsOnANonPass(CliCase):
         self.assertIn("unreadable", kinds, f"the sweep died on an OSError: {err}")
         self.assertEqual(EXIT_ATTENTION, code, err)
 
+    def test_the_dispatch_time_check_reads_the_delivery_through_the_renamed_folder(self):
+        """RV-29. `_verify_seed_delivery` (dispatch's own check, not the `seed-check` verb) read the delivery
+        record through the raw recorded path too. Driven directly, with no injected `seed_delivery`, so the
+        real read runs."""
+        self.brief()
+        self.attest()
+        solo = self.fleet_.paths["solo"]
+        solo.rename(solo.with_name(solo.name.replace("-inflight-", "-complete-")))
+        ctx = self.fleet_.context()(types.SimpleNamespace(on=lambda flag: False), io.StringIO(), io.StringIO())
+        ctx.seed_delivery = None
+        with mock.patch.dict(os.environ, {cli.SEED_CHECK_SECONDS: "0"}):
+            verdict = cli._verify_seed_delivery(ctx, "dt-solo", self.SEED, probes=self.probes,
+                                                sleep=lambda s: None)
+        self.assertEqual(seedcheck.ATTESTED, verdict.state, verdict.detail)
+
 
 class TestMilestoneEvidenceIsAdmitted(CliCase):
     """FB-44 (b03 OI-1). `milestone --evidence` stored its items verbatim — the one door B03's gate did not
