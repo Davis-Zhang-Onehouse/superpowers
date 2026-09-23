@@ -79,6 +79,13 @@ IT_RESULTS="$R" bash run-group5.sh             # §L §M §N in one process — 
 | `run-e9-leak` `run-m9-mutation` `run-rmw` | targeted regressions |
 | `run-P` | §P the real dispatch — see below |
 
+**The live-session baseline is per RUN** (FB-60). `lib.sh` mints and exports `IT_RUN_ID` once per process tree
+(`run-all.sh`'s runners share one; a standalone section is its own run) and keeps
+`it/live-tmux-sessions-run-<id>.txt`. A run's first check compares against the handover the previous run left
+(`it/live-tmux-sessions.txt`): a `dt-` session lost between runs is a NOTE, logged to `live-tmux-rebaselines.tsv`,
+not the FAIL in every later section it used to be. A loss during a run is still a FAIL, as is any `itfleet-`
+session on the default server. `scripts/tests/it-live-baseline-per-run.sh` drives all of these on a private server.
+
 **`RESULTS.tsv` is current state, not an append log.** Each runner declares the case ids it owns via
 `it_own_cases` and *replaces* those rows. That is what makes "zero NOT-RUN" expressible — and it is currently
 **273 PASS / 0 FAIL / 9 SKIP / 0 NOT-RUN**. Every SKIP carries a stated reason; a partial pass must never read
@@ -361,6 +368,10 @@ matters when you are changing the pipeline rather than using it.
 **Three wrapper scripts turn skill prose into actual checks, one per operator moment.** None of them talks
 to `release-verify`'s ~45-minute run except `release-gate.sh`, which launches it; the other two only read
 state that already exists.
+Each runs the `bin/fleet` beside it. None of them reads `FLEET_BIN`, which `fleet dispatch` exports into every
+worker naming the DISPATCHER'S fleet (FB-56). Their test seam is `FLEET_LAUNCHER_TEST_BIN`, and
+`tests/test_launchers.py` pins both halves. The same test requires every `#!` file under `scripts/` and `bin/` to
+be 100755 in the index (FB-31).
 
 - **`scripts/release-preflight.sh [--reap]`** — reports what makes this a bad moment to cut: this root's
   live `dt-` sessions (through the environment's own **derived** `FLEET_TMUX_SOCKET`, never a bare

@@ -17,7 +17,10 @@ fleet dispatch --profile "$PREPARED_PROFILE" --title "$TITLE" --seed-extra "$TAS
 
 Prepare the complete charter in the profile and any additional instructions in the task brief before
 dispatch. Dispatch renders and delivers the seed itself. It exports `FLEET_BIN` for the matching fleet CLI;
-the seed tells workers to use `"$FLEET_BIN"` so login-shell PATH changes cannot select an older binary. Remove the old fleet `claude` PATH shim:
+the seed tells workers to use `"$FLEET_BIN"` so login-shell PATH changes cannot select an older binary. The repository's
+launchers (`scripts/release-gate.sh`, `release-preflight.sh`, `fleet-revive.sh`, `fleet-finished-pids.sh`, `bin/fleet-view`)
+deliberately do NOT read it: each runs the `bin/fleet` it ships beside, and its test seam is `FLEET_LAUNCHER_TEST_BIN` (FB-56).
+Remove the old fleet `claude` PATH shim:
 `scripts/fleet-dispatch-launcher.sh` now reports that dispatch owns this operation.
 
 When the run is finished, complete and harvest every worker, stop the coordinator, and switch from a

@@ -132,6 +132,9 @@ rows already printed; the pid gone with no verdict **from this run** → **exit 
 checklist for you (`hermetic.log`'s size and mtime, then the log's tail); "still running" is unreachable by
 construction — the script does not return until one of the other two is true. It runs the gate **once**;
 re-running it is a separate, deliberate invocation you make, never something the script does for you.
+It runs the `bin/fleet` **it ships beside** and prints that path on its launch line. It never runs the
+`FLEET_BIN` a dispatched session carries, which names the dispatcher's fleet (FB-56). So `env -u FLEET_BIN`
+is no longer needed, and the checkout whose script you invoke is the checkout that gets verified.
 
 **"From this run" is load-bearing, and it is what a re-verify depends on.** A version that has already been
 verified still has the previous attempt's `VERDICT.tsv` on disk — `fleet-v0.5.9` and `fleet-v0.5.6` are
