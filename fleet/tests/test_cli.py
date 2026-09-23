@@ -2343,6 +2343,75 @@ class TestAbortDryRunEvaluatesTheRealGate(CliCase):
         self.assertIn("could not", out.lower())
 
 
+class TestDryRunSweepB10(CliCase):
+    """`B10`'s sweep (`evidence/02-sweep/SWEEP.md` in the b10 instant): verbs whose dry-run returned above a
+    refusal the real call reaches only AFTER a side effect (`clone` copies the whole golden first; `init`
+    creates the instant first), and trivial hoists in the same functions (`complete`, `init`, `enroll`).
+    Each: the dry-run refuses with the real call's rc and text, and changes nothing."""
+
+    def _same(self, fleet, argv):
+        before = snapshot(fleet.tmp)
+        dry = fleet.run([argv[0], "--dry-run"] + argv[1:])
+        self.assertEqual(snapshot(fleet.tmp), before, f"the dry-run of {argv[0]} changed state")
+        real = fleet.run(argv)
+        self.assertEqual((dry[0], dry[2]), (real[0], real[2]),
+                         f"{argv[0]}: the dry-run answered rc={dry[0]} {dry[1]!r}{dry[2]!r}, the real call "
+                         f"rc={real[0]} {real[2]!r}")
+        self.assertNotEqual(real[0], EXIT_OK, f"the real {argv[0]} did not refuse, so this is vacuous")
+        return real
+
+    def _golden(self, fleet):
+        golden = fleet.tmp / "golden"
+        (golden / "alpha").mkdir(parents=True)
+        (golden / "alpha" / "f.txt").write_text("content\n")
+        self.assertEqual(fleet.run(["set-golden", "--path", str(golden)])[0], EXIT_OK)
+        return golden
+
+    def test_clone_onto_an_existing_target(self):
+        fleet = self.loaded()
+        self._golden(fleet)
+        (fleet.tmp / "occupied").mkdir()
+        self._same(fleet, ["clone", "--slot", str(fleet.tmp / "occupied")])
+
+    def test_clone_outside_the_root_refuses_before_copying_the_golden(self):
+        fleet = self.loaded()
+        self._golden(fleet)
+        root = fleet.tmp / "theRoot"
+        root.mkdir()
+        fleet.pool = Pool(fleet.home, cwd_probe=lambda path: [], alive=fleet.sessions.alive, fleet_root=root)
+        target = fleet.tmp / "outsideTheRoot"
+        self._same(fleet, ["clone", "--slot", str(target)])
+        self.assertFalse(target.exists(), "the golden was copied before the enrolment refused")
+
+    def test_enroll_a_path_that_is_not_a_directory(self):
+        fleet = self.loaded()
+        self._same(fleet, ["enroll", "--slot", str(fleet.tmp / "no-such-dir")])
+
+    def test_complete_onto_an_existing_target(self):
+        fleet = self.loaded()
+        child = fleet.worker("twiceDone", live=False)
+        fleet.reviewed(child)
+        (child.parent / child.name.replace("-inflight-", "-complete-")).mkdir()
+        self._same(fleet, ["complete", "--instant", str(child)])
+        self.assertTrue(child.is_dir())
+
+    def test_init_onto_an_existing_target(self):
+        fleet = self.loaded()
+        code, out, err = fleet.run(["init", "--dry-run", "--porcelain", "--name", "clash"])
+        self.assertEqual(code, EXIT_OK, err)
+        pathlib.Path(dict(l.split("\t", 1) for l in out.splitlines())["would-create"]).mkdir()
+        self._same(fleet, ["init", "--name", "clash"])
+
+    def test_init_with_an_unreadable_registry_refuses_before_creating_the_instant(self):
+        fleet = self.loaded()
+        fleet.harvest.path.parent.mkdir(parents=True, exist_ok=True)
+        fleet.harvest.path.write_text('{"schema_version": 999, "sources": []}')
+        before = sorted(p.name for p in fleet.instants.iterdir())
+        self._same(fleet, ["init", "--name", "unwatched"])
+        self.assertEqual(sorted(p.name for p in fleet.instants.iterdir()), before,
+                         "init created the instant and THEN refused to watch it")
+
+
 class TestClose(CliCase):
     """FD-10: the external monitor is required to call `pane-guard` before any send-keys, and `close`
     disarms it. Plan 6 §J8/§N5: a busy pane and a pane holding unsubmitted input are both refused; a pane
@@ -3551,6 +3620,30 @@ class TestTheDispatchMilestoneJoin(CliCase):
         self.assertIn("M9", harvested[0], "the row must name what it applied")
         self.assertEqual(bystanders, [p for p in Roadmap(coordinator).proposals() if p.instant != child],
                          "harvesting ONE worker applied proposals another instant wrote")
+
+    def test_harvest_dry_run_evaluates_the_slot_gate_and_both_refuse_before_anything(self):
+        """`B10` sweep. `harvest --id` applied the delta, disowned, killed the session and stamped the
+        record, and only THEN did `pool.release` refuse on a cwd holder — while the dry-run, which never
+        asks, said `would-harvest` rc=0. Same gate as `abort`, same fix: asked first, by both."""
+        fleet = self.loaded()
+        coordinator, todo, _, _ = self._reported_and_finished(fleet, "done", title="heldHarvest")
+        record = fleet.store.read(todo)
+        self.assertTrue(record.slot, "the fixture leased no slot: this case is vacuous")
+        fleet.hold_slot_cwd(record.slot, pid=92000)
+        argv = ["harvest", "--id", todo]
+        before = (snapshot(fleet.tmp), list(fleet.killed))
+
+        dry = fleet.run(argv + ["--dry-run"])
+        self.assertEqual((snapshot(fleet.tmp), list(fleet.killed)), before, "the dry-run changed state")
+        self.assertEqual(dry[0], EXIT_REFUSED,
+                         f"the dry-run said the harvest would go through (rc={dry[0]}): {dry[1]}{dry[2]}")
+        real = fleet.run(argv)
+
+        self.assertEqual((real[0], real[2]), (dry[0], dry[2]), "dry-run and real call disagree")
+        self.assertEqual("blocked", Roadmap(coordinator).milestone("M9").status,
+                         "the refusing harvest applied the delta anyway")
+        self.assertIsNone(fleet.store.read(todo).harvested_at, "the refusing harvest stamped the record")
+        self.assertNotIn(record.tmux, fleet.killed, "the refusing harvest killed the session first")
 
     def test_harvest_dry_run_counts_the_rows_a_real_run_would_apply(self):
         fleet = self.loaded()
