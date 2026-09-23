@@ -2412,6 +2412,80 @@ class TestDryRunSweepB10(CliCase):
                          "init created the instant and THEN refused to watch it")
 
 
+    # ---- the mild half: the real call refuses before writing anything, the dry-run said rc=0 ----------
+
+    def test_park_with_a_blank_question(self):
+        fleet = self.loaded()
+        self._same(fleet, ["park", "--instant", str(fleet.paths["readyWorker"]), "--question", "   "])
+
+    def test_declare_over_an_unreadable_declarations_file(self):
+        fleet = self.loaded()
+        ready = fleet.paths["readyWorker"]
+        (ready / ".fleet").mkdir(exist_ok=True)
+        (ready / ".fleet" / "declare.json").write_text("{not json")
+        self._same(fleet, ["declare", "--instant", str(ready), "--phase", "building"])
+
+    def test_milestone_add_of_a_duplicate_id_and_of_a_status_outside_the_domain(self):
+        fleet = self.loaded()
+        ready = str(fleet.paths["readyWorker"])
+        self._same(fleet, ["milestone", "--instant", ready, "--id", "M1", "--title", "again"])
+        self._same(fleet, ["milestone", "--instant", ready, "--id", "M-new", "--title", "t",
+                           "--status", "finished"])
+
+    def test_propose_a_status_outside_the_domain(self):
+        fleet = self.loaded()
+        ready = str(fleet.paths["readyWorker"])
+        self._same(fleet, ["propose", "--instant", ready, "--milestone", "M1", "--status", "finished",
+                           "--evidence", "evidence/02-acceptance/verify-acs.sh"])
+
+    def test_apply_of_a_stored_row_apply_itself_would_refuse(self):
+        """A hand-built or legacy inbox row: `apply` re-validates it (`propose` is not the only writer)."""
+        fleet = self.loaded()
+        ready = fleet.paths["readyWorker"]
+        inbox = Roadmap(ready).proposals_path
+        data = json.loads(inbox.read_text())
+        self.assertTrue(data["pending"], "the fixture holds no pending row: this case is vacuous")
+        for row in data["pending"]:
+            row["status"] = "finished"
+        inbox.write_text(json.dumps(data))
+        self._same(fleet, ["apply", "--instant", str(ready), "--milestone", "M1"])
+
+    def test_review_with_a_scope_a_verdict_or_finding_ids_the_ledger_refuses(self):
+        fleet = self.loaded()
+        ready = str(fleet.paths["readyWorker"])
+        finding = "RV-1:Minor:applied:x.py:a finding:none"
+        self._same(fleet, ["review", "--instant", ready, "--scope", "everything", "--verdict", "READY",
+                           "--finding", finding])
+        self._same(fleet, ["review", "--instant", ready, "--scope", "all", "--verdict", "ready",
+                           "--finding", finding])
+        self._same(fleet, ["review", "--instant", ready, "--scope", "all", "--verdict", "READY",
+                           "--finding", finding, "--finding", finding])
+
+    def test_unenroll_a_slot_that_is_not_enrolled(self):
+        fleet = self.loaded()
+        self._same(fleet, ["unenroll", "--slot", "wsNeverEnrolled"])
+
+    def test_set_golden_to_a_path_that_is_not_a_directory(self):
+        fleet = self.loaded()
+        self._same(fleet, ["set-golden", "--path", str(fleet.tmp / "no-such-golden")])
+
+    def test_resume_into_a_slot_that_is_not_enrolled(self):
+        fleet = self.loaded()
+        orphan = fleet.orphan("adoptMe")
+        self._same(fleet, ["resume", "--instant", str(orphan), "--slot", "wsNeverEnrolled",
+                           "--tmux", "dt-adoptMe"])
+
+    def test_dispatch_twice_in_one_minute_and_into_a_leased_named_slot(self):
+        fleet = self.loaded()
+        base = ["dispatch", "--profile", str(fleet.profile("worker")), "--base", "00000000",
+                "--optype", "append", "--cap", "9"]            # the WIP cap is not what this case measures
+        code, out, err = fleet.run(base + ["--title", "twin"])
+        self.assertEqual(code, EXIT_OK, f"the first dispatch did not go through: {out}{err}")
+        self._same(fleet, base + ["--title", "twin"])
+        self.assertIsNotNone(fleet.pool.lease("ws1"), "ws1 is not leased: the named-slot case is vacuous")
+        self._same(fleet, base + ["--title", "intoTakenSlot", "--slot", "ws1"])
+
+
 class TestClose(CliCase):
     """FD-10: the external monitor is required to call `pane-guard` before any send-keys, and `close`
     disarms it. Plan 6 §J8/§N5: a busy pane and a pane holding unsubmitted input are both refused; a pane

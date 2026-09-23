@@ -94,14 +94,21 @@ class Workspace:
         return Path(text)
 
     def set_golden(self, path: Path) -> None:
+        refusal = self.golden_refusal(path)
+        if refusal is not None:
+            raise refusal
+        atomic_write(self._golden_file, f"{Path(path)}\n")
+
+    def golden_refusal(self, path: Path) -> "Optional[BadInput]":
+        """`set_golden`'s refusal, read-only, for its dry-run (`B10` sweep)."""
         path = Path(path)
         if not path.is_dir():
-            raise BadInput(
+            return BadInput(
                 f"{path} is not an existing directory, so it cannot be the golden workspace. "
                 "The golden is validated at SET time, because a golden that does not exist is "
                 "discovered at clone time — inside a dispatch that has already claimed a slot."
             )
-        atomic_write(self._golden_file, f"{path}\n")
+        return None
 
     # ---- clone: growing the pool FROM the declared golden ----------------------------------------
 

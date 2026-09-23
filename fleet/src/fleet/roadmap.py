@@ -48,6 +48,7 @@ Nothing here reads a `.md` file. The registry is JSON; `render` turns it into ma
 """
 import json
 from dataclasses import asdict, dataclass
+from typing import Optional
 from datetime import datetime, timezone
 from pathlib import Path
 
@@ -341,6 +342,19 @@ class Roadmap:
         atomic_write(path, json.dumps(data, indent=2, ensure_ascii=False))
 
     # ------------------------------------------------------------------ milestones
+
+    def add_refusal(self, m: Milestone) -> "Optional[BadInput]":
+        """`add`'s refusals, read-only, for `milestone --dry-run` (`B10` sweep). The duplicate check reads
+        without the lock: a dry-run answers for NOW, and `add` re-checks under it."""
+        if not m.id or not m.id.strip():
+            return BadInput("a milestone needs an id")
+        try:
+            _check_status(m.status)
+        except BadInput as exc:
+            return exc
+        if any(d["id"] == m.id for d in self._load()["milestones"]):
+            return BadInput(f"milestone {m.id!r} is already in the roadmap; refusing to shadow it")
+        return None
 
     def add(self, m: Milestone) -> None:
         if not m.id or not m.id.strip():
