@@ -76,6 +76,9 @@ class RuntimeCliTests(unittest.TestCase):
         self.assertEqual(code, 4, err)
         self.assertIn('unreadable codex process 781', err)
         self.assertIn('dt-someone', err)
+        # RV-32: the row does not keep WHICH /proc read failed, so the text names no cause it did not observe.
+        self.assertIn('a /proc read of it failed', err)
+        self.assertNotIn('cwd unreadable', err)
 
     def test_invalid_selection_is_not_overwritten(self):
         self.f.home.mkdir(exist_ok=True)
