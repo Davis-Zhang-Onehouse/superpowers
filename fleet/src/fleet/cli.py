@@ -862,6 +862,8 @@ def _cwd_holders(path, proc_root=Path("/proc")) -> list:
             return 0
         return int(fields[1])
 
+    if not holders:
+        return holders                                    # RV-25: nothing readable to tie an unreadable pid to
     readable = set(holders)
     for pid in unreadable:
         walker, steps = parent_of(pid), 0
