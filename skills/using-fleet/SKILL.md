@@ -295,7 +295,14 @@ column (`$2=="held"`), never with `wc -l` over the whole output.
 
 Every mutating verb has one, derived from whether the verb is read-only rather than added per verb — so the
 next mutating verb anybody writes gets an interrogable form whether or not they remembered to ask for one. A
-dry run evaluates every gate and writes nothing: not a lease, not a record, not a file.
+dry run evaluates every gate and writes nothing: not a lease, not a record, not a file. When the real call would
+refuse, the dry run refuses too, with the same exit code and the same message.
+
+That last sentence was false until fleet 0.6.7 (`B10`). `abort --dry-run` answered rc=0 `would-rename` for an
+argv the real call refused rc=4, and by then the real call had already killed the session. Sixteen verbs had
+the same shape. Three still answer rc=0 where the real call can exit non-zero: `reap` (foreign or unfreeable
+leases), `release-verify` (a missing source repo is printed as `would-refuse`, by design) and the `harvest`
+tick with no `--id` (its STALE rows). Read those three dry runs' rows, not just their exit codes.
 
 Use it to ask "would this be admitted?" A guard you cannot interrogate non-destructively gets interrogated
 destructively — twice, by two actors, one of whom had read the entry that declined to run that exact command.
