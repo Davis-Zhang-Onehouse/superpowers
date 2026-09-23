@@ -109,13 +109,13 @@ class VanishingPidTests(unittest.TestCase):
         (proc / 'cwd').symlink_to(self.root)
         return proc
 
-    def exiting(self, pid, state='R', flags=0x400000 | PF_EXITING):
+    def exiting(self, pid, state='R', flags=0x400000 | PF_EXITING, stat_comm='claude'):
         """`stat` readable, `exe`/`cwd` gone, directory still present."""
         proc = self.root / str(pid)
         proc.mkdir()
         (proc / 'comm').write_text('claude\n')
         (proc / 'cmdline').write_text('')
-        (proc / 'stat').write_text(_stat(pid, 'claude', state, flags=flags))
+        (proc / 'stat').write_text(_stat(pid, stat_comm, state, flags=flags))
         return proc
 
     def inventory(self, pids):
@@ -134,6 +134,13 @@ class VanishingPidTests(unittest.TestCase):
                 shutil.rmtree(self.root / '102', ignore_errors=True)
                 self.exiting(102, state=state)
                 self.assertEqual(self.inventory([101, 102, 103]), control)
+
+    def test_the_exit_flag_is_read_after_the_LAST_paren_of_stat(self):
+        """`comm` is free text, so `stat` is split at its last `)`. A comm that itself reads `) S (` must not shift
+        the flags field: parsed from the first `)`, this pid would read as not exiting and surface as unreadable."""
+        control = self.inventory([101, 103])
+        self.exiting(102, state='R', stat_comm='cl) S 1 1 1 0 -1 0 (aude')
+        self.assertEqual(self.inventory([101, 102, 103]), control)
 
     def test_a_pid_reaped_between_open_and_read_is_skipped(self):
         """ESRCH: the directory is gone by the time anyone looks, and the read that noticed raised it."""
