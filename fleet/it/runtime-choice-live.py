@@ -5,7 +5,8 @@ A private store whose box runtime is claude, a private itfleet-RTC- tmux server,
   (b) `dispatch --runtime codex` (codex's default model) — starts, seed-check VERIFIED, pane-guard classifies it;
   (d) each worker is killed and `fleet revive`d: the same runtime and model come back, and the revived session's
       next turn is answered by the same model (read from the transcript, never from fleet's own record).
-The only keystrokes the harness sends itself are answers to a folder-TRUST screen in its own fresh slots.
+The only keystrokes the harness sends itself answer codex's update modal ("2. Skip"); a folder-TRUST screen is never
+answered, because the answer persists into the CLI's configuration.
 """
 import json
 import os
@@ -44,7 +45,8 @@ os.environ['FLEET_INSTANTS'] = str(root / 'instants')
 def private_codex_home():
     """A CODEX_HOME of this attempt's own: the source's auth.json (0600, removed at teardown), its top-level settings
     (so "no model flag" still means THIS root's configured default model), and trust for the checkout this attempt
-    lives in. Codex keys trust by git toplevel, so both the toplevel and the attempt root are listed."""
+    lives in. Codex keys trust by the main repository behind a worktree (the parent of `--git-common-dir`), so that, the
+    toplevel and the attempt root are all listed."""
     home = root / 'codex-home'
     home.mkdir(mode=0o700)
     shutil.copy2(codex_source / 'auth.json', home / 'auth.json')
@@ -156,7 +158,7 @@ def guard(args):
 
 
 def settle(record):
-    """Wait until the worker's pane is idle (0), answering a trust screen (15) on the way."""
+    """Wait until the worker's pane is idle (0), answering only the update modal on the way; a trust screen stops the run."""
     seen = set()
     def idle():
         code = guard(['--id', record.todo_id])
