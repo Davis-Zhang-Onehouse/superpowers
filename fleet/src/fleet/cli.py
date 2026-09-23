@@ -1474,6 +1474,8 @@ def _runtime_record_blocker(ctx: Ctx, record: Record) -> str:
         state = None
     else:
         state = InstantName.parse(child.name).state
+    #: RV-20. An untagged (legacy) record's lease belongs to no base, and `reap --all` is the spelling that says so.
+    reap = f"fleet reap --base {record.base_instant}" if record.base_instant else "fleet reap --all"
     held = ctx.pool.lease(record.slot) if record.slot else None
     lease_is_its = held is not None and held.todo_id == record.todo_id
     try:
@@ -1488,7 +1490,7 @@ def _runtime_record_blocker(ctx: Ctx, record: Record) -> str:
                     f"when its work finishes and it is harvested, or `fleet abort --instant {child} --reason <why>` "
                     f"ends it)")
         return (f"running record {record.todo_id} (session {record.tmux} is alive — clears when it is harvested, or "
-                f"`fleet close --id {record.todo_id}` then `fleet reap --base {record.base_instant}` ends it)")
+                f"`fleet close --id {record.todo_id}` then `{reap}` ends it)")
     if state == "inflight":
         return (f"record {record.todo_id} can still be resumed (its folder is -inflight-) — `fleet abort --instant "
                 f"{child} --reason <why>` ends it and releases its lease")
@@ -1498,7 +1500,7 @@ def _runtime_record_blocker(ctx: Ctx, record: Record) -> str:
         return (f"record {record.todo_id} can still be revived (open, its lease on {record.slot} held; its folder "
                 f"is -{state}-) — "
                 f"`fleet harvest --id {record.todo_id}` closes it out after its review and final report, or "
-                f"`fleet close --id {record.todo_id}` then `fleet reap --base {record.base_instant}` ends it with "
+                f"`fleet close --id {record.todo_id}` then `{reap}` ends it with "
                 f"no review")
     return ""
 
