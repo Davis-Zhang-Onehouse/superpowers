@@ -294,6 +294,18 @@ class UnreadableHolderSurvivesTheKill(CliCase):
         self.assertEqual(code, EXIT_OK, f"{out}{err}")
         self.assertIsNone(fleet.pool.lease("ws1"))
 
+    def test_an_undecided_gate_still_notes_the_unreadable_holders(self):
+        """RV-19. With no pane pid to attribute holders, the gate is UNDECIDED and passes — and it used to note
+        nothing, so the orphan it could see before the kill was read as absent after it."""
+        fleet = self.fleet()
+        instant = self._setup(fleet)
+        fleet.sessions.probes.pane_pid = None             # attribution unobservable: the undecided branch
+        fleet.sessions.probes.pane_pids = None
+        code, out, err = fleet.run(["abort", "--instant", str(instant), "--reason", "stuck"])
+        self.assertEqual(code, EXIT_REFUSED, f"released under a live unreadable holder: {out}{err}")
+        self.assertIn(str(self.CHILD), err)
+        self.assertIsNotNone(fleet.pool.lease("ws1"))
+
     def test_a_recycled_pid_is_not_the_noted_process(self):
         fleet = self.fleet()
         self._setup(fleet)
