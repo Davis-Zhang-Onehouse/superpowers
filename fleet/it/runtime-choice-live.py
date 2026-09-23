@@ -257,6 +257,7 @@ verdict['a'] = dict(todo=a.todo_id, dispatch_rows={k: out[k] for k in ('runtime'
                     seed_check=fleet('seed-check', '--id', a.todo_id).stdout.strip().splitlines(),
                     pane_guard_id=guard(['--id', a.todo_id]), pane_guard_pane=guard(['--pane', a.tmux]))
 assert verdict['a']['seed_check'][0].startswith('verified\t'), verdict['a']
+assert verdict['a']['pane_guard_id'] == 0 and verdict['a']['pane_guard_pane'] == 0, verdict['a']   # RV-34
 
 # --- (b) codex, default model, on the claude box ------------------------------------------------------------
 out = fields(fleet('dispatch', '--profile', str(profile), '--title', 'rtc codex', '--slot', 'slotB', '--cap', '2',
