@@ -25,6 +25,8 @@ fleet/it/live-stores.sha256
 fleet/it/live-tmux-sessions.txt
 # The per-RUN live-session baselines lib.sh keys by IT_RUN_ID (FB-60); the file above is the handover between runs.
 fleet/it/live-tmux-sessions-run-*.txt
+# The re-baseline log: box-local session names, and since FB-60 a row on most runs. Tracked, it dirtied the checkout.
+fleet/it/live-tmux-rebaselines.tsv
 # The instants-directory baseline, the third live resource `it_assert_isolation` compares (I2-11).
 # A snapshot of THIS BOX's live effort trees, exactly like the two above, so it cannot be committed.
 fleet/it/live-instants*.txt
