@@ -3806,6 +3806,19 @@ class TestTheDispatchMilestoneJoin(CliCase):
         self.assertIsNone(fleet.store.read(todo).harvested_at, "the refusing harvest stamped the record")
         self.assertEqual("blocked", Roadmap(coordinator).milestone("M9").status)
 
+    def test_a_harvest_dry_run_cannot_fall_into_the_real_branch_whatever_the_gate_returns(self):
+        """`RV-24`. The dry-run branch was `elif (x := gate()) is not None and ctx.dry_run`, so a gate that
+        ever returned None would send a DRY RUN into the branch that applies, kills and stamps."""
+        from unittest import mock
+        fleet = self.loaded()
+        coordinator, todo, _, _ = self._reported_and_finished(fleet, "done", title="noneGate")
+        before = (snapshot(fleet.tmp), list(fleet.killed))
+        with mock.patch.object(cli, "_slot_gate_before_kill", return_value=None):
+            code, out, err = fleet.run(["harvest", "--id", todo, "--dry-run"])
+        self.assertEqual((snapshot(fleet.tmp), list(fleet.killed)), before,
+                         f"a dry run applied, killed or stamped: {out}{err}")
+        self.assertEqual("blocked", Roadmap(coordinator).milestone("M9").status)
+
     def test_harvest_dry_run_counts_the_rows_a_real_run_would_apply(self):
         fleet = self.loaded()
         coordinator, todo, _, _ = self._reported_and_finished(fleet, "done")
