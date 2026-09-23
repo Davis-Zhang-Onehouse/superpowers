@@ -287,6 +287,8 @@ class SessionLayer:
     def is_agent_process(self, name: str, live: Optional[list] = None) -> bool:
         """Whether a live process of THIS layer's runtime is attributed to `name`.
 
+        For an `unreadable` row the runtime is `comm` alone (RV-28; see `is_claude_process`).
+
         `live` is an optional census snapshot: a guard decision that asks three questions of one pane
         must ask them of ONE inventory, not three taken at different instants (and not pay three
         `pgrep` + `/proc` walks for one answer).
@@ -314,7 +316,10 @@ class SessionLayer:
 
         `SI-38`. Process evidence, not screen scraping. `live()` comes from `pgrep -x claude` joined to
         tmux pane ownership, so a True here means a real claude is running in that session — a fact no
-        amount of scrollback can change.
+        amount of scrollback can change. One weaker case (RV-28): an `unreadable` row is attributed through
+        `stat` alone, so for it the evidence is `comm` (what `pgrep -x` matched) and pane ownership — its
+        binary was never read, and `recognizes_process` never judged it. Every caller reads True as "treat
+        this pane as occupied by an agent", which is the conservative direction for that weaker evidence.
 
         This exists because the glyph test cannot answer it. A pane's markers ("esc to interrupt",
         "? for shortcuts", …) are UI chrome that scrolls away: a long answer followed by an idle prompt
