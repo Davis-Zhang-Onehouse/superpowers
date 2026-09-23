@@ -341,6 +341,15 @@ class SurfaceTests(unittest.TestCase):
         self.assertEqual(by_id[0], 0, by_id)
         self.assertEqual(by_pane[0], 0, by_pane)
 
+    def test_pane_guard_by_session_name_still_answers_when_a_record_is_unreadable(self):
+        """RV-30. `--pane` never read the store at base; the owner lookup added for pt2 must not turn one corrupt
+        record into a bad-input exit for the verb an operator is told to trust — it falls back to the ambient layer."""
+        self.f.worker('coder', slot='ws1', live=True, pane='❯ \n? for shortcuts')
+        (self.f.home / 'records' / 'broken-1.json').write_text('{not json')
+        code, out, err = self.f.run(['pane-guard', '--pane', 'dt-coder'])
+        self.assertEqual(code, 0, out + err)
+        self.assertIn('unreadable', err)
+
     def test_brief_names_the_runtime_and_model_the_instant_runs_on(self):
         path = self.f.worker('coder', slot='ws1', live=False)
         record = self.f.store.read(self.f.ids['coder'])
