@@ -122,10 +122,11 @@ def wait_for(label, predicate, step=2):
 #: "Update available" modal, answered "2. Skip" (measured to leave `config.toml` untouched). Its hint row
 #: `enter continue · esc …` is not yet a recognised dialog (`pane-guard 14`, ISSUES PT2-I2), so it is identified here
 #: by its text. "Update now" (a global npm install) and "Skip until next version" (persisted) are never chosen.
-#: A folder-TRUST screen is NEVER answered: both CLIs persist the answer into their configuration (`CODEX_HOME/
-#: config.toml`, claude's `.claude.json`), which here is the operator's shared config (ISSUES PT2-I3, RV-19). The
-#: attempt lives under `fleet/it/`, inside the checkout, so a trusted checkout needs no answer; an untrusted one
-#: stops the run with the path to trust by hand.
+#: A folder-TRUST screen is NEVER answered: both CLIs persist the answer into their configuration (ISSUES PT2-I3,
+#: RV-19). For codex that is this attempt's PRIVATE `CODEX_HOME` (pre-trusted, so the screen means the private trust
+#: list is wrong); for claude it is `.claude.json` under `RTC_CLAUDE_CONFIG`, the operator's shared config. The attempt
+#: lives under `fleet/it/`, inside the checkout, so a trusted checkout needs no answer; an untrusted one stops the run
+#: with the path to trust by hand.
 SCREENS = (('update available', '2. skip'),)
 TRUST = ('trust this folder', 'do you trust the contents', 'trust the files in this folder')
 
@@ -135,8 +136,9 @@ def answer_screen(name):
     text = plain(frame(name, 'screen')).lower()
     if any(marker in text for marker in TRUST):
         raise RuntimeError(f'{name} shows a folder-trust screen for {root}; this harness never answers one, because the '
-                           f'answer is persisted into the shared CLI configuration. Trust the checkout by hand once, or '
-                           f'point RTC_CLAUDE_CONFIG/RTC_CODEX_HOME at private copies, then re-run')
+                           f'answer is persisted into the CLI configuration. For a claude pane, trust the checkout by hand '
+                           f'once under RTC_CLAUDE_CONFIG (or point it at a private copy); for a codex pane the private '
+                           f'CODEX_HOME trust list (private_codex_home) missed a path — then re-run')
     wanted = [target for marker, target in SCREENS if marker in text]
     if not wanted:
         return False
