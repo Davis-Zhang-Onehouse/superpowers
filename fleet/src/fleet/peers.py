@@ -77,6 +77,9 @@ def from_live_sessions(sessions, socket=""):
         row = dict(pid=session.pid, cwd=str(session.cwd), name=session.name or "",
                    status="live", runtime=session.runtime, transport="tmux",
                    tmux=session.name or "", tmux_socket=socket)
+        if getattr(session, "unreadable", False):
+            #: RV-26. Carried so `classify` can say why this row is refused; its cwd is `/proc/<pid>`, never read.
+            row["unreadable"] = True
         _validate_provenance(len(rows), row)
         rows.append(row)
     return rows
@@ -398,7 +401,13 @@ def classify(rows, leases, self_pid=None, proc_root="/proc"):
                            milestone=lease.get("milestone", ""),
                            tmux=lease.get("tmux", ""), todo_id=lease.get("todo_id", ""))
 
-        if not live[idx]:
+        if row.get("unreadable"):
+            # RV-26. Its `/proc` refused the read, so the cwd cross-check below cannot run — which is not
+            # evidence that it is gone. Fail-closed as FOREIGN, with the reason that is actually true.
+            rec.update(verdict=FOREIGN,
+                       why=("this process's /proc could not be read, so neither its cwd nor its identity can "
+                            "be verified; refusing (fail-closed)"))
+        elif not live[idx]:
             _attach()
             rec.update(verdict=DEAD,
                        why=("this pid is not a live session at that cwd -- either gone, or the pid "

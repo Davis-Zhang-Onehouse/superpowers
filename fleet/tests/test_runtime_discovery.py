@@ -287,6 +287,16 @@ class UnreadablePidRowTests(unittest.TestCase):
             got = self.inventory([101, 102, 103])
         self.assertIn((102, None, Path('/proc/102'), True), got)
 
+    def test_peers_says_an_unreadable_row_could_not_be_read_not_that_it_is_gone(self):
+        """RV-26. `peers` cross-checks each row's cwd through `/proc/<pid>/cwd`, which an unreadable row refuses by
+        definition; that used to surface as DEAD, "gone, or the pid now belongs to a different process" — now under
+        the pane's name, for a process that is alive in it. Still never addressable; the reason is the true one."""
+        row = probe_unreadable(self.root / 'p', 102, 103, 'three')
+        rows = from_live_sessions([row], socket='itfleet-fb54')
+        [peer] = classify(rows, [], self_pid=1, proc_root=str(self.root / 'p'))
+        self.assertEqual((peer['verdict'], peer['name']), ('FOREIGN', 'three'))
+        self.assertIn('could not be read', peer['why'])
+
     def test_a_pid_found_gone_by_the_attribution_walk_keeps_its_row_unattributed(self):
         """The walk reads `stat` AFTER the refused reads; a pid reaped in between has no parent to name."""
         self.unreadable(102, ppid=103)
