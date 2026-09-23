@@ -70,7 +70,7 @@ from fleet import guards, layout, peers as peers_mod, render, seedcheck
 from fleet.atomic import atomic_symlink, atomic_write
 from fleet.errors import BadInput, FleetError, Refused
 from fleet.harvest import DEFAULT_MAX_AGE_S, REGISTER_NAME, Harvest
-from fleet.identity import ROOT_BASE, InstantName, resolve
+from fleet.identity import ROOT_BASE, InstantName, resolve, same_instant
 from fleet.layout import INFO, VIOLATION
 from fleet.pool import Pool, ReapReport
 from fleet.profiles import Profile
@@ -974,6 +974,15 @@ def _child_of(ctx: Ctx, record: Record) -> Path:
     return found
 
 
+def _child_or_why(ctx: Ctx, record: Record):
+    """`B08`. `_child_of` for a SWEEP: (folder, None), or (None, why) where `_child_of` would raise. A sweep
+    over every record must report the one it could not place as that record's own row, not die on it."""
+    try:
+        return _child_of(ctx, record), None
+    except FleetError as exc:
+        return None, _one_line(exc)
+
+
 def _record_for(ctx: Ctx, child: Path) -> Record:
     """The record whose child instant IS this folder, or `None`.
 
@@ -1121,8 +1130,10 @@ def _verify_seed_delivery(ctx: Ctx, tmux: str, rendered_seed: str, probes=None, 
     deadline = _seed_check_window()
     waited, step = 0.0, 0.25
     record = next((record for record in ctx.store.all() if record.tmux == tmux and not record.harvested_at), None)
+    #: `B08`. Through the resolver, like the seed it is compared with — never the raw recorded path.
+    child = _child_or_why(ctx, record)[0] if record else None
     def check():
-        delivery = seedcheck.read_delivery(Path(record.child_instant)) if record else None
+        delivery = seedcheck.read_delivery(child) if child is not None else None
         return seedcheck.check_session(tmux, pid, rendered_seed, probes, delivery=delivery)
     verdict = check()
     #: Poll only while the answer is "nothing delivered yet". A launcher that execs takes a moment, and a
@@ -1233,7 +1244,15 @@ def _do_seed_check(ctx: Ctx, parsed: Parsed) -> int:
         layer = ctx.sessions_for(record)
         if not layer.alive(session):
             continue
-        seed_file = _child_of(ctx, record) / ".fleet" / "seed.txt"
+        #: `B08` (NEW-1). ONE notion of where the instant is, for the seed AND the delivery record below: the
+        #: delivery used to be read through the RAW `record.child_instant`, so an ATTESTED session degraded
+        #: to NOT-DELIVERED the moment its worker renamed itself `-complete-`.
+        child, lost = _child_or_why(ctx, record)
+        if child is None:
+            unreadable.append((session, f"{lost}, so there is no rendered seed to compare against. This is "
+                                        f"NOT a pass — it is a check that could not run"))
+            continue
+        seed_file = child / ".fleet" / "seed.txt"
         if not seed_file.is_file():
             unreadable.append((session, f"no rendered seed at {seed_file} to compare against. This is NOT "
                                         f"a pass — it is a check that could not run"))
@@ -1248,7 +1267,7 @@ def _do_seed_check(ctx: Ctx, parsed: Parsed) -> int:
         #: attestation. An unreadable delivery file is refused by `read_delivery` rather than treated as
         #: absent, and that refusal is reported per session instead of failing the whole sweep.
         try:
-            delivery = seedcheck.read_delivery(Path(record.child_instant))
+            delivery = seedcheck.read_delivery(child)
         except FleetError as exc:
             unreadable.append((session, f"a delivery record exists and could not be read: "
                                         f"{_one_line(exc)}"))
@@ -1304,7 +1323,11 @@ def _do_seed_check(ctx: Ctx, parsed: Parsed) -> int:
                                 "is not a clean result, it is an empty population: an exit 0 here says "
                                 "the check found nothing to look at, not that delivery is correct")))
     _emit(ctx, "seed-check", rows)
-    return EXIT_ATTENTION if (foreign or collided) else EXIT_OK
+    #: `B09` (i13). Every row that says "This is NOT a pass" reaches the exit code, not only the rows that
+    #: alarm: a check that could not run (`unreadable`) and a delivery nothing verified (`not-delivered`,
+    #: whose remedy since `SI-55` is `fleet seed-delivered`) exited 0 while saying so in words, and an
+    #: agent reads the code. Their SEVERITY is unchanged — only FOREIGN and a collision are violations.
+    return EXIT_ATTENTION if (foreign or collided or unreadable or unverified) else EXIT_OK
 
 
 # --- dispatch -------------------------------------------------------------------------------------
@@ -2551,7 +2574,8 @@ def _do_milestone(ctx: Ctx, parsed: Parsed) -> int:
         #: this asks the store rather than looking for a session, which would call a worker gone whenever
         #: tmux could not be reached.
         holder = next((r for r in ctx.store.all()
-                       if r.child_instant == current.owner and not r.harvested_at and not r.closed_at),
+                       if same_instant(r.child_instant, current.owner)
+                       and not r.harvested_at and not r.closed_at),
                       None)
         if holder is not None:
             raise Refused(
@@ -2592,9 +2616,16 @@ def _do_milestone(ctx: Ctx, parsed: Parsed) -> int:
             f"--dep names {', '.join(repr(u) for u in unknown)}, which is not on {roadmap.path}. A "
             f"milestone can only depend on one that already exists — add the dependency first. Known: "
             f"{', '.join(sorted(known)) or '(the roadmap is empty)'}.")
+    #: FB-44. The same gate as a proposal's, relative to the coordinator's OWN instant — the one typing it
+    #: — and stored ANCHORED: a milestone item has no proposer row to be relative to, so a relative string
+    #: would be re-read at `owner` later (FB-45 re-created at write time). Before the dry-run branch, so the
+    #: rehearsal refuses what the real run refuses.
+    evidence = [evidence_mod.anchored(item, roadmap.instant)
+                for item in evidence_mod.admit(parsed.all("evidence"), roadmap.instant,
+                                               nothing="Nothing was written to the roadmap.")]
     m = Milestone(id=parsed.get("id"), title=parsed.get("title"),
                   status=parsed.get("status") or "blocked", deps=deps,
-                  evidence=parsed.all("evidence"), owner=parsed.get("owner"))
+                  evidence=evidence, owner=parsed.get("owner"))
     if ctx.dry_run:
         _emit(ctx, "milestone", [("dry-run", "the roadmap was not written"), ("id", m.id),
                                  ("title", m.title), ("status", m.status),
