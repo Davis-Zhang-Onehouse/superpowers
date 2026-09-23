@@ -428,12 +428,23 @@ class PoolCapacity(Guard):
         if free:
             return Verdict(allowed=True, guard=self.name,
                            reason=f"{len(free)} free slot(s): {', '.join(free)}. {population}")
+        #: RV-25 (`B11`). `free_slots()` also excludes a slot holding a claim directory with no lease body, so
+        #: "every enrolled slot is leased" is false there, and such a claim has its own route (`reap --all`,
+        #: since no base owns it). A read, like the rest of this guard: no age is judged here.
+        bodiless = [slot for slot in slots if ctx.pool.lease(slot) is None]
+        if bodiless:
+            leased = [slot for slot in slots if slot not in bodiless]
+            reason = (f"no slot is free: {', '.join(leased) or 'none'} leased, and {', '.join(bodiless)} "
+                      f"hold a claim with no lease body (an interrupted claim, or one mid-birth if it is "
+                      f"seconds old). {population}")
+        else:
+            reason = f"every enrolled slot is leased ({', '.join(slots) or 'none is enrolled'}). {population}"
         return Verdict(
             allowed=False, guard=self.name,
-            reason=(f"every enrolled slot is leased ({', '.join(slots) or 'none is enrolled'}). "
-                    f"{population}"),
-            clears_when=("a lease is released, a stale lease is reaped by its owning base, or another "
-                         "workspace is enrolled"),
+            reason=reason,
+            clears_when=("a lease is released, a stale lease is reaped by its owning base, an interrupted "
+                         "claim is reaped (`fleet reap --all` — no base owns it), or another workspace is "
+                         "enrolled"),
             clears_who="the base owning a stale lease, or the operator",
             blocker=", ".join(slots) or "an empty pool")
 
