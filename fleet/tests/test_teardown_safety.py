@@ -373,6 +373,29 @@ class NoteDoesNotResurrectOrClobber(unittest.TestCase):
         self.assertEqual(sorted(p.name for p in (self.pool.leases / "ws1").iterdir()), ["lease.json"])
 
 
+class MalformedNoteIsBadInput(unittest.TestCase):
+    """RV-24. Every other lease-body problem is a `BadInput` (SI-35); a malformed `unreadable_holders` entry raised
+    a raw ValueError/TypeError out of `Lease.from_json`."""
+
+    def test_a_malformed_note_is_bad_input(self):
+        import json
+        import tempfile
+        from fleet.errors import BadInput
+        tmp = Path(tempfile.mkdtemp(prefix="fleet-rv24-"))
+        self.addCleanup(shutil.rmtree, tmp, ignore_errors=True)
+        (tmp / "ws1").mkdir()
+        pool = Pool(tmp / "home")
+        pool.enroll(tmp / "ws1")
+        pool.claim(todo_id="t-1", tmux="dt-t", base_instant=OURS, child_instant="/x", slot="ws1")
+        body = pool.leases / "ws1" / "lease.json"
+        for bad in ([["not-a-pid", "1"]], [4242], "garbage"):
+            data = json.loads(body.read_text())
+            data["unreadable_holders"] = bad
+            body.write_text(json.dumps(data))
+            with self.assertRaises(BadInput, msg=repr(bad)):
+                pool.lease("ws1")
+
+
 class EnrollDoesNotRepoint(CliCase):
     """FB-91. `Pool.enroll` wrote enrolled/<basename>.json unconditionally, so enrolling (or cloning to) a second
     directory with the same basename silently re-pointed the existing slot."""
