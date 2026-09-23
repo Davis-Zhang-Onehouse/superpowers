@@ -4082,25 +4082,32 @@ def _do_unenroll(ctx: Ctx, parsed: Parsed) -> int:
     forced = parsed.on("force")
     held = ctx.pool.lease(slot)
 
-    if ctx.dry_run:
-        refusal = ctx.pool.unenroll_refusal(slot)                          # `B10` sweep
-        if refusal is not None:
-            raise refusal
-        rows = [("dry-run", "nothing was unenrolled"), ("slot", slot),
-                ("leased", f"{held.todo_id} for {held.base_instant}" if held else "false"),
-                ("would-unenroll", "false — refused" if (held and not forced) else "true")]
-        _emit(ctx, "unenroll", rows)
-        return EXIT_REFUSED if (held and not forced) else EXIT_OK
-
-    try:
-        ctx.pool.unenroll(slot, force=forced)
-    except Refused as exc:
+    def with_the_override(exc: Refused) -> Refused:
         # The pool's message names the work it would strand and says an override exists; this adds the
         # exact token a CALLER types. The two halves are split on purpose — the pool cannot know it was
         # reached from a command line, so it never spells the override in a language it cannot verify
         # (`FI-19b`: it used to say `pass force=True`, which is python quoted at an operator).
-        raise Refused(f"{exc} Override: `fleet unenroll --slot {slot} {FORCE}`.",
-                      clears_when=exc.clears_when, clears_who=exc.clears_who) from None
+        return Refused(f"{exc} Override: `fleet unenroll --slot {slot} {FORCE}`.",
+                       clears_when=exc.clears_when, clears_who=exc.clears_who)
+
+    if ctx.dry_run:
+        #: `B10` sweep / `RV-23`: the real call's refusals, with its text — the dry-run used to exit 4 for a
+        #: leased slot while printing no refusal at all.
+        refusal = ctx.pool.unenroll_refusal(slot, force=forced)
+        if isinstance(refusal, Refused):
+            raise with_the_override(refusal)
+        if refusal is not None:
+            raise refusal
+        rows = [("dry-run", "nothing was unenrolled"), ("slot", slot),
+                ("leased", f"{held.todo_id} for {held.base_instant}" if held else "false"),
+                ("would-unenroll", "true")]
+        _emit(ctx, "unenroll", rows)
+        return EXIT_OK
+
+    try:
+        ctx.pool.unenroll(slot, force=forced)
+    except Refused as exc:
+        raise with_the_override(exc) from None
     _emit(ctx, "unenroll", [("slot", slot), ("forced", "true" if forced else "false"),
                             ("released", held.todo_id if held else "(was free)"),
                             ("enrolled", str(len(ctx.pool.slots()))),

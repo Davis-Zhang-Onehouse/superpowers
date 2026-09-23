@@ -284,29 +284,30 @@ class Pool:
             return BadInput(f"{path} has no usable slot name (the slot name is the directory's basename)")
         return None
 
-    def unenroll_refusal(self, slot: str) -> "Optional[BadInput]":
-        """`unenroll`'s not-enrolled refusal, read-only, for its dry-run (`B10` sweep)."""
+    def unenroll_refusal(self, slot: str, force: bool = False) -> "Optional[FleetError]":
+        """`unenroll`'s refusals, read-only, for its dry-run (`B10` sweep; `RV-23` added the leased half)."""
         if not (self.enrolled / f"{slot}.json").is_file():
             return BadInput(f"slot {slot!r} is not enrolled in {self.enrolled}")
-        return None
-
-    def unenroll(self, slot: str, force: bool = False) -> None:
-        record = self.enrolled / f"{slot}.json"
-        refusal = self.unenroll_refusal(slot)
-        if refusal is not None:
-            raise refusal
         held = self.lease(slot)
         if held is not None and not force:
             # The refusal says an override EXISTS and never spells it as a python kwarg: this message is
             # transported verbatim to whoever typed a command, and `cli` appends the exact token they type
             # (`FI-19b` — an error written for the wrong audience names a remedy in the wrong language).
-            raise Refused(
+            return Refused(
                 f"slot {slot!r} is leased by todo {held.todo_id!r} (tmux {held.tmux!r}) for effort "
                 f"{held.base_instant!r}; unenrolling it would strand that work. Release it first, or say "
                 "the override out loud.",
                 clears_when=f"the lease on {slot!r} is released",
                 clears_who=held.base_instant or None,
             )
+        return None
+
+    def unenroll(self, slot: str, force: bool = False) -> None:
+        record = self.enrolled / f"{slot}.json"
+        refusal = self.unenroll_refusal(slot, force=force)
+        if refusal is not None:
+            raise refusal
+        held = self.lease(slot)
         if held is not None:
             self.release(slot, force=True)
         record.unlink()
