@@ -437,6 +437,18 @@ class ReapDryRunAnswersLikeTheRealCall(CliCase):
         self.assertEqual(fleet.run(["reap", "--base", OURS])[0], EXIT_OK)
         self.assertIsNotNone(fleet.pool.lease("ws2"), "control: the real reap freed a held slot")
 
+    def test_an_unreadable_holder_is_named_as_unread_not_as_holding(self):
+        """RV-23. FB-90's naming rule in the dry run too: an unreadable pid 'could not be read', never 'holds'."""
+        from fleet.pool import UnreadableHolder
+        fleet = self.fleet()
+        fleet.worker("blindDead", slot="ws2", live=False)
+        fleet.holders[str(fleet.pool.slot_path("ws2"))] = [UnreadableHolder(94002)]
+        code, out, err = fleet.run(["reap", "--dry-run", "--base", OURS])
+        ws2 = "".join(line for line in out.splitlines() if "ws2" in line)
+        self.assertIn("94002", ws2, out)
+        self.assertIn("could not be read", ws2)
+        self.assertNotIn("94002 hold", ws2)
+
     def test_control_an_owned_stale_lease_is_freed_by_both(self):
         fleet = self.fleet()
         fleet.worker("ownDead", slot="ws2", live=False)
