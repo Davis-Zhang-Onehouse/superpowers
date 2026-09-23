@@ -445,6 +445,66 @@ else
     "typo rc=$h12_typo (want 2) abs rc=$h12_abs gone rc=$h12_gone column='$h12_col' apply rc=$h12_apply dangling-apply rc=$h12_dangle (want 2) — see the directory"
 fi
 
+# ==================================================================================================
+# H13 — `B09` + `B08` (+ FB-44): the re-measure's scenA, on H10's REAL dispatched worker. Its completion
+# rename is the moment a coordinator checks, and on the base that moment broke four things at once:
+#   * `seed-check` read the seed through the resolver and the delivery record through the RAW recorded
+#     path, so the ATTESTED row degraded to not-delivered on the rename (NEW-1);
+#   * `seed-check` printed "This is NOT a pass" and exited 0 (i13) — here the seed is removed to force it;
+#   * `apply` rewrote status and evidence but never `owner`, so roadmap.json and `brief` named the
+#     `-inflight-` folder that no longer existed (i31) — and `--disown` must still find the OPEN record
+#     across the rename once `owner` does follow it;
+#   * `milestone --evidence` stored a typo'd path at exit 0 (FB-44).
+# ==================================================================================================
+H13="$OUT/h13"; mkdir -p "$H13"
+J_TODO="$(awk -F'\t' '$1=="todo_id"{print $2; exit}' "$H10/dispatch.out")"
+J_SESS="$(awk -F'\t' '$1=="tmux"{print $2; exit}' "$H10/dispatch.out")"
+J_DONE="${J_CHILD/-inflight-/-complete-}"
+fleet seed-check --id "$J_TODO" --porcelain > "$H13/seed-before.tsv" 2>&1; h13_before=$?
+mv "$J_CHILD" "$J_DONE"                                              # the worker's completion rename
+fleet seed-check --id "$J_TODO" --porcelain > "$H13/seed-renamed.tsv" 2>&1; h13_renamed=$?
+fleet milestone --instant "$COORD" --id j1 --disown --reason "h13 before apply" > "$H13/disown-before.out" 2>&1
+h13_disown_before=$?
+fleet apply --instant "$COORD" --milestone j1 --porcelain > "$H13/apply.out" 2>&1; h13_apply=$?
+h13_owner="$(py "$COORD" <<'PY3'
+import json, pathlib, sys
+print(next(m for m in json.loads((pathlib.Path(sys.argv[1]) / ".fleet" / "roadmap.json").read_text())["milestones"]
+           if m["id"] == "j1")["owner"])
+PY3
+)"
+fleet brief --instant "$J_DONE" --porcelain > "$H13/brief.tsv" 2>&1; h13_brief=$?
+fleet milestone --instant "$COORD" --id j1 --disown --reason "h13 after apply" > "$H13/disown-after.out" 2>&1
+h13_disown_after=$?
+rm -f "$J_DONE/.fleet/seed.txt"                                      # force the check that cannot run
+fleet seed-check --id "$J_TODO" --porcelain > "$H13/seed-unreadable.tsv" 2>&1; h13_unreadable=$?
+fleet milestone --instant "$COORD" --id h13typo --title "typo'd evidence" --evidence evidence/nope-typo.md \
+      --porcelain > "$H13/milestone-typo.out" 2>&1; h13_typo=$?
+{ echo "todo=$J_TODO session=$J_SESS child=$J_CHILD -> $J_DONE"
+  echo "seed-check before rename rc=$h13_before";   cat "$H13/seed-before.tsv"
+  echo "seed-check after rename rc=$h13_renamed";   cat "$H13/seed-renamed.tsv"
+  echo "disown before apply rc=$h13_disown_before"; cat "$H13/disown-before.out"
+  echo "apply rc=$h13_apply";                       cat "$H13/apply.out"
+  echo "roadmap.json owner=$h13_owner exists=$([ -d "$h13_owner" ] && echo yes || echo no)"
+  echo "brief rc=$h13_brief";                       grep '^milestone' "$H13/brief.tsv"
+  echo "disown after apply rc=$h13_disown_after";   cat "$H13/disown-after.out"
+  echo "seed-check with no seed rc=$h13_unreadable"; cat "$H13/seed-unreadable.tsv"
+  echo "milestone --evidence typo rc=$h13_typo";    cat "$H13/milestone-typo.out"; } > "$H13/state.txt" 2>&1
+cat "$H13/state.txt"
+h13_att0=0; [ "$h13_before" = 0 ]   && grep -q "^attested	$J_SESS	" "$H13/seed-before.tsv"  && h13_att0=1
+h13_att1=0; [ "$h13_renamed" = 0 ]  && grep -q "^attested	$J_SESS	" "$H13/seed-renamed.tsv" && h13_att1=1
+h13_own=0;  [ "$h13_apply" = 0 ] && [ "$h13_owner" = "$J_DONE" ] && [ -d "$h13_owner" ] && h13_own=1
+h13_brf=0;  grep -q "^milestone	.*owner=$J_DONE;" "$H13/brief.tsv" && h13_brf=1
+h13_hold=0; [ "$h13_disown_before" = 4 ] && [ "$h13_disown_after" = 4 ] && h13_hold=1
+h13_unr=0;  [ "$h13_unreadable" = 1 ] && grep -q "^unreadable	$J_SESS	" "$H13/seed-unreadable.tsv" && h13_unr=1
+h13_ev=0;   [ "$h13_typo" = 2 ] && grep -q 'nope-typo.md' "$H13/milestone-typo.out" && h13_ev=1
+if [ "$h13_att0$h13_att1$h13_own$h13_brf$h13_hold$h13_unr$h13_ev" = "1111111" ]; then
+  it_pass H13 "fleet/it/H/out/h13/state.txt" \
+    "on a real dispatched worker's -complete- rename: \`seed-check\` still reads ATTESTED (rc=0) because the delivery record is read through the same resolver as the seed; \`apply\` rewrote roadmap.json's owner to the -complete- folder, which exists, and \`brief\` prints it; \`--disown\` still refuses (rc=4) before and after the rewrite because the worker's record is open; with the seed removed \`seed-check\` prints 'NOT a pass' and exits 1; \`milestone --evidence\` refuses a typo'd path (rc=2)"
+else
+  it_fail H13 "fleet/it/H/out/h13/state.txt" \
+    "attested-before=$h13_att0(rc=$h13_before) attested-after-rename=$h13_att1(rc=$h13_renamed) owner-rewritten=$h13_own('$h13_owner') brief=$h13_brf disown-refused=$h13_hold($h13_disown_before/$h13_disown_after) unreadable-exits-1=$h13_unr(rc=$h13_unreadable) milestone-typo-refused=$h13_ev(rc=$h13_typo)"
+fi
+
 it_assert_isolation H-leave
 bash "$IT_ROOT/bin/source-pin.sh" after "$OUT" || { echo "CONTAMINATED — no verdict" >&2; exit 3; }
 sed -i "s|$INSTANT/||g" "$RESULTS"
