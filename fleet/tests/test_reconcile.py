@@ -491,7 +491,7 @@ class _FakeWatcherSessions:
 
 
 class TestAwaitingCiNote(unittest.TestCase):
-    """`_awaiting_note` directly. `working-as-a-dispatched-instant` names this gap as owned by `i45`:
+    """`_awaiting_note` directly. `i45` owned this gap, which `working-as-a-dispatched-instant` used to name:
     `reconcile` rendered every `awaiting-ci` row as the SAME constant note regardless of whether anything
     was actually observed on the pane. Measured: a Monitor that emitted zero events for 7.7h and a
     self-matching wait shell that outlived its job both rendered as a healthy wait, and the cost was
@@ -527,8 +527,8 @@ class TestAwaitingCiNote(unittest.TestCase):
         return _awaiting_note(pane, sessions, self.instant, stale_after_s=stale_after_s, now=now_epoch)
 
     def test_awaiting_ci_distinguishes_observed_attested_and_absent_watchers(self):
-        """`working-as-a-dispatched-instant` already warns that `fleet board` renders an attested claim
-        identically to an observed one, and names i45 as the owner. This is i45."""
+        """`i45`: `fleet board` rendered an attested claim identically to an observed one, which
+        `working-as-a-dispatched-instant` used to warn about. B07 made the board re-check both."""
         self.assertIn("watcher observed",
                       self.note(phase="awaiting-ci", pane="... 1 monitor ... esc to interrupt"))
         #: `B07`. The attestation carries `declare --watcher`'s prefix: stored BARE, a record means a watcher
