@@ -314,6 +314,9 @@ the same shape. A dry run can still answer rc=0 where the real call exits non-ze
 
 For these, read the dry run's rows, not only its exit code.
 
+A dry run of `abort` or `harvest --id` can take about 2 seconds. When a process outside the session holds the
+slot, it waits for that process to exit exactly as the real call would, then asks again before answering.
+
 Use it to ask "would this be admitted?" A guard you cannot interrogate non-destructively gets interrogated
 destructively — twice, by two actors, one of whom had read the entry that declined to run that exact command.
 
