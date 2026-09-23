@@ -1,4 +1,4 @@
-import os, pathlib, shutil, subprocess, sys, time, unittest, uuid
+import os, pathlib, re, shutil, subprocess, sys, time, unittest, uuid
 from fleet.session import (TMUX_SOCKET_ENV, LiveSession, Probes, SessionLayer, default_probes,
                            exact_pane_target, exact_session_target)
 
@@ -370,7 +370,7 @@ def _selftest_socket_path(name: str) -> pathlib.Path:
 def _retire_selftest_server(name: str) -> None:
     """Kill the private server and remove its socket file. Only ever called with an `itfleet-selftest-`
     name this suite made up; never the operator's server nor the IT harness's."""
-    assert name.startswith("itfleet-selftest"), name
+    assert re.fullmatch(r"itfleet-selftest-\d+(-att)?", name), name
     subprocess.run(["tmux", "-L", name, "kill-server"], capture_output=True)
     _selftest_socket_path(name).unlink(missing_ok=True)
 
