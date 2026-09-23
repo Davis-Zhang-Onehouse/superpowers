@@ -1125,6 +1125,32 @@ class TestTheWatcherIsClassifiedFromWhatIsTrue(unittest.TestCase):
         self.assertEqual(subject.state, AWAITING_CI, f"{subject.state}: {subject.note!r}")
         self.assertIn("could not be read", subject.note)
 
+    def test_the_state_and_the_note_come_from_one_classification(self):
+        """`RV-C2`. The state and the note each classified the watcher, so a pid exiting between the two `/proc`
+        reads gave an AWAITING-CI row whose note said the watcher was GONE — a note contradicting its own state
+        (`RV-43`). Simulated here by a classifier whose answer changes between calls."""
+        self.ci_worker("race-07300631", "dt-race", 5331, watchers="attested: gate pid:4248",
+                       watcher_pid={"pid": 4248, "start": "777"})
+        import fleet.reconcile as reconcile_mod
+        real = reconcile_mod._watcher_of
+        answers = [("attested", "gate pid:4248 (its pid 4248 is running)"),
+                   ("gone", "the attested watcher pid 4248 is GONE (it has exited since the claim)")]
+        calls = []
+
+        def racing(pane, sessions, instant, **kw):
+            if instant is None or "race" not in str(instant):
+                return real(pane, sessions, instant, **kw)
+            calls.append(1)
+            return answers[min(len(calls), len(answers)) - 1]
+
+        with mock.patch("fleet.reconcile._watcher_of", side_effect=racing):
+            subject = self.subjects()["race-07300631"]
+
+        if subject.state == AWAITING_CI:
+            self.assertNotIn("GONE", subject.note, f"the note contradicts its state: {subject.note!r}")
+        else:
+            self.assertIn("GONE", subject.note, f"{subject.state}: {subject.note!r}")
+
     def test_a_malformed_pid_handle_is_not_measured_and_never_crashes_the_board(self):
         """`RV-C5`. `declare.json` is a file; one hand-edited or truncated `watcher_pid` raised TypeError out of
         `reconcile` and took down `fleet board` for EVERY row. A handle that cannot be read is NOT MEASURED."""
