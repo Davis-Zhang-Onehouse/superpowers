@@ -723,7 +723,11 @@ class TestEveryAlarmNamesItsClearingConditionAndActor(Loaded):
         # repository to take a verification worktree from (`II-7`) — and it is covered by
         # `test_release.VerifyCase`. The three producers of a `Verdict` or an attention `Row` are the
         # population this file generates over.
-        carriers = {"errors", "pool", "harvest", "render", "cli", "release_verify"}
+        # `B11`: `messaging`, `release_git`, `runtime_config`, `runtime_launch` and `seedcheck` name a route on
+        # the refusals they RAISE; every `Refused(...)` in the package is enumerated for both fields by
+        # `test_refusal_routes`, so they are raisers like `pool`, not producers of a `Verdict` or `Row`.
+        carriers = {"errors", "pool", "harvest", "render", "cli", "release_verify",
+                    "messaging", "release_git", "runtime_config", "runtime_launch", "seedcheck"}
         self.assertEqual(bearing - {"guards", "roadmap", "review"} - carriers, set(),
                          "a module carries clears_when and is not covered by this file's table")
 

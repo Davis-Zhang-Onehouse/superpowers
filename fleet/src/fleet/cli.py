@@ -68,7 +68,7 @@ from typing import Callable
 from fleet import EXIT_ATTENTION, EXIT_BAD_INPUT, EXIT_CODES, EXIT_OK, EXIT_REFUSED, __version__
 from fleet import guards, layout, peers as peers_mod, render, seedcheck
 from fleet.atomic import atomic_symlink, atomic_write
-from fleet.errors import BadInput, FleetError, Refused
+from fleet.errors import BadInput, FleetError, NoCapacity, Refused
 from fleet.harvest import DEFAULT_MAX_AGE_S, REGISTER_NAME, Harvest
 from fleet.identity import ROOT_BASE, InstantName, resolve, same_instant
 from fleet.layout import INFO, VIOLATION
@@ -931,10 +931,24 @@ def _resolve_instant(ctx: Ctx, raw) -> Path:
         path = ctx.instants_dir / raw
     found = resolve(path)
     if found is None:
+        #: `B11` (NEW-3). A record that still names the path is the one case with a door that runs: every
+        #: `--instant` verb resolves the folder first, and `close --id` does not.
+        try:
+            holder = next((r for r in ctx.store.all()
+                           if r.child_instant and same_instant(_recorded_path(ctx, r), path)
+                           and not r.harvested_at and not r.closed_at), None)
+        except (FleetError, OSError):
+            #: RV-26. The lookup only improves the route; an unreadable store must not replace the answer.
+            holder = None
         raise BadInput(
             f"{path} is not an instant on disk. A recorded path goes stale when the worker renames its "
             "own folder, so resolution follows the full stable key with only `state` varying — and a "
-            "path that resolves to nothing is refused rather than invented (FD-1).")
+            "path that resolves to nothing is refused rather than invented (FD-1).",
+            clears_when=(f"--instant names a folder that exists; this one is GONE and the open record "
+                         f"{holder.todo_id!r} still names it, so `fleet close --id {holder.todo_id}` is the "
+                         f"door that runs without it" if holder is not None else
+                         "--instant names a folder that exists under the instants directory"),
+            clears_who="the caller")
     InstantName.parse(found.name)            # refused, not judged: a non-instant is not an instant
     return found
 
@@ -977,7 +991,10 @@ def _child_of(ctx: Ctx, record: Record) -> Path:
     path = _recorded_path(ctx, record)
     found = resolve(path)
     if found is None:
-        raise BadInput(f"record {record.todo_id!r} names {path}, which resolves to no instant on disk")
+        raise BadInput(f"record {record.todo_id!r} names {path}, which resolves to no instant on disk",
+                       clears_when=f"the folder is back where the record says, or the record is ended without "
+                                   f"it: `fleet close --id {record.todo_id}` needs no folder",
+                       clears_who="the coordinator")
     return found
 
 
@@ -1282,8 +1299,11 @@ def _do_seed_check(ctx: Ctx, parsed: Parsed) -> int:
         try:
             delivery = seedcheck.read_delivery(child)
         except FleetError as exc:
+            #: `FB-74`: the route travels with the row, or the reader of a sweep is told what is wrong
+            #: and not what clears it.
+            route = f" Clears when: {exc.clears_when}" if getattr(exc, "clears_when", None) else ""
             unreadable.append((session, f"a delivery record exists and could not be read: "
-                                        f"{_one_line(exc)}"))
+                                        f"{_one_line(exc)}{route}"))
             continue
         try:
             rendered = seed_file.read_text()
@@ -1427,7 +1447,23 @@ def _do_runtime(ctx: Ctx, parsed: Parsed) -> int:
                 return
             blockers = runtime_blockers(ctx)
             if blockers:
-                raise Refused('Runtime switch requires a completed fleet: ' + '; '.join(blockers))
+                raise Refused('Runtime switch requires a completed fleet: ' + '; '.join(blockers),
+                              #: `B11`, coordinator D-31. Three closures found this route wrong for some record
+                              #: state (RV-30, RV-35, RV-37): the chain that clears a record depends on its state
+                              #: (abort if -inflight-, a final report if dispatched for a milestone, review,
+                              #: harvest), and designing it is FB-92's. So the text names a route ONLY where it is
+                              #: measured to run — a `-complete-` record (review if unreviewed, then harvest) —
+                              #: and says, for every other state, that no single verb clears it today.
+                              clears_when='nothing above remains: each named record is HARVESTED. For a record '
+                                          'whose folder is `-complete-`, `fleet harvest --id <todo>` does it — '
+                                          'after `fleet review --instant <its folder> --scope all --verdict READY` '
+                                          'if it has no review round yet, and after its final report if it was '
+                                          'dispatched for a milestone. For a record in any other state (its '
+                                          'folder still -inflight-, aborted, or gone) no single verb clears it '
+                                          'today — a known gap (FB-92). Each held lease is released by that '
+                                          'harvest or by `fleet reap`, and each named process has exited; then '
+                                          'the same `fleet runtime --set` is re-run',
+                              clears_who='the coordinator of each named record, or the operator')
             if not ctx.dry_run:
                 write_runtime(ctx.home, requested)
                 current, source = read_runtime(ctx.home)
@@ -1446,10 +1482,17 @@ def _do_runtime(ctx: Ctx, parsed: Parsed) -> int:
 def _message_target(ctx, parsed):
     record = _record(ctx, parsed)
     if record.closed_at or record.harvested_at:
-        raise Refused('Cannot message a closed or harvested worker')
+        raise Refused('Cannot message a closed or harvested worker',
+                      clears_when='never, for this record: its session is over. Dispatch or resume a new '
+                                  'worker to carry the work',
+                      clears_who='the coordinator')
     lease = ctx.pool.lease(record.slot) if record.slot else None
     if lease is None or lease.todo_id != record.todo_id:
-        raise Refused('Worker no longer owns its recorded lease')
+        raise Refused('Worker no longer owns its recorded lease',
+                      clears_when=f'never, for this record: slot {record.slot!r} is no longer its lease '
+                                  f'(`fleet leases` shows who holds it now). Revive needs that lease too, so the '
+                                  f'work goes to a new worker (`fleet dispatch`), which is then messaged',
+                      clears_who='the coordinator')
     layer = ctx.sessions_for(record)
     matches = [item for item in layer.live() if item.name == record.tmux]
     unreadable = [item for item in matches if getattr(item, "unreadable", False)]
@@ -1457,12 +1500,19 @@ def _message_target(ctx, parsed):
         #: RV-27. Attributed to this pane through `stat`, but its cwd was never read, so ownership cannot be proven.
         #: Refused like any unproven owner — with the reason that is true, not "no process".
         raise Refused(f'The recorded pane holds {unreadable[0].runtime} process {unreadable[0].pid}, whose /proc '
-                      f'could not be read, so its workspace cannot be verified; inspect it before sending')
+                      f'could not be read, so its workspace cannot be verified; inspect it before sending',
+                      clears_when=f'/proc/{unreadable[0].pid} is readable by this user (or the process has '
+                                  f'exited) and `fleet send` is re-run',
+                      clears_who='the operator')
     roots = (Path(lease.path).resolve(), _child_of(ctx, record).resolve())
     if (not matches or any(item.runtime != record.runtime or
                            not any(item.cwd.resolve() == root or root in item.cwd.resolve().parents
                                    for root in roots) for item in matches)):
-        raise Refused('No matching live runtime process owns the recorded pane')
+        raise Refused('No matching live runtime process owns the recorded pane',
+                      clears_when=f'`fleet pane-guard --pane {record.tmux}` shows the worker is back in its '
+                                  f'pane (a dead session is brought back by `fleet revive --id '
+                                  f'{record.todo_id} --session-id <id>`), then `fleet send` is re-run',
+                      clears_who='the coordinator')
     return record, layer
 
 
@@ -1472,7 +1522,7 @@ def _do_send(ctx: Ctx, parsed: Parsed) -> int:
     record, layer = _message_target(ctx, parsed)
     if ctx.dry_run:
         if layer.observe(record.tmux).state != 'idle':
-            raise Refused('Message not sent: the worker input is not observed idle')
+            raise messaging.not_idle(record)
         result = 'would-submit'
     else:
         result = messaging.send(ctx.home, layer, record, text,
@@ -1501,19 +1551,36 @@ def _verify_resume(ctx, layer, record, session_id):
 def _do_revive(ctx: Ctx, parsed: Parsed) -> int:
     record = _record(ctx, parsed)
     if record.closed_at or record.harvested_at:
-        raise Refused('A closed or harvested record cannot be revived')
+        raise Refused('A closed or harvested record cannot be revived',
+                      clears_when='never, for this record. Dispatch a new worker to carry the work',
+                      clears_who='the coordinator')
     current, _ = read_runtime(ctx.home)
     if current != record.runtime:
-        raise Refused('The recorded runtime differs from the fleet selection')
+        #: RV-22. Not `fleet runtime --set {record.runtime}`: that switch is refused while any record is
+        #: unharvested or any lease held, and this record — open, lease held, or revive would refuse it anyway —
+        #: is exactly such a blocker. There is no state in which that route runs for this record.
+        raise Refused('The recorded runtime differs from the fleet selection',
+                      clears_when=f'never, for this record under the current selection: switching back to '
+                                  f'{record.runtime} needs every record harvested, this one included. Carry the '
+                                  f'work on with a new worker under the current runtime (`fleet dispatch`)',
+                      clears_who='the coordinator')
     lease = ctx.pool.lease(record.slot) if record.slot else None
     if lease is None or lease.todo_id != record.todo_id:
-        raise Refused('Revival requires the original lease to remain held')
+        raise Refused('Revival requires the original lease to remain held',
+                      clears_when='never, for this record: the slot is no longer this record\'s lease. Dispatch '
+                                  'a new worker onto the instant\'s work instead',
+                      clears_who='the coordinator')
     layer = ctx.sessions_for(record)
     if layer.alive(record.tmux):
-        raise Refused('The recorded pane is occupied; inspect it before revival')
+        raise Refused('The recorded pane is occupied; inspect it before revival',
+                      clears_when=f'session {record.tmux} is gone — inspect it with `fleet pane-guard --pane '
+                                  f'{record.tmux}`; if it is live work there is nothing to revive',
+                      clears_who='the operator')
     if any(Path(item.cwd).resolve() == Path(lease.path).resolve() or
            Path(lease.path).resolve() in Path(item.cwd).resolve().parents for item in layer.live()):
-        raise Refused('A live agent still holds this workspace; inspect it before revival')
+        raise Refused('A live agent still holds this workspace; inspect it before revival',
+                      clears_when=f'no live agent has {lease.path} as its cwd (`fleet board` names it)',
+                      clears_who='the operator')
     if not record.runtime_executable or not record.runtime_config_dir:
         if ctx.launch_settings is None:
             raise BadInput('Legacy recovery requires an explicit launch configuration resolver')
@@ -1523,7 +1590,10 @@ def _do_revive(ctx: Ctx, parsed: Parsed) -> int:
         from fleet.runtime import LaunchSettings
         settings = LaunchSettings(record.runtime, record.runtime_executable, record.runtime_config_dir)
     if not os.access(settings.executable, os.X_OK):
-        raise Refused('Recorded runtime executable is unavailable')
+        raise Refused('Recorded runtime executable is unavailable',
+                      clears_when=f'{settings.executable} exists and is executable, then `fleet revive` is '
+                                  f're-run',
+                      clears_who='the operator')
     session_id = parsed.get('session-id')
     transcript = runtime_launch.session_transcript(settings, session_id, lease.path)
     child = _child_of(ctx, record)
@@ -1575,14 +1645,67 @@ def _dispatch_collision(ctx: Ctx, base, optype, title):
             f"a dispatch this minute already produced {child}, so this one would write over it: the child "
             f"path, the todo id and the session name all derive from (base, minute, title) and nothing "
             f"else. Refused before anything was claimed. Change the title, or wait for the next minute.",
-            clears_when=f"{child} no longer exists, or the title or minute differs")
+            clears_when=f"{child} no longer exists, or the title or minute differs",
+            clears_who="the caller, by re-running with another --title or in the next minute")
     if any(r.todo_id == todo_id for r in ctx.store.all()):
         raise Refused(
             f"a record already exists for todo {todo_id!r}, and a dispatch writes records by todo id — so "
             f"this one would overwrite the record of work that may still be running. Refused before "
             f"anything was claimed. Change the title, or wait for the next minute.",
-            clears_when=f"no record is stored under todo {todo_id!r}")
+            clears_when=f"no record is stored under todo {todo_id!r}",
+            clears_who="the caller, by re-running with another --title or in the next minute")
     return name, child, todo_id, tmux
+
+
+def _claim_release_route(ctx: Ctx, owner, coordinator, milestone_id) -> str:
+    """`B11` (NEW-3, RV-20). The command that gives back a claim on `milestone_id`, chosen by the state the
+    owner's RECORD and FOLDER are in — because the one written for the common state is a door that does not
+    open in the others. `--disown` refuses only while an open record holds the owner, so:
+
+    * no open record holds it (never dispatched, closed, harvested): `--disown` alone;
+    * the folder is GONE: `close --id` (it needs no folder), then `--disown`. `abort` and `harvest` both
+      resolve the folder first and exit 2 on one that resolves to nothing (scenE2: close 0 -> reap 0 ->
+      disown 0 -> redispatch 0; the reap only frees the slot `close` leaves held);
+    * the folder is `-complete-`: `harvest --id` (abort renames only an inflight instant), then `--disown`
+      if no origin named the claim;
+    * `-inflight-` and its origin.json names this milestone on this roadmap: `abort`, which releases it;
+    * anything else — a claim set by hand, which `abort` exits 0 on and releases nothing: `close --id`,
+      then `--disown`.
+    """
+    disown = f"`fleet milestone --instant {coordinator} --id {milestone_id} --disown --reason <why>`"
+    try:
+        holder = next((r for r in ctx.store.all()
+                       if r.child_instant and same_instant(_recorded_path(ctx, r), owner)
+                       and not r.harvested_at and not r.closed_at), None)
+    except (FleetError, OSError) as exc:
+        #: RV-32. The lookup only chooses the route; an unreadable store must not replace the refusal.
+        return (f"the record store could not be read to find {owner}'s record ({_one_line(exc)}); by the "
+                f"owner's state: `fleet abort --instant {owner} --reason <why>` for an inflight worker "
+                f"dispatched onto it, `fleet harvest --id <its todo>` for a completed one, `fleet close --id "
+                f"<its todo>` when its folder is gone or the claim was set by hand, then {disown}")
+    if holder is None:
+        return f"no open record holds {owner}, so the claim is released by {disown}"
+    try:
+        found = resolve(Path(owner))
+    except (FleetError, OSError):
+        found = None
+    close_then = (f"`fleet close --id {holder.todo_id}` ends the open record (it needs no folder), then "
+                  f"{disown}")
+    if found is None:
+        return f"its folder {owner} resolves to nothing, so `abort` and `harvest` cannot run on it: {close_then}"
+    state = InstantName.parse(found.name).state
+    if state == "complete":
+        return (f"{found.name} has completed: `fleet harvest --id {holder.todo_id}` closes it out and gives "
+                f"back a claim its origin names; if the claim is still held after that, {disown}")
+    try:
+        origin = origin_mod.read(found)
+    except FleetError:
+        origin = None
+    if (state == "inflight" and origin is not None and origin.milestone == milestone_id
+            and origin.coordinator and same_instant(Path(origin.coordinator), Path(coordinator))):
+        return (f"`fleet abort --instant {found} --reason <why>` gives it back when that work is being "
+                f"abandoned; a worker that finishes gives it back when it is harvested")
+    return f"{found.name}'s own origin does not name this claim, so `abort` would not release it: {close_then}"
 
 
 def _do_dispatch(ctx: Ctx, parsed: Parsed) -> int:
@@ -1653,14 +1776,16 @@ def _do_dispatch(ctx: Ctx, parsed: Parsed) -> int:
                 f"milestone {milestone_id!r} is not ready, so nothing may be dispatched onto it: "
                 f"{blocker}. Refused before anything was claimed.",
                 clears_when="the milestone's dependencies have LANDED (status=done via an applied "
-                            "proposal)")
+                            "proposal)",
+                clears_who="the coordinator, by applying the dependencies' proposals")
         owned = Roadmap(coordinator).milestone(milestone_id).owner
         if owned:
             raise Refused(
                 f"milestone {milestone_id!r} is already claimed by {owned!r}, and two instants on one "
                 f"milestone is not a race the roadmap can resolve. Refused before anything was claimed.",
-                clears_when=f"the claim on {milestone_id!r} is given back, which `fleet abort --instant "
-                            f"{owned} --reason <why>` does when that work is being abandoned")
+                clears_when=f"the claim on {milestone_id!r} is given back: "
+                            f"{_claim_release_route(ctx, owned, coordinator, milestone_id)}",
+                clears_who="the coordinator")
 
     # `SI-32`. Parsed before anything is claimed, so a malformed pair is refused with nothing to roll back.
     lineage = _lineage_pairs(parsed.get("lineage-base"), "--lineage-base")
@@ -1702,7 +1827,24 @@ def _do_dispatch(ctx: Ctx, parsed: Parsed) -> int:
     if all(verdict.allowed for verdict in verdicts):
         if ctx.launch_settings is None:
             raise BadInput('Dispatch needs an injected runtime launch resolver')
-        candidate_slot = parsed.get('slot') or ctx.pool.free_slots()[0]
+        candidate_slot = parsed.get('slot') or next(iter(ctx.pool.free_slots()), None)
+        if candidate_slot is None:
+            #: `FB-86`. Reachable only under `--override`, which makes `pool-capacity` pass with the rest; it
+            #: was `free_slots()[0]` and an IndexError out of `main`. An override waives RULES — it cannot
+            #: make a slot — so this is the capacity answer `PoolCapacity` itself gives, real and dry-run.
+            #: RV-25. `free_slots()` also excludes a slot holding an INTERRUPTED claim, so "leased" is not
+            #: the whole truth, and that claim has its own route.
+            interrupted = [slot for slot, _ in ctx.pool.interrupted_claims(min_age_s=0.0)]
+            enrolled = ", ".join(ctx.pool.slots())
+            raise NoCapacity(
+                f"--override waives admission rules, but it cannot create a slot: no slot is free "
+                f"({'enrolled: ' + enrolled if enrolled else 'none is enrolled'})"
+                + (f"; {', '.join(interrupted)} hold an interrupted claim (a claim with no lease body — an "
+                   f"interrupted writer, or one mid-birth if it is seconds old)" if interrupted else "") + ".",
+                clears_when="a lease is released, a stale lease or an interrupted claim is reaped (`fleet reap "
+                            "--base <its base>`; `fleet reap --all` for a claim no base owns), or another "
+                            "workspace is enrolled (`fleet enroll --slot <path>`)",
+                clears_who="the base owning a stale lease, or the operator")
         settings = ctx.launch_settings(ctx.sessions.runtime, ctx.pool.slot_path(candidate_slot))
 
     if ctx.dry_run and all(verdict.allowed for verdict in verdicts):
@@ -1895,16 +2037,32 @@ def _do_resume(ctx: Ctx, parsed: Parsed) -> int:
     todo_id = f"{name.name}-{name.curr}"
     tmux = parsed.get("tmux", f"dt-{name.name}")
     observed = [item.runtime for item in ctx.sessions.live() if item.name == tmux]
-    if any(runtime != ctx.sessions.runtime for runtime in observed):
-        raise Refused('Cannot adopt a session whose runtime differs from the fleet selection')
     existing = None
     try:
         existing = ctx.store.read(todo_id)
     except BadInput:
         existing = None
+    #: RV-31. The route out of a record under another runtime, shared by both refusals below: with such a
+    #: record, a foreign session exiting is not enough — the re-run meets the second refusal.
+    recorded_route = (None if existing is None or existing.runtime == ctx.sessions.runtime else
+                      f'the fleet runs {existing.runtime} again — `fleet runtime --set {existing.runtime}` once '
+                      f'`fleet runtime --set {existing.runtime} --dry-run` names no blocker (every record '
+                      f'harvested, no lease held). While unharvested, this record is itself one of those '
+                      f'blockers, so that switch comes only after its work finishes and is harvested; to go on '
+                      f'now, carry the work with a new worker under the current runtime (`fleet dispatch`). '
+                      f'Closing the record does not change its runtime')
+    if any(runtime != ctx.sessions.runtime for runtime in observed):
+        raise Refused('Cannot adopt a session whose runtime differs from the fleet selection',
+                      clears_when=recorded_route or (
+                          f'the {observed[0]} session in {tmux} has exited and `fleet resume` is re-run, which '
+                          f'adopts the instant under the current runtime. (Switching to {observed[0]} instead '
+                          f'is refused while that attributable session is live.)'),
+                      clears_who='the operator')
 
-    if existing is not None and existing.runtime != ctx.sessions.runtime:
-        raise Refused('Recorded runtime differs from the fleet selection; resolve the existing record first')
+    if recorded_route is not None:
+        raise Refused('Recorded runtime differs from the fleet selection; resolve the existing record first',
+                      clears_when=recorded_route,
+                      clears_who='the operator')
 
     #: `B10` sweep. The claim below is the first write; its refusal is asked before the dry-run returns.
     asked_slot = existing.slot if (existing is not None and existing.slot) else parsed.get("slot")
@@ -2011,7 +2169,11 @@ def _watcher_for_claim(ctx: Ctx, child: Path, attested=None) -> tuple:
     #: tool could run. The audit that deletes this as boilerplate removes the guard, not the paperwork.
     claimed_record = _record_for(ctx, child)
     if claimed_record is not None and claimed_record.runtime == 'codex':
-        raise Refused('Codex has no verified wakeup-capable watcher; keep this worker counted until it completes')
+        raise Refused('Codex has no verified wakeup-capable watcher; keep this worker counted until it completes',
+                      clears_when=f'never, for a codex worker: declare the phase it is actually in '
+                                  f'(`fleet declare --instant {child} --phase <that phase>`) and let it count '
+                                  f'against the cap',
+                      clears_who=f'the worker {claimed_record.todo_id}')
     if attested is not None:
         if not str(attested).strip():
             raise BadInput(
@@ -2681,9 +2843,8 @@ def _do_milestone(ctx: Ctx, parsed: Parsed) -> int:
                 f"milestone {target!r} is claimed by {current.owner}, and that instant still has an OPEN "
                 f"record (todo {holder.todo_id!r}): it has been neither harvested nor closed. Releasing "
                 f"the claim now would let a second instant be dispatched onto work that is still running.",
-                clears_when=f"`fleet abort --instant {current.owner} --reason <why>` (which now releases "
-                            f"the claim itself), or `fleet harvest --id {holder.todo_id}`",
-                clears_who=holder.todo_id)
+                clears_when=_claim_release_route(ctx, current.owner, child, target),
+                clears_who=f"the coordinator, or {holder.todo_id} by finishing and being harvested")
         if ctx.dry_run:
             _emit(ctx, "milestone", [("dry-run", "the roadmap was not written"),
                                      ("would-disown", target), ("owner", current.owner),
@@ -2878,7 +3039,9 @@ def _live_session_warning(ctx: Ctx, proposal) -> str:
 
 
 def _row_named(p) -> str:
-    return f"{p.milestone} -> {p.status} at {p.at} ({p.instant})"
+    #: `FB-87`. Where the proposer is NOW (`SI-40`), as `_live_session_warning` already says it (`FB-71`):
+    #: the rows a coordinator reads before applying named the recorded `-inflight-` path after the rename.
+    return f"{p.milestone} -> {p.status} at {p.at} ({roadmap_proposer(p.instant)})"
 
 
 def _do_apply(ctx: Ctx, parsed: Parsed) -> int:
@@ -3477,14 +3640,20 @@ def _do_close(ctx: Ctx, parsed: Parsed) -> int:
         ctx.sessions_for(record).kill(record.tmux)
     record.closed_at = ctx.now()
     ctx.store.write(record)
+    #: RV-15 (`B11`). Who frees the slot depends on whether the folder is still there: `harvest` resolves it
+    #: first and exits 2 on one that resolves to nothing, so for a gone folder `reap` is the only door.
+    child, _ = _child_or_why(ctx, record)
+    held = ("(no slot)" if not record.slot else
+            (f"{record.slot} — released by `fleet harvest --id {record.todo_id}` when the delta lands, or by "
+             f"`fleet reap --base {record.base_instant}` once nothing is sitting in it") if child is not None else
+            (f"{record.slot} — its folder resolves to nothing, so `harvest` cannot run on it: `fleet reap --base "
+             f"{record.base_instant}` releases it once nothing is sitting in it"))
     _emit(ctx, "close", [
         ("record", record.todo_id),
         ("closed", record.tmux or "(no session)"),
         ("closed_at", record.closed_at),
         ("forced", "true" if parsed.on("force") else "false"),
-        ("slot_still_held", (f"{record.slot} — released by `fleet harvest --id {record.todo_id}` when "
-                             f"the delta lands, or by `fleet reap --base {record.base_instant}` once "
-                             f"nothing is sitting in it") if record.slot else "(no slot)"),
+        ("slot_still_held", held),
         ("disarmed", "the monitor's arm set is recomputed from the join; this pane is no longer in it")])
     return EXIT_OK
 
@@ -4047,7 +4216,8 @@ def _do_clone(ctx: Ctx, parsed: Parsed) -> int:
             f"UNENROLLED — a slot enrolled before it is verified can be leased while it is still wrong, and "
             f"every `base-check` in it would then compare against the wrong commit. The directory is left in "
             f"place and named here rather than removed; inspect it, then enrol it by hand or delete it.",
-            clears_when=f"{target} matches the golden for {', '.join(mismatched)}, or is removed")
+            clears_when=f"{target} matches the golden for {', '.join(mismatched)}, or is removed",
+            clears_who="the operator")
 
     ctx.pool.enroll(target)
     rows.append(("enrolled", str(target)))
@@ -5810,7 +5980,9 @@ VERBS = {spec.name: spec for spec in (
         Flag("--status", True, False, "blocked|ready|running|awaiting-ci|done|dropped (default: blocked)"),
         Flag("--dep", True, False, "a milestone id this one depends on; repeatable, and each must EXIST"),
         Flag("--evidence", True, False, "an evidence path; repeatable"),
-        Flag("--owner", True, False, "informational only — readiness never reads it"),
+        Flag("--owner", True, False,
+             "the instant that CLAIMS it: `dispatch --milestone` refuses a claimed milestone, so this is the "
+             "exclusive claim, not a note. Readiness is derived from deps alone and never reads it"),
         Flag("--retire", False, False,
              "retire an EXISTING milestone: sets it dropped and removes it from the ready population"),
         Flag("--reason", True, False, "why it was retired; required with --retire"),

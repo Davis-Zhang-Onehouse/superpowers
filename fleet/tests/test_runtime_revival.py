@@ -65,8 +65,15 @@ class RevivalTests(unittest.TestCase):
 
     def test_runtime_mismatch_refuses(self):
         write_runtime(self.f.home,'claude')
-        self.assertEqual(self.f.run(self.args())[0],4)
+        code, _, err = self.f.run(self.args())
+        self.assertEqual(code, 4, err)
         self.assertEqual(self.f.started,[])
+        #: RV-22. The route named `fleet runtime --set codex`, which this very record's open record and held
+        #: lease block — measured here, so the refusal can never again name it as the way out.
+        route = err.split('clears when:', 1)[-1]
+        self.assertNotIn('fleet runtime --set', route, err)
+        self.assertEqual(self.f.run(['runtime', '--set', 'codex'])[0], 4,
+                         'the switch ran in the revive state, so the old route was not dead after all')
 
     def test_occupied_pane_never_starts_another_worker(self):
         self.f.tmux_live.add(self.record.tmux)

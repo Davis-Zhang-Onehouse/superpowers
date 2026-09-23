@@ -117,7 +117,10 @@ def session_transcript(settings, session_id, slot) -> Path:
     else:
         candidates = list((config / 'projects').rglob(session_id + '.jsonl'))
     if len(candidates) != 1:
-        raise Refused(f'Expected one transcript for {session_id} under the recorded configuration; found {len(candidates)}')
+        raise Refused(f'Expected one transcript for {session_id} under the recorded configuration; '
+                      f'found {len(candidates)}',
+                      clears_when=f'`--session-id` names a session with exactly one transcript under {config}',
+                      clears_who='the caller')
     path = candidates[0]
     try:
         with path.open() as handle:
@@ -133,8 +136,14 @@ def session_transcript(settings, session_id, slot) -> Path:
                     identity = row.get('sessionId')
                 if identity == session_id and data.get('cwd'):
                     if Path(data['cwd']).resolve() != Path(slot).resolve():
-                        raise Refused('The requested transcript belongs to a different workspace')
+                        raise Refused('The requested transcript belongs to a different workspace',
+                                      clears_when=f'`--session-id` names a session that ran in {slot}',
+                                      clears_who='the caller')
                     return path
     except (OSError, ValueError, TypeError) as exc:
-        raise Refused(f'Cannot verify transcript {path}: {exc}') from exc
-    raise Refused(f'Transcript {path} has no matching session/workspace metadata')
+        raise Refused(f'Cannot verify transcript {path}: {exc}',
+                      clears_when=f'{path} is readable JSON lines, or `--session-id` names another session',
+                      clears_who='the operator') from exc
+    raise Refused(f'Transcript {path} has no matching session/workspace metadata',
+                  clears_when=f'`--session-id` names a session whose transcript records its id and cwd',
+                  clears_who='the caller')

@@ -14,6 +14,7 @@
 #   S7  a recorded send-keys delivery reads ATTESTED, and a mismatch is refused      SI-55
 #   S11 `abort --dry-run` evaluates the cwd-holder gate the real abort does, and both refuse
 #       BEFORE the session is killed                                                  B10 (i48c/FI-281)
+#   S12 a DELETED owner's claim: the refusals name `close --id`, and that route runs   B11 (NEW-3)
 #
 # ⚠️ RUN RED, not assumed to be red. `FI-303`: a control that cannot fire on the defect that motivated it
 # certifies its own blind spot. Every case here was run against a worktree at `fleet/v0.4.0` — the tree
@@ -71,12 +72,12 @@ py() { python3 - "$@"; }
 
 PROFILE="$OUT/profile"
 cp -r "$INSTANT/tests/fixtures/profiles/workerCompliant" "$PROFILE"
-for n in 1 2 3 4 5 6 7; do
+for n in 1 2 3 4 5 6 7 8 9; do
   ( mkdir -p "$OUT/slot$n" && cd "$OUT/slot$n" && git init -q . && git commit -q --allow-empty -m base ) \
     >/dev/null 2>&1
 done
 fleet set-golden --path "$OUT/slot1" --porcelain > "$OUT/setup.out" 2>&1
-for n in 1 2 3 4 5 6 7; do fleet enroll --slot "$OUT/slot$n" --porcelain >> "$OUT/setup.out" 2>&1; done
+for n in 1 2 3 4 5 6 7 8 9; do fleet enroll --slot "$OUT/slot$n" --porcelain >> "$OUT/setup.out" 2>&1; done
 
 COORD="$(s_init coordS)"
 [ -d "$COORD" ] || { echo "init produced no coordinator; nothing below is a verdict" >&2; exit 2; }
@@ -652,6 +653,66 @@ if [ -n "$S11_PANE" ] && [ "$s11_pane_held$s11_child_held$s11_control_rc" = "110
 else
   it_fail S11 "fleet/it/S/out/S11.txt" \
     "pane=$S11_PANE pane-held=$s11_pane_held pane2-child=$S11_PANE2_CHILD child-held=$s11_child_held control-rc=$s11_control_rc holder-seen=$s11_seen dry-rc=$s11_dry_rc(want 4) dry-unchanged=$s11_unchanged real-rc=$s11_real_rc(want 4) same-output=$s11_same session-alive=$s11_alive inflight=$s11_inflight rerun-rc=$s11_rerun_rc aborted=$s11_aborted"
+fi
+
+# ==================================================================================================
+# S12 — `B11` (NEW-3, scenE/scenE2 of the backlog re-measure). The owner's folder is deleted outright.
+#       Both refusals on the claim used to prescribe `abort --instant <gone>` and `harvest --id`, and both
+#       exit 2 on a folder that resolves to nothing; `close --id`, which needs no folder, was named by
+#       neither. Asserted: each refusal names `close --id <todo>` and neither names abort, and then the
+#       route it names RUNS — close 0 (naming reap for the slot it leaves), reap frees that slot, disown 0,
+#       re-dispatch 0: scenE2's own sequence. RED at 9fc02b0c: the refusals named abort.
+# ==================================================================================================
+fleet milestone --instant "$COORD" --id s12 --title "owned by a folder that was deleted" --porcelain \
+      > "$OUT/S12-milestone.out" 2>&1
+S12_CHILD="$(s_dispatch gonerOwner s12)"
+S12_TODO="$(s_todo "$S12_CHILD")"
+[ -n "$S12_CHILD" ] && rm -rf "$S12_CHILD"
+fleet dispatch --profile "$PROFILE" --title "ontoGone" --base 00000000 --optype append \
+      --from "$COORD" --milestone s12 --cap 9 > "$OUT/S12-dispatch-refused.out" 2>&1
+s12_dispatch_rc=$?
+fleet milestone --instant "$COORD" --id s12 --disown --reason "owner folder deleted" \
+      > "$OUT/S12-disown-refused.out" 2>&1
+s12_disown_rc=$?
+fleet close --id "$S12_TODO" --porcelain > "$OUT/S12-close.out" 2>&1
+s12_close_rc=$?
+S12_SLOT="$(awk -F'\t' '$1=="record"{next} $1=="slot_still_held"{split($2,a," "); print a[1]; exit}' "$OUT/S12-close.out")"
+#: RV-14/RV-15. close leaves the gone owner's slot leased and names `reap` (never `harvest`, which exits 2
+#: on a gone folder) for it; scenE2 ran that reap before re-dispatching, so this does too.
+s12_reap_named=0
+grep -F 'slot_still_held' "$OUT/S12-close.out" | grep -qF 'fleet reap' \
+  && ! grep -F 'slot_still_held' "$OUT/S12-close.out" | grep -qF 'fleet harvest' && s12_reap_named=1
+fleet reap --base 00000000 --porcelain > "$OUT/S12-reap.out" 2>&1
+s12_reap_rc=$?
+s12_slot_freed=0
+[ -n "$S12_SLOT" ] && [ ! -e "$FLEET_HOME/pool/leases/$S12_SLOT" ] && s12_slot_freed=1
+fleet milestone --instant "$COORD" --id s12 --disown --reason "owner folder deleted" --porcelain \
+      > "$OUT/S12-disown.out" 2>&1
+s12_disown2_rc=$?
+S12_AFTER="$(s_dispatch afterGone s12)"
+{ echo "child=$S12_CHILD todo=$S12_TODO"
+  echo "dispatch-onto-gone rc=$s12_dispatch_rc"; cat "$OUT/S12-dispatch-refused.out"
+  echo "disown-while-open rc=$s12_disown_rc"; cat "$OUT/S12-disown-refused.out"
+  echo "close rc=$s12_close_rc"; cat "$OUT/S12-close.out"
+  echo "reap rc=$s12_reap_rc slot=$S12_SLOT freed=$s12_slot_freed"; cat "$OUT/S12-reap.out"
+  echo "disown rc=$s12_disown2_rc"; cat "$OUT/S12-disown.out"
+  echo "redispatch -> $S12_AFTER"; cat "$OUT/dispatch-afterGone.out"; } > "$OUT/S12.txt" 2>&1
+s12_names=0
+if [ -n "$S12_TODO" ] && grep -qF "fleet close --id $S12_TODO" "$OUT/S12-dispatch-refused.out" \
+   && grep -qF "fleet close --id $S12_TODO" "$OUT/S12-disown-refused.out" \
+   && ! grep -qF "fleet abort" "$OUT/S12-dispatch-refused.out" \
+   && ! grep -qF "fleet abort" "$OUT/S12-disown-refused.out"; then s12_names=1; fi
+s12_runs=0; [ "$s12_close_rc$s12_disown2_rc" = "00" ] && [ "$s12_reap_named$s12_slot_freed" = "11" ] \
+  && [ -n "$S12_AFTER" ] && [ -d "$S12_AFTER" ] && s12_runs=1
+if [ -z "$S12_CHILD" ] || [ -z "$S12_TODO" ]; then
+  it_fail S12 "fleet/it/S/out/S12.txt" \
+    "SETUP, not a verdict about the route: the owner's dispatch produced no child/todo (see dispatch-gonerOwner.out)"
+elif [ "$s12_dispatch_rc$s12_disown_rc" = "44" ] && [ "$s12_names$s12_runs" = "11" ]; then
+  it_pass S12 "fleet/it/S/out/S12.txt" \
+    "with the owner's folder deleted, the dispatch refusal and the --disown refusal (rc=4 each) both named \`fleet close --id $S12_TODO\` and neither named abort, which exits 2 on a gone folder; the named route then ran: close rc=0 (its slot row named reap, not harvest), the reap freed slot $S12_SLOT, --disown rc=0, and a re-dispatch onto the milestone succeeded"
+else
+  it_fail S12 "fleet/it/S/out/S12.txt" \
+    "child=${S12_CHILD:-none} dispatch-rc=$s12_dispatch_rc(want 4) disown-rc=$s12_disown_rc(want 4) names-close-not-abort=$s12_names close-rc=$s12_close_rc reap-named=$s12_reap_named slot-freed=$s12_slot_freed($S12_SLOT) disown-after-rc=$s12_disown2_rc redispatched=${S12_AFTER:-none}"
 fi
 
 it_assert_isolation S-leave

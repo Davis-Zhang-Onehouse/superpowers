@@ -182,7 +182,9 @@ class Repo:
             raise Refused(
                 f"the tag {name} already exists. A release tag is never moved: it is what keeps the exact "
                 f"tree recoverable after the nightly rebase rewrites its commits off the branch. Choose "
-                f"the next version instead.")
+                f"the next version instead.",
+                clears_when=f"the cut is re-run with a version whose tag does not exist yet",
+                clears_who="the release instant")
         self._git("tag", "-a", name, "-m", message)
 
     def export(self, tag: str, dest) -> None:
