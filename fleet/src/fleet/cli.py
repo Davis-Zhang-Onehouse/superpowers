@@ -3220,6 +3220,12 @@ def _do_abort(ctx: Ctx, parsed: Parsed) -> int:
     step this call could not. The rename is never reached on that path, which is what keeps the re-run
     possible: a folder already renamed `-abort-` would make the documented recovery refuse too.
 
+    **`B10`: the gate comes first, for the dry-run too.** A cwd holder OUTSIDE the session's own process
+    tree survives the kill, so it is knowable before the kill — and `_abort_slot_gate` now refuses it there,
+    with nothing done, in the real call and in `--dry-run` alike (the dry-run used to return above the only
+    place the gate ran and said rc=0 for an argv the real call refused). The post-kill wait above remains
+    for what cannot be known beforehand: a process of the session's own tree that survives its kill.
+
     **`SI-51`: the milestone goes back too, and it goes back LAST.** `abort` released the session, the
     lease and the record and left the roadmap alone, so a milestone claimed by a dispatch that was later
     aborted stayed owned by an `-abort-` folder permanently — while `claim`'s own refusal named aborting as
