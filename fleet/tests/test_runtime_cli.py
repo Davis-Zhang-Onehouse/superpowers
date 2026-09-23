@@ -39,23 +39,24 @@ class RuntimeCliTests(unittest.TestCase):
         self.assertEqual(snapshot(self.f.home), before)
 
     def test_a_closed_record_still_blocks_and_the_route_says_what_does_clear_it(self):
-        """RV-21. The route said "harvested or closed", but `runtime_blockers` counts every UNHARVESTED record
-        and every held lease, so a close clears nothing. The route names the predicates that do, and meeting
-        them clears the switch."""
-        self.f.worker('shut', slot='ws1', live=False)
+        """RV-21 / RV-30. The route said "harvested or closed", but `runtime_blockers` counts every UNHARVESTED
+        record and every held lease, so a close clears nothing. The route names harvest — and the test RUNS
+        harvest (a stub that stamped `harvested_at` by hand hid that harvest cannot run for every record) —
+        and it says, rather than hides, that an aborted or unreviewed record cannot be harvested."""
+        done = self.f.worker('shut', state='complete', slot='ws1', live=False)
+        self.f.reviewed(done)
         code, _, err = self.f.run(['close', '--id', self.f.ids['shut']])
         self.assertEqual(code, 0, err)
         code, _, err = self.f.run(['runtime', '--set', 'codex'])
         self.assertEqual(code, 4, err)
+        route = err.split('clears when:', 1)[-1]
         self.assertNotIn('or closed', err)
-        for clause in ('harvest', 'reap', 'lease'):
-            self.assertIn(clause, err.split('clears when:', 1)[-1], err)
-        record = self.f.store.read(self.f.ids['shut'])
-        record.harvested_at = '2026-07-30T12:00:00Z'
-        self.f.store.write(record)
-        self.f.pool.release('ws1')
+        for clause in ('fleet harvest --id', 'fleet reap', 'cannot be harvested'):
+            self.assertIn(clause, route, err)
+        code, out, err = self.f.run(['harvest', '--id', self.f.ids['shut']])
+        self.assertTrue(self.f.store.read(self.f.ids['shut']).harvested_at, f"the named harvest did not run: {out}{err}")
         code, _, err = self.f.run(['runtime', '--set', 'codex'])
-        self.assertEqual(code, 0, f"meeting the route's own condition did not clear the switch: {err}")
+        self.assertEqual(code, 0, f"the named route ran and the switch is still refused: {err}")
 
     def test_same_runtime_is_noop_with_work(self):
         self.f.worker('active', slot='ws1')

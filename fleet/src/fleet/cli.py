@@ -1448,8 +1448,14 @@ def _do_runtime(ctx: Ctx, parsed: Parsed) -> int:
             blockers = runtime_blockers(ctx)
             if blockers:
                 raise Refused('Runtime switch requires a completed fleet: ' + '; '.join(blockers),
-                              clears_when='nothing above remains: each named record is HARVESTED (a closed '
-                                          'record still counts), each held lease is released by that '
+                              #: RV-30. Measured: `harvest` sets `harvested_at` for a completed, reviewed
+                              #: worker (closed or not); for an aborted record or an unreviewed one it does
+                              #: not, and on a gone folder it exits 2. Said, rather than implied to run.
+                              clears_when='nothing above remains: each named record is HARVESTED — `fleet '
+                                          'harvest --id <todo>` for a completed, reviewed worker (a closed '
+                                          'record still counts until then); a record that was aborted, closed '
+                                          'without a review, or whose folder is gone cannot be harvested, and '
+                                          'no verb clears it today — each held lease is released by that '
                                           'harvest or by `fleet reap`, and each named process has exited; '
                                           'then the same `fleet runtime --set` is re-run',
                               clears_who='the coordinator of each named record, or the operator')
