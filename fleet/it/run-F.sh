@@ -188,6 +188,7 @@ f2_row() {  # $1 = label: board once into a file, judge its exit status, read W1
   eval "${1}_note=\"\$(awk -F'\t' -v id=\"\$W1_ID\" '\$1==id {print \$7; exit}' \"\$OUT/$1-board.out\")\""
 }
 sleep 100000 & F2C_PID=$!                      # ours, and the only process this section signals
+F2C_WATCHED="$F2C_PID"                         # what the assertions name; F2C_PID is cleared once reaped
 rm -f "$W1/.fleet/declare.json"
 fleet declare --instant "$W1" --phase AWAITING-CI --watcher "release gate task pid:$F2C_PID" \
       --porcelain > "$OUT/F2c-declare.out" 2>&1
@@ -196,15 +197,15 @@ f2_row F2c_live
 kill "$F2C_PID" 2>/dev/null; wait "$F2C_PID" 2>/dev/null; F2C_PID=""
 f2_row F2c_gone
 f2c_ok=1
-[ "$f2c_declare_rc" = 0 ] && command grep -q "^watcher_pid	$F2C_PID " "$OUT/F2c-declare.out" || f2c_ok=0
+[ "$f2c_declare_rc" = 0 ] && command grep -q "^watcher_pid	$F2C_WATCHED " "$OUT/F2c-declare.out" || f2c_ok=0
 [ "$F2c_live_board_rc" = 0 ] && [ "$F2c_live_state" = AWAITING-CI ] || f2c_ok=0
-case "$F2c_live_note" in *ATTESTED*"pid $F2C_PID is running"*) ;; *) f2c_ok=0 ;; esac
+case "$F2c_live_note" in *ATTESTED*"pid $F2C_WATCHED is running"*) ;; *) f2c_ok=0 ;; esac
 [ "$F2c_gone_board_rc" = 0 ] || f2c_ok=0
 case "$F2c_gone_state" in RUNNING|IDLE) ;; *) f2c_ok=0 ;; esac
-case "$F2c_gone_note" in *"pid $F2C_PID is GONE"*disregarded*) ;; *) f2c_ok=0 ;; esac
+case "$F2c_gone_note" in *"pid $F2C_WATCHED is GONE"*disregarded*) ;; *) f2c_ok=0 ;; esac
 if [ "$f2c_ok" = 1 ]; then
   it_pass F2c "fleet/it/F/out/F2c_gone-board.out" \
-    "an attested watcher naming pid $F2C_PID was recorded with its start time and trusted while it ran ($W1_ID AWAITING-CI, note says the pid is running); after that process exited the SAME declaration reads $F2c_gone_state with 'attested watcher pid $F2C_PID is GONE' and 'disregarded' — no re-declare by hand"
+    "an attested watcher naming pid $F2C_WATCHED was recorded with its start time and trusted while it ran ($W1_ID AWAITING-CI, note says the pid is running); after that process exited the SAME declaration reads $F2c_gone_state with 'attested watcher pid $F2C_WATCHED is GONE' and 'disregarded' — no re-declare by hand"
 else
   it_fail F2c "fleet/it/F/out/F2c_gone-board.out" \
     "declare_rc=$f2c_declare_rc live: rc=$F2c_live_board_rc state='$F2c_live_state' note='$F2c_live_note' | gone: rc=$F2c_gone_board_rc state='$F2c_gone_state' note='$F2c_gone_note'"
