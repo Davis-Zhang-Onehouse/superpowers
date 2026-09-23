@@ -203,6 +203,11 @@ class Lease:
                                            in (d.get("unreadable_holders") or [])])
         except KeyError as exc:
             raise BadInput(f"lease body is missing the field {exc.args[0]!r}") from exc
+        except (TypeError, ValueError) as exc:
+            #: RV-24. A malformed `unreadable_holders` (or any mistyped field) is a body problem like a missing
+            #: one — the slot is held by somebody this body cannot name — never a raw traceback.
+            raise BadInput(f"lease body has a malformed field ({type(exc).__name__}: {exc}); expected "
+                           f"`unreadable_holders` as [[pid, start time], ...]") from exc
 
     @property
     def rank(self) -> tuple:
