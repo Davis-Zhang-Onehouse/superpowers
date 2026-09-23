@@ -106,12 +106,21 @@ def atomic_write_if(path, text: str, still_valid, encoding: str = "utf-8") -> bo
     path = Path(path)
     tmp = path.parent / tmp_name(path.name)
     try:
-        with open(tmp, "x", encoding=encoding) as handle:
+        handle = open(tmp, "x", encoding=encoding)
+    except (FileNotFoundError, NotADirectoryError):
+        return False                       # the directory is gone: there is nothing to publish into
+    try:
+        with handle:
             handle.write(text)
             handle.flush()
             os.fsync(handle.fileno())
-    except (FileNotFoundError, NotADirectoryError):
-        return False                       # the directory is gone: there is nothing to publish into
+    except BaseException:
+        #: RV-36. The staging file exists from here on; a write or fsync that raises must not leave it behind.
+        try:
+            os.unlink(tmp)
+        except OSError:
+            pass
+        raise
     published = False
     try:
         if still_valid():
