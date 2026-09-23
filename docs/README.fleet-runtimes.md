@@ -125,7 +125,11 @@ for the measured revisions, integration results and remaining evaluation limits 
 `bash fleet/it/run-runtime.sh --stubs` tests dispatch and switch-back using attributed stand-ins (RT1) and the
 per-dispatch runtime/model choice on a claude box (RT2). `bash fleet/it/run-runtime.sh --choice-live` spends two
 real trivial model turns to prove the same on the native CLIs: a claude worker on `claude-fable-5-1` and a codex
-worker on codex's default model, both dispatched onto a box set to claude, each killed and revived.
+worker on codex's default model, both dispatched onto a box set to claude, each killed and revived. Codex runs in a
+private `CODEX_HOME` inside the attempt directory: the credential is copied in and removed when the run exits, the
+source configuration's top-level settings are copied so "no `-m`" still means that root's configured model, and the
+checkout is pre-trusted there. `RTC_CODEX_HOME` names the source (default `/home/ubuntu/davis_root/.codex`) and is only
+read. The harness never answers a folder-trust screen, because the answer persists into the CLI's configuration.
 For real model coverage, point `RT_LIVE_CONFIG` at a private, authenticated configuration where the
 native plugin is installed, then explicitly select the runtime:
 
