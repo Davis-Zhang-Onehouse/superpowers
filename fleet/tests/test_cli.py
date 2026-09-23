@@ -2449,6 +2449,19 @@ class TestDryRunSweepB10(CliCase):
         (ready / ".fleet" / "declare.json").write_text("{not json")
         self._same(fleet, ["declare", "--instant", str(ready), "--phase", "building"])
 
+    def test_declare_awaiting_ci_over_an_unreadable_review_ledger_refuses_before_writing(self):
+        """`RV-18`. `declare --phase awaiting-ci` read `review.json` AFTER writing the phase and watchers, so
+        an unreadable ledger made the real call exit 2 with the phase already changed, while the dry-run
+        (which never read it) exited 0."""
+        fleet = self.loaded()
+        ready = fleet.paths["readyWorker"]
+        (ready / ".fleet").mkdir(exist_ok=True)
+        (ready / ".fleet" / "review.json").write_text('{"schema_version": 999, "rounds": []}')
+        before = Declarations(ready).phase()
+        self._same(fleet, ["declare", "--instant", str(ready), "--phase", "awaiting-ci",
+                           "--watcher", "cron */10 * * * * poll"])
+        self.assertEqual(Declarations(ready).phase(), before, "the refusing declare wrote the phase anyway")
+
     def test_milestone_add_of_a_duplicate_id_and_of_a_status_outside_the_domain(self):
         fleet = self.loaded()
         ready = str(fleet.paths["readyWorker"])
