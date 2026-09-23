@@ -565,9 +565,11 @@ class Roadmap:
                     f"instants on "
                     f"one milestone is not a race the roadmap can resolve — if that owner is gone, its "
                     f"record is what says so (`fleet board`, `fleet status`).",
-                    clears_when="the claim is given back: `fleet abort --instant <owner> --reason <why>` while "
-                                "the owner's folder exists; if it is gone, `fleet close --id <its todo>` then "
-                                "`fleet milestone --instant <the coordinator> --id <m> --disown --reason <why>`",
+                    clears_when="the claim is given back, by the owner's state: `fleet abort --instant <owner> "
+                                "--reason <why>` for an inflight worker dispatched onto it; `fleet harvest --id "
+                                "<its todo>` for a completed one; `fleet close --id <its todo>` when its folder is "
+                                "gone or the claim was set by hand; then, if still held, `fleet milestone "
+                                "--instant <the coordinator> --id <m> --disown --reason <why>`",
                     clears_who="the coordinator")
             #: Readiness is derived from the CURRENT file, which is the one held open here.
             owners = _Owners()
