@@ -745,7 +745,16 @@ class Roadmap:
                             if found is not None:
                                 d["evidence"][i] = str(found)
                     #: FB-45: a legacy relative item is located at the proposer that cited it, not at `owner`.
+                    #: RV-28: and, where a recorded row names that proposer and it still locates the item,
+                    #: stored anchored by this write — so a raw reader of roadmap.json needs no inbox.
                     anchor = self._legacy_anchor(d["id"], d.get("owner"))
+                    proposer = self._legacy_proposer(d["id"])
+                    for i, e in enumerate(d["evidence"]):
+                        if Path(e).is_absolute() or evidence_mod.is_url(e) or proposer(e) is None:
+                            continue
+                        found = evidence_mod.locate(e, proposer(e))
+                        if found is not None:
+                            d["evidence"][i] = str(found)
                     seen = {str(evidence_mod.locate(e, anchor(e)) or e): i
                             for i, e in enumerate(d["evidence"])}
                     for item in evidence:
@@ -838,23 +847,29 @@ class Roadmap:
         `closed` ones, newest first, whose row for this milestone cites that exact string — preferring one
         where it resolves. `owner` stays the anchor only for an item no row cites (e.g. one typed with
         `milestone --evidence` before FB-44). Read-time only: nothing on disk is migrated."""
+        proposer = self._legacy_proposer(milestone_id, inbox)
+
+        def anchor(item):
+            found = proposer(item)
+            return owner if found is None else found
+        return anchor
+
+    def _legacy_proposer(self, milestone_id: str, inbox: dict = None):
+        """FB-45. item -> the proposer a recorded row names for this legacy item, or None when no row cites
+        it. `_legacy_anchor` falls back to `owner`; `apply` anchors only what a row names (RV-28)."""
         inbox = inbox if inbox is not None else self._load_proposals()
         cited = {}
-        for row in reversed(inbox["applied"]):
-            if row.get("milestone") == milestone_id:
-                for item in row.get("evidence") or []:
-                    cited.setdefault(item, []).append(row["instant"])
-        for row in reversed(inbox["closed"]):
+        for row in list(reversed(inbox["applied"])) + list(reversed(inbox["closed"])):
             if row.get("milestone") == milestone_id:
                 for item in row.get("evidence") or []:
                     cited.setdefault(item, []).append(row["instant"])
 
-        def anchor(item):
+        def proposer(item):
             proposers = cited.get(item)
             if not proposers:
-                return owner
+                return None
             return next((p for p in proposers if evidence_mod.locate(item, p) is not None), proposers[0])
-        return anchor
+        return proposer
 
     @staticmethod
     def _ready_row(m: Milestone, anchor=None) -> Row:
