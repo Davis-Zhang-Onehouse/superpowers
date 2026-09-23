@@ -238,6 +238,17 @@ class RuntimeCliTests(unittest.TestCase):
         code, _, err = self.f.run(['resume', '--instant', str(orphan), '--slot', 'ws1'])
         self.assertEqual(code, 0, f"the named route does not run: {err}")
 
+    def test_a_foreign_session_over_an_existing_record_names_the_records_route(self):
+        """RV-31. With a record of the instant under another runtime, the session exiting is not enough: the
+        re-run meets the recorded-runtime refusal. The first refusal names that route, not a false promise."""
+        path = self.f.worker('original', slot='ws1', live=True)          # record + live session, runtime claude
+        write_runtime(self.f.home, 'codex')
+        code, _, err = self.f.run(['resume', '--instant', str(path)])
+        self.assertEqual(code, 4, err)
+        route = err.split('clears when:', 1)[-1]
+        self.assertNotIn('adopts the instant under the current runtime', route, err)
+        self.assertIn('fleet runtime --set claude', route, err)
+
     def test_adoption_cannot_relabel_an_existing_runtime(self):
         self.f.worker('original', slot='ws1', live=False)
         write_runtime(self.f.home, 'codex')
