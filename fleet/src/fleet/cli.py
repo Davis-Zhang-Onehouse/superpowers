@@ -271,6 +271,9 @@ REAP_UNFREED = "reap-unfreed"
 #: condition produced NO row, and the population line counted the lost slot as leased.
 REAP_RECLAIMED = "reap-reclaimed"
 REAP_UNATTRIBUTABLE = "reap-unattributable"
+#: `FB-85`. A dry run's row for a lease the reap would NOT free because it is not stale — its session is alive,
+#: or a live pid still holds its path as cwd. The real run emits no row for these; the dry run names them.
+REAP_KEPT = "reap-kept"
 
 #: `reconcile`'s two answers. The monitor branches on the KIND, never on the sentence — and the sentence
 #: still says why, because a watcher operator who cannot see why a pane is unarmed disarms the watcher.
@@ -4362,24 +4365,56 @@ def _do_reap(ctx: Ctx, parsed: Parsed) -> int:
     before = {slot: lease for slot, lease in before.items() if lease is not None}
 
     if ctx.dry_run:
+        #: `FB-85`. The dry-run reads the same `reap_plan` the real call executes — session liveness AND the
+        #: cwd-holder half, ownership, interrupted claims — and exits 4 exactly when the real call's strict
+        #: refusal would (a stale lease this base does not own). It used to judge by session liveness only and
+        #: exit 0 over a foreign stale lease the real call refuses.
+        plan = ctx.pool.reap_plan(base_instant=base, all_efforts=every)
         rows = []
-        for slot, lease in sorted(before.items()):
-            mine = every or not lease.base_instant or lease.base_instant == base
+
+        def leased(lease):
+            return (f"leased to {lease.todo_id} (tmux {lease.tmux}) by "
+                    f"{lease.base_instant or 'an untagged (legacy) claim'}")
+        for slot, lease in plan.mine:
+            rows.append(Row(kind=REAPED, subject=slot, severity=INFO,
+                            detail=(f"dry run: {leased(lease)}; stale — no live session and nothing holding "
+                                    f"{lease.path} as its cwd — and this base's to clear, so a real reap frees "
+                                    f"it")))
+        for slot, lease in plan.live:
+            rows.append(Row(kind=REAP_KEPT, subject=slot, severity=INFO,
+                            detail=f"dry run: {leased(lease)}; its session is alive, so it is not stale"))
+        for slot, lease, pids in plan.held:
+            rows.append(Row(kind=REAP_KEPT, subject=slot, severity=INFO,
+                            detail=(f"dry run: {leased(lease)}; its session is gone but live pid(s) "
+                                    f"{', '.join(str(p) for p in pids)} hold {lease.path} as cwd (OBS-48), so it "
+                                    f"is not stale")))
+        for slot, why in plan.reclaimable:
+            rows.append(Row(kind=REAP_RECLAIMED, subject=slot, severity=INFO,
+                            detail=f"dry run: an INTERRUPTED claim a real reap clears: {why}"))
+        for slot, why, wait in plan.unattributable:
+            rows.append(Row(kind=REAP_UNATTRIBUTABLE, subject=slot, severity=INFO,
+                            detail=(f"dry run: a bodiless claim too young to judge ({why}); a real reap leaves "
+                                    f"it"),
+                            clears_when=f"`fleet reap` is run again in about {wait:.0f}s",
+                            clears_who=base or ALL_EFFORTS))
+        if plan.foreign:
+            refusal = ctx.pool.foreign_refusal(plan.foreign, base)
+            owner = refusal.clears_who or "an untagged (legacy) claim"
             rows.append(Row(
-                kind=REAPED if mine else REAP_REFUSED, subject=slot, severity=INFO,
-                detail=(f"dry run: leased to {lease.todo_id} (tmux {lease.tmux}) by "
-                        f"{lease.base_instant or 'an untagged (legacy) claim'}; session alive: "
-                        f"{'yes' if ctx.sessions.alive(lease.tmux) else 'no'}; "
-                        + ("this base's to clear" if mine else
-                           f"NOT this base's to clear — {base!r} is not its owner"))))
+                kind=REAP_REFUSED, subject=owner, severity=VIOLATION,
+                detail=(f"a stale lease here is owned by {owner}, not by {base!r}, so a real reap leaves it "
+                        f"alone and exits 4: {refusal}. Override: `fleet reap {ALL_EFFORTS}`, said out loud."),
+                clears_when=refusal.clears_when or f"{owner} reaps it, or `fleet reap {ALL_EFFORTS}` is run",
+                clears_who=owner))
         rows.append(Row(
             kind=POPULATION, subject=base or ALL_EFFORTS, severity=INFO,
-            detail=(f"dry run over {len(ctx.pool.slots())} enrolled slot(s), {len(before)} leased; "
-                    f"nothing was released. Staleness here is by SESSION liveness only — the cwd-holder "
-                    f"half (OBS-48) is evaluated by the real run, and it can only make this set smaller, "
-                    f"never larger")))
+            detail=(f"dry run over {len(ctx.pool.slots())} enrolled slot(s), {len(before)} leased: "
+                    f"{len(plan.mine)} would be freed, {len(plan.live) + len(plan.held)} kept (live session or "
+                    f"cwd holder), {len(plan.foreign)} left to their owners, {len(plan.reclaimable)} interrupted "
+                    f"claim(s) would be reclaimed; nothing was released. A release that fails while executing "
+                    f"(the claim directory cannot be removed) is only knowable by the real run")))
         _emit(ctx, "reap", rows)
-        return EXIT_OK
+        return EXIT_REFUSED if plan.foreign else EXIT_OK
 
     refusal = None
     try:
