@@ -442,6 +442,22 @@ class TestAnInterruptedClaimIsReclaimableAndReported(unittest.TestCase):
         self.assertTrue((claim_dir / "something-a-human-put-here.txt").is_file(),
                         "a reclaim deleted a file it did not recognise")
 
+    def test_the_exhaustion_message_does_not_call_a_bodiless_claim_leased_or_dead(self):
+        """`B11` RV-25. `claim()` on a pool whose only other slot holds a bodiless claim said "every enrolled
+        slot is leased" (false) and called every such claim "a dead writer" — listed with `min_age_s=0.0`, so
+        a claim seconds old, possibly mid-birth, too. The substrings `run-C.sh` C4 pins are kept."""
+        from fleet.errors import NoCapacity
+        self.interrupt("ws1")
+        self.pool.claim(todo_id="t-live", tmux="dt-live", base_instant="/i/base", child_instant="/i/c", slot="ws2")
+        with self.assertRaises(NoCapacity) as caught:
+            self.pool.claim(todo_id="t-new", tmux="dt-new", base_instant="/i/base", child_instant="/i/d")
+        said = str(caught.exception)
+        self.assertNotIn("every enrolled slot is leased", said, said)
+        self.assertNotIn("dead writer", said, said)
+        self.assertIn("hold an INTERRUPTED claim with no lease body", said, said)
+        self.assertIn("a reap clears those and names them", said, said)
+        self.assertTrue(caught.exception.clears_when, "the exhaustion names no route")
+
     def test_the_leases_VIEW_does_not_call_it_free(self):
         """The other half of `SI-7`'s disagreement, in the reporting layer. `leases` is the verb an operator
         reads to see capacity, and it labelled an unclaimable slot `free` because it asked `lease()`, which

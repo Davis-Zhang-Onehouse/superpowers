@@ -127,7 +127,7 @@ else
 fi
 
 # --- E9-leak-d · GIVEN a pool exhausted by an interrupted claim, WHEN a dispatch is refused, --------
-# THEN the refusal NAMES s3, says it is a dead writer rather than work in progress, and points at the fix.
+# THEN the refusal NAMES s3, says it is an interrupted claim with no lease body (not a lease), and points at the fix.
 # WAS: asserted the refusal counts the leaked slot as leased and sends the operator to `reap`, which was
 # inert on exactly that -- `FI-30a`'s unclearable alarm, in the component a coordinator depends on for
 # workspaces.
@@ -161,7 +161,7 @@ if grep -qi 'INTERRUPTED claim' "$OUT/exhausted.txt" \
    && grep -q "'s3'" "$OUT/exhausted.txt" \
    && grep -qi 'reap' "$OUT/exhausted.txt"; then
   it_pass E9-leak-d "fleet/it/E9leak/out/exhausted.txt" \
-    "the exhausted-pool refusal now NAMES the interrupted claim ('s3'), says it is a dead writer rather than work in progress, and points at reap -- which E9-leak-b proves actually clears it. Before the fix the same sentence named a remedy that was inert, which is FI-30a's unclearable alarm"
+    "the exhausted-pool refusal now NAMES the interrupted claim ('s3'), says it is an interrupted claim with no lease body rather than a lease, and points at reap -- which E9-leak-b proves actually clears it. Before the fix the same sentence named a remedy that was inert, which is FI-30a's unclearable alarm"
 else
   it_fail E9-leak-d "fleet/it/E9leak/out/exhausted.txt" \
     "the refusal does not distinguish a lost slot from a busy one: $(tr '\n' ' ' < "$OUT/exhausted.txt" | head -c 400)"
