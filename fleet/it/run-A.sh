@@ -110,17 +110,25 @@ A_INHERITED_STORES="$(printf '%s\n' "${FLEET_ROOT:+$FLEET_ROOT/.fleet}" "${FLEET
 
 # --- A0 — the live-session baseline this run inherited ----------------------------------------------
 #
-#: Not a Plan 6 case. It exists because `it_assert_isolation` compares the live session set against a
-#: PERSISTED baseline (`live-tmux-sessions.txt`) with no re-baselining path, so any legitimate operator
-#: change between two runs is reported as this run's contamination. Recording the drift BEFORE §A does
-#: anything is what separates "§A moved a session" from "a session moved before §A started".
+#: Not a Plan 6 case. It records the drift BEFORE §A does anything, which is what separates "§A moved a
+#: session" from "a session moved before §A started". The baseline §A inherits is its RUN's (FB-60): the
+#: per-run file when an orchestrator such as run-all.sh already established one, otherwise the handover the
+#: previous run left, which ISOLATION-A-enter then re-establishes from (a `dt-` loss between runs is a NOTE
+#: there, not a FAIL). With neither there is nothing to compare, and that is said rather than passed. A
+#: missing file must never reach `diff`, whose empty stdout would read as "no drift".
 a0_baseline_drift() {
-  local drift; drift="$(diff "$LIVE_TMUX_SNAPSHOT" "$A_LIVE_BEFORE" | grep '^[<>]' | tr '\n' ' ')"
-  cp "$LIVE_TMUX_SNAPSHOT" "$OUT/live-sessions-baseline.txt"
+  local inherited="$LIVE_TMUX_SNAPSHOT" which="this run's baseline" drift
+  [ -f "$inherited" ] || { inherited="$LIVE_TMUX_HANDOVER"; which="the previous run's handover"; }
+  if [ ! -f "$inherited" ]; then
+    a_skip A0 "$A_LIVE_BEFORE" "$(sq "no live-session baseline exists yet (no run has left a handover in this checkout), so there is no drift to measure; ISOLATION-A-enter establishes one")"
+    return
+  fi
+  drift="$(diff "$inherited" "$A_LIVE_BEFORE" | grep '^[<>]' | tr '\n' ' ')"
+  cp "$inherited" "$OUT/live-sessions-baseline.txt"
   if [ -z "$drift" ]; then
-    a_pass A0 "$A_LIVE_BEFORE" "$(sq "the live session set at §A t0 is byte-identical to the recorded baseline ($(grep -c . "$A_LIVE_BEFORE") sessions), so ISOLATION-A-enter compares a current baseline")"
+    a_pass A0 "$A_LIVE_BEFORE" "$(sq "the live session set at §A t0 is byte-identical to $which ($(grep -c . "$A_LIVE_BEFORE") sessions), so ISOLATION-A-enter compares a current baseline")"
   else
-    a_skip A0 "$A_LIVE_BEFORE" "$(sq "NOT A §A CASE and NOT §A's doing: the live session set already differed from the recorded baseline BEFORE §A ran a single command — $drift. Measured at t0, ahead of it_section, so ISOLATION-A-enter's FAIL below is inherited drift, not contamination by §A. lib.sh offers no re-baselining path (REPORTED: a file this runner does not own)")"
+    a_skip A0 "$A_LIVE_BEFORE" "$(sq "NOT A §A CASE and NOT §A's doing: the live session set already differed from $which BEFORE §A ran a single command — $drift. Measured at t0, ahead of it_section. Against a handover, ISOLATION-A-enter re-establishes and a dt- loss is a NOTE there; against this run's own baseline it is a FAIL there, charged to the run, not to §A")"
   fi
 }
 a0_baseline_drift
@@ -1194,8 +1202,11 @@ FORBIDDEN = [
 KILL = re.compile(r"tmux[^;&|]*kill-(server|session)")
 RM_CMD = re.compile(r"\brm\s+(-[a-zA-Z]+\s+)*-[a-zA-Z]*r[a-zA-Z]*\b")
 RM_TGT = re.compile(r"\brm\s+(-[a-zA-Z]+\s+)*-[a-zA-Z]*r[a-zA-Z]*\s+(?P<target>\S+)")
-WRITE_OUT = re.compile(r"(>>?|tee)\s*<\$?(IT_ROOT|LIVE_TMUX_SNAPSHOT|RESULTS|LIVE_SNAPSHOT)\b"
-                       r"|(>>?|tee)\s*<\$(IT_ROOT|LIVE_TMUX_SNAPSHOT|RESULTS|LIVE_SNAPSHOT)")
+#: LIVE_TMUX_HANDOVER and the per-run prune (`find "$IT_ROOT" … -delete`) came with FB-60's per-run baseline;
+#: an audit that enumerates writes outside the section dir must count them too (RV-27).
+WRITE_OUT = re.compile(r"(>>?|tee)\s*<\$?(IT_ROOT|LIVE_TMUX_SNAPSHOT|LIVE_TMUX_HANDOVER|RESULTS|LIVE_SNAPSHOT)\b"
+                       r"|(>>?|tee)\s*<\$(IT_ROOT|LIVE_TMUX_SNAPSHOT|LIVE_TMUX_HANDOVER|RESULTS|LIVE_SNAPSHOT)"
+                       r"|\bfind\s+<\$IT_ROOT>.*\s-delete\b")
 TMPDIR = re.compile(r"\bmktemp\b|\$TMPDIR|(^|[\s<(=])/tmp/")
 HEREDOC = re.compile(r"<<-?\s*[\"']?([A-Za-z_][A-Za-z0-9_]*)[\"']?")
 
@@ -1343,7 +1354,7 @@ PY
   if [ "$nout" = 0 ]; then
     a_pass A8c "$OUT/A8-audit.txt" "$(sq "no harness write lands outside the section dir")"
   else
-    a_skip A8c "$OUT/A8-audit.txt" "$(sq "$nout write site(s) land OUTSIDE <section>/ — the clause as written does not hold, and every one is deliberate: $n_out site(s) write the register (\$RESULTS) and the live-session baseline (\$IT_ROOT/live-tmux-sessions.txt, \$IT_ROOT/dt-sessions-seen-<S>.txt) at fleet/it level, which is right for state SHARED across sections but is outside <section>/; $n_tmp site(s) touch \$TMPDIR — chiefly it_own_cases staging the register through mktemp, the only write that leaves the instant at all, transient and never cited as evidence. What P-3 actually protects (no evidence path outside the instant) HOLDS. SKIP not FAIL: the clause is stricter than the design (SI-18), the register and the baseline are shared-across-sections BY DESIGN, and what P-3 protects — no evidence path outside the instant — holds and is enforced per-commit by lint-evidence-paths.sh")"
+    a_skip A8c "$OUT/A8-audit.txt" "$(sq "$nout write site(s) land OUTSIDE <section>/ — the clause as written does not hold, and every one is deliberate: $n_out site(s) write the register (\$RESULTS) and the live-session baselines (\$IT_ROOT/live-tmux-sessions.txt, the handover, and the per-run live-tmux-sessions-run-<id>.txt with its one-day prune, \$IT_ROOT/dt-sessions-seen-<S>.txt) at fleet/it level, which is right for state SHARED across sections but is outside <section>/; $n_tmp site(s) touch \$TMPDIR — chiefly it_own_cases staging the register through mktemp, the only write that leaves the instant at all, transient and never cited as evidence. What P-3 actually protects (no evidence path outside the instant) HOLDS. SKIP not FAIL: the clause is stricter than the design (SI-18), the register and the baseline are shared-across-sections BY DESIGN, and what P-3 protects — no evidence path outside the instant — holds and is enforced per-commit by lint-evidence-paths.sh")"
   fi
 
   local bad skipped

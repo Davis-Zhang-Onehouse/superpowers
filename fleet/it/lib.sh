@@ -20,7 +20,45 @@ export PYTHONPATH="$INSTANT/src"
 RESULTS="${IT_RESULTS:-$IT_ROOT/RESULTS.tsv}"
 
 LIVE_SNAPSHOT="$IT_ROOT/live-stores.sha256"
-LIVE_TMUX_SNAPSHOT="$IT_ROOT/live-tmux-sessions.txt"
+#: The live-session baseline is keyed PER RUN (FB-60; FB-34 and FB-47 before it). It used to be this one
+#: `live-tmux-sessions.txt` per checkout, written only when absent and never advanced, so its horizon was
+#: "since anyone first ran IT in this slot" while every FAIL it raised says "during this section". In a leased
+#: slot that horizon spans lessees. A predecessor's `dt-` session harvested BETWEEN two runs FAILed
+#: `ISOLATION-*` in every section of every later run, which cost three instants in one day. And a `dt-`
+#: session born after that stale baseline could be killed inside a section with no alarm, because it was
+#: never in the baseline.
+#:
+#: A RUN is one runner process, or a group of runners an orchestrator deliberately joins: `lib.sh` mints
+#: `IT_RUN_ID` when none is inherited and does NOT export it, and `run-all.sh` exports the one it minted, so
+#: its runners share one id while a standalone section is a run of its own. Not exporting it here is
+#: deliberate (RV-25): `it_rebaseline_live_tmux` is used by sourcing this file into a shell, and an exported
+#: id would silently make every section later started from that shell one run, which brings FB-60 back. Within a run nothing
+#: changed: a `dt-` loss inside a section, or between two sections of one run, is still a FAIL
+#: (ISOLATION-ALL exists to see the second). Only the first check of a NEW run treats a `dt-` loss since
+#: the previous run's handover as the operator's, and it logs it (`it_establish_run_baseline`).
+#: Per-run FILES rather than a run stamp on one shared file: two concurrent runs in one slot would
+#: ping-pong a shared stamp, each check would look like a new run, and a session one of them killed would be
+#: forgiven.
+IT_RUN_ID="${IT_RUN_ID:-$(date -u +%Y%m%dT%H%M%SZ)-$$}"
+IT_RUN_ID="$(printf '%s' "$IT_RUN_ID" | tr -c 'A-Za-z0-9._-' '_')"
+LIVE_TMUX_SNAPSHOT="$IT_ROOT/live-tmux-sessions-run-$IT_RUN_ID.txt"
+#: The live set at the START of the most recent run in this checkout: what a new run's first check compares
+#: against. It keeps the old baseline's name, so a slot's pre-fix file is read as the first handover.
+LIVE_TMUX_HANDOVER="$IT_ROOT/live-tmux-sessions.txt"
+#: Written ONLY through this: two runs may read and write the handover at once, and a truncating `>` is
+#: observable empty mid-write, after which the between-runs check compares nothing (RV-28: a stress run saw
+#: 4699 empty reads in 6000 probes with `>`, 0 with tmp+mv). `mv` within one directory is an atomic rename.
+#: The evidence path an ISOLATION row cites: the snapshot the comparison actually used, which W1-7 and W1-11
+#: repoint into their own out/ directory (RV-29). Repo-relative under $IT_ROOT, absolute otherwise.
+it_tmux_snapshot_evidence() {
+  case "$LIVE_TMUX_SNAPSHOT" in
+    "$IT_ROOT"/*) printf 'fleet/it/%s' "${LIVE_TMUX_SNAPSHOT#"$IT_ROOT"/}" ;;
+    *)            printf '%s' "$LIVE_TMUX_SNAPSHOT" ;;
+  esac
+}
+it_write_handover() {   # it_write_handover <session-set>
+  printf '%s\n' "$1" > "$LIVE_TMUX_HANDOVER.tmp.$$" && mv -f "$LIVE_TMUX_HANDOVER.tmp.$$" "$LIVE_TMUX_HANDOVER"
+}
 #: The THIRD live resource this harness can damage, and the one `it_assert_isolation` could not see.
 #: `I2-11`/`FI-196`: `it_section` sandboxes FLEET_HOME and the tmux server, so the record store and the
 #: session set were both provably isolated — and every `fleet init` still wrote its FOLDER into whatever
@@ -417,17 +455,26 @@ it_classify_claude_delta() {    # it_classify_claude_delta <before-pids> <after-
 # a row naming who, why, and exactly what moved. An unexplained baseline change is then visible as a missing
 # row rather than as nothing at all, which is the whole "absence is never success" discipline applied to the
 # control's own maintenance.
+# One row of `live-tmux-rebaselines.tsv`: who/why, and exactly what moved. Shared by the manual re-baseline
+# below and the automatic one a new run performs (`it_establish_run_baseline`), so both leave the same trail.
+it_log_rebaseline() {   # it_log_rebaseline <reason> <before-set> <after-set>; prints "<removed>|<added>"
+  local log="$IT_ROOT/live-tmux-rebaselines.tsv" removed added
+  removed="$(comm -23 <(printf '%s\n' "$2" | sort) <(printf '%s\n' "$3" | sort) | grep -v '^$' | tr '\n' ' ')"
+  added="$(comm -13 <(printf '%s\n' "$2" | sort) <(printf '%s\n' "$3" | sort) | grep -v '^$' | tr '\n' ' ')"
+  [ -f "$log" ] || printf 'when\treason\tremoved\tadded\n' > "$log"
+  printf '%s\t%s\t%s\t%s\n' "$(date -u +%Y-%m-%dT%H:%M:%SZ)" "$1" "${removed:-none}" "${added:-none}" >> "$log"
+  printf '%s|%s\n' "${removed:-none}" "${added:-none}"
+}
+
 it_rebaseline_live_tmux() {     # it_rebaseline_live_tmux <reason>
   local reason="${1:?a re-baseline needs a reason — an unexplained one destroys the control}"
-  local log="$IT_ROOT/live-tmux-rebaselines.tsv" now before after removed added
-  now="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+  local before after moved removed added
   before="$([ -f "$LIVE_TMUX_SNAPSHOT" ] && cat "$LIVE_TMUX_SNAPSHOT" || echo)"
   after="$(it_live_tmux_sessions)"
-  removed="$(comm -23 <(printf '%s\n' "$before") <(printf '%s\n' "$after") | tr '\n' ' ')"
-  added="$(comm -13 <(printf '%s\n' "$before") <(printf '%s\n' "$after") | tr '\n' ' ')"
-  [ -f "$log" ] || printf 'when\treason\tremoved\tadded\n' > "$log"
-  printf '%s\t%s\t%s\t%s\n' "$now" "$reason" "${removed:-none}" "${added:-none}" >> "$log"
+  moved="$(it_log_rebaseline "$reason" "$before" "$after")"
+  removed="${moved%%|*}"; added="${moved#*|}"
   printf '%s\n' "$after" > "$LIVE_TMUX_SNAPSHOT"
+  it_write_handover "$after"
   printf 'live-tmux baseline re-established (%s sessions). removed:%s added:%s\n' \
          "$(printf '%s' "$after" | grep -c .)" "${removed:-none}" "${added:-none}"
 }
@@ -445,8 +492,13 @@ it_rebaseline_live_tmux() {     # it_rebaseline_live_tmux <reason>
 # The asymmetry is INVERTED from the claude check, and deliberately. There, an ADDITION is the violation
 # (a section spawned a process). Here, a REMOVAL is (the product killed live work), while an addition can
 # only be ours if it carries our own prefix.
-it_classify_session_delta() {   # it_classify_session_delta <baseline> <after>
-  local baseline="$1" after="$2" appeared vanished leaked killed
+#
+# `between-runs` (third argument) is for ONE caller: a run's first check, comparing against the previous
+# run's handover (`it_establish_run_baseline`). There a vanished `dt-` session was lost while no run of
+# this checkout was in progress, so it becomes a NOTE. A harness-prefixed name stays a FAIL in that mode:
+# an `itfleet-` session on the default server is a defect whichever run left it.
+it_classify_session_delta() {   # it_classify_session_delta <baseline> <after> [between-runs]
+  local baseline="$1" after="$2" mode="${3:-}" appeared vanished leaked killed
   appeared="$(comm -13 <(printf '%s\n' "$baseline" | sort) <(printf '%s\n' "$after" | sort) | grep -v '^$')"
   vanished="$(comm -23 <(printf '%s\n' "$baseline" | sort) <(printf '%s\n' "$after" | sort) | grep -v '^$')"
 
@@ -474,6 +526,11 @@ it_classify_session_delta() {   # it_classify_session_delta <baseline> <after>
   if [ -n "${stray// /}" ]; then
     printf 'FAIL|a harness-prefixed session was in the live baseline and is now gone: %s. The harness never creates one on the default server, so either it leaked there and was cleaned up, or the baseline is a fiction — both are failures.\n' \
       "$stray"
+    return 0
+  fi
+  if [ -n "${killed// /}" ] && [ "$mode" = between-runs ]; then
+    printf 'NOTE|a dt- session disappeared BETWEEN runs — after the previous run began and before this run'"'"'s first check, so it is not charged to this run: %s. appeared=[%s] vanished=[%s].\n' \
+      "$killed" "$(printf '%s' "$appeared" | tr '\n' ' ')" "$(printf '%s' "$vanished" | tr '\n' ' ')"
     return 0
   fi
   if [ -n "${killed// /}" ]; then
@@ -608,6 +665,59 @@ $vanished"
   printf 'OK|live instants trees byte-identical\n'
 }
 
+# A run's FIRST tmux check: write this run's own baseline, then judge the handover → now delta, i.e. what
+# happened on the live server while no check of THIS run could see it.
+#
+#   no handover  — this checkout has never run IT: ESTABLISHED, a SKIP (it compared nothing).
+#   OK / NOTE    — PASS. A `dt-` loss is the operator's (a harvest between runs), named on the row and logged
+#                  to `live-tmux-rebaselines.tsv` like a manual re-baseline, so it can never be silent. The
+#                  handover advances to now.
+#   FAIL         — a harness-prefixed session leaked onto, or vanished from, the default server. The handover
+#                  does NOT advance, so every later run fails here too until somebody clears it: the alarm
+#                  stays loud across runs, while this run's later checks judge only this run.
+it_establish_run_baseline() {   # it_establish_run_baseline <tag> <sessions> <note-prefix>
+  local tag="$1" sessions="$2" prefix="$3" handover classified verdict detail count
+  printf '%s\n' "$sessions" > "$LIVE_TMUX_SNAPSHOT"
+  # Other runs' files, once no run can still be using them: a full gate run takes ~45 minutes, a day is ample.
+  find "$IT_ROOT" -maxdepth 1 -name 'live-tmux-sessions-run-*.txt' -mmin +1440 -delete 2>/dev/null
+  count="$(printf '%s' "$sessions" | grep -c . )"
+  if [ ! -f "$LIVE_TMUX_HANDOVER" ]; then
+    # Even with nothing to compare against, a harness-prefixed session on the default server is a leak, and
+    # it must never be written INTO the handover: once it was cleaned up, every later run would FAIL on its
+    # ghost with no session left to clear (RV-26). An empty baseline makes every live name "appeared".
+    classified="$(it_classify_session_delta "" "$sessions" between-runs)"
+    if [ "${classified%%|*}" = FAIL ]; then
+      it_fail "ISOLATION-$tag" "$(it_tmux_snapshot_evidence)" \
+              "${prefix}run $IT_RUN_ID's first check, with no earlier handover: ${classified#*|} No handover is written until it is gone."
+      return 1
+    fi
+    it_write_handover "$sessions"
+    # Not a PASS. This call ESTABLISHED the baseline and therefore compared nothing, and a baseline-setting
+    # call reported as a pass is the "absence is never success" defect wearing the harness's own badge.
+    it_skip "ISOLATION-$tag" "$(it_tmux_snapshot_evidence)" \
+            "${prefix}live-session baseline ESTABLISHED on this call ($count sessions; no earlier run left a handover), so the tmux comparison is vacuous here; it binds from the next call on"
+    return 0
+  fi
+  handover="$(cat "$LIVE_TMUX_HANDOVER")"
+  classified="$(it_classify_session_delta "$handover" "$sessions" between-runs)"
+  verdict="${classified%%|*}"; detail="${classified#*|}"
+  if [ "$verdict" = FAIL ]; then
+    it_fail "ISOLATION-$tag" "fleet/it/live-tmux-sessions.txt" \
+            "${prefix}run $IT_RUN_ID's first check, against the previous run's handover: ${detail} The handover is NOT advanced past it, so every run fails here until it is resolved: kill a harness session that is still on the default server, or, if the named session is already gone, re-baseline with it_rebaseline_live_tmux <reason>."
+    return 1
+  fi
+  it_write_handover "$sessions"
+  if [ "$verdict" = NOTE ]; then
+    it_log_rebaseline "run $IT_RUN_ID began: baseline re-established from the previous run's handover (automatic, FB-60)" \
+                      "$handover" "$sessions" >/dev/null
+    it_pass "ISOLATION-$tag" "fleet/it/live-tmux-rebaselines.tsv" \
+            "${prefix}live-session baseline RE-ESTABLISHED for run $IT_RUN_ID ($count sessions): ${detail}"
+    return 0
+  fi
+  it_pass "ISOLATION-$tag" "" \
+          "${prefix}live-session baseline established for run $IT_RUN_ID; the live set is byte-identical to the previous run's handover ($count sessions)"
+}
+
 it_assert_isolation() {
   local tag="$1" now sessions
   now="$( { find ~/.claude-dispatch-board ~/.claude-ws-pool -type f -print0 2>/dev/null | sort -z | xargs -0 sha256sum; } )"
@@ -675,24 +785,20 @@ it_assert_isolation() {
     tmux ls 2>/dev/null | grep '^dt-' > "$IT_ROOT/dt-sessions-seen${SECTION:+-$SECTION}.txt"
   fi
   if [ ! -f "$LIVE_TMUX_SNAPSHOT" ]; then
-    printf '%s\n' "$sessions" > "$LIVE_TMUX_SNAPSHOT"
-    # Not a PASS. This call ESTABLISHED the baseline and therefore compared nothing, and a baseline-setting
-    # call reported as a pass is the "absence is never success" defect wearing the harness's own badge.
-    it_skip "ISOLATION-$tag" "fleet/it/live-tmux-sessions.txt" \
-            "${stores_note}${instants_note}live-session baseline ESTABLISHED on this call ($(printf '%s' "$sessions" | grep -c . ) sessions), so the tmux comparison is vacuous here; it binds from the next call on"
-    return 0
+    it_establish_run_baseline "$tag" "$sessions" "${stores_note}${instants_note}"
+    return $?
   fi
   local classified verdict detail
   classified="$(it_classify_session_delta "$(cat "$LIVE_TMUX_SNAPSHOT")" "$sessions")"
   verdict="${classified%%|*}"; detail="${classified#*|}"
   if [ "$verdict" = FAIL ]; then
-    it_fail "ISOLATION-$tag" "fleet/it/live-tmux-sessions.txt" "${stores_note}${instants_note}${detail}"
+    it_fail "ISOLATION-$tag" "$(it_tmux_snapshot_evidence)" "${stores_note}${instants_note}${detail}"
     return 1
   fi
   if [ "$verdict" = NOTE ]; then
     # Recorded on the PASS row rather than swallowed: the run stays attributable, and `verify` reads this
     # to decide between RED and INCONCLUSIVE.
-    it_pass "ISOLATION-$tag" "fleet/it/live-tmux-sessions.txt" "${stores_note}${instants_note}${detail}"
+    it_pass "ISOLATION-$tag" "$(it_tmux_snapshot_evidence)" "${stores_note}${instants_note}${detail}"
     return 0
   fi
   it_pass "ISOLATION-$tag" "" \

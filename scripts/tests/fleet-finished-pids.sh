@@ -138,7 +138,7 @@ check "exactly one pid in total" "1" "$(printf '%s\n' "$out" | grep -c '^[0-9][0
 # --- the contract's edges --------------------------------------------------------------------------
 bash "$SHIM" >/dev/null 2>&1; check "no argument exits 2" "2" "$?"
 bash "$SHIM" --nonsense >/dev/null 2>&1; check "an unknown argument exits 2" "2" "$?"
-FLEET_BIN=/nonexistent/fleet bash "$SHIM" --finished-pids >"$TMP/nofleet.out" 2>/dev/null
+FLEET_LAUNCHER_TEST_BIN=/nonexistent/fleet bash "$SHIM" --finished-pids >"$TMP/nofleet.out" 2>/dev/null
 check "no fleet binary exits 0" "0" "$?"
 check "no fleet binary prints nothing" "" "$(cat "$TMP/nofleet.out")"
 

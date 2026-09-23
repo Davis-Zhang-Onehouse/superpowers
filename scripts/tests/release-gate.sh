@@ -104,12 +104,12 @@ chmod +x "$STUB"
 
 run_gate() { # run_gate <version> [gate-args...]
   local version="$1"; shift
-  # RELEASE_GATE_POLL is the gate's own poll-interval seam (documented next to FLEET_BIN in
+  # RELEASE_GATE_POLL is the gate's own poll-interval seam (documented next to FLEET_LAUNCHER_TEST_BIN in
   # release-gate.sh): production polls every 30s, which would make this test's own wait loop race a
   # near-instant stub into a real 30s sleep on every case that loses the race -- observed making one
   # otherwise-sub-second run take 90s. A short interval here does not change what is being tested, only
   # how long the test waits to observe it.
-  FLEET_BIN="$STUB" RELEASE_GATE_POLL=0.05 bash "$GATE" "$version" "$@"
+  FLEET_LAUNCHER_TEST_BIN="$STUB" RELEASE_GATE_POLL=0.05 bash "$GATE" "$version" "$@"
 }
 
 # --- structural properties: read from the script's own source, not its behaviour --------------------
@@ -263,7 +263,7 @@ run_gate 1.0.0 --bogus >/dev/null 2>&1
 check "an unknown argument exits 2" "2" "$?"
 
 # --- fleet binary not executable: exit 2 -----------------------------------------------------------------
-FLEET_BIN="$TMP/no-such-fleet" bash "$GATE" 1.0.0 >/dev/null 2>&1
+FLEET_LAUNCHER_TEST_BIN="$TMP/no-such-fleet" bash "$GATE" 1.0.0 >/dev/null 2>&1
 check "a non-executable fleet binary exits 2" "2" "$?"
 
 if [ "$fails" = 0 ]; then
