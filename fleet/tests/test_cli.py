@@ -6934,6 +6934,24 @@ class TestB11RefusalsNameARouteThatRuns(CliCase):
         self.assertIn("clears when:", self.refusal(err), err)
         self.assertIn("fleet reap", self.refusal(err), err)
 
+    def test_an_override_with_an_interrupted_claim_names_it_rather_than_calling_it_leased(self):
+        """RV-25. `free_slots()` also excludes a slot holding an INTERRUPTED claim (a claim directory with no
+        lease body), so "every enrolled slot is leased" was false there, and its reap is its own route."""
+        fleet = self.loaded()
+        free = list(fleet.pool.free_slots())
+        (fleet.home / "pool" / "leases" / free[0]).mkdir(parents=True)
+        for slot in free[1:]:
+            fleet.pool.claim(todo_id=f"filler-{slot}", tmux=f"dt-{slot}", base_instant=FRESH_BASE,
+                             child_instant=f"/filler/{slot}", slot=slot)
+        self.assertEqual([], fleet.pool.free_slots(), "the pool is not full, so this case is vacuous")
+        code, out, err = fleet.run(["dispatch", "--profile", str(fleet.profile("worker")), "--title", "nowhere",
+                                    "--base", FRESH_BASE_DIGITS, "--optype", "append", "--override", "go"])
+        self.assertEqual(EXIT_NO_CAPACITY, code, err)
+        said = self.refusal(err)
+        self.assertNotIn("every enrolled slot is leased", said, said)
+        self.assertIn(f"interrupted claim", said, said)
+        self.assertIn(free[0], said, said)
+
     def test_an_override_into_a_full_pool_dry_run_answers_the_same(self):
         code, out, err = self._override_into_a_full_pool("--dry-run")
         self.assertEqual(EXIT_NO_CAPACITY, code, err)

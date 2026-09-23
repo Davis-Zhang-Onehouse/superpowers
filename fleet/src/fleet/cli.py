@@ -1810,11 +1810,18 @@ def _do_dispatch(ctx: Ctx, parsed: Parsed) -> int:
             #: `FB-86`. Reachable only under `--override`, which makes `pool-capacity` pass with the rest; it
             #: was `free_slots()[0]` and an IndexError out of `main`. An override waives RULES — it cannot
             #: make a slot — so this is the capacity answer `PoolCapacity` itself gives, real and dry-run.
+            #: RV-25. `free_slots()` also excludes a slot holding an INTERRUPTED claim, so "leased" is not
+            #: the whole truth, and that claim has its own route.
+            interrupted = [slot for slot, _ in ctx.pool.interrupted_claims(min_age_s=0.0)]
+            enrolled = ", ".join(ctx.pool.slots())
             raise NoCapacity(
-                f"--override waives admission rules, but it cannot create a slot: every enrolled slot is "
-                f"leased ({', '.join(ctx.pool.slots()) or 'none is enrolled'}).",
-                clears_when="a lease is released, a stale lease is reaped (`fleet reap --base <its base>`), "
-                            "or another workspace is enrolled (`fleet enroll --slot <path>`)",
+                f"--override waives admission rules, but it cannot create a slot: no slot is free "
+                f"({'enrolled: ' + enrolled if enrolled else 'none is enrolled'})"
+                + (f"; {', '.join(interrupted)} hold an interrupted claim (a claim with no lease body — a "
+                   f"dead writer, not work in progress)" if interrupted else "") + ".",
+                clears_when="a lease is released, a stale lease or an interrupted claim is reaped (`fleet reap "
+                            "--base <its base>`; `fleet reap --all` for a claim no base owns), or another "
+                            "workspace is enrolled (`fleet enroll --slot <path>`)",
                 clears_who="the base owning a stale lease, or the operator")
         settings = ctx.launch_settings(ctx.sessions.runtime, ctx.pool.slot_path(candidate_slot))
 
