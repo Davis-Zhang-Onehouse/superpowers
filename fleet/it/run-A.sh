@@ -110,17 +110,25 @@ A_INHERITED_STORES="$(printf '%s\n' "${FLEET_ROOT:+$FLEET_ROOT/.fleet}" "${FLEET
 
 # --- A0 — the live-session baseline this run inherited ----------------------------------------------
 #
-#: Not a Plan 6 case. It exists because `it_assert_isolation` compares the live session set against a
-#: PERSISTED baseline (`live-tmux-sessions.txt`) with no re-baselining path, so any legitimate operator
-#: change between two runs is reported as this run's contamination. Recording the drift BEFORE §A does
-#: anything is what separates "§A moved a session" from "a session moved before §A started".
+#: Not a Plan 6 case. It records the drift BEFORE §A does anything, which is what separates "§A moved a
+#: session" from "a session moved before §A started". The baseline §A inherits is its RUN's (FB-60): the
+#: per-run file when an orchestrator such as run-all.sh already established one, otherwise the handover the
+#: previous run left, which ISOLATION-A-enter then re-establishes from (a `dt-` loss between runs is a NOTE
+#: there, not a FAIL). With neither there is nothing to compare, and that is said rather than passed. A
+#: missing file must never reach `diff`, whose empty stdout would read as "no drift".
 a0_baseline_drift() {
-  local drift; drift="$(diff "$LIVE_TMUX_SNAPSHOT" "$A_LIVE_BEFORE" | grep '^[<>]' | tr '\n' ' ')"
-  cp "$LIVE_TMUX_SNAPSHOT" "$OUT/live-sessions-baseline.txt"
+  local inherited="$LIVE_TMUX_SNAPSHOT" which="this run's baseline" drift
+  [ -f "$inherited" ] || { inherited="$LIVE_TMUX_HANDOVER"; which="the previous run's handover"; }
+  if [ ! -f "$inherited" ]; then
+    a_skip A0 "$A_LIVE_BEFORE" "$(sq "no live-session baseline exists yet (no run has left a handover in this checkout), so there is no drift to measure; ISOLATION-A-enter establishes one")"
+    return
+  fi
+  drift="$(diff "$inherited" "$A_LIVE_BEFORE" | grep '^[<>]' | tr '\n' ' ')"
+  cp "$inherited" "$OUT/live-sessions-baseline.txt"
   if [ -z "$drift" ]; then
-    a_pass A0 "$A_LIVE_BEFORE" "$(sq "the live session set at §A t0 is byte-identical to the recorded baseline ($(grep -c . "$A_LIVE_BEFORE") sessions), so ISOLATION-A-enter compares a current baseline")"
+    a_pass A0 "$A_LIVE_BEFORE" "$(sq "the live session set at §A t0 is byte-identical to $which ($(grep -c . "$A_LIVE_BEFORE") sessions), so ISOLATION-A-enter compares a current baseline")"
   else
-    a_skip A0 "$A_LIVE_BEFORE" "$(sq "NOT A §A CASE and NOT §A's doing: the live session set already differed from the recorded baseline BEFORE §A ran a single command — $drift. Measured at t0, ahead of it_section, so ISOLATION-A-enter's FAIL below is inherited drift, not contamination by §A. lib.sh offers no re-baselining path (REPORTED: a file this runner does not own)")"
+    a_skip A0 "$A_LIVE_BEFORE" "$(sq "NOT A §A CASE and NOT §A's doing: the live session set already differed from $which BEFORE §A ran a single command — $drift. Measured at t0, ahead of it_section. Against a handover, ISOLATION-A-enter re-establishes and a dt- loss is a NOTE there; against this run's own baseline it is a FAIL there, charged to the run, not to §A")"
   fi
 }
 a0_baseline_drift

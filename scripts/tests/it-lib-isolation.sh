@@ -50,6 +50,24 @@ case "$out" in 'FAIL|'*itfleet-W1-ghost*) note "ok   the vanished harness sessio
 out="$(classify $'dt-live\nzsh' $'zsh')"
 check "a dt- session disappearing is a FAIL" "FAIL" "${out%%|*}"
 
+# --- `between-runs`: a run's FIRST check against the previous run's handover (FB-60) --------------------
+# A dt- session lost while no run was in progress is a NOTE there, and ONLY there: the call above, with the
+# same sets and no mode, is still a FAIL. The harness-prefixed rules do not relax in this mode.
+classify_between() {
+  BASELINE="$1" AFTER="$2" TMUX_PREFIX="itfleet-B" bash -c '
+    . "'"$REPO"'/fleet/it/lib.sh" 2>/dev/null || true
+    it_classify_session_delta "$BASELINE" "$AFTER" between-runs
+  '
+}
+out="$(classify_between $'dt-live\nzsh' $'zsh')"
+check "between runs, a dt- session disappearing is a NOTE" "NOTE" "${out%%|*}"
+case "$out" in 'NOTE|'*BETWEEN*dt-live*) note "ok   the between-runs note names the session" ;;
+               *) note "FAIL the between-runs note does not name the session: $out"; fails=1 ;; esac
+out="$(classify_between $'dt-live\nzsh' $'dt-live\nitfleet-B-worker\nzsh')"
+check "between runs, an IT-prefixed session appearing is still a LEAK" "FAIL" "${out%%|*}"
+out="$(classify_between $'dt-live\nitfleet-W1-ghost\nzsh' $'zsh')"
+check "between runs, a harness-prefixed session vanishing is still a FAIL" "FAIL" "${out%%|*}"
+
 # --- a non-dt session disappearing is a note ---------------------------------------------------------
 out="$(classify $'dt-live\nzsh' $'dt-live')"
 check "a non-dt session disappearing is a NOTE" "NOTE" "${out%%|*}"
@@ -117,7 +135,7 @@ out="$(leakcheck $'dt-mine-extra\nzsh' $'dt-mine')"
 check "a longer live name is not a prefix match for a private one" "PASS" "${out%%|*}"
 
 if [ "$fails" = 0 ]; then
-  echo "PASS: it_classify_session_delta fails on a harness leak and on a vanished dt- session and reports foreign churn as a note; it_assert_no_private_leak catches by EXACT NAME the dt- leak the classifier cannot see"
+  echo "PASS: it_classify_session_delta fails on a harness leak and on a vanished dt- session (a NOTE only between runs) and reports foreign churn as a note; it_assert_no_private_leak catches by EXACT NAME the dt- leak the classifier cannot see"
   exit 0
 fi
 echo FAIL

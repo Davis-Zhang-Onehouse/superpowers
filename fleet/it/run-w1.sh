@@ -262,7 +262,8 @@ mkdir -p "$OUT/w1-11"
   # shellcheck disable=SC2034  # lib.sh reads this when resolving ambient instants
   IT_AMBIENT_INSTANTS="$W11_LIVE"
   LIVE_INSTANTS_SNAPSHOT="$OUT/w1-11/instants-baseline.txt"; rm -f "$LIVE_INSTANTS_SNAPSHOT"
-  LIVE_TMUX_SNAPSHOT="$OUT/w1-11/tmux-baseline.txt"; cp "$IT_ROOT/live-tmux-sessions.txt" "$LIVE_TMUX_SNAPSHOT"
+  LIVE_TMUX_SNAPSHOT_REAL="$LIVE_TMUX_SNAPSHOT"   # this run's own baseline (FB-60: per run), set by it_section above
+  LIVE_TMUX_SNAPSHOT="$OUT/w1-11/tmux-baseline.txt"; cp "$LIVE_TMUX_SNAPSHOT_REAL" "$LIVE_TMUX_SNAPSHOT"
   LIVE_SNAPSHOT="$OUT/w1-11/stores-baseline.sha256"; cp "$IT_ROOT/live-stores.sha256" "$LIVE_SNAPSHOT"
 
   it_assert_isolation W1-11-baseline >/dev/null 2>&1     # establishes over the EMPTY pretend tree
