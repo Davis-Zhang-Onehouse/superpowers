@@ -2037,8 +2037,10 @@ def _watcher_for_claim(ctx: Ctx, child: Path, attested=None) -> tuple:
         clears_who="the declaring instant")
 
 
-#: `FB-58`. How an attestation names the process whose exit ends the wait: `pid:<n>` or `pid=<n>`.
-_PID_HANDLE = re.compile(r"\bpid\s*[:=]\s*(\d+)\b", re.IGNORECASE)
+#: `FB-58`. How an attestation names the process whose exit ends the wait: `pid:<n>` or `pid=<n>`. Group 2
+#: captures further bare integers straight after it (`pid:4242 4243`, `pid=4242,4243`) — `RV-C1`: that is what
+#: `pid:$(pgrep ...)` produces when several processes match, and only the first would carry the prefix.
+_PID_HANDLE = re.compile(r"\bpid\s*[:=]\s*(\d+)\b((?:[\s,]+\d+(?=[\s,]|$))*)", re.IGNORECASE)
 
 
 def _attested_pid_handle(attested) -> dict | None:
@@ -2052,7 +2054,9 @@ def _attested_pid_handle(attested) -> dict | None:
     that has already exited attests to nothing — or when two are named, because the reader could only guess
     which one's exit ends the wait. A pid that cannot be read is refused too: the claim is made from this
     host, about this host's process, and a handle nobody can check buys nothing over the free text."""
-    pids = sorted({int(m) for m in _PID_HANDLE.findall(str(attested))})
+    matches = _PID_HANDLE.findall(str(attested))
+    pids = sorted({int(first) for first, _ in matches}
+                  | {int(extra) for _, more in matches for extra in re.findall(r"\d+", more)})
     if not pids:
         return None
     if len(pids) > 1:

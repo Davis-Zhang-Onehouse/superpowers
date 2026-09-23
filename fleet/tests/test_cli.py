@@ -5389,6 +5389,34 @@ class TestAwaitingCiRequiresALiveWatcher(CliCase):
 
         self.assertEqual(EXIT_BAD_INPUT, code, out)
 
+    def test_a_pid_handle_followed_by_more_pids_is_ambiguous_and_refused(self):
+        """`RV-C1`. `--watcher "gate pid:$(pgrep -f gate)"` puts several pids on separate lines, and only the
+        first carries the prefix; the claim normalises whitespace, so it reads `pid:4242 4243`. Taking the first
+        silently would accept exactly the ambiguity the two-pid refusal exists for."""
+        root = self._proc(4242)
+        (root / "4243").mkdir()
+        (root / "4243" / "stat").write_text((root / "4242" / "stat").read_text().replace("4242", "4243", 1))
+        fleet = self.loaded()
+        ready = self._ready(fleet, BUSY_PANE)
+
+        for text in ("gate pid:4242\n4243", "gate pid:4242 4243", "gate pid=4242,4243"):
+            code, out, err = fleet.run(["declare", "--instant", ready, "--phase", "awaiting-ci",
+                                        "--watcher", text])
+            self.assertEqual(EXIT_BAD_INPUT, code, f"{text!r} was accepted: {out!r}")
+
+    def test_a_pid_handle_followed_by_words_or_a_time_is_one_pid(self):
+        """The neighbours `RV-C1`'s refusal must not turn away: text after the handle that is not another bare
+        integer — a label, a clock time — names one pid."""
+        self._proc(4242)
+        fleet = self.loaded()
+        ready = self._ready(fleet, BUSY_PANE)
+
+        for text in ("gate pid:4242 (release gate)", "gate pid:4242 started 09:30", "pid=4242"):
+            code, out, err = fleet.run(["declare", "--instant", ready, "--phase", "awaiting-ci",
+                                        "--watcher", text])
+            self.assertEqual(EXIT_OK, code, f"{text!r} was refused: {out!r} {err!r}")
+            self.assertEqual(4242, Declarations(fleet.paths["readyWorker"]).watcher_pid()["pid"])
+
     def test_a_free_text_attestation_is_told_nothing_rechecks_it(self):
         """FB-58's second half: without a handle fleet cannot tell when the watcher ends, so the claim says
         so AT the claim — name a pid, or re-declare when it ends — instead of the charter having to."""
