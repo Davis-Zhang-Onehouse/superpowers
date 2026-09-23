@@ -1359,7 +1359,7 @@ def runtime_blockers(ctx: Ctx) -> list[str]:
     for session in ctx.sessions.live():
         if getattr(session, "unreadable", False):
             #: FB-54: a pane may now NAME it, but its binary and cwd are still unknown — a blocker either way.
-            where = (f"in session {session.name}, its binary and cwd unreadable" if session.name
+            where = (f"in session {session.name}, a /proc read of it failed" if session.name
                      else "cannot be attributed")
             blockers.append(f"unreadable {session.runtime} process {session.pid} ({where})")
             continue

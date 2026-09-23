@@ -285,9 +285,11 @@ def _worker_subject(rec, pool, sessions, instants_dir: Path, idle_after_s: int, 
         on_pane = False
     unreadable = sess is not None and getattr(sess, "unreadable", False)
     if unreadable:
-        #: FB-54. This record's session, placed by its pane through `stat`; what `/proc` refused is said, not hidden.
-        note = (f"{note}; " if note else "") + (f"this record's session, unreadable: its process {sess.pid} "
-                                                f"refused exe/cwd, and was placed by the pane that owns it")
+        #: FB-54. This record's session, placed by its pane through `stat`; that `/proc` failed is said, not hidden. Which
+        #: read failed is not kept on the row, so the text does not guess (RV-24).
+        note = (f"{note}; " if note else "") + (f"this record's session, unreadable: its process {sess.pid} could "
+                                                f"not be read (a /proc read of it failed), and was placed by the "
+                                                f"pane that owns it")
     attachment = sessions.attachment(rec.tmux) if (live and rec.tmux) else None
     #: `RV-32`. ONE clock read for the attachment, so the note and `evidence.attached` state one age.
     now = time.time()
@@ -317,7 +319,7 @@ def _worker_subject(rec, pool, sessions, instants_dir: Path, idle_after_s: int, 
         "tmux_socket": rec.tmux_socket,
         "asked_server": getattr(sessions, "socket", "") or "",
         "pid": str(sess.pid) if sess is not None else (str(holder) if holder else ""),
-        #: FB-54. `unreadable` when the process holding this record's pane refused `exe`/`cwd`; "" otherwise.
+        #: FB-54. `unreadable` when a `/proc` read of the process holding this record's pane failed; "" otherwise.
         "process": "unreadable" if unreadable else "",
         "slot": rec.slot if holds else "",
         #: `SI-27`. Joined here rather than looked up per view, so `board` and `status` cannot disagree
@@ -659,7 +661,7 @@ def _unknown_subject(sess, slot: str):
         #: FB-54. Say WHY it cannot be placed further, so "no record claims it" is not read as "nothing is there".
         where = (f"placed by the tmux pane of session {sess.name}" if sess.name
                  else "no tmux pane on this server owns it or any ancestor, so it cannot be placed")
-        note = (f"its process {sess.pid} could not be read (exe/cwd refused) and is {where}; " + note)
+        note = (f"its process {sess.pid} could not be read (a /proc read of it failed) and is {where}; " + note)
     return Subject(kind=KIND_UNKNOWN, identity=f"session:{label}:{sess.pid}",
                    state=UNKNOWN_SESSION, holds_slot=bool(slot), evidence=evidence, note=note)
 
