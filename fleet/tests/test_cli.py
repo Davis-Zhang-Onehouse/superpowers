@@ -5345,7 +5345,7 @@ class TestAwaitingCiRequiresALiveWatcher(CliCase):
             (root / str(pid)).mkdir()
             fields = [state] + ["0"] * 18 + [start, "0", "0"]
             (root / str(pid) / "stat").write_text(f"{pid} (gate) " + " ".join(fields) + "\n")
-        patcher = mock.patch("fleet.reconcile.PROC_ROOT", root, create=True)
+        patcher = mock.patch("fleet.reconcile.PROC_ROOT", root)
         patcher.start()
         self.addCleanup(patcher.stop)
         return root

@@ -965,13 +965,13 @@ class TestNeedsAHumanUsesKnownFacts(unittest.TestCase):
         self.assertEqual(subject.note, "", f"an empty folder name reached the note: {subject.note!r}")
 
 
-def _fake_proc(root, pid, state="S", start="777"):
+def _fake_proc(root, pid, state="S", start="777", comm="release gate"):
     """A `/proc/<pid>/stat` in a private tree, so no case here starts or kills a process (module docstring).
     Twenty-two fields: `state` is field 3 and `starttime` field 22, the two `reconcile` reads."""
     d = pathlib.Path(root) / str(pid)
     d.mkdir(parents=True, exist_ok=True)
     after_comm = [state] + ["0"] * 18 + [start, "0", "0"]      # index 0 is field 3, index 19 is field 22
-    (d / "stat").write_text(f"{pid} (release gate) " + " ".join(after_comm) + "\n")
+    (d / "stat").write_text(f"{pid} ({comm}) " + " ".join(after_comm) + "\n")
 
 
 def _declare_json(path, **fields):
@@ -996,7 +996,7 @@ class TestTheWatcherIsClassifiedFromWhatIsTrue(unittest.TestCase):
         self.fleet = SyntheticFleet()
         self.proc = pathlib.Path(tempfile.mkdtemp()) / "proc"
         self.proc.mkdir()
-        patcher = mock.patch("fleet.reconcile.PROC_ROOT", self.proc, create=True)
+        patcher = mock.patch("fleet.reconcile.PROC_ROOT", self.proc)
         patcher.start()
         self.addCleanup(patcher.stop)
 
@@ -1113,6 +1113,18 @@ class TestTheWatcherIsClassifiedFromWhatIsTrue(unittest.TestCase):
         self.assertEqual(subject.state, AWAITING_CI, f"{subject.state}: {subject.note!r}")
         self.assertIn("ATTESTED", subject.note)
         self.assertIn("running", subject.note)
+
+    def test_a_command_name_with_parentheses_and_spaces_is_parsed_after_the_last_paren(self):
+        """`RV-C6`. The comm field is free text: `sleep) Z 1 (x` would put a fake `Z` where a first-`)` split
+        reads the state, and call a running watcher a zombie."""
+        _fake_proc(self.proc, 4249, start="777", comm="gate) Z 1 (x")
+        self.ci_worker("parencomm-07300633", "dt-parencomm", 5333,
+                       watchers="attested: gate pid:4249", watcher_pid={"pid": 4249, "start": "777"})
+
+        subject = self.subjects()["parencomm-07300633"]
+
+        self.assertEqual(subject.state, AWAITING_CI, f"{subject.state}: {subject.note!r}")
+        self.assertIn("pid 4249 is running", subject.note)
 
     def test_an_unreadable_attested_pid_is_not_measured(self):
         """A read that FAILED is not a read that found nothing (`FI-7`): the attestation stands."""
