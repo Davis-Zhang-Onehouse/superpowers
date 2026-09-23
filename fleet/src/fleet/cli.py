@@ -3173,9 +3173,12 @@ def _slot_gate_before_kill(ctx: Ctx, record, child: Path, verb: str) -> str:
     bounded wait `_release_slot_or_name_the_partial_state` gives it. A dead session spares nothing.
 
     Returns a note (a row for the dry-run) when the holders could not be attributed — a live session
-    whose pane pid or parent walk cannot be read — because refusing on a probe gap would block every abort,
-    and passing silently would be the dry-run claiming what it did not measure. The real call then keeps
-    the post-kill path, which names the partial state if a holder remains.
+    whose pane pids or parent walk cannot be read — because refusing on a probe gap would block every abort,
+    and passing silently would be the dry-run claiming what it did not measure. The real call then goes on
+    to its own post-kill release, which differs by verb (`RV-22`): `abort` waits once more and names the
+    partial state (`_release_slot_or_name_the_partial_state`); `harvest --id` calls `pool.release` with no
+    wait, after it has already applied, killed and stamped, so a holder that survives the kill there still
+    refuses from a partial state (the one `reap` recovers).
     """
     import time
 
