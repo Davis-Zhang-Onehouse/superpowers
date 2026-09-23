@@ -48,13 +48,14 @@ Liveness and cwd-holding arrive as injected callables, so this module spawns no 
 describe a whole fleet without owning one. `pool` is a leaf: it imports only `fleet.errors`.
 """
 import json
+import os
 import time
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Callable, Optional
 
-from fleet.atomic import TMP_SUFFIX, atomic_write
+from fleet.atomic import TMP_SUFFIX, atomic_write, tmp_name
 from fleet.errors import BadInput, FleetError, NoCapacity, Refused
 
 _LEASE_BODY = "lease.json"
@@ -719,10 +720,39 @@ class Pool:
             start = self._pid_start(int(pid))
             if start is not None:
                 added.append([int(pid), start])
-        if added:
-            held.unreadable_holders = list(held.unreadable_holders) + added
-            atomic_write(self.leases / slot / _LEASE_BODY, json.dumps(held.to_json(), indent=2))
-        return added
+        if not added:
+            return []
+        held.unreadable_holders = list(held.unreadable_holders) + added
+        return added if self._rewrite_own_lease(slot, held) else []
+
+    def _rewrite_own_lease(self, slot: str, held: Lease) -> bool:
+        """Replace `slot`'s lease body with `held`, ONLY while the claim on disk is still the one `held` was read
+        from — `RV-18`. Never through `atomic_write`, which creates missing parents: a release between the read
+        and the write would get its claim directory back (a phantom lease), and a re-claim would get the old
+        todo written over its body. The body is staged INSIDE the existing claim directory (a vanished directory
+        fails the open), and the claim is re-read just before the rename. Returns whether it was written."""
+        claim_dir = self.leases / slot
+        tmp = claim_dir / tmp_name(_LEASE_BODY)
+        try:
+            with open(tmp, "x", encoding="utf-8") as handle:
+                handle.write(json.dumps(held.to_json(), indent=2))
+                handle.flush()
+                os.fsync(handle.fileno())
+        except (FileNotFoundError, NotADirectoryError):
+            return False                                  # released under us: there is nothing left to note
+        try:
+            now = self.lease(slot)
+            if now is None or (now.todo_id, now.claimed_ns) != (held.todo_id, held.claimed_ns):
+                return False                              # released or re-claimed under us: not ours to write
+            os.replace(tmp, claim_dir / _LEASE_BODY)
+            return True
+        except FileNotFoundError:
+            return False                                  # a concurrent release swept the staging file
+        finally:
+            try:
+                os.unlink(tmp)
+            except OSError:
+                pass
 
     def release_refusal(self, slot: str, spare=(), holders=None) -> "Optional[Refused]":
         """The `OBS-48` refusal `release` would raise for `slot` right now, or None — read-only.

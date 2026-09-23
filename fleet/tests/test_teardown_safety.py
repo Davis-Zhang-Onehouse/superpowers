@@ -305,6 +305,48 @@ class UnreadableHolderSurvivesTheKill(CliCase):
         self.assertEqual(fleet.pool.cwd_holders("ws1"), [])
 
 
+class NoteDoesNotResurrectOrClobber(unittest.TestCase):
+    """RV-18. `note_unreadable` read the lease, then wrote the body with `atomic_write`, which creates missing
+    parents: a release between the two recreated the claim directory (a phantom lease), and a re-claim had its
+    body overwritten with the old todo. The seam is the start-time probe, which runs between the read and the
+    write."""
+
+    def setUp(self):
+        import tempfile
+        from fleet.pool import UnreadableHolder
+        self.tmp = Path(tempfile.mkdtemp(prefix="fleet-rv18-"))
+        self.addCleanup(shutil.rmtree, self.tmp, ignore_errors=True)
+        (self.tmp / "ws1").mkdir()
+        self.pool = Pool(self.tmp / "home")
+        self.pool.enroll(self.tmp / "ws1")
+        self.pool.claim(todo_id="old-1", tmux="dt-old", base_instant=OURS, child_instant="/x", slot="ws1")
+        self.pids = [UnreadableHolder(4242)]
+
+    def test_a_release_in_between_is_not_undone(self):
+        def released_meanwhile(pid):
+            self.pool.release("ws1", force=True)
+            return "77"
+        self.pool._pid_start = released_meanwhile
+        self.assertEqual(self.pool.note_unreadable("ws1", self.pids, expect_todo="old-1"), [])
+        self.assertFalse((self.pool.leases / "ws1").exists(), "the note recreated a released claim")
+
+    def test_a_reclaim_in_between_is_not_overwritten(self):
+        def reclaimed_meanwhile(pid):
+            self.pool.release("ws1", force=True)
+            self.pool.claim(todo_id="new-2", tmux="dt-new", base_instant=OURS, child_instant="/y", slot="ws1")
+            return "77"
+        self.pool._pid_start = reclaimed_meanwhile
+        self.assertEqual(self.pool.note_unreadable("ws1", self.pids, expect_todo="old-1"), [])
+        held = self.pool.lease("ws1")
+        self.assertEqual((held.todo_id, held.unreadable_holders), ("new-2", []))
+
+    def test_control_an_undisturbed_note_is_written(self):
+        self.pool._pid_start = lambda pid: "77"
+        self.assertEqual(self.pool.note_unreadable("ws1", self.pids, expect_todo="old-1"), [[4242, "77"]])
+        self.assertEqual(self.pool.lease("ws1").unreadable_holders, [[4242, "77"]])
+        self.assertEqual(sorted(p.name for p in (self.pool.leases / "ws1").iterdir()), ["lease.json"])
+
+
 class EnrollDoesNotRepoint(CliCase):
     """FB-91. `Pool.enroll` wrote enrolled/<basename>.json unconditionally, so enrolling (or cloning to) a second
     directory with the same basename silently re-pointed the existing slot."""

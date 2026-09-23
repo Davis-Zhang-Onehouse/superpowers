@@ -1006,6 +1006,8 @@ DELETE_ALLOWLIST = {
     ("pool.py", "unenroll", "unlink"),      # <home>/pool/enrolled/<slot>.json
     ("pool.py", "release", "unlink"),       # <home>/pool/leases/<slot>/lease.json and leftovers
     ("pool.py", "release", "rmdir"),        # <home>/pool/leases/<slot>
+    ("pool.py", "_rewrite_own_lease", "unlink"),  # RV-18: its OWN tmp_name staging file inside an existing
+                                                  # claim directory, once renamed or declined
     ("roadmap.py", "_close", "remove"),     # B02: list.remove(row) from inbox["pending"], the row then
                                             # appended to `closed` — not a filesystem call
     ("release.py", "prune", "rmtree"),      # a release directory beyond the 10-release ceiling, under
