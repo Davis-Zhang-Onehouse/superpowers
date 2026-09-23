@@ -53,8 +53,8 @@ from pathlib import Path
 
 from fleet import evidence as evidence_mod
 from fleet.atomic import atomic_write, held_for_update
-from fleet.errors import AmbiguousId, BadInput
-from fleet.identity import resolve, same_instant
+from fleet.errors import AmbiguousId, BadInput, InstantNameError
+from fleet.identity import InstantName, resolve, same_instant
 from fleet.store import SCHEMA_VERSION
 
 #: The status domain. A value outside it is refused at the producer, never coerced (FD-1).
@@ -218,25 +218,61 @@ def _described(items, anchor) -> str:
     return ", ".join(evidence_mod.describe(e, at(e)) for e in items)
 
 
+class _Owners:
+    """`B08`. Milestone owners where those instants are NOW, for ONE read of the roadmap.
+
+    `claim` records the worker's path while it is `-inflight-` and the worker's completion signal is
+    renaming its own folder, so the stored string names a folder that no longer exists for the rest of the
+    roadmap's life. The rule is `identity.resolve`'s — an existing path is itself; otherwise exactly one
+    sibling folder with the same full stable key; none or several leaves the owner exactly as recorded
+    rather than guessed at — but each parent folder is listed ONCE per read (RV-25): resolving every
+    stale owner separately listed the instants folder once per owner on every read (0.34 s for 80 stale
+    owners among 400 folders, several times per verb)."""
+
+    def __init__(self):
+        self._listed = {}
+
+    def _by_key(self, parent: Path) -> dict:
+        if parent not in self._listed:
+            listing = {}
+            try:
+                if parent.is_dir():
+                    for candidate in sorted(parent.iterdir()):
+                        try:
+                            if candidate.is_dir():
+                                listing.setdefault(InstantName.parse(candidate.name).stable_key(),
+                                                   []).append(candidate)
+                        except InstantNameError:
+                            continue
+            except OSError:
+                listing = {}
+            self._listed[parent] = listing
+        return self._listed[parent]
+
+    def now(self, owner):
+        if not owner:
+            return owner
+        recorded = Path(str(owner))
+        try:
+            if recorded.exists():
+                return str(recorded)
+            want = InstantName.parse(recorded.name).stable_key()
+        except (InstantNameError, OSError):
+            return owner
+        found = self._by_key(recorded.parent).get(want, [])
+        return str(found[0]) if len(found) == 1 else owner
+
+
 def _owner_now(owner):
-    """`B08`. A milestone's `owner` where that instant is NOW. `claim` records the worker's path while it is
-    `-inflight-` and the worker's completion signal is renaming its own folder, so the stored string names
-    a folder that no longer exists for the rest of the roadmap's life. Resolved through the one resolver
-    (`identity.resolve`); an owner that resolves nowhere, or ambiguously, is reported exactly as recorded
-    rather than guessed at."""
-    if not owner:
-        return owner
-    try:
-        found = resolve(Path(str(owner)))
-    except (AmbiguousId, OSError):
-        return owner
-    return str(found) if found is not None else owner
+    """One owner where it is now — `_Owners` for a single value (refusal texts, `apply`'s rewrite)."""
+    return _Owners().now(owner)
 
 
-def _milestone(entry: dict) -> "Milestone":
+def _milestone(entry: dict, owners: "_Owners" = None) -> "Milestone":
     """Every `Milestone` a reader gets is built here, so every reader — `brief`, `dispatch`'s refusal, the
-    `roadmap` rows, `--disown` — sees `owner` where it is now (`B08`)."""
-    return Milestone(**dict(entry, owner=_owner_now(entry.get("owner"))))
+    `roadmap` rows, `--disown` — sees `owner` where it is now (`B08`). `owners` shares one listing cache
+    across a whole read."""
+    return Milestone(**dict(entry, owner=(owners or _Owners()).now(entry.get("owner"))))
 
 
 def last_index(rows: list, row) -> int:
@@ -379,12 +415,14 @@ class Roadmap:
         raise BadInput(f"no milestone {milestone_id!r} in {self.path}, so there is nothing to retire")
 
     def milestones(self) -> list:
-        return [_milestone(d) for d in self._load()["milestones"]]
+        owners = _Owners()
+        return [_milestone(d, owners) for d in self._load()["milestones"]]
 
     def milestone(self, milestone_id: str) -> Milestone:
-        for m in self.milestones():
-            if m.id == milestone_id:
-                return m
+        #: RV-25. Resolves the ONE owner it returns, not every owner on the roadmap.
+        for d in self._load()["milestones"]:
+            if d["id"] == milestone_id:
+                return _milestone(d)
         raise BadInput(f"no milestone {milestone_id!r} in {self.path}")
 
     def _readiness(self) -> list:
@@ -504,7 +542,8 @@ class Roadmap:
                     f"record is what says so (`fleet board`, `fleet status`), and the work is released by "
                     f"aborting it with a reason.")
             #: Readiness is derived from the CURRENT file, which is the one held open here.
-            by_id = {m["id"]: _milestone(m) for m in data["milestones"]}
+            owners = _Owners()
+            by_id = {m["id"]: _milestone(m, owners) for m in data["milestones"]}
             blocker, _, _, _ = self._blocker(by_id[milestone_id], by_id)
             if blocker:
                 raise BadInput(
