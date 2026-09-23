@@ -14,7 +14,7 @@ import tempfile
 repo = Path(sys.argv[1])
 with tempfile.TemporaryDirectory(prefix='fleet helper ') as directory:
     root = Path(directory)
-    env=dict(os.environ,FLEET_LAUNCHER_TEST_BIN=str(repo/'bin/fleet'))
+    env=dict(os.environ)
     for key in ('FLEET_HOME','FLEET_INSTANTS','FLEET_TMUX_SOCKET'): env.pop(key, None)
     result=subprocess.run(['bash',str(repo/'scripts/fleet-dispatch-launcher.sh')],env=env,capture_output=True,text=True)
     assert result.returncode==2
