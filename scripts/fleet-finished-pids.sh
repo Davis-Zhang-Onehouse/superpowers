@@ -43,7 +43,10 @@ case "${1:-}" in
 esac
 
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]:-$0}")" && pwd)"
-FLEET="${FLEET_BIN:-$HERE/../bin/fleet}"
+# NOT `FLEET_BIN` (FB-56). `fleet dispatch` exports FLEET_BIN into every worker it starts, naming the fleet
+# that ran dispatch, so reading that name here ran the DISPATCHER'S binary (for a release worker, the deployed
+# copy) instead of the one this script ships beside. The seam has a name nothing exports.
+FLEET="${FLEET_LAUNCHER_TEST_BIN:-$HERE/../bin/fleet}"
 [ -x "$FLEET" ] || exit 0                     # no fleet, no exclusions — the safe direction
 
 # Subjects whose work is over. `reconcile`'s arm-set rows are `armed`/`unarmed` with the state leading the

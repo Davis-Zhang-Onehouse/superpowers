@@ -8,8 +8,9 @@
 # `superpowers:reviving-dead-panes` owns the JUDGEMENT — revive or abort, whether a resume menu is really on
 # screen, whether to send a key at all. This owns everything that is derivation: which root, which server,
 # which slot, which configuration directory, which transcript. Nothing is typed by an operator. Three environment
-# values are read: `$HOME` (the marker walk stops below it, as `fleet`'s does), `FLEET_BIN` (which binary acts;
-# printed on the second line) and, for a legacy Claude record only, `CLAUDE_OWNERS_MAP` through
+# values are read: `$HOME` (the marker walk stops below it, as `fleet`'s does), `FLEET_LAUNCHER_TEST_BIN` (the test
+# seam for which binary acts, `$REPO/bin/fleet` otherwise; printed on the second line — an ambient `FLEET_BIN`
+# is deliberately NOT read, FB-56) and, for a legacy Claude record only, `CLAUDE_OWNERS_MAP` through
 # `claude-config-dir.sh`.
 #
 # THE ROOT IS THE WORKING DIRECTORY'S. The marker walk is the same one `fleet` and `fleet-env.sh` perform,
@@ -35,8 +36,11 @@ set -uo pipefail
 
 HERE="$(cd "$(dirname "$(readlink -f "$0")")" && pwd)"
 REPO="$(cd "$HERE/.." && pwd)"
-FLEET="${FLEET_BIN:-$REPO/bin/fleet}"
-[ -x "$FLEET" ] || { printf 'fleet-revive: no executable fleet at %s (set FLEET_BIN)\n' "$FLEET" >&2; exit 2; }
+# NOT `FLEET_BIN` (FB-56). `fleet dispatch` exports FLEET_BIN into every worker it starts, naming the fleet
+# that ran dispatch, so reading that name here ran the DISPATCHER'S binary (for a release worker, the deployed
+# copy) instead of the one this script ships beside. The seam has a name nothing exports.
+FLEET="${FLEET_LAUNCHER_TEST_BIN:-$REPO/bin/fleet}"
+[ -x "$FLEET" ] || { printf 'fleet-revive: no executable fleet at %s\n' "$FLEET" >&2; exit 2; }
 
 die()  { printf 'fleet-revive: %s\n' "$*" >&2; exit 2; }
 
