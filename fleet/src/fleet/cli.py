@@ -1080,14 +1080,18 @@ def _do_init(ctx: Ctx, parsed: Parsed) -> int:
                            title=parsed.get("name"))
     target = ctx.instants_dir / name.format()
     register = target / REGISTER_NAME
+    #: `B10` sweep. Both refusals the real call can meet, asked before it creates anything — and by the
+    #: dry-run, which used to exit 0 above them. An unreadable watched-source registry used to be met only
+    #: at `register`, AFTER the instant had been bootstrapped: an instant created and left unwatched.
+    if target.exists():
+        raise BadInput(f"{target} already exists; `init` never overwrites an instant")
+    ctx.harvest.sources()
     if ctx.dry_run:
         _emit(ctx, "init", [("dry-run", "nothing was created and nothing was registered"),
                             ("would-create", str(target)),
                             ("would-register", str(register)),
                             ("instant", name.format())])
         return EXIT_OK
-    if target.exists():
-        raise BadInput(f"{target} already exists; `init` never overwrites an instant")
     created = layout.bootstrap(target, name)
     source = ctx.harvest.register(str(target), str(register))
     rows = [("instant", name.format()), ("path", str(target)), ("created", str(len(created))),
@@ -3000,12 +3004,12 @@ def _do_complete(ctx: Ctx, parsed: Parsed) -> int:
                                 ("clears_when", gate.clears_when or ""),
                                 ("clears_who", gate.clears_who or "")])
         return exit_code_for(gate)
+    if target.exists():                            # `B10` sweep: above the dry-run's return, not below it
+        raise BadInput(f"{target} already exists; an instant may hold only one state (OBS-14)")
     if ctx.dry_run:
         _emit(ctx, "complete", [("dry-run", "the folder was not renamed"), ("gate", gate.guard),
                                 ("allowed", "true"), ("would-rename", f"{child.name} -> {target.name}")])
         return EXIT_OK
-    if target.exists():
-        raise BadInput(f"{target} already exists; an instant may hold only one state (OBS-14)")
     child.rename(target)
     _emit(ctx, "complete", [("gate", gate.guard), ("from", child.name), ("to", target.name),
                             ("path", str(target))])
@@ -3115,9 +3119,11 @@ def _release_slot_or_name_the_partial_state(ctx: Ctx, record, child: Path) -> No
         ) from exc
 
 
-def _abort_slot_gate(ctx: Ctx, record, child: Path) -> str:
+def _slot_gate_before_kill(ctx: Ctx, record, child: Path, verb: str) -> str:
     """`B10`. The `OBS-48` cwd-holder gate, asked BEFORE anything is closed, released, renamed or written —
-    by the real `abort` and by its `--dry-run` alike, so the two cannot disagree about the same argv.
+    by the real `abort`/`harvest --id` and by its `--dry-run` alike, so the two cannot disagree about the
+    same argv. Both verbs kill the session and then release its slot; both used to meet this refusal only
+    after the kill (`harvest` after applying the delta and stamping the record too).
 
     The gate `release` evaluates is only decidable for holders the abort will not end itself. A dispatched
     worker's pane sits in its slot, so every ordinary abort HAS holders — the session's own processes, which
@@ -3162,11 +3168,11 @@ def _abort_slot_gate(ctx: Ctx, record, child: Path) -> str:
            f"Session {record.tmux or '(none)'} is not running, so nothing this abort closes would free "
            f"the slot.")
     raise Refused(
-        f"abort of {child.name} refused before doing anything: {found} {why} They were given "
-        f"{ABORT_RELEASE_WAIT_S}s to exit. Nothing was closed, released, renamed or written — session "
-        f"{record.tmux or '(none)'} {'still running' if live else 'not running'}, slot {record.slot!r} "
-        f"still leased, folder still `-inflight-` at {child}, milestone (if any) still claimed. Re-run the "
-        f"identical `abort` command once the pid(s) named above exit.",
+        f"{verb} of {child.name} refused before doing anything: {found} {why} They were given "
+        f"{ABORT_RELEASE_WAIT_S}s to exit. Nothing was closed, released, renamed, applied or written — "
+        f"session {record.tmux or '(none)'} {'still running' if live else 'not running'}, slot "
+        f"{record.slot!r} still leased, {child} unchanged, the roadmap untouched. Re-run the identical "
+        f"`{verb}` command once the pid(s) named above exit.",
         clears_when=found.clears_when,
         clears_who=found.clears_who,
     )
@@ -3221,7 +3227,7 @@ def _do_abort(ctx: Ctx, parsed: Parsed) -> int:
     possible: a folder already renamed `-abort-` would make the documented recovery refuse too.
 
     **`B10`: the gate comes first, for the dry-run too.** A cwd holder OUTSIDE the session's own process
-    tree survives the kill, so it is knowable before the kill — and `_abort_slot_gate` now refuses it there,
+    tree survives the kill, so it is knowable before the kill — and `_slot_gate_before_kill` refuses it there,
     with nothing done, in the real call and in `--dry-run` alike (the dry-run used to return above the only
     place the gate ran and said rc=0 for an argv the real call refused). The post-kill wait above remains
     for what cannot be known beforehand: a process of the session's own tree that survives its kill.
@@ -3270,7 +3276,7 @@ def _do_abort(ctx: Ctx, parsed: Parsed) -> int:
     #: `B10`. The one gate `release` evaluates, asked here — above the dry-run's return and before the
     #: session kill — so a dry-run reports the refusal the real call would hit, and the real call refuses
     #: before its first irreversible step instead of after it.
-    undecided = _abort_slot_gate(ctx, record, child)
+    undecided = _slot_gate_before_kill(ctx, record, child, "abort")
 
     if ctx.dry_run:
         _emit(ctx, "abort", [
@@ -3671,7 +3677,12 @@ def _do_harvest(ctx: Ctx, parsed: Parsed) -> int:
                              "withdraw` closes the row instead only when it is residue: withdrawing a "
                              "worker's only report leaves it unreported, which harvest also refuses"),
                 clears_who="the dispatched instant, or the coordinator on its behalf"))
-        elif ctx.dry_run:
+        elif (undecided := _slot_gate_before_kill(ctx, record, child, "harvest")) is not None and ctx.dry_run:
+            #: `B10` sweep. The gate is asked on BOTH paths above (the walrus runs before `ctx.dry_run` is
+            #: read, and a refusal raises): the real harvest used to apply, disown, kill and stamp before
+            #: `pool.release` refused, and this dry-run said `would-harvest` rc=0 over it.
+            if undecided:
+                rows.append(Row(kind="gate", subject=record.todo_id, severity=INFO, detail=undecided))
             roadmap, mine, held, recorded = _harvest_inbox(ctx, child)
             #: The status the real run would judge the claim on: the last row it would apply for the origin
             #: milestone, else the milestone's current status (`_stranded_claim` reads that itself).
@@ -3932,12 +3943,16 @@ def _do_clone(ctx: Ctx, parsed: Parsed) -> int:
     #: sha to state — the golden's own HEAD is the expectation.
     repos = [r.strip() for r in str(parsed.get("verify-repos") or "").split(",") if r.strip()]
 
+    #: `B10` sweep. Every refusal knowable before the copy, asked before it — by the dry-run too, which used
+    #: to print "a real run would REFUSE" and exit 0. The enrolment half (a target outside this root) was
+    #: met only AFTER the whole golden had been copied.
+    refusal = workspace.clone_refusal(target) or ctx.pool.enroll_refusal(target, exists=False)
+    if refusal is not None:
+        raise refusal
     if ctx.dry_run:
         golden = workspace.golden()
         _emit(ctx, "clone", [("dry-run", "nothing was copied or enrolled"), ("golden", str(golden)),
-                             ("target", str(target)),
-                             ("target_exists", "true — a real run would REFUSE" if target.exists()
-                              else "false"),
+                             ("target", str(target)), ("target_exists", "false"),
                              ("verify_repos", ", ".join(sorted(repos)) or "(none named)")])
         return EXIT_OK
 
@@ -3984,6 +3999,10 @@ def _do_enroll(ctx: Ctx, parsed: Parsed) -> int:
     """
     path = Path(parsed.get("slot"))
     if ctx.dry_run:
+        #: `B10` sweep: the dry-run asks the validator the real call raises from, instead of exiting 0.
+        refusal = ctx.pool.enroll_refusal(path)
+        if refusal is not None:
+            raise refusal
         _emit(ctx, "enroll", [
             ("dry-run", "nothing was enrolled"),
             ("would-enroll", str(path)),

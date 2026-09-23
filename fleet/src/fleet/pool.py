@@ -252,8 +252,19 @@ class Pool:
 
     def enroll(self, path: Path) -> None:
         path = Path(path)
-        if not path.is_dir():
-            raise BadInput(
+        refusal = self.enroll_refusal(path)
+        if refusal is not None:
+            raise refusal
+        atomic_write(self.enrolled / f"{path.name}.json",
+                     json.dumps({"slot": path.name, "path": str(path.resolve())}, indent=2))
+
+    def enroll_refusal(self, path: Path, exists: bool = True) -> "Optional[BadInput]":
+        """The refusal `enroll` would raise for `path`, or None — read-only (`B10` sweep: the dry-runs of
+        `enroll` and `clone` ask it). `exists=False` skips the is-a-directory check, for `clone`, which
+        asks about a target it has not created yet."""
+        path = Path(path)
+        if exists and not path.is_dir():
+            return BadInput(
                 f"{path} is not an existing directory; a slot is enrolled by pointing at the workspace "
                 "that already exists. Enrolment never creates the workspace."
             )
@@ -263,16 +274,15 @@ class Pool:
         if self.fleet_root is not None:
             resolved, owner = path.resolve(), self.fleet_root.resolve()
             if owner != resolved and owner not in resolved.parents:
-                raise BadInput(
+                return BadInput(
                     f"{resolved} is outside this fleet's root {owner}, so it cannot be enrolled here. A "
                     f"pool that can lease a workspace belonging to another root is exactly the "
                     f"interference per-root isolation exists to remove. Enrol it from the root that owns "
                     f"it.")
         slot = path.name
         if not slot or "/" in slot:
-            raise BadInput(f"{path} has no usable slot name (the slot name is the directory's basename)")
-        atomic_write(self.enrolled / f"{slot}.json",
-                     json.dumps({"slot": slot, "path": str(path.resolve())}, indent=2))
+            return BadInput(f"{path} has no usable slot name (the slot name is the directory's basename)")
+        return None
 
     def unenroll(self, slot: str, force: bool = False) -> None:
         record = self.enrolled / f"{slot}.json"
