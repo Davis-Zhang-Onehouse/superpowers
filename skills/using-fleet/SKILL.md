@@ -80,7 +80,7 @@ Read-only. Safe to run at any time; they change nothing.
 | `fleet reconcile` | the arm set an external monitor reads, from the one join |
 | `fleet compaction-status` | whether a compaction is holding every dispatch |
 | `fleet pane-guard` | the pane contract every send and close branches on, as an exit code; keyed by `--id <todo>` or `--pane <session>` |
-| `fleet seed-check` | is every live worker running the briefing that was rendered FOR it? |
+| `fleet seed-check` | is every live worker running the briefing that was rendered FOR it? Exits `1` on any row that is not a pass — `foreign`, a collision, `unreadable` (the check could not run) or `not-delivered` (clear it with `fleet seed-delivered`) |
 | `fleet lint` | the layout matrix, the watched-source registry, the near-miss rule |
 | `fleet verify` | EXECUTE every documented recipe in a sandbox |
 | `fleet selftest` | discover and run every suite; the tree state is always stamped |
@@ -274,7 +274,10 @@ fleet roadmap --instant . --porcelain | awk -F'\t' '$1=="not-ready"{print $2, $4
 or proposal cites, re-resolved through the `-inflight-`→`-complete-` rename to where it is today, comma-joined,
 an item that does not resolve suffixed `(does not resolve)`. `propose` refuses (exit 2) an evidence item that
 does not resolve NOW — a relative path means the proposer's instant folder, an absolute one must exist, a URL
-passes as-is — and `apply` refuses a row whose items stopped resolving.
+passes as-is — and `apply` refuses a row whose items stopped resolving. `milestone --evidence` is gated the
+same way, relative to the coordinator's own folder, and stores each item where it is. A milestone item
+written before those gates is read relative to the proposer that cited it (from the inbox's applied or
+closed rows), and `owner` is printed where that instant is now, not where it was claimed.
 <!-- v2-cite: evidence-resolves-at-propose-and-apply H12 --> Every milestone gets exactly one `ready` row (its
 deps have landed — `owner` empty means dispatchable, non-empty means already claimed) or one `not-ready` row
 (the `detail` names the blocker), plus one `pending-proposal` row per proposal waiting on it. Act on

@@ -3488,7 +3488,7 @@ class TestTheDispatchMilestoneJoin(CliCase):
         roadmap = Roadmap(coordinator)
         self.assertEqual(["running"], [p.status for p in roadmap.proposals() if p.instant == child])
         self.assertEqual("blocked", roadmap.milestone("M9").status)
-        self.assertEqual(child, roadmap.milestone("M9").owner, "a refused harvest released the claim")
+        self.assertEqual(str(resolve(pathlib.Path(child))), roadmap.milestone("M9").owner, "a refused harvest released the claim")
 
     def test_harvest_dry_run_previews_the_claim_it_would_give_back_and_changes_nothing(self):
         fleet = self.loaded()
@@ -3500,7 +3500,7 @@ class TestTheDispatchMilestoneJoin(CliCase):
         self.assertTrue(row, f"{out} {err}")
         self.assertIn("give back the claim on M9", row[0],
                       f"the dry run hides a change the real run makes: {row[0]}")
-        self.assertEqual(child, Roadmap(coordinator).milestone("M9").owner, "a dry run released a claim")
+        self.assertEqual(str(resolve(pathlib.Path(child))), Roadmap(coordinator).milestone("M9").owner, "a dry run released a claim")
 
     def test_harvest_keeps_the_owner_of_a_milestone_it_finished(self):
         """The other side of the release: a DONE milestone keeps the record of who did it."""
@@ -3509,7 +3509,9 @@ class TestTheDispatchMilestoneJoin(CliCase):
 
         fleet.run(["harvest", "--id", todo, "--porcelain"])
 
-        self.assertEqual(child, Roadmap(coordinator).milestone("M9").owner)
+        #: `B08`: named where the worker is NOW — its `-complete-` folder — not the `-inflight-` path it was
+        #: claimed under, which no longer exists.
+        self.assertEqual(str(resolve(pathlib.Path(child))), Roadmap(coordinator).milestone("M9").owner)
 
     def test_harvest_never_un_lands_a_finished_milestone_it_leaves_that_row_pending(self):
         """Before B01 harvest applied nothing, so it could not do this. After it, a stale row of the worker's
@@ -3738,7 +3740,7 @@ class TestTheDispatchMilestoneJoin(CliCase):
         self.assertTrue(row, f"{out} {err}")
         self.assertIn("apply 0 proposal(s)", row[0])
         self.assertIn("give back the claim on M9", row[0], f"apply-first dry run hides the release: {row[0]}")
-        self.assertEqual(child, Roadmap(coordinator).milestone("M9").owner, "a dry run released a claim")
+        self.assertEqual(str(resolve(pathlib.Path(child))), Roadmap(coordinator).milestone("M9").owner, "a dry run released a claim")
 
     def test_an_applied_row_another_instant_wrote_does_not_count_as_this_workers_report(self):
         fleet = self.loaded()
@@ -5959,3 +5961,203 @@ class TestEvidenceIsALocation(CliCase):
         code, out, err = self.fleet.run(["apply", "--instant", str(self.coordinator), "--milestone", "k1"])
         self.assertEqual(EXIT_OK, code, err)
         self.assertEqual([url], Roadmap(self.coordinator).milestone("k1").evidence)
+
+
+class TestSeedCheckExitsOnANonPass(CliCase):
+    """`B09` (i13) and `B08` NEW-1. `seed-check` printed "This is NOT a pass" and exited 0 — its exit code
+    read only FOREIGN and a collision, so a check that could not run, or a delivery nothing verified, left
+    an agent reading the code with a clean answer. And one function held two notions of where the instant
+    is: the seed through `_child_of` (rename-following), the delivery record through the RAW
+    `record.child_instant` — so an ATTESTED session degraded to NOT-DELIVERED the moment its worker
+    completed, which is exactly when a coordinator checks."""
+
+    SEED = TestRecordingASendKeysDelivery.SEED
+
+    def setUp(self):
+        super().setUp()
+        self.fleet_ = self.loaded()
+        self.fleet_.sessions.probes.pane_pid = lambda name: 4242 if name in self.fleet_.tmux_live else None
+        self.probes = seedcheck.Probes(read_cmdline=lambda pid: b"claude\0--permission-mode\0auto",
+                                       comm_of=lambda pid: "claude", children_of=lambda pid: [])
+
+    def brief(self, name="solo"):
+        seed = self.fleet_.paths[name] / ".fleet" / "seed.txt"
+        seed.parent.mkdir(parents=True, exist_ok=True)
+        seed.write_text(self.SEED)
+
+    def attest(self, name="solo"):
+        sent = self.fleet_.tmp / "sent.txt"
+        sent.write_text(self.SEED)
+        code, _, err = self.fleet_.run(["seed-delivered", "--id", self.fleet_.ids[name], "--delivered", str(sent)])
+        self.assertEqual(EXIT_OK, code, err)
+
+    def seed_check(self):
+        with mock.patch.object(cli.seedcheck, "default_probes", lambda runtime="claude": self.probes):
+            code, out, err = self.fleet_.run(["seed-check", "--porcelain", "--id", self.fleet_.ids["solo"]])
+        return code, {line.split("\t")[0] for line in out.splitlines()}, out, err
+
+    def test_an_attested_session_passes_with_exit_0(self):
+        """The control: the same setup reads clean when the delivery is attested."""
+        self.brief()
+        self.attest()
+        code, kinds, out, err = self.seed_check()
+        self.assertIn("attested", kinds, out)
+        self.assertEqual(EXIT_OK, code, err)
+
+    def test_an_unreadable_row_exits_attention(self):
+        code, kinds, out, err = self.seed_check()          # no seed.txt was rendered
+        self.assertIn("unreadable", kinds, out)
+        self.assertIn("NOT a pass", out)
+        self.assertEqual(EXIT_ATTENTION, code, f"'This is NOT a pass' exited {code}: {out}")
+
+    def test_a_not_delivered_row_exits_attention(self):
+        self.brief()
+        code, kinds, out, err = self.seed_check()
+        self.assertIn("not-delivered", kinds, out)
+        self.assertEqual(EXIT_ATTENTION, code, f"'This is NOT a pass' exited {code}: {out}")
+
+    def test_an_attested_session_stays_attested_after_its_worker_completes(self):
+        self.brief()
+        self.attest()
+        solo = self.fleet_.paths["solo"]
+        solo.rename(solo.with_name(solo.name.replace("-inflight-", "-complete-")))
+        code, kinds, out, err = self.seed_check()
+        self.assertIn("attested", kinds, f"the rename degraded the attested row: {out}")
+        self.assertEqual(EXIT_OK, code, err)
+
+    def test_a_record_whose_folder_is_gone_is_an_unreadable_row_not_a_failed_sweep(self):
+        self.brief()
+        shutil.rmtree(self.fleet_.paths["solo"])
+        code, kinds, out, err = self.seed_check()
+        self.assertIn("unreadable", kinds, f"the sweep died instead of reporting the session: {err}")
+        self.assertIn("population", kinds, out)
+        self.assertEqual(EXIT_ATTENTION, code, err)
+
+    def test_a_seed_that_cannot_be_decoded_is_an_unreadable_row_not_a_failed_sweep(self):
+        """RV-26. A per-session read failure is that session's row, never a traceback out of the sweep."""
+        seed = self.fleet_.paths["solo"] / ".fleet" / "seed.txt"
+        seed.parent.mkdir(parents=True, exist_ok=True)
+        seed.write_bytes(b"\xff\xfe not utf-8 \x80")
+        code, kinds, out, err = self.seed_check()
+        self.assertIn("unreadable", kinds, f"the sweep died on one bad seed: {err}")
+        self.assertIn("population", kinds, out)
+        self.assertEqual(EXIT_ATTENTION, code, err)
+
+    def test_an_instant_folder_that_cannot_be_listed_is_an_unreadable_row(self):
+        """RV-26. `resolve` lists the parent folder when the recorded path is gone; an OSError there (a
+        permission error, an I/O error) is a fact about this session, not a reason to stop looking."""
+        solo = self.fleet_.paths["solo"]
+        solo.rename(solo.with_name(solo.name.replace("-inflight-", "-complete-")))
+        with mock.patch.object(cli, "resolve", side_effect=PermissionError("denied")):
+            code, kinds, out, err = self.seed_check()
+        self.assertIn("unreadable", kinds, f"the sweep died on an OSError: {err}")
+        self.assertEqual(EXIT_ATTENTION, code, err)
+
+    def test_the_dispatch_time_check_reads_the_delivery_through_the_renamed_folder(self):
+        """RV-29. `_verify_seed_delivery` (dispatch's own check, not the `seed-check` verb) read the delivery
+        record through the raw recorded path too. Driven directly, with no injected `seed_delivery`, so the
+        real read runs."""
+        self.brief()
+        self.attest()
+        solo = self.fleet_.paths["solo"]
+        solo.rename(solo.with_name(solo.name.replace("-inflight-", "-complete-")))
+        ctx = self.fleet_.context()(types.SimpleNamespace(on=lambda flag: False), io.StringIO(), io.StringIO())
+        ctx.seed_delivery = None
+        with mock.patch.dict(os.environ, {cli.SEED_CHECK_SECONDS: "0"}):
+            verdict = cli._verify_seed_delivery(ctx, "dt-solo", self.SEED, probes=self.probes,
+                                                sleep=lambda s: None)
+        self.assertEqual(seedcheck.ATTESTED, verdict.state, verdict.detail)
+
+
+class TestMilestoneEvidenceIsAdmitted(CliCase):
+    """FB-44 (b03 OI-1). `milestone --evidence` stored its items verbatim — the one door B03's gate did not
+    cover, because `milestone` is not a proposal. A typo'd path landed with exit 0, and a relative item had
+    no proposer to be relative to, so it was read at `owner` (FB-45 re-created at write time)."""
+
+    def test_a_typo_is_refused_and_nothing_is_written(self):
+        fleet = self.loaded()
+        coordinator = fleet.paths["readyWorker"]
+        before = Roadmap(coordinator).path.read_bytes()
+        code, out, err = fleet.run(["milestone", "--instant", str(coordinator), "--id", "seeded",
+                                    "--title", "seeded work", "--evidence", "evidence/nope-typo.md"])
+        self.assertEqual(EXIT_BAD_INPUT, code, f"a typo'd evidence path was accepted: {out}")
+        self.assertIn("nope-typo.md", err)
+        self.assertEqual(before, Roadmap(coordinator).path.read_bytes(), "a refused add wrote the roadmap")
+        #: RV-30. The refusal describes THIS verb's anchor, not a proposal's.
+        self.assertIn("the coordinator's own instant folder", err)
+        self.assertNotIn("proposing instant", err)
+        self.assertNotIn("Nothing was proposed", err)
+
+    def test_a_relative_item_is_stored_anchored_at_the_coordinator(self):
+        fleet = self.loaded()
+        coordinator = fleet.paths["readyWorker"]
+        code, out, err = fleet.run(["milestone", "--instant", str(coordinator), "--id", "seeded",
+                                    "--title", "seeded work", "--evidence", "evidence/INDEX.md",
+                                    "--evidence", "https://example.com/pr/1"])
+        self.assertEqual(EXIT_OK, code, err)
+        self.assertEqual([str(coordinator / "evidence" / "INDEX.md"), "https://example.com/pr/1"],
+                         Roadmap(coordinator).milestone("seeded").evidence)
+
+    def test_dry_run_refuses_the_typo_too(self):
+        fleet = self.loaded()
+        coordinator = fleet.paths["readyWorker"]
+        code, out, err = fleet.run(["milestone", "--dry-run", "--instant", str(coordinator), "--id", "seeded",
+                                    "--title", "seeded work", "--evidence", "evidence/nope-typo.md"])
+        self.assertEqual(EXIT_BAD_INPUT, code, f"the dry run approved what the real run refuses: {out}")
+
+
+class TestDisownFindsItsOpenHolderAcrossTheRename(CliCase):
+    """`B08` guard. Once `owner` follows the worker's rename, `--disown`'s open-record check must too: it
+    string-compared `record.child_instant` (recorded `-inflight-`, never rewritten) with `owner`, and a
+    rewritten `owner` would make it miss a worker that has completed but not been harvested."""
+
+    def test_a_completed_unharvested_worker_still_holds_its_claim(self):
+        fleet = self.loaded()
+        coordinator = fleet.paths["readyWorker"]
+        worker = fleet.paths["solo"]
+        roadmap = Roadmap(coordinator)
+        roadmap.add(Milestone(id="M9", title="carried work", status="ready", deps=[], evidence=[]))
+        roadmap.claim("M9", str(worker))
+        done = worker.rename(worker.with_name(worker.name.replace("-inflight-", "-complete-")))
+        roadmap.apply(roadmap.propose(done, "M9", "done", ["evidence/INDEX.md"]))
+
+        code, out, err = fleet.run(["milestone", "--instant", str(coordinator), "--id", "M9",
+                                    "--disown", "--reason", "I want the slot"])
+
+        self.assertEqual(EXIT_REFUSED, code, f"an OPEN worker's claim was released: {out}")
+        self.assertEqual(str(done), Roadmap(coordinator).milestone("M9").owner)
+
+    def _relative_record(self, fleet, name):
+        record = fleet.store.read(fleet.ids[name])
+        record.child_instant = pathlib.Path(record.child_instant).name
+        fleet.store.write(record)
+
+    def test_a_record_that_names_its_instant_relatively_still_holds_its_claim(self):
+        """RV-27. `_child_of` accepts a RELATIVE `child_instant` (anchored at the instants dir); the holder
+        lookup compared it as recorded, so a relative record never matched and its claim was released."""
+        fleet = self.loaded()
+        coordinator, worker = fleet.paths["readyWorker"], fleet.paths["solo"]
+        self._relative_record(fleet, "solo")
+        roadmap = Roadmap(coordinator)
+        roadmap.add(Milestone(id="M9", title="carried work", status="ready", deps=[], evidence=[]))
+        roadmap.claim("M9", str(worker))
+
+        code, out, err = fleet.run(["milestone", "--instant", str(coordinator), "--id", "M9",
+                                    "--disown", "--reason", "I want the slot"])
+
+        self.assertEqual(EXIT_REFUSED, code, f"an OPEN worker's claim was released: {out}")
+
+    def test_a_relative_record_of_ANOTHER_instant_does_not_hold_a_gone_owners_claim(self):
+        """RV-27's neighbour: anchoring a relative record must not make it match every owner."""
+        fleet = self.loaded()
+        coordinator = fleet.paths["readyWorker"]
+        self._relative_record(fleet, "solo")
+        gone = fleet.instants / "00000000-07300099-abort-append-longGone"
+        roadmap = Roadmap(coordinator)
+        roadmap.add(Milestone(id="M9", title="carried work", status="ready", deps=[], evidence=[]))
+        roadmap.claim("M9", str(gone))
+
+        code, out, err = fleet.run(["milestone", "--instant", str(coordinator), "--id", "M9",
+                                    "--disown", "--reason", "owner is long gone"])
+
+        self.assertEqual(EXIT_OK, code, err)
