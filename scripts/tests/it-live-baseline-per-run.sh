@@ -135,6 +135,13 @@ else
   note "ok   the re-baseline log is untracked and gitignored"
 fi
 
+# Two runs may read and write the handover at once, and a truncating `> "$LIVE_TMUX_HANDOVER"` is observable
+# EMPTY mid-write: the between-runs check then compares nothing (RV-28; 4699 empty reads of 6000 probes in a
+# stress run). Every write goes through the tmp+mv helper.
+direct="$(grep -nE '>>? *"?\$LIVE_TMUX_HANDOVER"?( |$)' "$REPO/fleet/it/lib.sh" | grep -v '^\s*#')"
+[ -z "$direct" ] && note "ok   no site truncates the handover in place" \
+                 || { note "FAIL the handover is written in place, a concurrent reader can see it empty: $direct"; fails=1; }
+
 n_runs="$(cd "$TMP/it" && ls live-tmux-sessions-run-*.txt 2>/dev/null | wc -l)"
 [ "$n_runs" -ge 6 ] && note "ok   one baseline file per run ($n_runs), none shared" \
                     || { note "FAIL expected a per-run baseline file per run, found $n_runs"; fails=1; }
