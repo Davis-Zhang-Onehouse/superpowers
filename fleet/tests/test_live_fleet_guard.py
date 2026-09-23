@@ -112,11 +112,14 @@ class LiveFleetGuardCase(unittest.TestCase):
         path the wrappers compare is resolved, so the live set must be resolved too or it never matches."""
         (self.tmp / "real-store").mkdir()
         (self.tmp / "real-releases").mkdir()
+        (self.tmp / "real-instants").mkdir()
         (self.root / ".fleet").symlink_to(self.tmp / "real-store")
         (self.root / "fleet-releases").symlink_to(self.tmp / "real-releases")
-        _, stores, releases, _ = tests._live_destinations({"HOME": str(self.home)}, self.root)
+        (self.tmp / "real-store" / "instants").symlink_to(self.tmp / "real-instants")
+        _, stores, releases, instants = tests._live_destinations({"HOME": str(self.home)}, self.root)
         self.assertEqual(stores, {(self.tmp / "real-store").resolve()})
         self.assertEqual(releases, {(self.tmp / "real-releases").resolve()})
+        self.assertEqual(instants, {(self.tmp / "real-instants").resolve()})
 
     def test_the_import_captures_the_live_set_from_the_real_process(self):
         """The call site itself, not `_live_destinations` with arguments a test chose: every other case
