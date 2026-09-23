@@ -118,14 +118,19 @@ def _inside(path: Path, folder):
         return None
 
 
-def admit(items, proposer) -> list:
+def admit(items, proposer, nothing: str = "Nothing was proposed.",
+          anchor_is: str = "the proposing instant's folder") -> list:
     """The PROPOSE-time gate: the stored form of each item, or `BadInput` naming every item that does not
     resolve NOW. The producer is the party that can fix a typo in seconds; the coordinator meets it hours
     later with nobody left to ask.
 
     An absolute path inside the proposer's own folder is STORED RELATIVE. It resolves and its intent is
     unambiguous, so refusing it would tax a correct claim to teach a style; stored verbatim, it is the path
-    that dangles one rename later (`i21(a)`)."""
+    that dangles one rename later (`i21(a)`).
+
+    FB-44: `milestone --evidence` admits through here too, with the coordinator as the "proposer"; `nothing`
+    is the refusal's closing sentence, so it names what the refused verb did not write, and `anchor_is` names
+    what a relative item resolves against (RV-30)."""
     folder = _folder(proposer)
     stored, missing = [], []
     for item in (_plain(e) for e in items):
@@ -153,9 +158,8 @@ def admit(items, proposer) -> list:
     if missing:
         raise BadInput(
             f"{len(missing)} evidence item(s) do not resolve: {'; '.join(missing)}. Evidence is a path a "
-            f"reader can open: a RELATIVE path resolves against the proposing instant's folder "
-            f"({folder or proposer}), an absolute path must exist, and a URL is accepted as-is. Nothing was "
-            f"proposed.")
+            f"reader can open: a RELATIVE path resolves against {anchor_is} "
+            f"({folder or proposer}), an absolute path must exist, and a URL is accepted as-is. {nothing}")
     return stored
 
 
