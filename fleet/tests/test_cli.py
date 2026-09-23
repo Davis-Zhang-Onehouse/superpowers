@@ -6886,6 +6886,19 @@ class TestB11RefusalsNameARouteThatRuns(CliCase):
         self.assertIn("clears when:", self.refusal(err), err)
         self.assertIn("clears who:", self.refusal(err), err)
 
+    def test_a_lost_lease_is_not_routed_to_revive_which_needs_that_lease(self):
+        """RV-23. The send refusal said a worker whose lease is gone "is revived or re-dispatched"; revive
+        refuses exactly that state, so the two routes contradicted each other."""
+        fleet = self.loaded()
+        fleet.pool.release("ws1")
+        sent = fleet.tmp / "msg.txt"
+        sent.write_text("hello\n")
+        code, out, err = fleet.run(["send", "--id", fleet.ids["solo"], "--message-file", str(sent)])
+        self.assertEqual(EXIT_REFUSED, code, out)
+        said = self.refusal(err)
+        self.assertIn("no longer owns its recorded lease", said, said)
+        self.assertNotIn("revive", said.split("clears when:", 1)[-1], said)
+
     def _full_pool(self, fleet):
         for slot in list(fleet.pool.free_slots()):
             fleet.pool.claim(todo_id=f"filler-{slot}", tmux=f"dt-{slot}", base_instant=FRESH_BASE,

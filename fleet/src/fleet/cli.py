@@ -1474,9 +1474,9 @@ def _message_target(ctx, parsed):
     lease = ctx.pool.lease(record.slot) if record.slot else None
     if lease is None or lease.todo_id != record.todo_id:
         raise Refused('Worker no longer owns its recorded lease',
-                      clears_when=f'the record and the lease agree again — `fleet status --id {record.todo_id}` '
-                                  f'and `fleet leases` show who holds slot {record.slot!r} now; a worker '
-                                  f'whose slot was reaped is revived or re-dispatched, not messaged',
+                      clears_when=f'never, for this record: slot {record.slot!r} is no longer its lease '
+                                  f'(`fleet leases` shows who holds it now). Revive needs that lease too, so the '
+                                  f'work goes to a new worker (`fleet dispatch`), which is then messaged',
                       clears_who='the coordinator')
     layer = ctx.sessions_for(record)
     matches = [item for item in layer.live() if item.name == record.tmux]
@@ -1555,8 +1555,8 @@ def _do_revive(ctx: Ctx, parsed: Parsed) -> int:
     lease = ctx.pool.lease(record.slot) if record.slot else None
     if lease is None or lease.todo_id != record.todo_id:
         raise Refused('Revival requires the original lease to remain held',
-                      clears_when='never, for this record: its slot was released. Dispatch a new worker onto '
-                                  'the instant\'s work instead',
+                      clears_when='never, for this record: the slot is no longer this record\'s lease. Dispatch '
+                                  'a new worker onto the instant\'s work instead',
                       clears_who='the coordinator')
     layer = ctx.sessions_for(record)
     if layer.alive(record.tmux):
