@@ -50,13 +50,57 @@ class RuntimeCliTests(unittest.TestCase):
         code, _, err = self.f.run(['runtime', '--set', 'codex'])
         self.assertEqual(code, 4, err)
         route = err.split('clears when:', 1)[-1]
-        self.assertNotIn('or closed', err)
-        for clause in ('fleet harvest --id', 'fleet reap', 'cannot be harvested'):
+        self.assertNotIn('harvested or closed', err)             # the withdrawn value, exactly
+        for clause in ('fleet harvest --id', 'fleet reap'):
             self.assertIn(clause, route, err)
         code, out, err = self.f.run(['harvest', '--id', self.f.ids['shut']])
         self.assertTrue(self.f.store.read(self.f.ids['shut']).harvested_at, f"the named harvest did not run: {out}{err}")
         code, _, err = self.f.run(['runtime', '--set', 'codex'])
         self.assertEqual(code, 0, f"the named route ran and the switch is still refused: {err}")
+
+    def _review_then_harvest_clears_the_switch(self, name, folder):
+        code, _, err = self.f.run(['runtime', '--set', 'codex'])
+        self.assertEqual(code, 4, err)
+        route = err.split('clears when:', 1)[-1]
+        for clause in ('fleet review --instant', 'fleet harvest --id'):
+            self.assertIn(clause, route, err)
+        code, _, err = self.f.run(['review', '--instant', str(folder), '--scope', 'all', '--verdict', 'READY'])
+        self.assertIn(code, (0, 1), err)                 # 1 = the gate's own exit when it has something to say
+        code, out, err = self.f.run(['harvest', '--id', self.f.ids[name]])
+        self.assertTrue(self.f.store.read(self.f.ids[name]).harvested_at,
+                        f"review -> harvest, the named route, did not harvest: {out}{err}")
+        code, _, err = self.f.run(['runtime', '--set', 'codex'])
+        self.assertEqual(code, 0, f"the named route ran and the switch is still refused: {err}")
+
+    def test_an_aborted_record_is_cleared_by_the_named_review_then_harvest(self):
+        """RV-35. The refusal said an aborted record "cannot be harvested, and no verb clears it" — measured
+        false: after a review round, harvest stamps it and the switch runs. The test runs that route."""
+        path = self.f.worker('dropped', slot='ws1', live=False)
+        code, _, err = self.f.run(['abort', '--instant', str(path), '--reason', 'abandoned for the test'])
+        self.assertEqual(code, 0, err)
+        folder = next(self.f.instants.glob('*-abort-append-dropped'))
+        self._review_then_harvest_clears_the_switch('dropped', folder)
+
+    def test_a_closed_unreviewed_record_is_cleared_by_the_named_review_then_harvest(self):
+        """RV-35. The other state the refusal wrote off: closed with no review round."""
+        path = self.f.worker('unreviewed', state='complete', slot='ws1', live=False)
+        code, _, err = self.f.run(['close', '--id', self.f.ids['unreviewed']])
+        self.assertEqual(code, 0, err)
+        self._review_then_harvest_clears_the_switch('unreviewed', path)
+
+    def test_a_gone_folder_record_is_said_to_have_no_clearing_verb(self):
+        """RV-35 / FB-92. The one state with no route: harvest exits 2 on a folder that resolves to nothing.
+        The refusal says so, and says it is a known gap, rather than naming a door that does not open."""
+        path = self.f.worker('gone', slot='ws1', live=False)
+        self.assertEqual(self.f.run(['close', '--id', self.f.ids['gone']])[0], 0)
+        shutil.rmtree(path)
+        code, _, err = self.f.run(['runtime', '--set', 'codex'])
+        self.assertEqual(code, 4, err)
+        route = err.split('clears when:', 1)[-1]
+        self.assertIn('no verb clears it today', route, err)
+        self.assertIn('FB-92', route, err)
+        self.assertEqual(self.f.run(['harvest', '--id', self.f.ids['gone']])[0], 2,
+                         'harvest ran on a gone folder, so the refusal is no longer true')
 
     def test_same_runtime_is_noop_with_work(self):
         self.f.worker('active', slot='ws1')
