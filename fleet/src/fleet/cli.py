@@ -3186,6 +3186,12 @@ def _slot_gate_before_kill(ctx: Ctx, record, child: Path, verb: str) -> str:
         return ""
     layer = ctx.sessions_for(record)
     live = bool(record.tmux) and layer.alive(record.tmux)
+    #: `RV-33`. What the real call then does is the verb's own, and the two differ (see the docstring).
+    after_an_undecided_gate = (
+        "the real call closes the session, waits once more, releases, and names the partial state if a "
+        "holder remains" if verb == "abort" else
+        "the real call applies, closes the session and stamps the record, then releases with no wait: a "
+        "holder that survives the kill refuses there, from that partial state (`reap` recovers the slot)")
 
     def refusal():
         pids = ctx.pool.cwd_holders(record.slot)
@@ -3196,8 +3202,7 @@ def _slot_gate_before_kill(ctx: Ctx, record, child: Path, verb: str) -> str:
             return None, (f"pid(s) {', '.join(str(p) for p in pids)} hold slot {record.slot!r} as cwd, and "
                           f"whether closing session {record.tmux!r} ends them could not be observed (no pane "
                           f"pid or parent walk), so the cwd-holder gate could not be decided before the "
-                          f"kill; the real call closes the session, then releases, and names the partial "
-                          f"state if a holder remains")
+                          f"kill; {after_an_undecided_gate}")
         #: `RV-21`. The same scan `own` was computed from — a second one would read a newborn child as foreign.
         return ctx.pool.release_refusal(record.slot, spare=own, holders=pids), ""
 

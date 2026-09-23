@@ -306,8 +306,10 @@ the same shape. A dry run can still answer rc=0 where the real call exits non-ze
 - `release-verify`, where a missing source repo is printed as `would-refuse` by design.
 - The `harvest` tick with no `--id`, for its STALE rows.
 - `abort` and `harvest --id` when the session's own processes cannot be attributed (no pane pids or
-  parent walk). The dry run prints a `gate` row saying it could not decide. The real call then kills and
-  releases, and names the partial state if a holder is left.
+  parent walk). The dry run prints a `gate` row saying it could not decide. If a holder is left after the
+  kill, the two verbs end differently. `abort` waits once more and names the partial state. `harvest --id`
+  has already applied the proposals and stamped the record by then, so it refuses with the bare OBS-48
+  message and leaves the slot for `reap`.
 - `abort` and `harvest --id` when a process of the session's own tree survives the kill. Nothing can see
   that before the kill.
 - `revive` on a record with no session name. `dispatch` and `resume` never write one.
