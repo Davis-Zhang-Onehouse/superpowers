@@ -200,6 +200,8 @@ def reconcile(store, pool, sessions, instants_dir: Path, idle_after_s: int = 180
 
     live_sessions = list(sessions.live())
     subjects, seen_records, accounted_slots = [], set(), set()
+    #: RV-29. Records dispatched on ANOTHER tmux server: a same-named pane here is not theirs, and neither is their lease.
+    elsewhere = {rec.todo_id for rec in records if rec.tmux_socket and rec.tmux_socket != sessions.socket}
 
     # --- pass 1: PROCESS-FIRST. Start from what is running, whatever the records say. -------------
     #: RV-25. Readable rows first (a stable sort, so their own order is kept): when one record's pane holds both, the
@@ -216,7 +218,7 @@ def reconcile(store, pool, sessions, instants_dir: Path, idle_after_s: int = 180
                 accounted_slots.add(rec.slot)
             subjects.append(subject)
         else:
-            slot = _slot_holding(pool, sess.cwd) or _slot_leased_to_pane(pool, sess)
+            slot = _slot_holding(pool, sess.cwd) or _slot_leased_to_pane(pool, sess, elsewhere)
             if slot:
                 accounted_slots.add(slot)
             subjects.append(_unknown_subject(sess, slot))
@@ -675,17 +677,19 @@ def _slot_holding(pool, cwd: Path) -> str:
     return ""
 
 
-def _slot_leased_to_pane(pool, sess) -> str:
+def _slot_leased_to_pane(pool, sess, elsewhere=frozenset()) -> str:
     """FB-54. The slot whose lease names this session's tmux pane — for an UNREADABLE row only, "" otherwise.
 
     An unreadable process carries no cwd (`/proc/<pid>` stands in for the one the kernel refused), so the cwd
     join above cannot place it; the pane walk still named its session through `stat`. A readable row is never
-    placed this way: its cwd is the stronger fact, and a process that left its slot has left it."""
+    placed this way: its cwd is the stronger fact, and a process that left its slot has left it. A lease names a
+    session but not a server, so a lease held by a record on another server (`elsewhere`, todo ids) is never
+    matched: a same-named pane here is somebody else's (RV-29)."""
     if not getattr(sess, "unreadable", False) or not sess.name:
         return ""
     for slot in pool.slots():
         lease = pool.lease(slot)
-        if lease is not None and lease.tmux == sess.name:
+        if lease is not None and lease.tmux == sess.name and lease.todo_id not in elsewhere:
             return slot
     return ""
 
