@@ -2520,6 +2520,14 @@ class TestDryRunSweepB10(CliCase):
         fleet = self.loaded()
         self._same(fleet, ["unenroll", "--slot", "wsNeverEnrolled"])
 
+    def test_unenroll_a_leased_slot_without_force_names_the_refusal_in_the_dry_run_too(self):
+        """`RV-23`. The dry-run exited 4 for a leased slot but printed no refusal; the real call names the
+        work it would strand and the override token."""
+        fleet = self.loaded()
+        self.assertIsNotNone(fleet.pool.lease("ws1"), "ws1 is not leased: vacuous")
+        real = self._same(fleet, ["unenroll", "--slot", "ws1"])
+        self.assertIn("--force", real[2], "the refusal does not name the override")
+
     def test_set_golden_to_a_path_that_is_not_a_directory(self):
         fleet = self.loaded()
         self._same(fleet, ["set-golden", "--path", str(fleet.tmp / "no-such-golden")])
