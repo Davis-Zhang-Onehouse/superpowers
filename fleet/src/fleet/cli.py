@@ -271,6 +271,9 @@ REAP_UNFREED = "reap-unfreed"
 #: condition produced NO row, and the population line counted the lost slot as leased.
 REAP_RECLAIMED = "reap-reclaimed"
 REAP_UNATTRIBUTABLE = "reap-unattributable"
+#: `FB-85`. A dry run's row for a lease the reap would NOT free because it is not stale — its session is alive,
+#: or a live pid still holds its path as cwd. The real run emits no row for these; the dry run names them.
+REAP_KEPT = "reap-kept"
 
 #: `reconcile`'s two answers. The monitor branches on the KIND, never on the sentence — and the sentence
 #: still says why, because a watcher operator who cannot see why a pane is unarmed disarms the watcher.
@@ -818,21 +821,57 @@ def default_context(parsed: Parsed, out, err) -> Ctx:
                layer_for=layer_for, launch_settings=resolve_launch, launch_environment=environ)
 
 
-def _cwd_holders(path) -> list:
+def _cwd_holders(path, proc_root=Path("/proc")) -> list:
     """Live pids holding `path` as their cwd. `OBS-48`: tmux liveness cannot see a session that outlived
-    its work, so "the tmux is gone" is not freedom."""
-    holders = []
-    proc = Path("/proc")
+    its work, so "the tmux is gone" is not freedom.
+
+    `FB-90`. A pid whose cwd cannot be read used to be skipped — an unreadable holder read as absent. It is
+    reported now, as a `pool.UnreadableHolder`, when world-readable facts tie it to `path`: its parent walk
+    (`/proc/<pid>/stat`, readable by anyone) reaches a READABLE holder of `path`, i.e. it was started from
+    inside the slot. Every other unreadable pid stays unreported, and deliberately: measured on this box, 299
+    of 341 pids have an unreadable cwd (286 of them root's, 7 of them this user's sshd processes), so treating
+    all of them as undecided would refuse every release on every box. What is left — an unreadable process
+    that entered the slot by `chdir`, with no readable holder above it — is not observable by any fact this
+    user can read (the bucket's ISSUES OI-1). Exited and zombie pids hold nothing and are skipped."""
+    from fleet.pool import UnreadableHolder
+
+    proc = Path(proc_root)
     if not proc.is_dir():
-        return holders
+        return []
+    target = Path(path).resolve()
+    holders, unreadable = [], []
     for entry in proc.iterdir():
         if not entry.name.isdigit():
             continue
         try:
-            if (entry / "cwd").resolve() == Path(path).resolve():
+            if (entry / "cwd").resolve(strict=True) == target:
                 holders.append(int(entry.name))
-        except OSError:
-            continue
+        except FileNotFoundError:
+            continue                                   # exited between the listing and the read
+        except (OSError, RuntimeError):
+            unreadable.append(int(entry.name))
+
+    def parent_of(pid: int) -> int:
+        """ppid from `stat` (world-readable), 0 for an exited or zombie pid or an unreadable stat."""
+        try:
+            fields = (proc / str(pid) / "stat").read_text(
+                encoding="utf-8", errors="surrogateescape").rsplit(")", 1)[1].split()
+        except (OSError, IndexError):
+            return 0
+        if len(fields) < 2 or fields[0] in ("Z", "X") or not fields[1].isdigit():
+            return 0
+        return int(fields[1])
+
+    if not holders:
+        return holders                                    # RV-25: nothing readable to tie an unreadable pid to
+    readable = set(holders)
+    for pid in unreadable:
+        walker, steps = parent_of(pid), 0
+        while walker > 1 and steps < 256:                 # bounded: a /proc race cannot loop us
+            if walker in readable:
+                holders.append(UnreadableHolder(pid))
+                break
+            walker, steps = parent_of(walker), steps + 1
     return holders
 
 
@@ -1403,6 +1442,71 @@ def _read_seed_extra(path) -> str:
     return text.strip()
 
 
+def _runtime_record_blocker(ctx: Ctx, record: Record) -> str:
+    """Why this record forbids a runtime switch — naming the verb that clears ITS state — or "" when it does not.
+
+    `FB-92`, coordinator D-30. The switch used to count every record without `harvested_at`, so a record nothing
+    could ever bring back — its folder gone, or aborted, or closed after it completed — blocked the switch
+    forever, or cleared only through a review somebody fabricated so `harvest` would stamp it. What a switch can
+    strand is a record `revive` or `resume` could still act on, because both refuse a record of another runtime.
+    So a record blocks only while one of them could:
+
+      * REVIVABLE — not closed, its folder there, and its lease still held by it or its session alive;
+      * RESUMABLE — its folder resolves and is `-inflight-` (`resume` adopts an inflight instant);
+      * UNDECIDED — its folder could not be read, so neither can be ruled out (FB-53: unreadable is not absent).
+
+    Anything else strands nothing. A lease it still holds and a live process it still has are blockers of their
+    own (below), with their own routes, so dropping the record here never lets a switch run over live work.
+    """
+    if record.harvested_at:
+        return ""
+    try:
+        child, _ = _child_or_why(ctx, record)
+    except Exception:                                        # noqa: BLE001 - an unreadable record is undecided
+        child = None
+    recorded = _recorded_path(ctx, record)
+    if child is None:
+        try:
+            gone = resolve(recorded) is None
+        except (FleetError, OSError):
+            gone = False
+        if not gone:
+            return (f"record {record.todo_id} (its folder {recorded} could not be read, so whether it can still be "
+                    f"resumed is undecided — clears when the folder is readable again and this is re-run)")
+        state = None
+    else:
+        state = InstantName.parse(child.name).state
+    #: RV-20. An untagged (legacy) record's lease belongs to no base, and `reap --all` is the spelling that says so.
+    reap = f"fleet reap --base {record.base_instant}" if record.base_instant else "fleet reap --all"
+    held = ctx.pool.lease(record.slot) if record.slot else None
+    lease_is_its = held is not None and held.todo_id == record.todo_id
+    try:
+        alive = bool(record.tmux) and ctx.sessions_for(record).alive(record.tmux)
+    except (FleetError, OSError):
+        alive = True                                         # unobservable is not dead
+    if not record.closed_at and alive:
+        #: RV-17. `close` alone does not end an -inflight- record for this predicate — it is still resumable —
+        #: so the route for a live -inflight- worker is `abort` (which asks the pane guard first).
+        if state == "inflight":
+            return (f"running record {record.todo_id} (session {record.tmux} is alive, folder -inflight- — clears "
+                    f"when its work finishes and it is harvested, or `fleet abort --instant {child} --reason <why>` "
+                    f"ends it)")
+        return (f"running record {record.todo_id} (session {record.tmux} is alive — clears when it is harvested, or "
+                f"`fleet close --id {record.todo_id}` then `{reap}` ends it)")
+    if state == "inflight":
+        return (f"record {record.todo_id} can still be resumed (its folder is -inflight-) — `fleet abort --instant "
+                f"{child} --reason <why>` ends it and releases its lease")
+    #: `revive` resolves the folder too, so a gone folder is not revivable even with its lease held (the lease
+    #: is a blocker of its own, cleared by `reap`).
+    if not record.closed_at and lease_is_its and child is not None:
+        return (f"record {record.todo_id} can still be revived (open, its lease on {record.slot} held; its folder "
+                f"is -{state}-) — "
+                f"`fleet harvest --id {record.todo_id}` closes it out after its review and final report, or "
+                f"`fleet close --id {record.todo_id}` then `{reap}` ends it with "
+                f"no review")
+    return ""
+
+
 def runtime_blockers(ctx: Ctx) -> list[str]:
     """What forbids changing the saved runtime right now, each named so the operator can clear it.
 
@@ -1412,9 +1516,9 @@ def runtime_blockers(ctx: Ctx) -> list[str]:
     project under the root, and an operator's own interactive session in an unrelated checkout would
     forbid `runtime --set` forever (the spec's "foreign fleets never block", read one level closer).
     """
-    blockers = [f"unharvested record {record.todo_id}" for record in ctx.store.all()
-                if not record.harvested_at]
-    names = {record.tmux for record in ctx.store.all() if record.tmux and not record.harvested_at}
+    records = ctx.store.all()
+    blockers = [why for why in (_runtime_record_blocker(ctx, record) for record in records) if why]
+    names = {record.tmux for record in records if record.tmux and not record.harvested_at}
     paths = [Path(ctx.instants_dir).resolve()]
     for slot in ctx.pool.slots():
         paths.append(ctx.pool.slot_path(slot).resolve())
@@ -1448,21 +1552,14 @@ def _do_runtime(ctx: Ctx, parsed: Parsed) -> int:
             blockers = runtime_blockers(ctx)
             if blockers:
                 raise Refused('Runtime switch requires a completed fleet: ' + '; '.join(blockers),
-                              #: `B11`, coordinator D-31. Three closures found this route wrong for some record
-                              #: state (RV-30, RV-35, RV-37): the chain that clears a record depends on its state
-                              #: (abort if -inflight-, a final report if dispatched for a milestone, review,
-                              #: harvest), and designing it is FB-92's. So the text names a route ONLY where it is
-                              #: measured to run — a `-complete-` record (review if unreviewed, then harvest) —
-                              #: and says, for every other state, that no single verb clears it today.
-                              clears_when='nothing above remains: each named record is HARVESTED. For a record '
-                                          'whose folder is `-complete-`, `fleet harvest --id <todo>` does it — '
-                                          'after `fleet review --instant <its folder> --scope all --verdict READY` '
-                                          'if it has no review round yet, and after its final report if it was '
-                                          'dispatched for a milestone. For a record in any other state (its '
-                                          'folder still -inflight-, aborted, or gone) no single verb clears it '
-                                          'today — a known gap (FB-92). Each held lease is released by that '
-                                          'harvest or by `fleet reap`, and each named process has exited; then '
-                                          'the same `fleet runtime --set` is re-run',
+                              #: `FB-92` (D-30). Each record blocker above names the verb that clears ITS state
+                              #: (abort / harvest / close then reap / its work finishing); a record no verb can
+                              #: resume or revive is not listed at all, so no review has to be fabricated. B11's
+                              #: "no single verb clears it today" is gone with the gap it described.
+                              clears_when='nothing above remains: each named record is ended by the verb named '
+                                          'beside it, each held lease is released (`fleet reap --base <its base>` '
+                                          'once its session is gone and nothing sits in it), and each named '
+                                          'process has exited; then the same `fleet runtime --set` is re-run',
                               clears_who='the coordinator of each named record, or the operator')
             if not ctx.dry_run:
                 write_runtime(ctx.home, requested)
@@ -1556,13 +1653,15 @@ def _do_revive(ctx: Ctx, parsed: Parsed) -> int:
                       clears_who='the coordinator')
     current, _ = read_runtime(ctx.home)
     if current != record.runtime:
-        #: RV-22. Not `fleet runtime --set {record.runtime}`: that switch is refused while any record is
-        #: unharvested or any lease held, and this record — open, lease held, or revive would refuse it anyway —
-        #: is exactly such a blocker. There is no state in which that route runs for this record.
+        #: RV-22 (worded for FB-92 by the teardown bucket's RV-22). Not `fleet runtime --set {record.runtime}`: that
+        #: switch is refused while any record can still be revived or resumed, and revive needs this open record's
+        #: lease — held, it is exactly such a blocker; released, revive refuses it below anyway. There is no state
+        #: in which that route runs for this record.
         raise Refused('The recorded runtime differs from the fleet selection',
                       clears_when=f'never, for this record under the current selection: switching back to '
-                                  f'{record.runtime} needs every record harvested, this one included. Carry the '
-                                  f'work on with a new worker under the current runtime (`fleet dispatch`)',
+                                  f'{record.runtime} is refused while this record can still be revived (it holds '
+                                  f'its lease), and without its lease revive refuses it anyway. Carry the work on '
+                                  f'with a new worker under the current runtime (`fleet dispatch`)',
                       clears_who='the coordinator')
     lease = ctx.pool.lease(record.slot) if record.slot else None
     if lease is None or lease.todo_id != record.todo_id:
@@ -2046,9 +2145,9 @@ def _do_resume(ctx: Ctx, parsed: Parsed) -> int:
     #: record, a foreign session exiting is not enough — the re-run meets the second refusal.
     recorded_route = (None if existing is None or existing.runtime == ctx.sessions.runtime else
                       f'the fleet runs {existing.runtime} again — `fleet runtime --set {existing.runtime}` once '
-                      f'`fleet runtime --set {existing.runtime} --dry-run` names no blocker (every record '
-                      f'harvested, no lease held). While unharvested, this record is itself one of those '
-                      f'blockers, so that switch comes only after its work finishes and is harvested; to go on '
+                      f'`fleet runtime --set {existing.runtime} --dry-run` names no blocker (no record that can '
+                      f'still be resumed or revived, no lease held). While it can still be resumed or revived, this record is '
+                      f'itself one of those blockers (FB-92), so that switch comes only after it ends; to go on '
                       f'now, carry the work with a new worker under the current runtime (`fleet dispatch`). '
                       f'Closing the record does not change its runtime')
     if any(runtime != ctx.sessions.runtime for runtime in observed):
@@ -3286,7 +3385,25 @@ def _refuse_a_session_on_another_server(ctx: Ctx, record) -> None:
 ABORT_RELEASE_WAIT_S = 2.0
 
 
-def _release_slot_or_name_the_partial_state(ctx: Ctx, record, child: Path) -> None:
+def _released_or_why_not(ctx: Ctx, record) -> str:
+    """Release `record.slot` as THIS record's lease, and say what happened, for the verb's `released` row.
+
+    `FB-89`. `abort` and `harvest --id` read the record, then kill, then release — and released with no
+    identity, so a slot re-claimed in between had the NEW claim freed: a live worker losing its slot, the
+    destructive double free `Pool.release`'s `expect_todo` exists to close. Passing the record's todo makes
+    the release a no-op on anybody else's claim, and the row then says whose claim it left alone rather than
+    announcing a release that did not happen. A `Refused` (a cwd holder) propagates to the caller.
+    """
+    if ctx.pool.release(record.slot, expect_todo=record.todo_id):
+        return record.slot
+    now = ctx.pool.lease(record.slot)
+    if now is not None and now.todo_id != record.todo_id:
+        return (f"no — slot {record.slot!r} was re-claimed by todo {now.todo_id!r} (effort "
+                f"{now.base_instant or 'untagged'}) after this call read it; that claim was left alone")
+    return f"no — slot {record.slot!r} was already free"
+
+
+def _release_slot_or_name_the_partial_state(ctx: Ctx, record, child: Path) -> str:
     """Release `record.slot`, waiting out a live cwd-holder once before giving up.
 
     `pool.release` refuses when a live pid still holds the slot as its cwd (`OBS-48`) — and by the time
@@ -3301,14 +3418,13 @@ def _release_slot_or_name_the_partial_state(ctx: Ctx, record, child: Path) -> No
     import time
 
     try:
-        ctx.pool.release(record.slot)
-        return
+        return _released_or_why_not(ctx, record)
     except Refused:
         pass
     sleep = ctx.sleep or time.sleep
     sleep(ABORT_RELEASE_WAIT_S)
     try:
-        ctx.pool.release(record.slot)
+        return _released_or_why_not(ctx, record)
     except Refused as exc:
         raise Refused(
             f"abort of {child.name} could not finish: the session was closed, but releasing slot "
@@ -3345,6 +3461,8 @@ def _slot_gate_before_kill(ctx: Ctx, record, child: Path, verb: str) -> str:
     """
     import time
 
+    from fleet.pool import UnreadableHolder
+
     if record is None or not record.slot:
         return ""
     layer = ctx.sessions_for(record)
@@ -3356,25 +3474,42 @@ def _slot_gate_before_kill(ctx: Ctx, record, child: Path, verb: str) -> str:
         "the real call applies, closes the session and stamps the record, then releases with no wait: a "
         "holder that survives the kill refuses there, from that partial state (`reap` recovers the slot)")
 
+    spared = set()
+
     def refusal():
+        spared.clear()
         pids = ctx.pool.cwd_holders(record.slot)
         if not pids:
             return None, ""
         own = layer.own_processes(record.tmux, pids) if live else set()
         if own is None:
+            #: RV-19. Undecided passes the gate, and the kill that follows reparents every unreadable holder it
+            #: could see — so each is noted, since which of them the kill ends cannot be told either.
+            spared.update(pid for pid in pids if isinstance(pid, UnreadableHolder))
             return None, (f"pid(s) {', '.join(str(p) for p in pids)} hold slot {record.slot!r} as cwd, and "
                           f"whether closing session {record.tmux!r} ends them could not be observed (no pane "
                           f"pid or parent walk), so the cwd-holder gate could not be decided before the "
                           f"kill; {after_an_undecided_gate}")
+        spared.update(pid for pid in pids if pid in own)
         #: `RV-21`. The same scan `own` was computed from — a second one would read a newborn child as foreign.
         return ctx.pool.release_refusal(record.slot, spare=own, holders=pids), ""
 
+    def note_the_unreadable():
+        """`FB-90`. The session's own processes are spared because the kill ends them — but one whose cwd cannot
+        be read is tied to the slot only THROUGH that session (its parent walk), and after the kill it would be
+        reparented and read as absent. So, the gate passed and the real call about to kill, it is written into
+        the lease: while that same process lives the pool counts it as an undecided holder."""
+        if not ctx.dry_run:
+            ctx.pool.note_unreadable(record.slot, spared, expect_todo=record.todo_id)
+
     found, undecided = refusal()
     if found is None:
+        note_the_unreadable()
         return undecided
     (ctx.sleep or time.sleep)(ABORT_RELEASE_WAIT_S)
     found, undecided = refusal()
     if found is None:
+        note_the_unreadable()
         return undecided
     why = (f"Those pid(s) are not processes of session {record.tmux!r}, so closing it would not free the "
            f"slot." if live else
@@ -3389,6 +3524,23 @@ def _slot_gate_before_kill(ctx: Ctx, record, child: Path, verb: str) -> str:
         clears_when=found.clears_when,
         clears_who=found.clears_who,
     )
+
+
+def _refuse_a_guarded_pane(ctx: Ctx, record, child: Path, verb: str, parsed: Parsed, override: str) -> None:
+    """`FB-88`. Raise `close`'s own pane refusal — busy, queued text, awaiting an operator, indeterminate — for a
+    verb that is about to kill the record's session, BEFORE it writes or kills anything. `abort` and `harvest --id`
+    end the same pane `close` ends and used to kill it unasked, discarding a turn in progress, a message somebody
+    typed, or a decision on screen. `--force` is the override, as for `close`; it overrides this judgement about
+    work in progress and nothing else — never the server check nor the cwd-holder gate (`B10`)."""
+    if record is None or parsed.on("force"):
+        return
+    refusal = _pane_refusal(ctx, record, override)
+    if refusal is None:
+        return
+    raise Refused(
+        f"{verb} of {child.name} refused before doing anything: {refusal[0]} — {refusal[1]}. Nothing was "
+        f"closed, released, renamed, applied or written. Override: `{override}`.",
+        clears_when=refusal[2], clears_who=refusal[3] or "the operator")
 
 
 def _abort_inputs(ctx, parsed):
@@ -3486,6 +3638,10 @@ def _do_abort(ctx: Ctx, parsed: Parsed) -> int:
         origin, origin_problem = None, _one_line(exc)
     milestone_id = origin.milestone if origin is not None else None
     coordinator = Path(origin.coordinator) if (origin is not None and milestone_id) else None
+    #: `FB-88`. The pane guard `close` asks, asked here too — abort kills the same pane. Before the slot gate
+    #: (which waits) and above the dry-run's return, so both answer alike; `--force` overrides this guard only.
+    _refuse_a_guarded_pane(ctx, record, child, "abort", parsed,
+                           f"fleet abort --instant {child} --reason <why> {FORCE}")
     #: `B10`. The one gate `release` evaluates, asked here — above the dry-run's return and before the
     #: session kill — so a dry-run reports the refusal the real call would hit, and the real call refuses
     #: before its first irreversible step instead of after it.
@@ -3510,8 +3666,9 @@ def _do_abort(ctx: Ctx, parsed: Parsed) -> int:
     reason_path.write_text(json.dumps(body, indent=2, ensure_ascii=False))
     if record is not None and record.tmux:
         ctx.sessions_for(record).kill(record.tmux)
+    released = "(no slot)"
     if record is not None and record.slot:
-        _release_slot_or_name_the_partial_state(ctx, record, child)
+        released = _release_slot_or_name_the_partial_state(ctx, record, child)
     child.rename(target)                       # THE state transition, and the last irreversible step
     if record is not None:
         record.closed_at = ctx.now()
@@ -3520,14 +3677,14 @@ def _do_abort(ctx: Ctx, parsed: Parsed) -> int:
     #: `SI-51`, and the LAST thing this transaction does — see the docstring on why this one fallible step
     #: follows both irreversible steps.
     if coordinator is None:
-        released = ("(nothing claimed)" if not origin_problem
+        milestone_released = ("(nothing claimed)" if not origin_problem
                     else f"no — this instant's origin could not be read: {origin_problem}")
     else:
         try:
             Roadmap(coordinator).disown(milestone_id, expect_owner=claim_owner, reason=reason)
-            released = f"yes — {milestone_id} on {coordinator} is unowned again"
+            milestone_released = f"yes — {milestone_id} on {coordinator} is unowned again"
         except Exception as exc:  # noqa: BLE001 - the abort has already happened; never mask it
-            released = f"no — {_one_line(exc)}"
+            milestone_released = f"no — {_one_line(exc)}"
             print(f"WARNING: {child.name} was aborted, but milestone {milestone_id!r} on {coordinator} "
                   f"could NOT be released ({_one_line(exc)}). It stays claimed by an instant that no "
                   f"longer exists, so nothing may be dispatched onto it until the claim is cleared: "
@@ -3541,22 +3698,28 @@ def _do_abort(ctx: Ctx, parsed: Parsed) -> int:
         ("from", child.name), ("to", target.name), ("path", str(target)),
         ("reason", reason), ("recorded_in", str(target / ".fleet" / ABORT_FILE)),
         ("closed", (record.tmux if record is not None and record.tmux else "(no session)")),
-        ("released", (record.slot if record is not None and record.slot else "(no slot)")),
+        ("released", released),
         ("record", (record.todo_id if record is not None else "(none in this store)")),
         ("milestone", milestone_id or "(none)"),
-        ("milestone_released", released)])
+        ("milestone_released", milestone_released)])
     return EXIT_OK
 
 
 # --- close ----------------------------------------------------------------------------------------
 
 
-def _pane_refusal(ctx: Ctx, record: Record):
+def _pane_refusal(ctx: Ctx, record: Record, override: str = ""):
     """Why this pane must not be closed, as `(guard, reason, clears_when, clears_who)`, or `None`.
 
     The predicates are `session`'s and `pane-guard`'s — the SAME three, not a fourth copy. DA-2 enumerated
     six send paths, and a predicate restated per caller is how five of them keep the old behaviour.
+
+    `FB-88`. `close` is not the only verb that kills a pane: `abort` and `harvest --id` do too, and they asked
+    nothing. They ask THIS function now, and `override` is the exact command that says the kill out loud for
+    the verb that was typed — a refusal of `abort` that named `fleet close --force` would route the caller to a
+    different transaction (one that neither renames nor releases).
     """
+    override = override or f"fleet close --id {record.todo_id} {FORCE}"
     tmux = record.tmux
     #: On the record's OWN server. A pane guard that read a different server than the kill will act on
     #: would be asking one machine for permission to act on another.
@@ -3578,23 +3741,21 @@ def _pane_refusal(ctx: Ctx, record: Record):
         return (PANE_GUARD_CODES[PANE_MID_TURN],
                 f"{tmux} is still offering a way to interrupt, so it is mid-turn: closing it now ends a "
                 f"turn in progress and whatever that turn had not yet written down",
-                f"the turn finishes, or `fleet close --id {record.todo_id} {FORCE}` is said out loud",
+                f"the turn finishes, or `{override}` is said out loud",
                 record.base_instant or record.todo_id)
     if layer.asking(text):
         #: After `busy`, before `unsubmitted` — the one ordering `_do_pane_guard` uses (see there).
         return (PANE_GUARD_CODES[PANE_AWAITING_OPERATOR],
                 f"{tmux} is showing an operator dialog and is blocked on a human's answer: closing it "
                 f"now discards a decision in progress",
-                f"the dialog is answered, or `fleet close --id {record.todo_id} {FORCE}` is said out "
-                f"loud",
+                f"the dialog is answered, or `{override}` is said out loud",
                 record.base_instant or record.todo_id)
     queued = layer.unsubmitted(text)
     if queued is not None:
         return (PANE_GUARD_CODES[PANE_QUEUED_TEXT],
                 f"{tmux} holds unsubmitted text in its input box ({queued!r}): closing it discards a "
                 f"message somebody typed and never sent",
-                f"the text is submitted or cleared, or `fleet close --id {record.todo_id} {FORCE}` is "
-                f"said out loud",
+                f"the text is submitted or cleared, or `{override}` is said out loud",
                 record.base_instant or record.todo_id)
     return None
 
@@ -3643,11 +3804,13 @@ def _do_close(ctx: Ctx, parsed: Parsed) -> int:
     #: RV-15 (`B11`). Who frees the slot depends on whether the folder is still there: `harvest` resolves it
     #: first and exits 2 on one that resolves to nothing, so for a gone folder `reap` is the only door.
     child, _ = _child_or_why(ctx, record)
+    #: RV-37. An untagged (legacy) record's lease belongs to no base: `reap --all` is its spelling (as in RV-20).
+    reap = f"fleet reap --base {record.base_instant}" if record.base_instant else "fleet reap --all"
     held = ("(no slot)" if not record.slot else
             (f"{record.slot} — released by `fleet harvest --id {record.todo_id}` when the delta lands, or by "
-             f"`fleet reap --base {record.base_instant}` once nothing is sitting in it") if child is not None else
-            (f"{record.slot} — its folder resolves to nothing, so `harvest` cannot run on it: `fleet reap --base "
-             f"{record.base_instant}` releases it once nothing is sitting in it"))
+             f"`{reap}` once nothing is sitting in it") if child is not None else
+            (f"{record.slot} — its folder resolves to nothing, so `harvest` cannot run on it: `{reap}` releases it "
+             f"once nothing is sitting in it"))
     _emit(ctx, "close", [
         ("record", record.todo_id),
         ("closed", record.tmux or "(no session)"),
@@ -3878,6 +4041,10 @@ def _do_harvest(ctx: Ctx, parsed: Parsed) -> int:
     board**, which is what makes an orphan unreachable (FD-5). Without `--id` it is the tick alone.
     """
     rows = []
+    if parsed.on("force") and not parsed.get("id"):
+        #: RV-26. The override belongs to the transaction's pane guard; the tick kills nothing.
+        raise BadInput(f"harvest: {FORCE} overrides the pane guard of `harvest --id <todo>` and means nothing "
+                       f"without --id; the tick alone closes no pane. Add --id, or drop {FORCE}.")
     if parsed.get("id"):
         record = _record(ctx, parsed)
         child = _child_of(ctx, record)
@@ -3915,6 +4082,9 @@ def _do_harvest(ctx: Ctx, parsed: Parsed) -> int:
             #: harvest used to apply, disown, kill and stamp before `pool.release` refused, and the dry-run
             #: said `would-harvest` rc=0 over it. `RV-24`: the branch below is chosen by `ctx.dry_run` alone,
             #: never by the gate's return value, so no return of it can send a dry run into the real branch.
+            #: `FB-88`. The pane guard first: it waits for nothing, and harvest kills the same pane `close` does.
+            _refuse_a_guarded_pane(ctx, record, child, "harvest", parsed,
+                                   f"fleet harvest --id {record.todo_id} {FORCE}")
             undecided = _slot_gate_before_kill(ctx, record, child, "harvest")
             if ctx.dry_run:
                 if undecided:
@@ -3974,8 +4144,7 @@ def _do_harvest(ctx: Ctx, parsed: Parsed) -> int:
                 record.harvested_at = ctx.now()
                 record.closed_at = ctx.now()
                 ctx.store.write(record)
-                if record.slot:
-                    ctx.pool.release(record.slot)
+                released = _released_or_why_not(ctx, record) if record.slot else "(none)"
                 rows.append(Row(kind="harvested", subject=record.todo_id, severity=INFO,
                                 detail=(f"delta applied at {roadmap.instant.name} "
                                         f"({', '.join(applied) or 'none pending'})"
@@ -3984,7 +4153,7 @@ def _do_harvest(ctx: Ctx, parsed: Parsed) -> int:
                                         + (f", claim on {stranded.id} given back (status={stranded.status})"
                                            if stranded is not None else "")
                                         + f", session "
-                                        f"{record.tmux} closed, slot {record.slot or '(none)'} released, "
+                                        f"{record.tmux} closed, slot released: {released}, "
                                         f"record stamped at {record.harvested_at}; the row has left the "
                                         f"board (FD-5)")))
                 rows += _held_rows(record, roadmap, held)
@@ -4317,24 +4486,63 @@ def _do_reap(ctx: Ctx, parsed: Parsed) -> int:
     before = {slot: lease for slot, lease in before.items() if lease is not None}
 
     if ctx.dry_run:
+        #: `FB-85`. The dry-run reads the same `reap_plan` the real call executes — session liveness AND the
+        #: cwd-holder half, ownership, interrupted claims — and exits 4 exactly when the real call's strict
+        #: refusal would (a stale lease this base does not own). It used to judge by session liveness only and
+        #: exit 0 over a foreign stale lease the real call refuses.
+        from fleet.pool import UnreadableHolder
+
+        plan = ctx.pool.reap_plan(base_instant=base, all_efforts=every)
         rows = []
-        for slot, lease in sorted(before.items()):
-            mine = every or not lease.base_instant or lease.base_instant == base
+
+        def leased(lease):
+            return (f"leased to {lease.todo_id} (tmux {lease.tmux}) by "
+                    f"{lease.base_instant or 'an untagged (legacy) claim'}")
+        for slot, lease in plan.mine:
+            rows.append(Row(kind=REAPED, subject=slot, severity=INFO,
+                            detail=(f"dry run: {leased(lease)}; stale — no live session and nothing holding "
+                                    f"{lease.path} as its cwd — and this base's to clear, so a real reap frees "
+                                    f"it")))
+        for slot, lease in plan.live:
+            rows.append(Row(kind=REAP_KEPT, subject=slot, severity=INFO,
+                            detail=f"dry run: {leased(lease)}; its session is alive, so it is not stale"))
+        for slot, lease, pids in plan.held:
+            #: RV-23. FB-90's naming rule: an unreadable pid is reported as unread, never as holding the slot.
+            seen = [str(p) for p in pids if not isinstance(p, UnreadableHolder)]
+            blind = [str(p) for p in pids if isinstance(p, UnreadableHolder)]
+            held_by = "; ".join(part for part in (
+                f"live pid(s) {', '.join(seen)} hold {lease.path} as cwd (OBS-48)" if seen else "",
+                f"live pid(s) {', '.join(blind)} descend from a process in it and their cwd could not be read, so "
+                f"whether they hold it is undecided (FB-90)" if blind else "") if part)
+            rows.append(Row(kind=REAP_KEPT, subject=slot, severity=INFO,
+                            detail=f"dry run: {leased(lease)}; its session is gone but {held_by}, so it is not stale"))
+        for slot, why in plan.reclaimable:
+            rows.append(Row(kind=REAP_RECLAIMED, subject=slot, severity=INFO,
+                            detail=f"dry run: an INTERRUPTED claim a real reap clears: {why}"))
+        for slot, why, wait in plan.unattributable:
+            rows.append(Row(kind=REAP_UNATTRIBUTABLE, subject=slot, severity=INFO,
+                            detail=(f"dry run: a bodiless claim too young to judge ({why}); a real reap leaves "
+                                    f"it"),
+                            clears_when=f"`fleet reap` is run again in about {wait:.0f}s",
+                            clears_who=base or ALL_EFFORTS))
+        if plan.foreign:
+            refusal = ctx.pool.foreign_refusal(plan.foreign, base)
+            owner = refusal.clears_who or "an untagged (legacy) claim"
             rows.append(Row(
-                kind=REAPED if mine else REAP_REFUSED, subject=slot, severity=INFO,
-                detail=(f"dry run: leased to {lease.todo_id} (tmux {lease.tmux}) by "
-                        f"{lease.base_instant or 'an untagged (legacy) claim'}; session alive: "
-                        f"{'yes' if ctx.sessions.alive(lease.tmux) else 'no'}; "
-                        + ("this base's to clear" if mine else
-                           f"NOT this base's to clear — {base!r} is not its owner"))))
+                kind=REAP_REFUSED, subject=owner, severity=VIOLATION,
+                detail=(f"a stale lease here is owned by {owner}, not by {base!r}, so a real reap leaves it "
+                        f"alone and exits 4: {refusal}. Override: `fleet reap {ALL_EFFORTS}`, said out loud."),
+                clears_when=refusal.clears_when or f"{owner} reaps it, or `fleet reap {ALL_EFFORTS}` is run",
+                clears_who=owner))
         rows.append(Row(
             kind=POPULATION, subject=base or ALL_EFFORTS, severity=INFO,
-            detail=(f"dry run over {len(ctx.pool.slots())} enrolled slot(s), {len(before)} leased; "
-                    f"nothing was released. Staleness here is by SESSION liveness only — the cwd-holder "
-                    f"half (OBS-48) is evaluated by the real run, and it can only make this set smaller, "
-                    f"never larger")))
+            detail=(f"dry run over {len(ctx.pool.slots())} enrolled slot(s), {len(before)} leased: "
+                    f"{len(plan.mine)} would be freed, {len(plan.live) + len(plan.held)} kept (live session or "
+                    f"cwd holder), {len(plan.foreign)} left to their owners, {len(plan.reclaimable)} interrupted "
+                    f"claim(s) would be reclaimed; nothing was released. A release that fails while executing "
+                    f"(the claim directory cannot be removed) is only knowable by the real run")))
         _emit(ctx, "reap", rows)
-        return EXIT_OK
+        return EXIT_REFUSED if plan.foreign else EXIT_OK
 
     refusal = None
     try:
@@ -6030,6 +6238,8 @@ VERBS = {spec.name: spec for spec in (
         Flag("--reason", True, True,
              "why the work stopped; mandatory and recorded — an abort with no reason is a deletion "
              "with a nicer name"),
+        Flag(FORCE, False, False, "abort even though the pane is mid-turn, holds unsubmitted text or awaits "
+                                  "an operator (the pane guard `close` asks); never overrides the cwd gate"),
     )),
     _verb("close", _do_close, False,
           "shut a pane this store owns and stamp the record; disarms the monitor (FD-10)", (
@@ -6039,6 +6249,8 @@ VERBS = {spec.name: spec for spec in (
     _verb("harvest", _do_harvest, False, "the harvest transaction, plus the observation tick",
           checker=True, flags=(
         Flag("--id", True, False, "the record to harvest; omit for the tick alone"),
+        Flag(FORCE, False, False, "with --id: close the pane even though it is mid-turn, holds unsubmitted text "
+                                  "or awaits an operator; never overrides the cwd gate"),
         Flag("--max-age", True, False, f"the cadence window in seconds (default {DEFAULT_MAX_AGE_S})"),
     )),
     _verb("clone", _do_clone, False,

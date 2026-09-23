@@ -54,7 +54,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Callable, Optional
 
-from fleet.atomic import TMP_SUFFIX, atomic_write
+from fleet.atomic import TMP_SUFFIX, atomic_write, atomic_write_if
 from fleet.errors import BadInput, FleetError, NoCapacity, Refused
 
 _LEASE_BODY = "lease.json"
@@ -128,6 +128,34 @@ def _live_pid(pid: int) -> bool:
     return (Path("/proc") / str(pid)).exists()
 
 
+class UnreadableHolder(int):
+    """A pid that may hold a slot as its cwd, but whose `/proc/<pid>/cwd` this user cannot read — `FB-90`.
+
+    An `int`, so every spare set, `own_processes` walk and comparison keeps working on it unchanged; the type
+    only changes how a refusal NAMES it ("could not be read", never "holds it"). Nothing proves it is in the
+    slot and nothing proves it is not: it is UNDECIDED, and an undecided holder refuses a release exactly as a
+    proven one does (FB-53's rule — unobservable is not absent). Only a pid world-readable facts TIE to the
+    slot is ever one of these (see `cli._cwd_holders`): on a real box most pids are unreadable (another uid, a
+    non-dumpable process), and refusing on all of them would refuse every release.
+    """
+
+
+def _pid_start(pid: int, proc_root: Path = Path("/proc")) -> Optional[str]:
+    """The start time (`/proc/<pid>/stat` field 22, world-readable) of a LIVE pid, or None when it has exited or is
+    a zombie. A pid plus its start time names one process, so a recycled pid is never read as the one noted."""
+    try:
+        fields = (Path(proc_root) / str(pid) / "stat").read_text(
+            encoding="utf-8", errors="surrogateescape").rsplit(")", 1)[1].split()
+    except (OSError, IndexError):
+        return None
+    if not fields or fields[0] in ("Z", "X"):
+        return None
+    try:
+        return fields[19]
+    except IndexError:
+        return None
+
+
 @dataclass
 class Lease:
     slot: str
@@ -142,9 +170,14 @@ class Lease:
     #: exists to be an ORDER, not a time — it is what makes `rank` a total order over simultaneous
     #: claimants, and so what lets exactly `cap` of them admit instead of all or none (`FI-21`).
     claimed_ns: int = 0
+    #: `FB-90`. `[pid, start time]` of each UNREADABLE process a teardown saw tied to this slot through the
+    #: session it was about to kill. The tie (a parent walk to a readable holder) is lost the moment that
+    #: session dies and the process is reparented, so it is written down first: while the same process lives,
+    #: the pool counts it as an undecided holder of the slot.
+    unreadable_holders: list = field(default_factory=list)
 
     def to_json(self) -> dict:
-        return {
+        body = {
             "slot": self.slot,
             "path": str(self.path),
             "todo_id": self.todo_id,
@@ -154,6 +187,9 @@ class Lease:
             "claimed_at": self.claimed_at,
             "claimed_ns": self.claimed_ns,
         }
+        if self.unreadable_holders:
+            body["unreadable_holders"] = [list(item) for item in self.unreadable_holders]
+        return body
 
     @classmethod
     def from_json(cls, d: dict) -> "Lease":
@@ -161,9 +197,16 @@ class Lease:
             return cls(slot=d["slot"], path=Path(d["path"]), todo_id=d["todo_id"],
                        tmux=d["tmux"], base_instant=d.get("base_instant", ""),
                        child_instant=d.get("child_instant", ""), claimed_at=d.get("claimed_at", ""),
-                       claimed_ns=int(d.get("claimed_ns", 0) or 0))
+                       claimed_ns=int(d.get("claimed_ns", 0) or 0),
+                       unreadable_holders=[[int(pid), str(start)] for pid, start
+                                           in (d.get("unreadable_holders") or [])])
         except KeyError as exc:
             raise BadInput(f"lease body is missing the field {exc.args[0]!r}") from exc
+        except (TypeError, ValueError) as exc:
+            #: RV-24. A malformed `unreadable_holders` (or any mistyped field) is a body problem like a missing
+            #: one — the slot is held by somebody this body cannot name — never a raw traceback.
+            raise BadInput(f"lease body has a malformed field ({type(exc).__name__}: {exc}); expected "
+                           f"`unreadable_holders` as [[pid, start time], ...]") from exc
 
     @property
     def rank(self) -> tuple:
@@ -216,6 +259,23 @@ class ReapReport:
         return len(self.freed)
 
 
+@dataclass
+class ReapPlan:
+    """What a reap WOULD do right now, read without writing anything — `FB-85`.
+
+    `reap --dry-run` used to answer from session liveness alone and exit 0 where the real call exits 4 (a
+    foreign stale lease) or leaves a slot a cwd holder keeps. Both now read this one classification: the real
+    `reap` executes it, the dry-run prints it, so the two cannot disagree about which lease is whose or stale.
+    """
+
+    live: list = field(default_factory=list)          # [(slot, lease)]         its session is alive
+    held: list = field(default_factory=list)          # [(slot, lease, pids)]   a live pid holds its path
+    mine: list = field(default_factory=list)          # [(slot, lease)]         stale and this caller's to free
+    foreign: list = field(default_factory=list)       # [(slot, owner, lease)]  stale, somebody else's
+    reclaimable: list = field(default_factory=list)   # [(slot, why)]           interrupted claim, old enough
+    unattributable: list = field(default_factory=list)  # [(slot, why, wait_s)]  bodiless, too young to judge
+
+
 class Pool:
     """Enrolment is opt-in; a claim is a directory that either exists or does not.
 
@@ -230,7 +290,8 @@ class Pool:
                  cwd_probe: Callable[[Path], list] = None,
                  alive: Callable[[str], bool] = None,
                  pid_alive: Callable[[int], bool] = None,
-                 fleet_root: Path = None):
+                 fleet_root: Path = None,
+                 pid_start: Callable[[int], Optional[str]] = None):
         self.home = Path(home)
         #: `G3`. The FLEET root this pool belongs to, when there is one — not to be confused with
         #: `self.root` two lines down, which is this pool's own directory. Optional because the hermetic
@@ -247,6 +308,9 @@ class Pool:
         #: as litter and deletes a live worker's lease — so the safe default is the true answer, and a test
         #: that wants determinism injects one (`SI-7`).
         self._pid_alive = pid_alive if pid_alive is not None else _live_pid
+        #: `FB-90`. The identity of a live process, for the unreadable holders a lease notes; the real `/proc`
+        #: by default for the same reason as `pid_alive` — a default of "gone" would free a slot on a guess.
+        self._pid_start = pid_start if pid_start is not None else _pid_start
 
     # ---- enrolment -------------------------------------------------------------------------
 
@@ -258,7 +322,7 @@ class Pool:
         atomic_write(self.enrolled / f"{path.name}.json",
                      json.dumps({"slot": path.name, "path": str(path.resolve())}, indent=2))
 
-    def enroll_refusal(self, path: Path, exists: bool = True) -> "Optional[BadInput]":
+    def enroll_refusal(self, path: Path, exists: bool = True) -> "Optional[FleetError]":
         """The refusal `enroll` would raise for `path`, or None — read-only (`B10` sweep: the dry-runs of
         `enroll` and `clone` ask it). `exists=False` skips the is-a-directory check, for `clone`, which
         asks about a target it has not created yet."""
@@ -282,6 +346,28 @@ class Pool:
         slot = path.name
         if not slot or "/" in slot:
             return BadInput(f"{path} has no usable slot name (the slot name is the directory's basename)")
+        #: `FB-91`. The slot NAME is the basename, and the enrolment file is keyed by it — so enrolling (or
+        #: cloning to) `/elsewhere/ws1` used to overwrite `ws1.json` and silently re-point an enrolled slot,
+        #: possibly under a live lease whose worker still sits in the old path. The same path again is fine.
+        record = self.enrolled / f"{slot}.json"
+        if record.is_file():
+            try:
+                current = Path(json.loads(record.read_text())["path"])
+            except (OSError, ValueError, KeyError, TypeError) as exc:
+                return Refused(
+                    f"slot {slot!r} is already enrolled, and its enrolment file {record} could not be read "
+                    f"({type(exc).__name__}: {exc}); enrolling {path} would overwrite it unread.",
+                    clears_when=f"{record} is readable again, or the slot is unenrolled (`fleet unenroll --slot {slot}`)",
+                    clears_who="the operator")
+            if current.resolve() != path.resolve():
+                return Refused(
+                    f"slot {slot!r} is already enrolled at {current}; enrolling {path.resolve()} would re-point "
+                    f"it, and a lease on {slot!r} would then name a directory its worker is not in. The slot "
+                    f"name is the directory's basename, so two workspaces cannot share one.",
+                    clears_when=(f"the enrolled {slot!r} is taken out first (`fleet unenroll --slot {slot}`, "
+                                 f"refused while it is leased), or the new workspace gets a basename no enrolled "
+                                 f"slot uses"),
+                    clears_who="the operator")
         return None
 
     def unenroll_refusal(self, slot: str, force: bool = False) -> "Optional[FleetError]":
@@ -605,9 +691,55 @@ class Pool:
             f"`reap` clears it and says what it cleared.")
 
     def cwd_holders(self, slot: str) -> list:
-        """Live pids holding `slot`'s leased path as their cwd; `[]` when it is not leased. Read-only."""
+        """Live pids holding `slot`'s leased path as their cwd; `[]` when it is not leased. Read-only.
+        Includes the lease's noted unreadable holders that still live (`FB-90`)."""
         held = self.lease(slot)
-        return [] if held is None else list(self._cwd_probe(held.path))
+        return [] if held is None else self._holders(held)
+
+    def _holders(self, held: Lease, scanned=None) -> list:
+        """The probe's scan (or `scanned`, one the caller already took — `RV-21`) plus every process the lease
+        NOTED as an unreadable holder that is still the same live process (`FB-90`), each once."""
+        pids = list(self._cwd_probe(held.path) if scanned is None else scanned)
+        seen = set(pids)
+        for pid, start in held.unreadable_holders:
+            if pid not in seen and self._pid_start(pid) == start:
+                pids.append(UnreadableHolder(pid))
+                seen.add(pid)
+        return pids
+
+    def note_unreadable(self, slot: str, pids, expect_todo: str) -> list:
+        """Record the `UnreadableHolder`s among `pids` in `slot`'s lease body, as `[pid, start time]` — `FB-90`.
+
+        Called by a teardown BEFORE it kills the session those processes were tied to through: after the kill
+        the tie is gone, and without the note the next release would read the slot as empty. Only for the lease
+        `expect_todo` holds (a re-claimed slot is somebody else's lease — `FB-89`). Returns what was noted."""
+        held = self.lease(slot)
+        if held is None or held.todo_id != expect_todo:
+            return []
+        known = {pid for pid, _ in held.unreadable_holders}
+        added = []
+        for pid in pids:
+            if not isinstance(pid, UnreadableHolder) or int(pid) in known:
+                continue
+            start = self._pid_start(int(pid))
+            if start is not None:
+                added.append([int(pid), start])
+        if not added:
+            return []
+        held.unreadable_holders = list(held.unreadable_holders) + added
+        return added if self._rewrite_own_lease(slot, held) else []
+
+    def _rewrite_own_lease(self, slot: str, held: Lease) -> bool:
+        """Replace `slot`'s lease body with `held`, ONLY while the claim on disk is still the one `held` was read
+        from — `RV-18`. Never through `atomic_write`, which creates missing parents: a release between the read
+        and the write would get its claim directory back (a phantom lease), and a re-claim would get the old
+        todo written over its body. `atomic_write_if` publishes into the existing claim directory only, after
+        re-reading the claim. Returns whether it was written."""
+        def still_ours():
+            now = self.lease(slot)
+            return now is not None and (now.todo_id, now.claimed_ns) == (held.todo_id, held.claimed_ns)
+
+        return atomic_write_if(self.leases / slot / _LEASE_BODY, json.dumps(held.to_json(), indent=2), still_ours)
 
     def release_refusal(self, slot: str, spare=(), holders=None) -> "Optional[Refused]":
         """The `OBS-48` refusal `release` would raise for `slot` right now, or None — read-only.
@@ -624,16 +756,27 @@ class Pool:
 
     def _cwd_refusal(self, slot: str, held, spare=(), holders=None) -> "Optional[Refused]":
         spared = set(spare)
-        scanned = self._cwd_probe(held.path) if holders is None else holders
-        pids = [p for p in scanned if p not in spared]
+        pids = [p for p in self._holders(held, holders) if p not in spared]
         if not pids:
             return None
+        seen = [p for p in pids if not isinstance(p, UnreadableHolder)]
+        blind = [p for p in pids if isinstance(p, UnreadableHolder)]
+        said = []
+        if seen:
+            said.append(f"held as cwd by live pid(s) {', '.join(str(p) for p in seen)}")
+        if blind:
+            #: `FB-90`. Named as what was observed: tied to the slot, cwd unreadable — never "holds it".
+            said.append(f"possibly held by live pid(s) {', '.join(str(p) for p in blind)}, whose cwd could not "
+                        f"be read (another user's or a non-dumpable process) but which descend from a process "
+                        f"that sat in this slot, so whether they still do is UNDECIDED — and undecided is "
+                        f"not absent")
         return Refused(
-            f"slot {slot!r} ({held.path}) is held as cwd by live pid(s) "
-            f"{', '.join(str(p) for p in pids)}; releasing it would let a second worker be "
+            f"slot {slot!r} ({held.path}) is {'; and '.join(said)}; releasing it would let a second worker be "
             f"leased into a directory somebody is still working in (OBS-48). Lease is todo "
             f"{held.todo_id!r} for effort {held.base_instant!r}.",
-            clears_when=f"pid(s) {', '.join(str(p) for p in pids)} exit {held.path}",
+            clears_when=(f"pid(s) {', '.join(str(p) for p in pids)} exit {held.path}"
+                         + (f" (for {', '.join(str(p) for p in blind)}: the process exits — its cwd cannot be "
+                            f"read, so leaving the slot cannot be observed)" if blind else "")),
             clears_who=held.base_instant or None,
         )
 
@@ -706,26 +849,12 @@ class Pool:
         call freed, never every slot that ended up free, so a slot freed once is announced once. And a slot
         it could not free is named in `unfreed` rather than raised — the whole point of a reap is the report.
         """
-        freed, unfreed, skipped, reclaimed = [], [], [], []
+        plan = self.reap_plan(base_instant=base_instant, all_efforts=all_efforts, min_claim_age_s=min_claim_age_s)
+        freed, unfreed, reclaimed = [], [], []
+        skipped = list(plan.foreign)
+        unattributable = list(plan.unattributable)
 
-        # `SI-7` first, and it is FIRST on purpose: an interrupted claim makes a slot unclaimable, so
-        # clearing it is the difference between a pool that recovers and a pool that has lost a workspace
-        # for good. An interrupted claim carries no base — the body that would name one is what failed to be
-        # written — so it falls under the rule this method already applies to an untagged lease: nobody
-        # owns it, therefore it is this caller's to clear. That is why `--all` is not required; the operator
-        # is told to `reap` by the very refusal they hit, and a remedy that needs a second, undocumented
-        # flag is the unclearable alarm again (`FI-30a`).
-        # `E9` mode 2: what this call can SEE but cannot yet judge. Computed before the reclaim loop and
-        # from the same predicate at a zero floor, so the two cannot disagree about which claims exist —
-        # the difference between the lists is exactly the age floor, which is the thing being reported.
-        reclaimable = {slot for slot, _ in self.interrupted_claims(min_age_s=min_claim_age_s)}
-        unattributable = []
-        for slot, why in self.interrupted_claims(min_age_s=0.0):
-            if slot in reclaimable:
-                continue                                # this call is about to clear it; not a report
-            unattributable.append((slot, why, max(0.0, min_claim_age_s - self._claim_age_s(slot))))
-
-        for slot, why in self.interrupted_claims(min_age_s=min_claim_age_s):
+        for slot, why in plan.reclaimable:
             try:
                 what = self._reclaim(slot)
                 if what:
@@ -736,19 +865,7 @@ class Pool:
             except OSError as exc:
                 unfreed.append((slot, f"{type(exc).__name__}: {exc}"))
 
-        for slot in self.slots():
-            held = self.lease(slot)
-            if held is None:
-                continue
-            owner = held.base_instant or ""
-            mine = all_efforts or owner == "" or owner == base_instant
-            if self._alive(held.tmux):
-                continue                                    # its worker is still running
-            if list(self._cwd_probe(held.path)):
-                continue                                    # somebody is still sitting in it (OBS-48)
-            if not mine:
-                skipped.append((slot, owner, held))
-                continue
+        for slot, held in plan.mine:
             try:
                 if self.release(slot, expect_todo=held.todo_id):
                     freed.append(slot)
@@ -769,17 +886,65 @@ class Pool:
                                                   if s not in cleared
                                                   and (self.leases / s).is_dir()))
         if strict and skipped:
-            slot, owner, held = skipped[0]
-            others = "".join(f"; {s} is {o}" for s, o, _ in skipped[1:])
-            # Named in words, not in kwargs, for the same reason as `unenroll` above: `cli` quotes the
-            # `--all` token, and this sentence is read by whoever typed the command (`FI-19b`).
-            refusal = Refused(
-                f"slot {slot!r} holds a stale lease owned by {owner} (todo {held.todo_id!r}, tmux "
-                f"{held.tmux!r}), not by {base_instant!r}{others}. Not yours to clear — that is a "
-                "state, not a failure. The owner reaps it, or the every-effort override is said out loud.",
-                clears_when=f"{owner} reaps {slot!r}, or a reap across every effort is said out loud",
-                clears_who=owner,
-            )
+            refusal = self.foreign_refusal(skipped, base_instant)
             refusal.report = report
             raise refusal
         return report
+
+    @staticmethod
+    def foreign_refusal(skipped: list, base_instant) -> Refused:
+        """The strict reap's refusal over `skipped` (a `ReapPlan.foreign`), built in ONE place so `reap` and its
+        dry-run print the same sentence (`FB-85`)."""
+        slot, owner, held = skipped[0]
+        others = "".join(f"; {s} is {o}" for s, o, _ in skipped[1:])
+        # Named in words, not in kwargs, for the same reason as `unenroll` above: `cli` quotes the
+        # `--all` token, and this sentence is read by whoever typed the command (`FI-19b`).
+        return Refused(
+            f"slot {slot!r} holds a stale lease owned by {owner} (todo {held.todo_id!r}, tmux "
+            f"{held.tmux!r}), not by {base_instant!r}{others}. Not yours to clear — that is a "
+            "state, not a failure. The owner reaps it, or the every-effort override is said out loud.",
+            clears_when=f"{owner} reaps {slot!r}, or a reap across every effort is said out loud",
+            clears_who=owner,
+        )
+
+    def reap_plan(self, base_instant=None, all_efforts: bool = False,
+                  min_claim_age_s: float = INTERRUPTED_CLAIM_AGE_S) -> ReapPlan:
+        """Classify every lease and bodiless claim the way `reap` judges them, writing nothing (`FB-85`).
+
+        A lease is stale when its tmux is not alive AND no live process holds its path as cwd; it is this
+        caller's when `all_efforts` is set, it carries no base (legacy), or its base is `base_instant`.
+        An interrupted claim old enough to judge is reclaimable; a younger one is unattributable (`E9`).
+        """
+        plan = ReapPlan()
+        # `SI-7` first, and it is FIRST on purpose: an interrupted claim makes a slot unclaimable, so
+        # clearing it is the difference between a pool that recovers and a pool that has lost a workspace
+        # for good. An interrupted claim carries no base — the body that would name one is what failed to be
+        # written — so it falls under the rule this method already applies to an untagged lease: nobody
+        # owns it, therefore it is this caller's to clear. That is why `--all` is not required; the operator
+        # is told to `reap` by the very refusal they hit, and a remedy that needs a second, undocumented
+        # flag is the unclearable alarm again (`FI-30a`).
+        # `E9` mode 2: what this call can SEE but cannot yet judge, from the same predicate at a zero floor, so
+        # the two cannot disagree about which claims exist — the difference is exactly the age floor.
+        reclaimable = self.interrupted_claims(min_age_s=min_claim_age_s)
+        plan.reclaimable = list(reclaimable)
+        judged = {slot for slot, _ in reclaimable}
+        for slot, why in self.interrupted_claims(min_age_s=0.0):
+            if slot not in judged:
+                plan.unattributable.append((slot, why, max(0.0, min_claim_age_s - self._claim_age_s(slot))))
+        for slot in self.slots():
+            held = self.lease(slot)
+            if held is None:
+                continue
+            owner = held.base_instant or ""
+            if self._alive(held.tmux):
+                plan.live.append((slot, held))                   # its worker is still running
+                continue
+            pids = self._holders(held)
+            if pids:
+                plan.held.append((slot, held, pids))             # somebody is still sitting in it (OBS-48)
+                continue
+            if all_efforts or owner == "" or owner == base_instant:
+                plan.mine.append((slot, held))
+            else:
+                plan.foreign.append((slot, owner, held))
+        return plan
