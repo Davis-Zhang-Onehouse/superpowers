@@ -360,6 +360,21 @@ class SurfaceTests(unittest.TestCase):
         self.assertEqual(len(row), 1, out)
         self.assertIn('runtime=codex model=gpt-x', row[0])
 
+    def test_brief_still_renders_when_the_record_cannot_be_acted_on(self):
+        """RV-31. `_record_for` refuses a record written under another root (`_refuse_foreign_root`, BadInput). pt2's
+        runtime row must not turn that into a failed read-only briefing: the row reports it and brief goes on."""
+        from unittest import mock
+        from fleet import cli
+        from fleet.errors import BadInput
+        path = self.f.worker('coder', slot='ws1', live=False)
+        with mock.patch.object(cli, '_record_for', side_effect=BadInput('record written under another root')):
+            code, out, err = self.f.run(['brief', '--instant', str(path)])
+        self.assertNotEqual(code, 2, err)
+        row = [line for line in out.splitlines() if line.startswith('runtime')]
+        self.assertEqual(len(row), 1, out)
+        self.assertIn('another root', row[0])
+        self.assertTrue(any(line.startswith('origin') for line in out.splitlines()), out)
+
     def test_status_evidence_carries_the_model(self):
         self.f.worker('coder', slot='ws1', live=False)
         record = self.f.store.read(self.f.ids['coder'])
