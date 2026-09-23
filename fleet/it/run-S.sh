@@ -590,6 +590,19 @@ from fleet.cli import _cwd_holders
 print(" ".join(str(p) for p in sorted(_cwd_holders(sys.argv[1]))))
 PY2
 }
+#: `RV-27` / `RV-20`. A SECOND pane whose CHILD holds the slot: the real `/proc` parent walk has to climb
+#: from that child to a pane pid, and the pane is not the session's first — the two shapes the hermetic
+#: tier can only model. `kill-session` ends it, so the control dry-run below must still pass.
+tmux -L "$IT_TMUX_SOCKET" split-window -t "=$S11_TMUX:" -c "$S11_SLOT" 'sh -c "sleep 300 & wait"' \
+     2> "$OUT/S11-split.err"
+S11_PANE2="$(tmux -L "$IT_TMUX_SOCKET" list-panes -s -t "=$S11_TMUX" -F '#{pane_pid}' 2>/dev/null \
+             | grep -vx "$S11_PANE" | head -1)"
+S11_PANE2_CHILD=""
+for _ in 1 2 3 4 5 6 7 8 9 10; do
+  S11_PANE2_CHILD="$(ps -o pid= --ppid "${S11_PANE2:-0}" 2>/dev/null | tr -d ' ' | head -1)"
+  [ -n "$S11_PANE2_CHILD" ] && case " $(s11_holders "$S11_SLOT") " in *" $S11_PANE2_CHILD "*) break ;; esac
+  sleep 0.2
+done
 S11_OWN="$(s11_holders "$S11_SLOT")"
 S11_ARGV=(--instant "$S11_CHILD" --reason "B10: a live pid still sits in the slot")
 
@@ -618,22 +631,24 @@ fleet abort "${S11_ARGV[@]}" > "$OUT/S11-rerun.out" 2>&1
 s11_rerun_rc=$?
 s11_aborted=0; [ -d "${S11_CHILD/-inflight-/-abort-}" ] && s11_aborted=1
 { echo "slot=$S11_SLOT session=$S11_TMUX pane_pid=$S11_PANE own-holders-before=[$S11_OWN] foreign-holder=$S11_HOLDER (seen holding the slot: $s11_seen)"
-  echo "--- control dry-run (only the pane's own tree holds the slot) rc=$s11_control_rc"; cat "$OUT/S11-control-dry.out"
+  echo "second pane=$S11_PANE2 its child=$S11_PANE2_CHILD (a descendant of a non-first pane, holding the slot)"
+  echo "--- control dry-run (only the session's own trees hold the slot: both panes and the second pane's child) rc=$s11_control_rc"; cat "$OUT/S11-control-dry.out"
   echo "--- dry-run with the foreign holder rc=$s11_dry_rc (state unchanged: $([ "$s11_before" = "$s11_after_dry" ] && echo yes || echo NO))"; cat "$OUT/S11-dry.out"
   echo "--- real abort, same argv rc=$s11_real_rc  byte-identical-to-dry-run=$s11_same  session-alive-after=$s11_alive  folder-inflight=$s11_inflight"; cat "$OUT/S11-real.out"
   echo "--- holder killed; re-run rc=$s11_rerun_rc aborted=$s11_aborted"; cat "$OUT/S11-rerun.out"; } > "$OUT/S11.txt" 2>&1
 cat "$OUT/S11.txt"
 
 s11_pane_held=0; case " $S11_OWN " in *" $S11_PANE "*) s11_pane_held=1 ;; esac
+s11_child_held=0; [ -n "$S11_PANE2_CHILD" ] && case " $S11_OWN " in *" $S11_PANE2_CHILD "*) s11_child_held=1 ;; esac
 s11_unchanged=0; [ -n "$s11_before" ] && [ "$s11_before" = "$s11_after_dry" ] && s11_unchanged=1
-if [ -n "$S11_PANE" ] && [ "$s11_pane_held$s11_control_rc" = "10" ] && [ "$s11_seen" = 1 ] && [ "$s11_dry_rc" = 4 ] \
+if [ -n "$S11_PANE" ] && [ "$s11_pane_held$s11_child_held$s11_control_rc" = "110" ] && [ "$s11_seen" = 1 ] && [ "$s11_dry_rc" = 4 ] \
    && [ "$s11_unchanged" = 1 ] && [ "$s11_real_rc" = 4 ] && [ "$s11_same$s11_alive$s11_inflight" = "111" ] \
    && [ "$s11_rerun_rc" = 0 ] && [ "$s11_aborted" = 1 ]; then
   it_pass S11 "fleet/it/S/out/S11.txt" \
-    "with a live setsid pid holding the worker's slot as cwd, \`abort --dry-run\` refused rc=4 leaving the store, instants, slots and tmux sessions byte-identical, and the real abort with the same argv refused with byte-identical output while the session was STILL ALIVE and the folder still -inflight- (it refused before the kill, not after). Control: the pane's own pid ($S11_PANE) held the slot too and the dry-run taken then passed rc=0, so the gate spares the session's own tree. Once the holder was killed the identical abort completed"
+    "with a live setsid pid holding the worker's slot as cwd, \`abort --dry-run\` refused rc=4 leaving the store, instants, slots and tmux sessions byte-identical, and the real abort with the same argv refused with byte-identical output while the session was STILL ALIVE and the folder still -inflight- (it refused before the kill, not after). Control: the first pane's pid ($S11_PANE) and a child ($S11_PANE2_CHILD) of a SECOND pane held the slot too and the dry-run taken then passed rc=0, so the gate spares every pane's tree through the real /proc parent walk. Once the holder was killed the identical abort completed"
 else
   it_fail S11 "fleet/it/S/out/S11.txt" \
-    "pane=$S11_PANE pane-held=$s11_pane_held control-rc=$s11_control_rc holder-seen=$s11_seen dry-rc=$s11_dry_rc(want 4) dry-unchanged=$s11_unchanged real-rc=$s11_real_rc(want 4) same-output=$s11_same session-alive=$s11_alive inflight=$s11_inflight rerun-rc=$s11_rerun_rc aborted=$s11_aborted"
+    "pane=$S11_PANE pane-held=$s11_pane_held pane2-child=$S11_PANE2_CHILD child-held=$s11_child_held control-rc=$s11_control_rc holder-seen=$s11_seen dry-rc=$s11_dry_rc(want 4) dry-unchanged=$s11_unchanged real-rc=$s11_real_rc(want 4) same-output=$s11_same session-alive=$s11_alive inflight=$s11_inflight rerun-rc=$s11_rerun_rc aborted=$s11_aborted"
 fi
 kill "$S11_HOLDER" 2>/dev/null
 
