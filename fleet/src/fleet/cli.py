@@ -4482,6 +4482,8 @@ def _do_reap(ctx: Ctx, parsed: Parsed) -> int:
         #: cwd-holder half, ownership, interrupted claims — and exits 4 exactly when the real call's strict
         #: refusal would (a stale lease this base does not own). It used to judge by session liveness only and
         #: exit 0 over a foreign stale lease the real call refuses.
+        from fleet.pool import UnreadableHolder
+
         plan = ctx.pool.reap_plan(base_instant=base, all_efforts=every)
         rows = []
 
@@ -4497,10 +4499,15 @@ def _do_reap(ctx: Ctx, parsed: Parsed) -> int:
             rows.append(Row(kind=REAP_KEPT, subject=slot, severity=INFO,
                             detail=f"dry run: {leased(lease)}; its session is alive, so it is not stale"))
         for slot, lease, pids in plan.held:
+            #: RV-23. FB-90's naming rule: an unreadable pid is reported as unread, never as holding the slot.
+            seen = [str(p) for p in pids if not isinstance(p, UnreadableHolder)]
+            blind = [str(p) for p in pids if isinstance(p, UnreadableHolder)]
+            held_by = "; ".join(part for part in (
+                f"live pid(s) {', '.join(seen)} hold {lease.path} as cwd (OBS-48)" if seen else "",
+                f"live pid(s) {', '.join(blind)} descend from a process in it and their cwd could not be read, so "
+                f"whether they hold it is undecided (FB-90)" if blind else "") if part)
             rows.append(Row(kind=REAP_KEPT, subject=slot, severity=INFO,
-                            detail=(f"dry run: {leased(lease)}; its session is gone but live pid(s) "
-                                    f"{', '.join(str(p) for p in pids)} hold {lease.path} as cwd (OBS-48), so it "
-                                    f"is not stale")))
+                            detail=f"dry run: {leased(lease)}; its session is gone but {held_by}, so it is not stale"))
         for slot, why in plan.reclaimable:
             rows.append(Row(kind=REAP_RECLAIMED, subject=slot, severity=INFO,
                             detail=f"dry run: an INTERRUPTED claim a real reap clears: {why}"))
