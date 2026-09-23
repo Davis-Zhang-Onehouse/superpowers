@@ -1278,6 +1278,20 @@ class UnreadableRowAttributionTests(unittest.TestCase):
                          [(UNKNOWN_SESSION, True, "7004")])
         self.assertIn("could not be read", rows[0].note)
 
+    def test_a_same_named_pane_on_another_server_does_not_take_that_servers_lease(self):
+        """RV-29. A lease names a tmux session, not a server. Record B lives on server `other` and leases ws9 for
+        `dt-x`; THIS server has its own `dt-x` pane holding an unreadable claude. The name fallback must not hand
+        B's slot to it — two subjects would then hold ws9."""
+        fleet = self.fleet
+        fleet.dispatch("elsewhere-07300313", "00000000-07300313-inflight-append-elsewhere", "ws9", "dt-x",
+                       tmux_socket="other")
+        fleet.procs.append(probe_unreadable(self.proc, 7008, 7007, "dt-x"))
+        subjects = self.subjects()
+        self.assertEqual([s.identity for s in subjects if s.holds_slot and s.evidence.get("slot") == "ws9"],
+                         ["elsewhere-07300313"])
+        unknown = next(s for s in subjects if s.evidence.get("pid") == "7008")
+        self.assertEqual((unknown.state, unknown.holds_slot), (UNKNOWN_SESSION, False))
+
     def test_an_unreadable_process_no_pane_owns_is_reported_as_unplaceable(self):
         """A control on the other side: nothing names it, so it stays an unknown holding no slot — and says WHY."""
         fleet = self.fleet
