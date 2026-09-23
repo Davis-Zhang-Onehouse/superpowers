@@ -276,8 +276,8 @@ an item that does not resolve suffixed `(does not resolve)`. `propose` refuses (
 does not resolve NOW — a relative path means the proposer's instant folder, an absolute one must exist, a URL
 passes as-is — and `apply` refuses a row whose items stopped resolving. `milestone --evidence` is gated the
 same way, relative to the coordinator's own folder, and stores each item where it is. A milestone item
-written before those gates is read relative to the proposer that cited it (from the inbox's applied rows),
-and `owner` is printed where that instant is now, not where it was claimed.
+written before those gates is read relative to the proposer that cited it (from the inbox's applied or
+closed rows), and `owner` is printed where that instant is now, not where it was claimed.
 <!-- v2-cite: evidence-resolves-at-propose-and-apply H12 --> Every milestone gets exactly one `ready` row (its
 deps have landed — `owner` empty means dispatchable, non-empty means already claimed) or one `not-ready` row
 (the `detail` names the blocker), plus one `pending-proposal` row per proposal waiting on it. Act on
