@@ -357,7 +357,9 @@ def default_probes(process_name: str = WORKER_COMM) -> Probes:
     def worker_identity(pid):
         try:
             executable = os.readlink(f'/proc/{pid}/exe')
-            argv = (read_cmdline(pid) or b'').decode().rstrip('\0').split('\0')
+            # RV-23 (FB-53). An argv is arbitrary bytes; decoded strictly, a briefing holding byte 0xe9 made a real
+            # claude "no claude process found". Identity rests on comm and exe, never on the payload's encoding.
+            argv = (read_cmdline(pid) or b'').decode('utf-8', 'surrogateescape').rstrip('\0').split('\0')
             return recognizes_process(process_name, comm_of(pid) or '', executable, argv)
         except (OSError, UnicodeError):
             return False
