@@ -5162,7 +5162,15 @@ def _pane_subject(ctx: Ctx, parsed: Parsed):
         #: chosen per dispatch, a codex worker on a claude box read through the box's layer is `14 runtime
         #: differs` while `--id` of the same worker reads it as codex. Exactly one open record, or the ambient layer.
         here = getattr(ctx.sessions, "socket", "") or ""
-        owners = [record for record in ctx.store.all()
+        try:
+            records = ctx.store.all()
+        except BadInput as exc:
+            #: RV-30. `--pane` never read the store before pt2; one unreadable record must not turn this verb into a
+            #: bad-input exit. The ambient layer answers, as it always did, and the reason is said.
+            print(f"pane-guard: the store is unreadable ({_one_line(exc)}); {named_pane!r} is observed as the fleet "
+                  f"selection ({ctx.sessions.runtime}), not as its record's runtime", file=ctx.err)
+            records = []
+        owners = [record for record in records
                   if record.tmux == named_pane and not record.harvested_at and not record.closed_at
                   and (not record.tmux_socket or record.tmux_socket == here)]
         if len(owners) == 1 and owners[0].runtime != ctx.sessions.runtime:
