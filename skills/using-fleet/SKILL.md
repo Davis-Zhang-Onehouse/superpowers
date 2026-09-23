@@ -171,7 +171,8 @@ none means no model flag — the CLI's configured default. The model reaches the
 `--model`, codex `-m`); the slot's `.claude/settings*.json` and `CODEX_HOME` are never edited. Both land on the
 record: `board` shows a `runtime` column (`codex`, `claude/claude-fable-5-1`), `brief` a `runtime` row, and
 `revive` relaunches the same pair while `resume` adopts under the record's runtime, whatever the box says.
-`--dry-run` prints the choice and where each half came from. A codex worker on a claude box is admitted like any
+`--dry-run` prints the choice and where each half came from; a fleet older than the release carrying these fields
+ignores the profile fields silently and has no such rows, so a missing `runtime` row means the choice was not made. A codex worker on a claude box is admitted like any
 other; do not switch the box to get one.
 
 ### Selecting the box's default runtime
