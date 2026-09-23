@@ -1202,8 +1202,11 @@ FORBIDDEN = [
 KILL = re.compile(r"tmux[^;&|]*kill-(server|session)")
 RM_CMD = re.compile(r"\brm\s+(-[a-zA-Z]+\s+)*-[a-zA-Z]*r[a-zA-Z]*\b")
 RM_TGT = re.compile(r"\brm\s+(-[a-zA-Z]+\s+)*-[a-zA-Z]*r[a-zA-Z]*\s+(?P<target>\S+)")
-WRITE_OUT = re.compile(r"(>>?|tee)\s*<\$?(IT_ROOT|LIVE_TMUX_SNAPSHOT|RESULTS|LIVE_SNAPSHOT)\b"
-                       r"|(>>?|tee)\s*<\$(IT_ROOT|LIVE_TMUX_SNAPSHOT|RESULTS|LIVE_SNAPSHOT)")
+#: LIVE_TMUX_HANDOVER and the per-run prune (`find "$IT_ROOT" … -delete`) came with FB-60's per-run baseline;
+#: an audit that enumerates writes outside the section dir must count them too (RV-27).
+WRITE_OUT = re.compile(r"(>>?|tee)\s*<\$?(IT_ROOT|LIVE_TMUX_SNAPSHOT|LIVE_TMUX_HANDOVER|RESULTS|LIVE_SNAPSHOT)\b"
+                       r"|(>>?|tee)\s*<\$(IT_ROOT|LIVE_TMUX_SNAPSHOT|LIVE_TMUX_HANDOVER|RESULTS|LIVE_SNAPSHOT)"
+                       r"|\bfind\s+<\$IT_ROOT>.*\s-delete\b")
 TMPDIR = re.compile(r"\bmktemp\b|\$TMPDIR|(^|[\s<(=])/tmp/")
 HEREDOC = re.compile(r"<<-?\s*[\"']?([A-Za-z_][A-Za-z0-9_]*)[\"']?")
 
@@ -1351,7 +1354,7 @@ PY
   if [ "$nout" = 0 ]; then
     a_pass A8c "$OUT/A8-audit.txt" "$(sq "no harness write lands outside the section dir")"
   else
-    a_skip A8c "$OUT/A8-audit.txt" "$(sq "$nout write site(s) land OUTSIDE <section>/ — the clause as written does not hold, and every one is deliberate: $n_out site(s) write the register (\$RESULTS) and the live-session baseline (\$IT_ROOT/live-tmux-sessions.txt, \$IT_ROOT/dt-sessions-seen-<S>.txt) at fleet/it level, which is right for state SHARED across sections but is outside <section>/; $n_tmp site(s) touch \$TMPDIR — chiefly it_own_cases staging the register through mktemp, the only write that leaves the instant at all, transient and never cited as evidence. What P-3 actually protects (no evidence path outside the instant) HOLDS. SKIP not FAIL: the clause is stricter than the design (SI-18), the register and the baseline are shared-across-sections BY DESIGN, and what P-3 protects — no evidence path outside the instant — holds and is enforced per-commit by lint-evidence-paths.sh")"
+    a_skip A8c "$OUT/A8-audit.txt" "$(sq "$nout write site(s) land OUTSIDE <section>/ — the clause as written does not hold, and every one is deliberate: $n_out site(s) write the register (\$RESULTS) and the live-session baselines (\$IT_ROOT/live-tmux-sessions.txt, the handover, and the per-run live-tmux-sessions-run-<id>.txt with its one-day prune, \$IT_ROOT/dt-sessions-seen-<S>.txt) at fleet/it level, which is right for state SHARED across sections but is outside <section>/; $n_tmp site(s) touch \$TMPDIR — chiefly it_own_cases staging the register through mktemp, the only write that leaves the instant at all, transient and never cited as evidence. What P-3 actually protects (no evidence path outside the instant) HOLDS. SKIP not FAIL: the clause is stricter than the design (SI-18), the register and the baseline are shared-across-sections BY DESIGN, and what P-3 protects — no evidence path outside the instant — holds and is enforced per-commit by lint-evidence-paths.sh")"
   fi
 
   local bad skipped
