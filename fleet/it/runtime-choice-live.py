@@ -28,7 +28,9 @@ assert root.is_relative_to(Path(__file__).resolve().parent)
 MODEL = os.environ.get('RTC_CLAUDE_MODEL', 'claude-fable-5-1')
 limit = float(os.environ.get('RT_LIVE_TIMEOUT', '600'))
 claude_config = Path(os.environ.get('RTC_CLAUDE_CONFIG', '/home/ubuntu/davis_root/.claude')).resolve(strict=True)
-codex_home = Path(os.environ.get('RTC_CODEX_HOME', '/home/ubuntu/davis_root/.codex')).resolve(strict=True)
+#: The codex configuration this root uses, read ONLY: its credential and its top-level defaults are copied into a
+#: PRIVATE `CODEX_HOME` below, so nothing codex writes (sessions, trust, history) lands in the shared one (D-35, PT2-I3).
+codex_source = Path(os.environ.get('RTC_CODEX_HOME', '/home/ubuntu/davis_root/.codex')).resolve(strict=True)
 
 # `IT_ENV_UNNAMED`: nothing ambient may name a fleet; this attempt names its own store and instants.
 for key in ('FLEET_HOME', 'FLEET_INSTANTS', 'FLEET_ROOT', 'FLEET_INSTANT', 'FLEET_RELEASES', 'FLEET_BIN',
@@ -36,8 +38,32 @@ for key in ('FLEET_HOME', 'FLEET_INSTANTS', 'FLEET_ROOT', 'FLEET_INSTANT', 'FLEE
     os.environ.pop(key, None)
 os.environ['FLEET_HOME'] = str(root / 'store')
 os.environ['FLEET_INSTANTS'] = str(root / 'instants')
-os.environ['CODEX_HOME'] = str(codex_home)
 (root / 'instants').mkdir()
+
+
+def private_codex_home():
+    """A CODEX_HOME of this attempt's own: the source's auth.json (0600, removed at teardown), its top-level settings
+    (so "no model flag" still means THIS root's configured default model), and trust for the checkout this attempt
+    lives in. Codex keys trust by git toplevel, so both the toplevel and the attempt root are listed."""
+    home = root / 'codex-home'
+    home.mkdir(mode=0o700)
+    shutil.copy2(codex_source / 'auth.json', home / 'auth.json')
+    (home / 'auth.json').chmod(0o600)
+    top = []
+    for line in (codex_source / 'config.toml').read_text().splitlines():
+        if line.lstrip().startswith('['):
+            break                                    # only the top-level keys; no [projects.*] or other tables
+        top.append(line)
+    toplevel = subprocess.run(['git', '-C', str(root), 'rev-parse', '--show-toplevel'],
+                              capture_output=True, text=True).stdout.strip()
+    trusted = [path for path in (toplevel, str(root)) if path]
+    body = '\n'.join(top).rstrip() + '\n\n' + ''.join(f'[projects."{path}"]\ntrust_level = "trusted"\n\n' for path in trusted)
+    (home / 'config.toml').write_text(body)
+    return home
+
+
+codex_home = private_codex_home()
+os.environ['CODEX_HOME'] = str(codex_home)
 (root / '.claude').symlink_to(claude_config, target_is_directory=True)
 (root / 'owners.tsv').write_text(f'{root}\truntime-choice-live-test\n')
 os.environ['CLAUDE_OWNERS_MAP'] = str(root / 'owners.tsv')
@@ -225,7 +251,11 @@ def kill_and_wait(record, slot):
 (evidence / 'environment.json').write_text(json.dumps(dict(
     revision=subprocess.run(['git', '-C', str(repo), 'rev-parse', 'HEAD'], capture_output=True, text=True).stdout.strip(),
     claude=command(['claude', '--version']).stdout.strip(), codex=command(['codex', '--version']).stdout.strip(),
-    socket=socket, root=str(root), claude_config=str(claude_config), codex_home=str(codex_home)), indent=2) + '\n')
+    socket=socket, root=str(root), claude_config=str(claude_config), codex_home=str(codex_home),
+    codex_source=str(codex_source),
+    codex_configured_model=next((line.split('=', 1)[1].strip().strip('"') for line in
+                                 (codex_home / 'config.toml').read_text().splitlines()
+                                 if line.split('=')[0].strip() == 'model'), '')), indent=2) + '\n')
 fleet('runtime', '--set', 'claude')
 slots = {}
 for name in ('slotA', 'slotB'):
@@ -270,6 +300,8 @@ settle(b)
 transcript_b = wait_for('codex transcript', lambda: codex_transcript(slots['slotB']))
 models_b, said_b, session_b = wait_for('codex answered READY', lambda: (lambda t: t if any('READY' in s for s in t[1]) else None)(codex_turns(transcript_b)))
 assert fields(fleet('runtime').stdout)['runtime'] == 'claude'
+configured = json.loads((evidence / 'environment.json').read_text())['codex_configured_model']
+assert set(models_b) == {configured}, (models_b, configured)   # no -m = this root's configured default (D-35)
 verdict['b'] = dict(todo=b.todo_id, dispatch_rows={k: out[k] for k in ('runtime', 'model')},
                     argv=argv_b[:-1] + ['<seed>'], transcript=str(transcript_b), default_models=sorted(set(models_b)),
                     seed_check=fleet('seed-check', '--id', b.todo_id).stdout.strip().splitlines(),
@@ -305,4 +337,5 @@ for record, slot, session in ((a, slots['slotA'], session_a), (b, slots['slotB']
     fleet('abort', '--instant', store.read(record.todo_id).child_instant, '--reason', 'RTC finished')
 
 (evidence / 'verdict.json').write_text(json.dumps(verdict, indent=2) + '\n')
+(codex_home / 'auth.json').unlink()
 print('PASS RTC: (a) model, (b) codex default on a claude box, (d) revive of both with the same runtime and model')

@@ -43,7 +43,8 @@ case "$mode" in
     export RT_ATTEMPT
     RT_ATTEMPT="$(mktemp -d "$EV/attempt-XXXXXX")"
     bash "$IT_ROOT/bin/source-pin.sh" before "$EV" || exit 2
-    trap 'it_tmux kill-server 2>/dev/null || true' EXIT
+    # The private CODEX_HOME holds a COPY of the credential; it never outlives the run, pass or fail.
+    trap 'it_tmux kill-server 2>/dev/null || true; rm -f "$RT_ATTEMPT/codex-home/auth.json"' EXIT
     echo "Native runtime-choice test: $RT_ATTEMPT (inspect: tmux -L $FLEET_TMUX_SOCKET attach)"
     if python3 "$IT_ROOT/runtime-choice-live.py" > "$RT_ATTEMPT/steps.log" 2>&1; then
       it_pass RTC1 "fleet/it/$SECTION/$(basename "$RT_ATTEMPT")/evidence/verdict.json" 'on a claude box: a claude-fable-5-1 worker and a codex default-model worker each start, answer, pass seed-check and pane-guard, and revive with the same runtime and model'
