@@ -60,7 +60,8 @@ class DiscoveryTests(unittest.TestCase):
             with patch('subprocess.run', run):
                 self.assertEqual(default_probes(both_runtimes=True).list_processes(), [])
 
-    def test_exited_workers_are_omitted_but_unreadable_live_workers_refuse(self):
+    def test_exited_workers_are_omitted_but_unreadable_live_workers_are_reported_unreadable(self):
+        """FB-41 D-3: a pid whose exe/cwd are gone while `stat` shows no sign of exiting is reported, not raised."""
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
             proc = root / '101'
@@ -74,8 +75,111 @@ class DiscoveryTests(unittest.TestCase):
                     (proc / 'stat').write_text(f'101 (codex) {state} 1 0')
                     self.assertEqual(probes.list_processes(), [])
                 (proc / 'stat').write_text('101 (codex) S 1 0')
-                with self.assertRaises(FleetError):
-                    probes.list_processes()
+                self.assertEqual([(s.pid, s.unreadable) for s in probes.list_processes()], [(101, True)])
+
+
+def _stat(pid, comm, state, ppid=1, flags=0x400000):
+    """A `/proc/<pid>/stat` line with the real field order: pid (comm) state ppid pgrp session tty tpgid FLAGS …"""
+    return f'{pid} ({comm}) {state} {ppid} {pid} {pid} 0 -1 {flags} 0 0 0 0'
+
+
+class VanishingPidTests(unittest.TestCase):
+    """FB-41. A `claude` pid that exits between `pgrep` and the `/proc` reads must not take down the inventory.
+
+    Two kernel shapes, both measured (`fb41vanishingpid` instant, `evidence/10-kernel/`): a task inside `do_exit()`
+    — state still `R`/`D`, `PF_EXITING` (0x4) set in stat's flags, `exe`/`cwd` already unlinked, directory present —
+    and a pid reaped between open and read of `comm`/`cmdline`, which answers ESRCH (`ProcessLookupError`)."""
+
+    PF_EXITING = 0x4
+
+    def setUp(self):
+        self.directory = tempfile.TemporaryDirectory()
+        self.addCleanup(self.directory.cleanup)
+        self.root = Path(self.directory.name)
+        for pid in (101, 103):
+            self.healthy(pid)
+
+    def healthy(self, pid, comm='claude'):
+        proc = self.root / str(pid)
+        proc.mkdir()
+        (proc / 'comm').write_text(comm + '\n')
+        (proc / 'cmdline').write_text(comm + '\0')
+        (proc / 'stat').write_text(_stat(pid, comm, 'S'))
+        (proc / 'exe').symlink_to('/opt/claude/versions/2.1.268' if comm == 'claude' else f'/usr/bin/{comm}')
+        (proc / 'cwd').symlink_to(self.root)
+        return proc
+
+    def exiting(self, pid, state='R', flags=0x400000 | PF_EXITING, stat_comm='claude'):
+        """`stat` readable, `exe`/`cwd` gone, directory still present."""
+        proc = self.root / str(pid)
+        proc.mkdir()
+        (proc / 'comm').write_text('claude\n')
+        (proc / 'cmdline').write_text('')
+        (proc / 'stat').write_text(_stat(pid, stat_comm, state, flags=flags))
+        return proc
+
+    def inventory(self, pids):
+        def run(argv, **kw):
+            listed = ''.join(f'{p}\n' for p in pids) if argv[0] == 'pgrep' else '101 one\n103 three\n'
+            return subprocess.CompletedProcess(argv, 0, listed, '')
+        with patch('subprocess.run', run):
+            return [(s.pid, s.name, s.cwd, s.unreadable)
+                    for s in default_probes(tmux_socket='itfleet-fb41', proc_root=self.root).list_processes()]
+
+    def test_an_exiting_pid_is_skipped_and_the_rest_of_the_inventory_is_unchanged(self):
+        control = self.inventory([101, 103])
+        self.assertEqual([p for p, *_ in control], [101, 103])
+        for state in ('R', 'S', 'D', 'T'):
+            with self.subTest(state=state):
+                shutil.rmtree(self.root / '102', ignore_errors=True)
+                self.exiting(102, state=state)
+                self.assertEqual(self.inventory([101, 102, 103]), control)
+
+    def test_the_exit_flag_is_read_after_the_LAST_paren_of_stat(self):
+        """`comm` is free text, so `stat` is split at its last `)`. A comm that itself reads `) S (` must not shift
+        the flags field: parsed from the first `)`, this pid would read as not exiting and surface as unreadable."""
+        control = self.inventory([101, 103])
+        self.exiting(102, state='R', stat_comm='cl) S 1 1 1 0 -1 0 (aude')
+        self.assertEqual(self.inventory([101, 102, 103]), control)
+
+    def test_a_pid_reaped_between_open_and_read_is_skipped(self):
+        """ESRCH: the directory is gone by the time anyone looks, and the read that noticed raised it."""
+        control = self.inventory([101, 103])
+        self.healthy(102)
+        real = Path.read_text
+        def read_text(path, *a, **kw):
+            if path == self.root / '102' / 'cmdline':
+                shutil.rmtree(self.root / '102')
+                raise ProcessLookupError(3, 'No such process')
+            return real(path, *a, **kw)
+        with patch.object(Path, 'read_text', read_text):
+            self.assertEqual(self.inventory([101, 102, 103]), control)
+
+    def test_a_pid_whose_directory_disappears_between_two_reads_is_skipped(self):
+        """A control: the base already skipped this shape (`not proc.exists()`); pinned so the fix keeps it."""
+        control = self.inventory([101, 103])
+        self.healthy(102)
+        real = os.readlink
+        def readlink(path, *a, **kw):
+            if str(path) == str(self.root / '102' / 'exe'):
+                shutil.rmtree(self.root / '102')
+            return real(path, *a, **kw)
+        with patch('os.readlink', readlink):
+            self.assertEqual(self.inventory([101, 102, 103]), control)
+
+    def test_an_unreadable_pid_with_no_exit_flag_is_reported_not_raised(self):
+        """D-1's residual: nothing says the pid is going, so it stays VISIBLE (dispatch names it a blocker)."""
+        control = self.inventory([101, 103])
+        self.exiting(102, state='S', flags=0x400000)
+        got = self.inventory([101, 102, 103])
+        self.assertEqual([row for row in got if row[0] != 102], control)
+        self.assertEqual([(p, u) for p, _, _, u in got if p == 102], [(102, True)])
+
+    def test_a_pid_reused_by_a_non_claude_process_is_not_reported(self):
+        """D-4: pid reuse between pgrep and the reads is already covered by the identity check. A control."""
+        control = self.inventory([101, 103])
+        self.healthy(102, comm='bash')
+        self.assertEqual(self.inventory([101, 102, 103]), control)
 
 
 class EmptyOrExitingTmuxServerTests(unittest.TestCase):
