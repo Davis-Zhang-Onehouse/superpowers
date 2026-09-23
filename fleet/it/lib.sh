@@ -28,8 +28,11 @@ LIVE_SNAPSHOT="$IT_ROOT/live-stores.sha256"
 #: session born after that stale baseline could be killed inside a section with no alarm, because it was
 #: never in the baseline.
 #:
-#: A RUN is one process tree. The first `lib.sh` sourced in it mints `IT_RUN_ID` and exports it, so
-#: `run-all.sh`'s runners share one id, and a standalone section is a run of its own. Within a run nothing
+#: A RUN is one runner process, or a group of runners an orchestrator deliberately joins: `lib.sh` mints
+#: `IT_RUN_ID` when none is inherited and does NOT export it, and `run-all.sh` exports the one it minted, so
+#: its runners share one id while a standalone section is a run of its own. Not exporting it here is
+#: deliberate (RV-25): `it_rebaseline_live_tmux` is used by sourcing this file into a shell, and an exported
+#: id would silently make every section later started from that shell one run, which brings FB-60 back. Within a run nothing
 #: changed: a `dt-` loss inside a section, or between two sections of one run, is still a FAIL
 #: (ISOLATION-ALL exists to see the second). Only the first check of a NEW run treats a `dt-` loss since
 #: the previous run's handover as the operator's, and it logs it (`it_establish_run_baseline`).
@@ -38,7 +41,6 @@ LIVE_SNAPSHOT="$IT_ROOT/live-stores.sha256"
 #: forgiven.
 IT_RUN_ID="${IT_RUN_ID:-$(date -u +%Y%m%dT%H%M%SZ)-$$}"
 IT_RUN_ID="$(printf '%s' "$IT_RUN_ID" | tr -c 'A-Za-z0-9._-' '_')"
-export IT_RUN_ID
 LIVE_TMUX_SNAPSHOT="$IT_ROOT/live-tmux-sessions-run-$IT_RUN_ID.txt"
 #: The live set at the START of the most recent run in this checkout: what a new run's first check compares
 #: against. It keeps the old baseline's name, so a slot's pre-fix file is read as the first handover.
