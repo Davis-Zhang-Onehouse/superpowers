@@ -130,6 +130,15 @@ class PaneGuardOnTeardown(CliCase):
         self.assertTrue(fleet.store.read(fleet.ids["forcedDone"]).harvested_at, f"{code}{out}{err}")
         self.assertIn("dt-forcedDone", fleet.killed)
 
+    def test_force_without_id_is_refused_not_ignored(self):
+        """RV-26. `--force` overrides the pane guard of `harvest --id`; on the tick alone it would be a flag
+        silently accepted and meaning nothing."""
+        fleet = self.fleet()
+        for argv in (["harvest", "--force"], ["harvest", "--dry-run", "--force"]):
+            code, _, err = fleet.run(argv)
+            self.assertEqual(code, 2, f"{argv}: {err}")
+            self.assertIn("--id", err)
+
     def test_control_harvest_of_an_idle_pane(self):
         fleet = self.fleet()
         self._harvestable(fleet, "idleDone", IDLE_PANE)

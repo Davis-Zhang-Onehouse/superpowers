@@ -4039,6 +4039,10 @@ def _do_harvest(ctx: Ctx, parsed: Parsed) -> int:
     board**, which is what makes an orphan unreachable (FD-5). Without `--id` it is the tick alone.
     """
     rows = []
+    if parsed.on("force") and not parsed.get("id"):
+        #: RV-26. The override belongs to the transaction's pane guard; the tick kills nothing.
+        raise BadInput(f"harvest: {FORCE} overrides the pane guard of `harvest --id <todo>` and means nothing "
+                       f"without --id; the tick alone closes no pane. Add --id, or drop {FORCE}.")
     if parsed.get("id"):
         record = _record(ctx, parsed)
         child = _child_of(ctx, record)
