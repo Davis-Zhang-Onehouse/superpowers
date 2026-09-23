@@ -375,6 +375,17 @@ class NoteDoesNotResurrectOrClobber(unittest.TestCase):
         held = self.pool.lease("ws1")
         self.assertEqual((held.todo_id, held.unreadable_holders), ("new-2", []))
 
+    def test_a_failed_staging_write_leaves_no_litter(self):
+        """RV-36. A write or fsync that raises after the staging file was opened must not leave it in a LIVE claim
+        directory — `atomic_write`'s own contract (FI-20's third property)."""
+        from unittest import mock
+        self.pool._pid_start = lambda pid: "77"
+        with mock.patch("fleet.atomic.os.fsync", side_effect=OSError(28, "No space left on device")):
+            with self.assertRaises(OSError):
+                self.pool.note_unreadable("ws1", self.pids, expect_todo="old-1")
+        self.assertEqual(sorted(p.name for p in (self.pool.leases / "ws1").iterdir()), ["lease.json"])
+        self.assertEqual(self.pool.lease("ws1").unreadable_holders, [])
+
     def test_control_an_undisturbed_note_is_written(self):
         self.pool._pid_start = lambda pid: "77"
         self.assertEqual(self.pool.note_unreadable("ws1", self.pids, expect_todo="old-1"), [[4242, "77"]])
