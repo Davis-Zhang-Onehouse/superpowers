@@ -83,6 +83,13 @@ class Record:
     runtime: str = "claude"
     runtime_executable: str = ""
     runtime_config_dir: str = ""
+    #: pt2 (D-22/D-33). The model this worker was launched with, chosen at dispatch; "" = no model flag, the CLI's
+    #: own configured model. `revive` relaunches with it. OMITTED from the JSON when empty (`to_json`), so a record
+    #: dispatched the default way is byte-identical to one written before this field and an older binary still
+    #: reads it; a record that carries a model is refused by an older binary (unknown field) rather than being
+    #: relaunched without its model. Its SHAPE is checked where it reaches an argv (`runtime_launch.model_args`),
+    #: because this module is a leaf and imports nothing of the package.
+    runtime_model: str = ""
     launched_at: str | None = None
     gate_verdict: str | None = None
     harvested_at: str | None = None
@@ -90,13 +97,16 @@ class Record:
     schema_version: int = SCHEMA_VERSION
 
     def to_json(self) -> dict:
-        return asdict(self)
+        body = asdict(self)
+        if not body["runtime_model"]:
+            del body["runtime_model"]
+        return body
 
     @classmethod
     def from_json(cls, d: dict) -> "Record":
         if not isinstance(d.get('runtime', 'claude'), str) or d.get('runtime', 'claude') not in ('claude', 'codex'):
             raise BadInput(f"record {d.get('todo_id')!r} has unsupported runtime")
-        for key in ('runtime_executable', 'runtime_config_dir'):
+        for key in ('runtime_executable', 'runtime_config_dir', 'runtime_model'):
             if not isinstance(d.get(key, ''), str):
                 raise BadInput(f"record {d.get('todo_id')!r} has invalid {key}")
         version = d.get("schema_version")
