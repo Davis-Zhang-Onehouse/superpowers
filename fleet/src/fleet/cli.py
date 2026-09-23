@@ -2638,7 +2638,8 @@ def _do_milestone(ctx: Ctx, parsed: Parsed) -> int:
     #: rehearsal refuses what the real run refuses.
     evidence = [evidence_mod.anchored(item, roadmap.instant)
                 for item in evidence_mod.admit(parsed.all("evidence"), roadmap.instant,
-                                               nothing="Nothing was written to the roadmap.")]
+                                               nothing="Nothing was written to the roadmap.",
+                                               anchor_is="the coordinator's own instant folder")]
     m = Milestone(id=parsed.get("id"), title=parsed.get("title"),
                   status=parsed.get("status") or "blocked", deps=deps,
                   evidence=evidence, owner=parsed.get("owner"))

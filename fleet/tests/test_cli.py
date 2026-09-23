@@ -6083,6 +6083,10 @@ class TestMilestoneEvidenceIsAdmitted(CliCase):
         self.assertEqual(EXIT_BAD_INPUT, code, f"a typo'd evidence path was accepted: {out}")
         self.assertIn("nope-typo.md", err)
         self.assertEqual(before, Roadmap(coordinator).path.read_bytes(), "a refused add wrote the roadmap")
+        #: RV-30. The refusal describes THIS verb's anchor, not a proposal's.
+        self.assertIn("the coordinator's own instant folder", err)
+        self.assertNotIn("proposing instant", err)
+        self.assertNotIn("Nothing was proposed", err)
 
     def test_a_relative_item_is_stored_anchored_at_the_coordinator(self):
         fleet = self.loaded()
