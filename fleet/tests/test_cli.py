@@ -6718,7 +6718,8 @@ class TestB11RefusalsNameARouteThatRuns(CliCase):
         """NEW-3 (scenE/scenE2). The owner's folder is deleted outright. The refusals prescribed
         `fleet abort --instant <gone>` and `fleet harvest --id` — both exit 2 on a folder that resolves to
         nothing — while `fleet close --id`, the door that works, was named by neither. Each refusal must
-        name close, and the route it names must then clear the claim: close -> disown -> dispatch."""
+        name close, and the route it names must then clear the claim — scenE2's raw sequence, close -> reap ->
+        disown -> dispatch."""
         fleet = self.loaded()
         owner = fleet.worker("goner", slot="ws4", live=False)
         todo = fleet.ids["goner"]
