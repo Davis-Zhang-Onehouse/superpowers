@@ -3408,6 +3408,23 @@ def _slot_gate_before_kill(ctx: Ctx, record, child: Path, verb: str) -> str:
     )
 
 
+def _refuse_a_guarded_pane(ctx: Ctx, record, child: Path, verb: str, parsed: Parsed, override: str) -> None:
+    """`FB-88`. Raise `close`'s own pane refusal — busy, queued text, awaiting an operator, indeterminate — for a
+    verb that is about to kill the record's session, BEFORE it writes or kills anything. `abort` and `harvest --id`
+    end the same pane `close` ends and used to kill it unasked, discarding a turn in progress, a message somebody
+    typed, or a decision on screen. `--force` is the override, as for `close`; it overrides this judgement about
+    work in progress and nothing else — never the server check nor the cwd-holder gate (`B10`)."""
+    if record is None or parsed.on("force"):
+        return
+    refusal = _pane_refusal(ctx, record, override)
+    if refusal is None:
+        return
+    raise Refused(
+        f"{verb} of {child.name} refused before doing anything: {refusal[0]} — {refusal[1]}. Nothing was "
+        f"closed, released, renamed, applied or written. Override: `{override}`.",
+        clears_when=refusal[2], clears_who=refusal[3] or "the operator")
+
+
 def _abort_inputs(ctx, parsed):
     child = _instant(ctx, parsed)
     name = InstantName.parse(child.name)
@@ -3503,6 +3520,10 @@ def _do_abort(ctx: Ctx, parsed: Parsed) -> int:
         origin, origin_problem = None, _one_line(exc)
     milestone_id = origin.milestone if origin is not None else None
     coordinator = Path(origin.coordinator) if (origin is not None and milestone_id) else None
+    #: `FB-88`. The pane guard `close` asks, asked here too — abort kills the same pane. Before the slot gate
+    #: (which waits) and above the dry-run's return, so both answer alike; `--force` overrides this guard only.
+    _refuse_a_guarded_pane(ctx, record, child, "abort", parsed,
+                           f"fleet abort --instant {child} --reason <why> {FORCE}")
     #: `B10`. The one gate `release` evaluates, asked here — above the dry-run's return and before the
     #: session kill — so a dry-run reports the refusal the real call would hit, and the real call refuses
     #: before its first irreversible step instead of after it.
@@ -3569,12 +3590,18 @@ def _do_abort(ctx: Ctx, parsed: Parsed) -> int:
 # --- close ----------------------------------------------------------------------------------------
 
 
-def _pane_refusal(ctx: Ctx, record: Record):
+def _pane_refusal(ctx: Ctx, record: Record, override: str = ""):
     """Why this pane must not be closed, as `(guard, reason, clears_when, clears_who)`, or `None`.
 
     The predicates are `session`'s and `pane-guard`'s — the SAME three, not a fourth copy. DA-2 enumerated
     six send paths, and a predicate restated per caller is how five of them keep the old behaviour.
+
+    `FB-88`. `close` is not the only verb that kills a pane: `abort` and `harvest --id` do too, and they asked
+    nothing. They ask THIS function now, and `override` is the exact command that says the kill out loud for
+    the verb that was typed — a refusal of `abort` that named `fleet close --force` would route the caller to a
+    different transaction (one that neither renames nor releases).
     """
+    override = override or f"fleet close --id {record.todo_id} {FORCE}"
     tmux = record.tmux
     #: On the record's OWN server. A pane guard that read a different server than the kill will act on
     #: would be asking one machine for permission to act on another.
@@ -3596,23 +3623,21 @@ def _pane_refusal(ctx: Ctx, record: Record):
         return (PANE_GUARD_CODES[PANE_MID_TURN],
                 f"{tmux} is still offering a way to interrupt, so it is mid-turn: closing it now ends a "
                 f"turn in progress and whatever that turn had not yet written down",
-                f"the turn finishes, or `fleet close --id {record.todo_id} {FORCE}` is said out loud",
+                f"the turn finishes, or `{override}` is said out loud",
                 record.base_instant or record.todo_id)
     if layer.asking(text):
         #: After `busy`, before `unsubmitted` — the one ordering `_do_pane_guard` uses (see there).
         return (PANE_GUARD_CODES[PANE_AWAITING_OPERATOR],
                 f"{tmux} is showing an operator dialog and is blocked on a human's answer: closing it "
                 f"now discards a decision in progress",
-                f"the dialog is answered, or `fleet close --id {record.todo_id} {FORCE}` is said out "
-                f"loud",
+                f"the dialog is answered, or `{override}` is said out loud",
                 record.base_instant or record.todo_id)
     queued = layer.unsubmitted(text)
     if queued is not None:
         return (PANE_GUARD_CODES[PANE_QUEUED_TEXT],
                 f"{tmux} holds unsubmitted text in its input box ({queued!r}): closing it discards a "
                 f"message somebody typed and never sent",
-                f"the text is submitted or cleared, or `fleet close --id {record.todo_id} {FORCE}` is "
-                f"said out loud",
+                f"the text is submitted or cleared, or `{override}` is said out loud",
                 record.base_instant or record.todo_id)
     return None
 
@@ -3933,6 +3958,9 @@ def _do_harvest(ctx: Ctx, parsed: Parsed) -> int:
             #: harvest used to apply, disown, kill and stamp before `pool.release` refused, and the dry-run
             #: said `would-harvest` rc=0 over it. `RV-24`: the branch below is chosen by `ctx.dry_run` alone,
             #: never by the gate's return value, so no return of it can send a dry run into the real branch.
+            #: `FB-88`. The pane guard first: it waits for nothing, and harvest kills the same pane `close` does.
+            _refuse_a_guarded_pane(ctx, record, child, "harvest", parsed,
+                                   f"fleet harvest --id {record.todo_id} {FORCE}")
             undecided = _slot_gate_before_kill(ctx, record, child, "harvest")
             if ctx.dry_run:
                 if undecided:
@@ -6047,6 +6075,8 @@ VERBS = {spec.name: spec for spec in (
         Flag("--reason", True, True,
              "why the work stopped; mandatory and recorded — an abort with no reason is a deletion "
              "with a nicer name"),
+        Flag(FORCE, False, False, "abort even though the pane is mid-turn, holds unsubmitted text or awaits "
+                                  "an operator (the pane guard `close` asks); never overrides the cwd gate"),
     )),
     _verb("close", _do_close, False,
           "shut a pane this store owns and stamp the record; disarms the monitor (FD-10)", (
@@ -6056,6 +6086,8 @@ VERBS = {spec.name: spec for spec in (
     _verb("harvest", _do_harvest, False, "the harvest transaction, plus the observation tick",
           checker=True, flags=(
         Flag("--id", True, False, "the record to harvest; omit for the tick alone"),
+        Flag(FORCE, False, False, "with --id: close the pane even though it is mid-turn, holds unsubmitted text "
+                                  "or awaits an operator; never overrides the cwd gate"),
         Flag("--max-age", True, False, f"the cadence window in seconds (default {DEFAULT_MAX_AGE_S})"),
     )),
     _verb("clone", _do_clone, False,
