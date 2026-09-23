@@ -60,10 +60,14 @@ class LiveSession:
     cwd: Path
     name: Optional[str]
     runtime: str = "claude"
-    #: `/proc/<pid>/exe` or `cwd` refused the read (another user's process, or a non-dumpable one). The row
-    #: is kept, unattributed: `runtime --set` treats it as a blocker — an agent that cannot be placed is not
-    #: proof of emptiness — while `board`, `status` and `close` see an unmanaged session, which is what it
-    #: is to them. Raising instead blinded every read verb for as long as that process lived.
+    #: `/proc/<pid>/exe` or `cwd` refused the read (another user's process, a non-dumpable one, or any other
+    #: per-pid failure — FB-53). The row is kept, with `cwd` left at `/proc/<pid>` because the real one was never
+    #: read. `name` is still attributed (FB-54): `stat` is world-readable, so the parent walk a readable row uses
+    #: can name the tmux session whose pane owns it, and then `reconcile` reads it as THAT session — this
+    #: record's session, unreadable — rather than as an unmanaged one. With no owning pane it stays `None`.
+    #: `runtime --set` treats it as a blocker either way — naming its pane does not make its binary or cwd
+    #: known, and an agent that cannot be read is not proof of emptiness. Raising instead blinded every read
+    #: verb for as long as that process lived.
     unreadable: bool = False
 
 
@@ -433,7 +437,8 @@ def default_probes(process_name: str = "claude", tmux_socket=_FROM_ENV, *,
 
     def parent_of(pid: int) -> int:
         try:
-            stat = (Path(proc_root) / str(pid) / "stat").read_text()
+            # FB-53: `comm` inside `stat` is free bytes too, and a parent named in Latin-1 must not refuse the walk.
+            stat = (Path(proc_root) / str(pid) / "stat").read_text(encoding="utf-8", errors="surrogateescape")
         except OSError:
             return 0
         # comm may contain spaces and parentheses; ppid is the field after the closing paren + state.
@@ -517,9 +522,31 @@ def default_probes(process_name: str = "claude", tmux_socket=_FROM_ENV, *,
                 owners[int(parts[0])] = parts[1].strip()
         return owners
 
+    def pane_of(pid: int, owners: dict) -> Optional[str]:
+        """The tmux session whose pane pid is `pid` or one of its ancestors, through the world-readable `stat`."""
+        walker, hops = pid, 0
+        while walker > 1 and hops < 32:
+            if walker in owners:
+                return owners[walker]
+            walker = parent_of(walker)
+            hops += 1
+        return None
+
     def list_processes() -> list:
+        """Every live `claude`/`codex` process, attributed to its session where a pane owns it.
+
+        Only the ENUMERATION refuses — `pgrep` failing or answering something that is not a pid list, or the
+        pane listing refusing (`pane_owners`). No condition of ONE pid raises out of here (FB-53): that pid is
+        skipped when the kernel says it is exiting, and otherwise reported as an `unreadable` row."""
         owners = pane_owners()
         out = []
+
+        def unreadable(pid: int, runtime: str) -> LiveSession:
+            # FB-54. Placed through the pane walk, which needs only `stat` — readable by anyone — so an unreadable
+            # row is attributed exactly as a readable one would be. Its cwd was never read, and is not invented.
+            return LiveSession(pid=pid, cwd=Path(f"/proc/{pid}"), name=pane_of(pid, owners), runtime=runtime,
+                               unreadable=True)
+
         for runtime in (("claude", "codex") if both_runtimes else (process_name,)):
             done = run(["pgrep", "-x", runtime])
             if done.returncode == 1:
@@ -532,9 +559,13 @@ def default_probes(process_name: str = "claude", tmux_socket=_FROM_ENV, *,
                 pid = int(token)
                 proc = Path(proc_root) / str(pid)
                 try:
-                    comm = (proc / "comm").read_text().strip()
+                    # FB-53. `comm` and `cmdline` are whatever bytes the process was started with; decoded strictly,
+                    # one argv holding byte 0xe9 refused the whole inventory. Undecodable bytes are kept as
+                    # surrogates, and identity is judged on `comm` and `exe` below — never on the prompt.
+                    comm = (proc / "comm").read_text(encoding="utf-8", errors="surrogateescape").strip()
                     executable = os.readlink(proc / "exe")
-                    argv = (proc / "cmdline").read_text().rstrip("\0").split("\0")
+                    argv = (proc / "cmdline").read_text(encoding="utf-8",
+                                                        errors="surrogateescape").rstrip("\0").split("\0")
                     cwd = os.readlink(proc / "cwd")
                 except (FileNotFoundError, ProcessLookupError):
                     # FB-41. The pid exited while the inventory was sampled, which the kernel says in three
@@ -543,28 +574,21 @@ def default_probes(process_name: str = "claude", tmux_socket=_FROM_ENV, *,
                     # read, whose directory is gone and whose read answered ESRCH. None holds a workspace.
                     # Anything else is reported `unreadable` like a denied read: a skip rests on what the
                     # kernel said, never on what it did not say, and a VANISHING pid never refuses the whole
-                    # inventory. (The generic OSError/UnicodeError arm below still refuses — a different cause.)
+                    # inventory.
                     if exited_or_exiting(proc):
                         continue
-                    out.append(LiveSession(pid=pid, cwd=Path(f"/proc/{pid}"), name=None, runtime=runtime,
-                                           unreadable=True))
+                    out.append(unreadable(pid, runtime))
                     continue
-                except PermissionError:
-                    out.append(LiveSession(pid=pid, cwd=Path(f"/proc/{pid}"), name=None, runtime=runtime,
-                                           unreadable=True))
+                except (OSError, UnicodeError):
+                    # FB-53. A denied read (another uid, a non-dumpable process) and every other per-pid failure —
+                    # an errno nobody measured, a decode that surrogateescape somehow did not absorb — report
+                    # THIS pid and leave the rest of the inventory standing. They used to raise `Cannot inspect
+                    # … process`, which took board, status, reconcile, dispatch and pane-guard down together.
+                    out.append(unreadable(pid, runtime))
                     continue
-                except (OSError, UnicodeError) as exc:
-                    raise FleetError(f"Cannot inspect {runtime} process {pid}: {exc}") from exc
                 if not recognizes_process(runtime, comm, executable, argv):
                     continue
-                name, walker, hops = None, pid, 0
-                while walker > 1 and hops < 32:
-                    if walker in owners:
-                        name = owners[walker]
-                        break
-                    walker = parent_of(walker)
-                    hops += 1
-                out.append(LiveSession(pid=pid, cwd=Path(cwd), name=name, runtime=runtime))
+                out.append(LiveSession(pid=pid, cwd=Path(cwd), name=pane_of(pid, owners), runtime=runtime))
         return out
 
     # Every `-t` below is EXACT (`FI-23`). `new-session -s` is not a target and needs no marker: it
