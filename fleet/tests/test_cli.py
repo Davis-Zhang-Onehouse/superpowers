@@ -6913,6 +6913,16 @@ class TestB11RefusalsNameARouteThatRuns(CliCase):
         self.assertEqual(self.refusal(dry_err), self.refusal(err))
         self.assertIn("clears who:", self.refusal(err))
 
+    def test_a_corrupt_record_does_not_replace_the_not_on_disk_refusal(self):
+        """RV-26. `_resolve_instant` now looks for a record naming the missing path (to name `close --id`);
+        one unreadable record must not turn "not an instant on disk" into an unrelated parse refusal."""
+        fleet = self.loaded()
+        (fleet.home / "records" / "zz-corrupt.json").write_text("{ not json")
+        gone = fleet.instants / "00000000-07300099-inflight-append-neverHere"
+        code, out, err = fleet.run(["abort", "--instant", str(gone), "--reason", "gone"])
+        self.assertEqual(EXIT_BAD_INPUT, code, err)
+        self.assertIn("is not an instant on disk", self.refusal(err), err)
+
     def _full_pool(self, fleet):
         for slot in list(fleet.pool.free_slots()):
             fleet.pool.claim(todo_id=f"filler-{slot}", tmux=f"dt-{slot}", base_instant=FRESH_BASE,

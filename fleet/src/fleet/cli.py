@@ -933,9 +933,13 @@ def _resolve_instant(ctx: Ctx, raw) -> Path:
     if found is None:
         #: `B11` (NEW-3). A record that still names the path is the one case with a door that runs: every
         #: `--instant` verb resolves the folder first, and `close --id` does not.
-        holder = next((r for r in ctx.store.all()
-                       if r.child_instant and same_instant(_recorded_path(ctx, r), path)
-                       and not r.harvested_at and not r.closed_at), None)
+        try:
+            holder = next((r for r in ctx.store.all()
+                           if r.child_instant and same_instant(_recorded_path(ctx, r), path)
+                           and not r.harvested_at and not r.closed_at), None)
+        except (FleetError, OSError):
+            #: RV-26. The lookup only improves the route; an unreadable store must not replace the answer.
+            holder = None
         raise BadInput(
             f"{path} is not an instant on disk. A recorded path goes stale when the worker renames its "
             "own folder, so resolution follows the full stable key with only `state` varying — and a "
