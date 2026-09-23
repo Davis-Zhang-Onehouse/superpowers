@@ -2493,6 +2493,15 @@ class TestDryRunSweepB10(CliCase):
         self._same(fleet, ["propose", "--instant", ready, "--milestone", "M1", "--status", "finished",
                            "--evidence", "evidence/02-acceptance/verify-acs.sh"])
 
+    def test_propose_asks_its_refusals_in_the_real_calls_order(self):
+        """`RV-28`. Evidence that does not resolve AND an unreadable inbox: `Roadmap.propose` admits the
+        evidence first, so that is the refusal the dry-run must name too."""
+        fleet = self.loaded()
+        ready = fleet.paths["readyWorker"]
+        Roadmap(ready).proposals_path.write_text('{"schema_version": 999, "pending": [], "closed": []}')
+        self._same(fleet, ["propose", "--instant", str(ready), "--milestone", "M1", "--status", "done",
+                           "--evidence", "evidence/no-such-file.txt"])
+
     def test_apply_of_a_stored_row_apply_itself_would_refuse(self):
         """A hand-built or legacy inbox row: `apply` re-validates it (`propose` is not the only writer)."""
         fleet = self.loaded()

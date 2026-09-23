@@ -2814,15 +2814,15 @@ def _do_propose(ctx: Ctx, parsed: Parsed) -> int:
     if ctx.dry_run:
         #: `B03`. The dry run judges the evidence the way the real run does — an item that does not resolve
         #: against the proposer is refused here too — and prints the form that would be stored. `B10` sweep:
-        #: and the status domain and the inbox's readability, in the order `Roadmap.propose` asks them.
+        #: and the status domain and the inbox's readability, in the order `Roadmap.propose` asks them:
+        #: status, then the evidence admitted, then the inbox (read under its lock there) — `RV-28`.
         _check_status(status)
-        _check_evidence(evidence, milestone)
+        admitted = evidence_mod.admit(_check_evidence(evidence, milestone), proposer)
         roadmap.proposals()
         _emit(ctx, "propose", [("dry-run", "no proposal was written"), ("milestone", milestone),
                                ("status", status), ("proposer", str(proposer)),
                                ("roadmap", str(destination)), ("destination-chosen", chosen),
-                               ("evidence", ", ".join(evidence_mod.admit(
-                                   _check_evidence(evidence, milestone), proposer)))] + extra)
+                               ("evidence", ", ".join(admitted))] + extra)
         return EXIT_OK
     proposal = roadmap.propose(proposer, milestone, status, evidence, note=parsed.get("note") or "")
     _emit(ctx, "propose", [("milestone", proposal.milestone), ("status", proposal.status),
