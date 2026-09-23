@@ -130,9 +130,14 @@ instructions in a UTF-8 file. Do not edit a shared profile while another dispatc
 fleet dispatch --profile "$PREPARED_PROFILE" --title "$TITLE" --base "$BASE" \
   --from "$INSTANT" --milestone "$M" --cap "$CAP" \
   --lineage-base "repo=$SHA" --seed-extra "$TASK_BRIEF" \
-  --runtime "$RUNTIME" ${MODEL:+--model "$MODEL"} --dry-run
+  --runtime codex --dry-run                       # codex on its configured default model
+# or, for a claude worker on a chosen model:  --runtime claude --model claude-fable-5-1
 # Once the gates allow, run the same command without --dry-run.
 ```
+
+Type the runtime and model literally. A conditional expansion such as `${MODEL:+--model "$MODEL"}` is ONE word
+under zsh, which `fleet` refuses as an unknown flag, and an empty `--runtime ""` is refused rather than read as
+"use the box".
 
 **Pick the runtime and model per worker, in the command.** `--runtime claude|codex` and `--model <name>` win
 over the profile's `"runtime"`/`"model"`, which win over the box's `fleet runtime`; omit `--model` to run the
