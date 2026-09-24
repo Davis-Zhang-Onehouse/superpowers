@@ -138,6 +138,7 @@ class WorktreeSlotTests(unittest.TestCase):
                 self.assertEqual(code, 4, out + err)
                 self.assertIn('linked git worktree', err)
                 self.assertIn('clone', err)                              # clears_when names a clone slot
+                self.assertIn('--slot <a clone slot>', err)              # RV-53: and how to ask for one
                 self.assertEqual(f.store.all(), [])
                 self.assertIsNone(f.pool.lease('ws1'))
                 self.assertEqual(f.started, [])

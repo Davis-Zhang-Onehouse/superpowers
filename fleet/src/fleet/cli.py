@@ -2268,8 +2268,10 @@ def _refuse_codex_worktree_slot(runtime, slot_path, verb) -> None:
         raise Refused(f"{verb}: a codex worker cannot run in {slot_path}: {', '.join(found)} is a linked git worktree "
                       f"(its repository is outside the slot, so the sandboxed worker could not commit) or could not be "
                       f"inspected (refused rather than guessed)",
-                      clears_when="the codex worker goes to a clone-shaped slot (each repository a full clone with its own "
-                                  "`.git` directory, like ws8–ws10), or this work runs on claude (`--runtime claude`)",
+                      clears_when="the codex worker goes to a clone-shaped slot, named with `--slot <a clone slot>` (each "
+                                  "repository a full clone with its own `.git` directory, like ws8–ws10; without --slot "
+                                  "dispatch takes the first free slot, which may be a worktree), or this work runs on claude "
+                                  "(`--runtime claude`)",
                       clears_who="the coordinator")
 
 
