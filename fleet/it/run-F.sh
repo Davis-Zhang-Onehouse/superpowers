@@ -571,10 +571,44 @@ else
   it_fail F10 "fleet/it/F/out" "$f10_fail of 8 evaluate-only path(s) left a delta — see the F10-* rows"
 fi
 
+# F12 — Historical records remain in reconcile after their folders are gone, while an unstamped loss
+# stays DEAD. The records are written into this section's private store and read through the CLI.
+F12_HOME="$EV/home-f12"; F12_INSTANTS="$EV/instants-f12"
+mkdir -p "$F12_HOME" "$F12_INSTANTS"
+FLEET_HOME="$F12_HOME" FLEET_INSTANTS="$F12_INSTANTS" python3 - <<'PY'
+import os
+from pathlib import Path
+from fleet.store import Record, Store
+
+home = Path(os.environ['FLEET_HOME'])
+instants = Path(os.environ['FLEET_INSTANTS'])
+for name, stamps in [('f12harvested', {'harvested_at': '2026-08-08T12:00:00Z', 'closed_at': '2026-08-08T12:00:00Z'}),
+                     ('f12closed', {'closed_at': '2026-08-08T12:00:00Z'}),
+                     ('f12dead', {})]:
+    Store(home).write(Record(todo_id=name, child_instant=str(instants / f'00000000-08081200-inflight-append-{name}'),
+                             base_instant='00000000', slot='', tmux=f'dt-{name}', profile='', golden='',
+                             lineage_base='', title=name, dispatched_at='2026-08-08T11:00:00Z',
+                             launched_at='2026-08-08T11:01:00Z', tmux_socket=os.environ['FLEET_TMUX_SOCKET'],
+                             **stamps))
+PY
+f12_setup_rc=$?
+FLEET_HOME="$F12_HOME" FLEET_INSTANTS="$F12_INSTANTS" fleet reconcile --porcelain > "$OUT/F12-reconcile.tsv" 2>&1
+f12_reconcile_rc=$?
+f12_harvested=$(command grep -c 'f12harvested.*state HARVESTED' "$OUT/F12-reconcile.tsv")
+f12_closed=$(command grep -c 'f12closed.*state CLOSED' "$OUT/F12-reconcile.tsv")
+f12_dead=$(command grep -c 'f12dead.*state DEAD' "$OUT/F12-reconcile.tsv")
+if [ "$f12_setup_rc" = 0 ] && [ "$f12_reconcile_rc" = 0 ] && [ "$f12_harvested$f12_closed$f12_dead" = 111 ]; then
+  it_pass F12 "fleet/it/F/out/F12-reconcile.tsv" \
+    "the private store's folderless harvested, closed-only and unstamped records remain visible in reconcile as HARVESTED, CLOSED and DEAD respectively"
+else
+  it_fail F12 "fleet/it/F/out/F12-reconcile.tsv" \
+    "setup=$f12_setup_rc reconcile=$f12_reconcile_rc harvested=$f12_harvested closed=$f12_closed dead=$f12_dead"
+fi
+
 it_assert_isolation F-leave
 bash "$IT_ROOT/bin/source-pin.sh" after "$OUT" || { echo "CONTAMINATED — no verdict" >&2; exit 3; }
 sed -i "s|$INSTANT/||g" "$RESULTS"
-echo "§F (targeted: F2 F3 F9) done: IT_FAILED=$IT_FAILED"
+echo "§F (targeted: F2 F3 F9 F12) done: IT_FAILED=$IT_FAILED"
 #: `II-11`. Was `exit "$IT_FAILED"` — a COUNT. `exit` truncates modulo 256, so a section with
 #: exactly 256 failures reported SUCCESS, and one with 300 reported 44, a number meaning nothing
 #: to any reader. An exit status is a one-byte verdict, not a tally: the count is already printed
