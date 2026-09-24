@@ -5342,10 +5342,26 @@ def _sandbox_env(sandbox: Path) -> dict:
             "PATH": os.environ.get("PATH", "/usr/bin:/bin"), "LC_ALL": "C"}
 
 
+#: A shell fence opener indented 4+ spaces (or by a tab): a code block inside a list item, which
+#: `fleet.markdown` reads as prose because containers are not modelled (OI-4). `recipes_of` cannot see it,
+#: and "examined 0 recipe(s)" would read as success, so `verify` counts them and says so (RV-31).
+_INDENTED_SHELL_FENCE = re.compile(r"^(?: {4,}|\t)\s*(?:`{3,}|~{3,})\s*(?:" + "|".join(_RECIPE_LANGS) + r")\b",
+                                   re.IGNORECASE)
+
+
+def unexamined_indented_fences(path: Path) -> int:
+    """How many shell-fence openers in `path` sit inside a container the reader does not model."""
+    path = Path(path)
+    if not path.is_file():
+        return 0
+    return sum(1 for line in prose(path.read_text()) if _INDENTED_SHELL_FENCE.match(line.raw))
+
+
 def _do_verify(ctx: Ctx, parsed: Parsed) -> int:
     child = _instant(ctx, parsed)
     documents = [child / "RUNBOOK.md", child / "evidence" / "INDEX.md"]
     recipes = [recipe for document in documents for recipe in recipes_of(document)]
+    unexamined = sum(unexamined_indented_fences(document) for document in documents)
     sandbox = Path(tempfile.mkdtemp(prefix="fleet-verify-"))
     rows, executed = [], []
     for recipe in recipes:
@@ -5396,6 +5412,8 @@ def _do_verify(ctx: Ctx, parsed: Parsed) -> int:
         detail=(f"examined {len(recipes)} recipe(s) from "
                 f"{', '.join(document.name for document in documents if document.is_file()) or 'nothing'}; "
                 f"{len(executed)} executed, {len(recipes) - len(executed)} refused or unexecuted; "
+                f"{unexamined} indented shell fence(s) read as prose and not examined (a fence indented 4+ "
+                f"spaces sits inside a container the reader does not model — OI-4); "
                 f"sandbox {sandbox} (left in place for inspection)")))
     _emit(ctx, "verify", rows)
     return _code_of(rows)

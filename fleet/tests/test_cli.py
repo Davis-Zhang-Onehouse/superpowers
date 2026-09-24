@@ -1794,6 +1794,23 @@ class TestVerify(CliCase):
         kinds = [line.split("\t")[0] for line in out.splitlines()]
         self.assertEqual(kinds.count(cli.UNVOUCHED), 2, out)
 
+    def test_verify_names_the_indented_shell_fences_it_did_not_examine(self):
+        """RV-31. A fence indented 4+ spaces (inside a list item) is prose to `fleet.markdown` (OI-4), so
+        `recipes_of` no longer sees it where the base's regex did. Silence there would read as success —
+        "examined 0 recipe(s)", exit 0 — so the population row counts them and says why."""
+        fleet = self.loaded()
+        instant = fleet.paths["readyWorker"]
+        (instant / "RUNBOOK.md").write_text(
+            "# RUNBOOK\n\n1. step\n    ```bash\n    ls\n    ```\n2. step\n\t~~~sh\n\tpwd\n\t~~~\n"
+            "```markdown\n    ```bash\n    not counted, it is inside a fence\n    ```\n```\n")
+
+        code, out, err = fleet.run(["verify", "--porcelain", "--instant", str(instant)])
+
+        self.assertEqual(fleet.runner.commands(), [], "an indented fence's line was executed")
+        population = [line for line in out.splitlines() if line.startswith("population\t")]
+        self.assertTrue(population, out)
+        self.assertIn("2 indented shell fence(s) read as prose and not examined", population[0])
+
     def test_an_outward_shape_keeps_its_outward_reason(self):
         """The denylist is the FIRST line, not a removed one: `rm -rf` is still `outside-sandbox`."""
         fleet = self.loaded()
