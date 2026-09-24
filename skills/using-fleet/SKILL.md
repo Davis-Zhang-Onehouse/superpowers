@@ -150,7 +150,7 @@ nothing was claimed for them.
 **Every dispatch says what it did on STDOUT, including one that started nothing.** A non-start prints a
 `refused` row (exit 3/4) or an `error` row (exit 1/2/5), with `clears_when`/`clears_who` when the answer has
 them. That includes a flag the parser refuses. After a claim it also prints `step` plus bare `left_todo_id`,
-`left_instant`, `left_record` (`pending-launch`/`launched`/`none`/`unknown`) and `left_lease`
+`left_instant` (a path, or `none`), `left_record` (`pending-launch`/`launched`/`none`/`unknown`) and `left_lease`
 (`given-back`/`retained`), and a `remedy` sentence. A non-start never prints the success keys `todo_id` or
 `instant`, so their presence means a worker started. Stderr still carries the paragraph for a human. Every dispatch, `--dry-run` included, prints
 `title_as_used`: the name the verb actually used. `--title` is rewritten into one dashless camelCase field, so
