@@ -7,7 +7,7 @@
 # say `COMPLETE: F1-F11`, `COMPLETE: J1-J9`, `Not in Plan 6` — each run standalone and never added here.
 #
 #   (default)  the GATE roster: everything that is safe and quick enough to run for every release.
-#   --full     every runner, EXCEPT §P unless FLEET_IT_ALLOW_CLAUDE=1.
+#   --full     every runner, EXCEPT §P and §SEND unless FLEET_IT_ALLOW_CLAUDE=1.
 #
 # §P is excluded from `--full` by default for BUDGET, not capability: it dispatches a real `claude` and
 # spends the account's weekly allowance. A release gate that silently consumes that is a gate that gets
@@ -126,8 +126,10 @@ if [ "$IT_FULL" = yes ]; then
   RUNNERS+=("${FULL_EXTRA[@]}")
   if [ "${FLEET_IT_ALLOW_CLAUDE:-0}" = 1 ]; then
     RUNNERS+=("P:bash $IT_ROOT/run-P.sh")
+    #: §SEND: `fleet send` against a real pane (B13/FB-27) — one fixture worker that only answers; gated with §P.
+    RUNNERS+=("SEND:bash $IT_ROOT/run-SEND.sh")
   else
-    say "§P SKIPPED: it dispatches a real claude and spends the weekly allowance. Set FLEET_IT_ALLOW_CLAUDE=1 to include it."
+    say "§P and §SEND SKIPPED: they dispatch a real claude and spend the weekly allowance. Set FLEET_IT_ALLOW_CLAUDE=1 to include them."
   fi
 fi
 say "roster: $IT_FULL full; ${#RUNNERS[@]} runner(s)"
