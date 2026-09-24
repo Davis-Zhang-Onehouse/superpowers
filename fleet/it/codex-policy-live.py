@@ -3,10 +3,11 @@ approval=never, inside the workspace-write sandbox, network on — on a REAL cod
 
 A private store, a private itfleet-CXP- tmux server and a private CODEX_HOME (the root's credential and top-level keys
 copied read-only, so "no policy on the argv" means exactly what a production worker inherits: on-request). The slot is
-the ws5 shape: a LINKED WORKTREE of a repository outside the slot. The seed asks the worker to run one probe script,
-which:
-  - commits in the slot repo (git writes the shared repository's objects and refs, outside the slot);
-  - cannot write that repository's hooks or working tree (RV-28);
+CLONE-shaped (ws8–ws10; operator decision D-51: codex runs only in clone slots): `slot/repo` is a full clone of a
+repository outside the slot. At the fix, a codex dispatch into a second, LINKED-WORKTREE-shaped slot must be refused first
+(exit 4, dry-run and real, nothing recorded). The seed asks the worker to run one probe script, which:
+  - commits in the slot repo (its `.git` is inside the sandbox cwd);
+  - cannot write the origin repository's hooks or working tree;
   - writes into FLEET_INSTANTS;
   - does a network operation: a read-only `git ls-remote` of the fork over ssh (never a push);
   - writes OUTSIDE every writable root, which the sandbox must DENY (not prompt, not allow).
@@ -126,7 +127,7 @@ def private_codex_home(trusted):
     return home
 
 
-# --- set-up: a worktree-shaped slot, a probe, a trivial profile ------------------------------------------------
+# --- set-up: a clone-shaped slot, a worktree-shaped slot (for the refusal), a probe, a trivial profile ------------
 main = root / 'main'
 slot = root / 'slot'
 outside = root / 'outside'
@@ -134,7 +135,10 @@ for path in (main, slot, outside):
     path.mkdir()
 git('init', '-q', str(main))
 git('commit', '-q', '--allow-empty', '-m', 'init', cwd=main)
-git('worktree', 'add', '-q', '--detach', str(slot / 'repo'), cwd=main)
+git('clone', '-q', str(main), str(slot / 'repo'))
+wtslot = root / 'wtslot'
+wtslot.mkdir()
+git('worktree', 'add', '-q', '--detach', str(wtslot / 'repo'), cwd=main)
 codex_home = private_codex_home((slot, main, slot / 'repo', root))
 os.environ['CODEX_HOME'] = str(codex_home)
 (root / 'owners.tsv').write_text(f'{root}\tcodex-policy-live-test\n')
@@ -356,6 +360,18 @@ def argv_has_policy(argv):
     #: session transcript's turn_context instead.
     codex_home_config_keys=[line.split('=', 1)[0].strip() for line in (codex_home / 'config.toml').read_text().splitlines()
                             if '=' in line and not line.lstrip().startswith('#')]), indent=2) + '\n')
+
+# --- (0) D-51: a codex dispatch into the linked-worktree slot is refused before anything happens (fix only) -----
+fleet('enroll', '--slot', str(wtslot))
+if EXPECT == 'green':
+    refusals = {}
+    for extra in (['--dry-run'], []):
+        done = fleet('dispatch', '--profile', str(profile), '--title', 'cxp worktree', '--slot', 'wtslot', '--cap', '1',
+                     '--runtime', 'codex', *extra, codes=(0, 4))
+        refusals['dry-run' if extra else 'real'] = dict(code=done.returncode, err=done.stderr.strip())
+        assert done.returncode == 4 and 'linked git worktree' in done.stderr, done
+    assert not store.all(), 'a refused dispatch left a record'
+    verdict['worktree_slot_refusal'] = refusals
 
 # --- (1) dispatch a codex worker; it runs the probe with no keystroke ----------------------------------------
 out = fields(fleet('dispatch', '--profile', str(profile), '--title', 'cxp codex', '--slot', 'slot', '--cap', '1',
