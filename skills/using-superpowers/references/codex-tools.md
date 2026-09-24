@@ -1,3 +1,14 @@
+## Loading a skill
+
+Codex has no Skill tool. The superpowers skills appear in your session's
+Skills list as `superpowers:<name>`, each with the path to its `SKILL.md`.
+To use one, read that file in full with your shell (for example
+`cat <path>`) and follow it: the file is the skill. When a skill says
+"invoke the Skill tool" or "load superpowers:X", do the same with X's
+`SKILL.md`. A fleet worker's `fleet brief` has a `skills` row that names
+where its skills are. If a skill you are told to load is not listed,
+say so. Do not improvise its steps.
+
 ## Subagent dispatch requires multi-agent support
 
 Add to your Codex config (`~/.codex/config.toml`):

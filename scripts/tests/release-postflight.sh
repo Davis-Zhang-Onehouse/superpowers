@@ -359,6 +359,51 @@ rc=$?
 check "an EXEMPT verdict exits 0, same as GREEN" "0" "$rc"
 cp "$TMP/verdict.bak" "$VERDICT"
 
+# --- assertion 6 (FB-111): each root's codex skills link follows `current` ----------------------------------
+# No root has a .codex yet: that is "codex is not configured here", a SKIP line and not a MISMATCH.
+out="$(run 2>&1)"
+rc=$?
+check "a root with no .codex does not fail the run" "0" "$rc"
+case "$out" in
+  *"SKIP: $ROOTS/aroot_root/.codex"*) note "ok   a root with no .codex is named as skipped" ;;
+  *)
+    note "FAIL a root with no .codex was not named as skipped: $out"
+    fails=1
+    ;;
+esac
+for s in using-superpowers systematic-debugging brainstorming writing-plans subagent-driven-development \
+         test-driven-development verification-before-completion working-as-a-dispatched-instant using-fleet \
+         harvesting-an-instant releasing-fleet; do
+  mkdir -p "$R/fleet-v$VERSION/skills/$s"
+  echo "$s" >"$R/fleet-v$VERSION/skills/$s/SKILL.md"
+done
+mkdir -p "$ROOTS/aroot_root/.codex"
+bash "$REPO/scripts/fleet-codex-skills.sh" --codex-home "$ROOTS/aroot_root/.codex" --releases "$R" >/dev/null 2>&1
+check "the codex skills install on the fake root succeeds" "0" "$?"
+out="$(run 2>&1)"
+rc=$?
+check "a root whose codex skills link follows current exits 0" "0" "$rc"
+case "$out" in
+  *"OK: $ROOTS/aroot_root/.codex"*) note "ok   the root's codex skills link is checked and reported OK" ;;
+  *)
+    note "FAIL the root's codex skills link was not reported OK: $out"
+    fails=1
+    ;;
+esac
+CODEX_LINK="$ROOTS/aroot_root/.codex/skills/superpowers"
+ln -sfn "$R/fleet-v$VERSION/skills" "$CODEX_LINK"
+out="$(run 2>&1)"
+rc=$?
+check "a codex skills link pinned to one release exits 1" "1" "$rc"
+case "$out" in
+  *"MISMATCH: $ROOTS/aroot_root/.codex"*fleet-codex-skills.sh*) note "ok   the pinned link is a MISMATCH naming the install command" ;;
+  *)
+    note "FAIL the pinned link was not a MISMATCH naming the install command: $out"
+    fails=1
+    ;;
+esac
+ln -sfn "$R/current/skills" "$CODEX_LINK"
+
 # --- read-only: this script must never mutate anything under the roots it inspects ------------------------
 before="$(find "$ROOTS" -printf '%p %s %T@ %l\n' 2>/dev/null | sort)"
 run >/dev/null 2>&1
@@ -369,7 +414,8 @@ if [ "$fails" = 0 ]; then
   echo "PASS: release-postflight.sh clears a fully-shared, fully-correct deployment with no false alarm," \
        "correctly excludes an unrelated root's own release area, catches a second root whose current still" \
        "points at the previous version (naming both the actual and wanted target), catches a stale" \
-       "marketplace path, catches an unbumped file for both a flat YAML field and a nested dotted JSON" \
+       "marketplace path, checks each root's codex skills link follows current (skipping a root with no" \
+       ".codex, catching one pinned to a release), catches an unbumped file for both a flat YAML field and a nested dotted JSON" \
        "field (.hermes-plugin/plugin.yaml and plugins.0.version), classifies RED vs EXEMPT/GREEN verdicts," \
        "refuses a missing version or an unset FLEET_RELEASES with exit 2, never lets an assertion pass" \
        "vacuously -- an empty or unparseable .version-bump.json file list and a zero-root population are" \

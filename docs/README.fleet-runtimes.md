@@ -81,7 +81,20 @@ a seed-delivery shim. Claude's existing `REAL_CLAUDE` override
 remains supported. Executable, configuration directory and runtime are recorded for recovery; credentials
 are never copied into fleet records or launchers.
 
-Install **this fork** as a native plugin in the selected CLI, following the quickstart's
+**Codex skills (FB-111).** A codex worker gets the superpowers skills through one link in its `CODEX_HOME`:
+`scripts/fleet-codex-skills.sh --codex-home <dir> --releases "$FLEET_RELEASES"` (`--dry-run` first, `--check` to
+verify) writes `<dir>/skills/superpowers -> $FLEET_RELEASES/current/skills`. codex-cli 0.156 scans `CODEX_HOME/skills`
+and follows links, so it lists every skill as `superpowers:<name>`, and every deploy moves them, the way the claude
+marketplace entry moves claude's. Measured on 0.156.1: `codex plugin marketplace add` records the release `current`
+resolves to today, and `codex plugin add` git-clones and copies a snapshot, so neither follows a deploy.
+`fleet dispatch --runtime codex` refuses (exit 4) a `CODEX_HOME` that cannot see the core skills, and names this
+command; `--override "<reason>"` launches without them. The codex seed and `fleet brief` tell the worker how to load
+a skill: read its `SKILL.md` with the shell, starting with `superpowers:using-superpowers`, and use
+`using-superpowers/references/codex-tools.md` for tool names. The seed stands in for the plugin's SessionStart
+hook, which the link route does not install. `scripts/release-postflight.sh` verifies the link on every root that
+has a `.codex`.
+
+For the plugin route (a root that runs from a checkout, or an interactive codex outside fleet), install **this fork** as a native plugin in the selected CLI, following the quickstart's
 [runtime installation](../README.md#2-install-the-fork-in-your-runtime), not the upstream marketplace instructions. The Codex package includes
 `hooks/hooks-codex.json` and `hooks/session-start-codex`. Enable native hooks in the CLI configuration,
 review and trust the plugin hook when prompted, then start a fresh session. Its SessionStart hook loads
