@@ -5342,11 +5342,14 @@ def _sandbox_env(sandbox: Path) -> dict:
             "PATH": os.environ.get("PATH", "/usr/bin:/bin"), "LC_ALL": "C"}
 
 
-#: A shell fence opener indented 4+ spaces (or by a tab): a code block inside a list item, which
-#: `fleet.markdown` reads as prose because containers are not modelled (OI-4). `recipes_of` cannot see it,
-#: and "examined 0 recipe(s)" would read as success, so `verify` counts them and says so (RV-31).
-_INDENTED_SHELL_FENCE = re.compile(r"^(?: {4,}|\t)\s*(?:`{3,}|~{3,})\s*(?:" + "|".join(_RECIPE_LANGS) + r")\b",
-                                   re.IGNORECASE)
+#: A shell fence opener the reader classed as PROSE: one behind a container the reader does not model — 4+
+#: spaces, a tab, spaces then a tab, a `>` blockquote, a list marker (OI-4). A fence at 0–3 spaces is a fence
+#: to the reader and never reaches this pattern, so any prose line that is fence-shaped after a run of
+#: spaces, tabs and container markers is one `recipes_of` cannot see, and "examined 0 recipe(s)" would read
+#: as success; `verify` counts them and says so (RV-31, RV-37).
+_INDENTED_SHELL_FENCE = re.compile(
+    r"^[ \t>]*(?:(?:\d+[.)]|[-*+])[ \t]+[ \t>]*)?(?:`{3,}|~{3,})[ \t]*(?:" + "|".join(_RECIPE_LANGS) + r")\b",
+    re.IGNORECASE)
 
 
 def unexamined_indented_fences(path: Path) -> int:
