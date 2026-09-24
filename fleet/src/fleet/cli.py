@@ -5054,7 +5054,6 @@ SPAWN_CALLS = frozenset({
 FORBIDDEN_CALLS = DELETE_CALLS | SPAWN_CALLS
 
 #: Fences whose contents are recipes. A fence with no language is prose in a box.
-_FENCE = re.compile(r"^\s*```+\s*(?P<lang>[A-Za-z0-9_+-]*)\s*$")
 _RECIPE_LANGS = ("bash", "sh", "shell", "zsh", "console")
 
 
@@ -5068,30 +5067,28 @@ class Recipe:
 def recipes_of(path: Path) -> list:
     """Every runnable command in a document's shell fences, in file order.
 
-    Continuations are joined, comments and blank lines are dropped, and a fence with no language is left
-    alone. `RUNBOOK.md` is read here as the **recipe list**, never for a control signal (AC-2 / FD-8).
+    Read through `fleet.markdown` (`B19`): a fence is one whose language is in `_RECIPE_LANGS`, a ~~~ fence
+    counts, and a fence with no language or another language is prose in a box. Continuations are joined,
+    comments and blank lines are dropped. `RUNBOOK.md` is read here as the **recipe list**, never for a
+    control signal (AC-2 / FD-8).
     """
     path = Path(path)
     if not path.is_file():
         return []
-    out, inside, pending, start = [], False, "", 0
-    for number, raw in enumerate(path.read_text().splitlines(), start=1):
-        fence = _FENCE.match(raw)
-        if fence is not None:
-            inside = fence.group("lang").lower() in _RECIPE_LANGS if not inside else False
-            pending = ""
-            continue
-        if not inside:
-            continue
-        line = raw.strip()
-        if not line or line.startswith("#"):
+    out, pending, start, block = [], "", 0, -1
+    for line in fenced(path.read_text(), _RECIPE_LANGS):
+        if line.block != block:
+            #: A continuation left dangling at the end of one fence never joins the next fence's first line.
+            pending, block = "", line.block
+        stripped = line.raw.strip()
+        if not stripped or stripped.startswith("#"):
             continue
         if not pending:
-            start = number
-        if line.endswith("\\"):
-            pending = f"{pending}{line[:-1].strip()} "
+            start = line.number
+        if stripped.endswith("\\"):
+            pending = f"{pending}{stripped[:-1].strip()} "
             continue
-        out.append(Recipe(command=f"{pending}{line}".strip(), line=start, source=str(path)))
+        out.append(Recipe(command=f"{pending}{stripped}".strip(), line=start, source=str(path)))
         pending = ""
     return out
 
