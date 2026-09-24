@@ -1553,6 +1553,64 @@ class TestCadence(CliCase):
     observed failure was 19 hours of silence from an actor who had stalled. This is `git gc --auto`'s
     shape and needs no daemon."""
 
+    def test_foreign_effort_is_silent_for_local_verbs_and_explicit_target_is_honored(self):
+        fleet = self.loaded()
+        foreign = fleet.tmp / "other-effort" / FRESH_BASE
+        foreign.mkdir(parents=True)
+        register = foreign / "ISSUES.md"
+        register.write_text("## Other-1 overdue\n")
+        fleet.harvest.register(str(foreign), str(register))
+        data = json.loads(fleet.harvest.path.read_text())
+        for source in data["sources"]:
+            source["registered_at"] = LONG_AGO
+            source["last_run"] = LONG_AGO if source["base"] == str(foreign) else NOW
+        fleet.harvest.path.write_text(json.dumps(data))
+
+        for verb, args in (("milestone", ["--instant", str(fleet.paths["readyWorker"]),
+                                            "--id", "M-foreign", "--title", "local work"]),
+                           ("pane-guard", ["--pane", "dt-solo"]),
+                           ("release-status", ["--releases", str(release_fixture(fleet)[1])])):
+            with self.subTest(verb=verb):
+                code, out, err = fleet.run([verb, "--porcelain", *args])
+                self.assertNotIn(cli.CADENCE_PREFIX, err)
+                self.assertNotIn(str(foreign), err)
+                self.assertNotIn(cli.CADENCE_PREFIX, out)
+
+        for verb, args in (("roadmap", ["--instant", str(foreign)]),
+                           ("dispatch", ["--dry-run", "--profile", str(fleet.profile()),
+                                         "--title", "foreign child", "--base", FRESH_BASE_DIGITS,
+                                         "--optype", "append", "--from", str(foreign)])):
+            with self.subTest(verb=verb, target="foreign"):
+                code, out, err = fleet.run([verb, "--porcelain", *args])
+                self.assertIn(f"{cli.CADENCE_PREFIX} {foreign}", err)
+                self.assertNotIn(str(fleet.instants / OURS), err)
+                self.assertNotIn(cli.CADENCE_PREFIX, out)
+
+        with mock.patch.object(cli.Path, "cwd", return_value=foreign):
+            code, out, err = fleet.run(["pane-guard", "--porcelain", "--pane", "dt-solo"])
+        self.assertIn(f"{cli.CADENCE_PREFIX} {foreign}", err)
+        self.assertNotIn(cli.CADENCE_PREFIX, out)
+
+        with mock.patch.object(cli.Path, "cwd", return_value=foreign / "nested"):
+            code, out, err = fleet.run(["pane-guard", "--porcelain", "--pane", "dt-solo"])
+        self.assertNotIn(cli.CADENCE_PREFIX, err)
+
+    def test_path_and_base_sources_for_one_register_print_once(self):
+        for state in ("inflight", "complete"):
+            with self.subTest(state=state):
+                fleet = self.loaded()
+                register = fleet.instants / OURS.replace("-inflight-", f"-{state}-") / "ISSUES.md"
+                fleet.harvest.register("07300312", str(register))
+                data = json.loads(fleet.harvest.path.read_text())
+                for source in data["sources"]:
+                    source["registered_at"] = LONG_AGO
+                    source["last_run"] = LONG_AGO
+                fleet.harvest.path.write_text(json.dumps(data))
+
+                code, out, err = fleet.run(["pane-guard", "--porcelain", "--pane", "dt-solo"])
+                self.assertEqual(err.count(cli.CADENCE_PREFIX), 1, err)
+                self.assertNotIn(cli.CADENCE_PREFIX, out)
+
     def test_every_verb_evaluates_cadence_staleness_and_prints_it_to_stderr(self):
         # The two halves are asserted in SEPARATE subTests, and the stdout half goes first. That order
         # is load-bearing and was found by mutation: with the stderr assertion first, "cadence not
