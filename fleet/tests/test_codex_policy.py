@@ -122,6 +122,25 @@ class GitRootsTests(unittest.TestCase):
         git('worktree', 'add', '-q', '--detach', str(self.slot / 'mine'), cwd=self.main)    # the neighbour still counts
         self.assertEqual(sorted(git_writable_dirs(self.slot, default_git())), sorted(worktree_roots(self.main, 'mine')))
 
+    def test_a_git_dir_forged_inside_the_slot_chooses_no_root(self):
+        """RV-29 (closure 1). A worker can write a whole fake git dir inside its own slot, back-link included, so a
+        back-link proves nothing when it lives there. The common dir must lie OUTSIDE the slot."""
+        other = self.tmp / 'other'
+        other.mkdir()
+        git('init', '-q', '.', cwd=other)
+        forged = {'evil': self.slot / 'fg',                                       # closure 1's probe: commondir -> other
+                  'evil2': self.slot / 'x' / 'worktrees' / 'fg'}                  # and the worktree-shaped variant
+        for name, gitdir in forged.items():
+            (self.slot / name).mkdir()
+            gitdir.mkdir(parents=True)
+            (self.slot / name / '.git').write_text(f'gitdir: {gitdir}\n')
+            (gitdir / 'gitdir').write_text(str(self.slot / name / '.git') + '\n')
+            (gitdir / 'commondir').write_text(str((other / '.git').resolve()) + '\n')
+            (gitdir / 'HEAD').write_text('0' * 40 + '\n')
+        for sub in ('objects', 'refs', 'logs'):
+            (self.slot / 'x' / sub).mkdir(parents=True)
+        self.assertEqual(git_writable_dirs(self.slot, default_git()), ())
+
     def test_a_rewritten_commondir_does_not_move_the_roots(self):
         """RV-37. `<common>/worktrees/<name>` is itself a writable root, so its `commondir` file is the worker's to
         rewrite; roots re-derived at the next revive must not follow it to another repository."""
