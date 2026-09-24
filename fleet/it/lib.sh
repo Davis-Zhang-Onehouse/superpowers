@@ -341,7 +341,7 @@ _it_row() {               # _it_row <case> <verdict> <evidence> <note>
     # a subshell (F9-zero-delta) would advance a counter only in that subshell, and every later row would
     # then land before it. A staging failure falls back to an append rather than losing the row.
     local at
-    at="$(awk -F'\t' -v re="^(OWN-)?(${IT_OWN_RE:-})\$" -v fallback="$IT_OWN_AT" 'NR>1 && $1 ~ re {last=NR} END{print (last ? last+1 : fallback)}' "$RESULTS")"
+    at="$(IT_RE="^(OWN-)?(${IT_OWN_RE:-})\$" awk -F'\t' -v fallback="$IT_OWN_AT" 'NR>1 && $1 ~ ENVIRON["IT_RE"] {last=NR} END{print (last ? last+1 : fallback)}' "$RESULTS")"
     tmp="$(mktemp "$(dirname "$RESULTS")/.$(basename "$RESULTS").XXXXXX" 2>/dev/null)" || tmp=""
     if [ -n "$tmp" ] && IT_ROW="$line" awk -v at="$at" 'NR==at{print ENVIRON["IT_ROW"]; done=1} {print} END{if(!done) print ENVIRON["IT_ROW"]}' "$RESULTS" > "$tmp" \
        && mv "$tmp" "$RESULTS"; then
@@ -388,8 +388,10 @@ it_own_cases() {          # it_own_cases <extended regex matched against the who
   # own `OWN-<case>` rows from an earlier run are dropped too: they are this runner's, and a fixed regex
   # makes them stale. The insertion point is a line number in the file AFTER the drop, which is the same
   # number: nothing above the first owned row is removed.
-  at="$(awk -F'\t' -v re="^(OWN-)?($re)\$" 'NR>1 && $1 ~ re {print NR; exit}' "$RESULTS")"
-  awk -F'\t' -v re="^(OWN-)?($re)\$" 'NR==1 || $1 !~ re' "$RESULTS" > "$tmp" && mv "$tmp" "$RESULTS"
+  # The regex reaches awk through ENVIRON like the row does: `-v` processes escapes, so a `\.` in a
+  # runner's regex would be read differently here than by the grep in _it_row.
+  at="$(IT_RE="^(OWN-)?($re)\$" awk -F'\t' 'NR>1 && $1 ~ ENVIRON["IT_RE"] {print NR; exit}' "$RESULTS")"
+  IT_RE="^(OWN-)?($re)\$" awk -F'\t' 'NR==1 || $1 !~ ENVIRON["IT_RE"]' "$RESULTS" > "$tmp" && mv "$tmp" "$RESULTS"
   [ -n "$at" ] && IT_OWN_AT="$at"
   return 0
 }
