@@ -155,8 +155,12 @@ f2b_rc=$?
 #: Measured: the real product names `capholder, secondc`; a product that wrongly frees an unbacked
 #: declaration names `secondc` only, and this case now fails on it (w2itharness evidence/01-red and
 #: 03-green, sectionF-mutant-*).
+#: `[^.]*`, not `.*`: the held list ends at the first full stop, and the SAME line then prints the
+#: population — which names the EXCLUDED subjects too, so a greedy match found `capholder` on the mutant
+#: ("… hold it: …-secondc. examined 2 subject(s) …; 1 counted, 1 excluded (…-capholder (RUNNING))").
+#: Found in review; tests/test_it_harness.py pins the pattern against both measured lines.
 f2b_w1_held=0
-command grep -E 'hold it: .*capholder' "$OUT/F2b-dispatch.out" >/dev/null && f2b_w1_held=1
+command grep -E 'hold it: [^.]*capholder' "$OUT/F2b-dispatch.out" >/dev/null && f2b_w1_held=1
 #: `RV-40`. Keyed on the TODO ID, which is what a board row's `identity` column carries
 #: (`render.BOARD_COLUMNS`); the first draft matched the INSTANT FOLDER name, which appears on no row, so
 #: the lookup returned "" and `[ "" != "AWAITING-CI" ]` passed on a failed measurement — absence read as
@@ -549,8 +553,8 @@ it_zero_delta F10-lint             fleet lint --instant "$W1" --porcelain
 it_zero_delta F10-roadmap          fleet roadmap --instant "$W1" --porcelain
 it_zero_delta F10-brief            fleet brief --instant "$W1" --porcelain
 #: `--want 4`: by here F2's W2 holds the cap and W1's declaration is restored, so the dry run is REFUSED by
-#: the cap — it still evaluates every gate and writes nothing, which is the property. Measured, not
-#: assumed: w2itharness evidence/03-green/sectionF-real-fix.
+#: the cap — it still evaluates every gate and writes nothing, which is the property. The code is asserted,
+#: not assumed: a wrong one fails this row red (w2itharness evidence/03-green, the §F run on the fix).
 it_zero_delta --want 4 F10-dispatch-dryrun fleet dispatch --profile "$OUT/profile" --title f10probe \
                                      --base 00000000 --optype append --dry-run
 for c in F10-compaction-status F10-board F10-leases F10-status F10-lint F10-roadmap F10-brief \
