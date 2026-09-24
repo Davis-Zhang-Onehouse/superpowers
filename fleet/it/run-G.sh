@@ -527,7 +527,8 @@ fi
 #      block (the coordinator's dispatch command kept verbatim) and inside an HTML comment, and the
 #      literal RCF-9 line appears ONLY inside a ```markdown block introduced by "what NOT to do". `lint`
 #      must report 0 near-miss rows and `complete --dry-run` must answer would-rename (rc=0). Second, the
-#      negative control in the SAME file: the same two things written as prose fire again (1 row, rc=4).
+#      negative control in the SAME file: the same two things written as prose fire again (lint: 1 row,
+#      rc=1; complete: rc=4).
 #      Before B19 the first reading refused rc=4 on the fenced and the commented line and lint exited 1.
 # ==================================================================================================
 mkdir -p "$QUOTED/evidence"

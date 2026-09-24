@@ -5125,15 +5125,16 @@ def _redirects_to(command: str, token: str) -> bool:
 #: `-delete`), `xargs`/`env`/`bash`/`sh`/`python*` (run anything), `curl`/`wget`/`ssh` (fetch or reach out),
 #: `tee` (writes), `cd` (moves every relative write out of the sandbox), `uniq` (its second positional is an
 #: output file), `git` (a repository's config — `core.fsmonitor`, `diff.external`, textconv — names programs
-#: for its read-only subcommands to run, and a RUNBOOK author controls the repository; D-7). `sort` and
-#: `date` are vouched with their writing/spawning options refused (`sort -o`, `--compress-program`;
-#: `date -s`), on EVERY argument: a `--` never ends the scan, because an option that takes a value consumes
+#: for its read-only subcommands to run, and a RUNBOOK author controls the repository; D-7). The heads
+#: with a writing or spawning OPTION keep it refused (`_HEAD_OPTION_BLOCKLIST`: `sort -o/-T`,
+#: `--compress-program`; `date -s`; `file -C/-z/-Z`; `diff -l`; `printf -v`; `test -v`), on EVERY
+#: argument: a `--` never ends the scan, because an option that takes a value consumes
 #: it (`sort --random-source -- -o …`). `fleet` is NOT vouched (D-8): the verb table's `read_only` says
 #: nothing about `pane-guard --capture` writing a file or `release-status` spawning git in an author's
 #: checkout, and `--home`/`--root` reach a real store and a real tmux server the sandbox does not pin.
 #: A recipe that needs one of the rest is the author's to run by hand; `verify` says so.
 #:
-#: HOW THE RECIPE IS READ (DECISIONS D-6, D-7). Three review rounds each found an input a shlex-based reading
+#: HOW THE RECIPE IS READ (DECISIONS D-6 to D-9). Three review rounds each found an input a shlex-based reading
 #: split into fewer commands than bash runs — a mid-word `#`, a quoted operator, `'a'#`, a glued `|>`,
 #: `<&-curl`, a newline. Mirroring bash's lexer is the wrong architecture for a fail-closed rule, so the
 #: rule does not try: a recipe is vouched only when its RAW TEXT fits a grammar small enough that bash's
@@ -5150,9 +5151,14 @@ _VOUCHED_HEADS = frozenset({
     "test", "true", "false", "pwd", "jq",
 })
 #: Per-head options that write or spawn: the short letters, and the long names (getopt's prefix rule).
-#: `sort -T` and `file -C` write where the author aims (temporary files; a compiled magic file).
+#: `sort -T` and `file -C` write where the author aims (temporary files; a compiled magic file);
+#: `file -z`/`-Z` and `diff -l` start a helper the tool picks (a decompressor, `pr`). `printf` and `test`
+#: are BASH BUILTINS under `bash -c`, and their `-v` evaluates an array subscript — `'a[$(id)]'` inside
+#: single quotes is a command substitution to them — while `printf -v` can rewrite `PATH` or `BASH_CMDS`
+#: for the next head (final review, D-9). The oracle disables builtins, so it could not see this class.
 _HEAD_OPTION_BLOCKLIST = {"sort": ("oT", ("output", "compress-program", "temporary-directory")),
-                          "date": ("s", ("set",)), "file": ("C", ("compile",))}
+                          "date": ("s", ("set",)), "file": ("CzZ", ("compile", "uncompress")),
+                          "diff": ("l", ("paginate",)), "printf": ("v", ()), "test": ("v", ())}
 _OPAQUE_HEADS = frozenset({"eval", "exec", "source", "."})
 _SIMPLE_CHARS = frozenset("ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789_@%+=:,./-")
 _SIMPLE_OPS = ("||", "&&", "|", ";")
@@ -5355,8 +5361,9 @@ def _do_verify(ctx: Ctx, parsed: Parsed) -> int:
                         f"executes only what it can vouch for (B21: a denylist alone fails open, and three "
                         f"shapes it did not name were measured reaching the runner)."),
                 clears_when=("the recipe is rewritten in vouched shapes — read-and-print tools, plain words "
-                             "and quoted strings, no substitution, glob or expansion — or its author runs it "
-                             "by hand and records the output under evidence/"),
+                             "and quoted strings, no substitution, glob or expansion — or, if it is a command "
+                             "for a human to run, it moves out of a shell fence (```text), since a recipe verify "
+                             "cannot vouch for stays reported and is never executed by it"),
                 clears_who="the author of that document"))
             continue
         code, out, err = ctx.runner(recipe.command, cwd=sandbox, env=_sandbox_env(sandbox))
