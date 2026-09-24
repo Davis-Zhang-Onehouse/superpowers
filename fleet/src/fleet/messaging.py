@@ -24,6 +24,10 @@ UNCERTAIN = "uncertain"
 #: placeholder agreed with the message (`placeholder`, FB-27) — a weaker confirmation, and said so.
 CONFIRMED_BY_DRAFT = "draft"
 CONFIRMED_BY_PLACEHOLDER = "placeholder"
+#: RV-47. Claude Code's single-line placeholder `[Pasted text #N]` states NO length — only that a paste
+#: with no newline sits in the box, which any single-line message of 800+ characters would also produce.
+#: It is accepted (the box was observed empty before this one paste) and recorded as the weakest kind.
+CONFIRMED_BY_PLACEHOLDER_UNCOUNTED = "placeholder-uncounted"
 
 
 def validate_message(text):
@@ -63,6 +67,8 @@ def confirms(runtime, draft, text) -> Optional[str]:
         return CONFIRMED_BY_DRAFT
     placeholder = paste_placeholder(runtime, draft)
     if placeholder is not None and placeholder.describes(text):
+        if placeholder.chars is None and not placeholder.newlines:
+            return CONFIRMED_BY_PLACEHOLDER_UNCOUNTED
         return CONFIRMED_BY_PLACEHOLDER
     return None
 
