@@ -7264,6 +7264,14 @@ def main(argv: list, *, stdout=None, stderr=None, context=None) -> int:
     except BadInput as exc:
         print(str(exc), file=err)
         print(usage(verb if spec is not None else None), file=err)
+        if verb == "dispatch":
+            #: RV-C3. Refused by the parser, so there is no `parsed` — the two facts a stdout reader needs
+            #: are read off the raw argv: whether it asked for porcelain, and which title it passed.
+            args = argv[1:]
+            titles = [args[i + 1] for i, arg in enumerate(args[:-1]) if arg == "--title"]
+            rows = [("error", _one_line(f"{type(exc).__name__}: {exc}"))]
+            rows += _title_rows(titles[-1]) if titles else [("title_as_used", "(none)")]
+            _emit(types.SimpleNamespace(porcelain="--porcelain" in args, out=out), verb, rows)
         return EXIT_BAD_INPUT
 
     if parsed.on(HELP):

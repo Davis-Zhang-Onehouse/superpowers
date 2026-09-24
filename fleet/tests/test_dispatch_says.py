@@ -273,6 +273,23 @@ class TestANonStartBeforeTheClaimKeepsItsCodeAndSaysSo(DispatchCase):
         self.assertTrue(rows.get("error", "").startswith("BadInput: --milestone 'M9' names a row"), out)
         self.assertEqual(rows.get("title_as_used"), "saysWhat", out)
 
+    def test_an_argument_error_prints_an_error_row_too(self):
+        #: RV-C3. Refused by the parser, before any context exists: it used to be 0 stdout bytes.
+        code, out, err = self.dispatch("--bogus-flag")
+        self.assertEqual(code, EXIT_BAD_INPUT, err)
+        rows = kv(out)
+        self.assertTrue(rows.get("error", "").startswith("BadInput:"), out)
+        self.assertIn("--bogus-flag", rows["error"], out)
+        self.assertEqual(rows.get("title_as_used"), "saysWhat", out)
+        self.assertIn("usage", err.lower(), "stderr keeps the usage text")
+
+    def test_an_argument_error_with_no_title_says_no_title_was_used(self):
+        code, out, err = self.fleet.run(["dispatch", "--porcelain", "--profile", str(self.fleet.profile())])
+        self.assertEqual(code, EXIT_BAD_INPUT, err)
+        rows = kv(out)
+        self.assertIn("error", rows, out)
+        self.assertEqual(rows.get("title_as_used"), "(none)", out)
+
     def test_every_row_value_is_one_line(self):
         #: A refusal is a paragraph; as a FIELD it must stay one line, or `cut -f2` reads the wrong row.
         code, out, err = self.dispatch("--slot", "wsNope")
