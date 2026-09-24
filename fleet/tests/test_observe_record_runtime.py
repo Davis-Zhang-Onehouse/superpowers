@@ -13,8 +13,10 @@ Two causes, both pinned here:
 2. codex 0.156's busy row was matched only as a bare `• Working (… esc to interrupt)` directly above the caret. The
    live row carries a ` · 1 background terminal running · …` tail, and a `└ <command>` row can sit under it.
 
-The inventory is built by the REAL `default_probes` over a fake `/proc`, and the verbs run through `cli.main`, so a
-test here fails on the base for the reason the pilot did, not for a missing keyword.
+The inventory is built by the REAL `default_probes` over a fake `/proc`, and the verbs run through `cli.main`, so the
+verb tests fail on the base for the reason the pilot did (BLOCKED, 14, 0, a refused send or resume). The four
+`InventoryNamesTheOwningAgent` tests are the exception: they read `LiveSession.nested`, which the base does not have, so
+there they fail with AttributeError — a structural RED; the behavioural RED for the same fault is the verb tests' (RV-27).
 """
 from pathlib import Path
 import shutil
