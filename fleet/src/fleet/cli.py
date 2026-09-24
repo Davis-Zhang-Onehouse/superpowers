@@ -5138,7 +5138,9 @@ def _redirects_to(command: str, token: str) -> bool:
 #: split into fewer commands than bash runs — a mid-word `#`, a quoted operator, `'a'#`, a glued `|>`,
 #: `<&-curl`, a newline. Mirroring bash's lexer is the wrong architecture for a fail-closed rule, so the
 #: rule does not try: a recipe is vouched only when its RAW TEXT fits a grammar small enough that bash's
-#: reading of it is unambiguous and equal to this one, and NOTHING in it expands. Tokens are separated by
+#: reading of it is unambiguous and equal to this one OR STRICTER on this side — an all-digit word glued
+#: to a redirection (`echo 3>out`) is a descriptor to bash and an argument plus `>out` here, which only
+#: adds an argument the option scan may refuse (RV-35) — and NOTHING in it expands. Tokens are separated by
 #: spaces and tabs; a word is a run of `_SIMPLE_CHARS` (no glob, no `$`, no `~`), a single-quoted string,
 #: or a double-quoted string with no `$`, backtick or backslash, glued in any order; an operator from
 #: `_SIMPLE_OPS` / `_SIMPLE_REDIRECTS` ends a word (as it does in bash) and must be followed by whitespace,
