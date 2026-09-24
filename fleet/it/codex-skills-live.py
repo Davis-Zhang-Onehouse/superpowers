@@ -284,7 +284,13 @@ def read_skill(calls, skill, marker):
 
 # --- set-up ----------------------------------------------------------------------------------------------------------
 (evidence / 'environment.json').write_text(json.dumps(dict(
-    revision=subprocess.run(['git', '-C', str(fleet_repo), 'rev-parse', 'HEAD'], capture_output=True, text=True).stdout.strip(),
+    #: RV-17: the fleet under test and the driver are recorded separately. A base EXPORT is not a git checkout, so its sha
+    #: comes from CXS_FLEET_REV (the runner passes it for --red), and the driver's own tree says whether it was dirty.
+    revision=(subprocess.run(['git', '-C', str(fleet_repo), 'rev-parse', 'HEAD'], capture_output=True, text=True).stdout.strip()
+              or os.environ.get('CXS_FLEET_REV', '')),
+    driver_revision=subprocess.run(['git', '-C', str(repo), 'rev-parse', 'HEAD'], capture_output=True, text=True).stdout.strip(),
+    driver_dirty=subprocess.run(['git', '-C', str(repo), 'status', '--porcelain', '--', 'fleet/it', 'fleet/src', 'scripts'],
+                                capture_output=True, text=True).stdout.splitlines(),
     codex=command(['codex', '--version']).stdout.strip(), socket=socket, root=str(root), codex_home=str(codex_home),
     releases=str(releases), install=install), indent=2) + '\n')
 fleet('runtime', '--set', 'claude')
