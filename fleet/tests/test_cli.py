@@ -1826,7 +1826,7 @@ class TestUnvouchedReason(unittest.TestCase):
             "grep -c x -- -weird-name", "echo ';' '|' '>' quoted", "test -f x || echo missing",
             "ls && wc -l x", "cat RUNBOOK.md 2>err.txt; true", "echo \"quoted words\" x", "grep -E 'a|b' x",
             "\tls\t-la", "cat x 2>err.txt", "ls >out.txt", "ls 2>>log >>out", "cat <in.txt", "ls &>all.txt",
-            "ls 2>&1 | wc -l", "sha256sum a.txt b.txt", "echo a > -", "file -b x", "sort -S 1 -k1 x",
+            "ls 2>&1 | wc -l", "sha256sum a.txt b.txt", "echo a > -", "sort -S 1 -k1 x",
             "echo a > ..x", "ls a=b", "test -x a", "echo -e x", "printf '%s\\n' x", "diff -u a b", "file -b x",
         ]
         unvouched = {
