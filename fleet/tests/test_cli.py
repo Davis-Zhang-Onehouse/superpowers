@@ -594,7 +594,14 @@ class Fleet:
         #: time, so without this the suite measured whatever the person running it had exported — 33 cases
         #: passed on an ambient `FLEET_HOME` and failed inside `release-verify`, which runs with it unset.
         with hermetic_environment(self.instants, home=self.tmp):
-            code = cli.main(list(argv), stdout=out, stderr=err, context=self.context())
+            # The suite may itself run from a checkout nested under a real instant. Keep the fixture's
+            # default cwd in its private tree; focused cwd cases patch Path.cwd explicitly.
+            prior_cwd = os.getcwd()
+            try:
+                os.chdir(self.tmp)
+                code = cli.main(list(argv), stdout=out, stderr=err, context=self.context())
+            finally:
+                os.chdir(prior_cwd)
         return code, out.getvalue(), err.getvalue()
 
     # ---- the three halves of a delta --------------------------------------------------------------
@@ -1611,8 +1618,7 @@ class TestCadence(CliCase):
         self.assertNotIn(cli.CADENCE_PREFIX, out)
 
         with mock.patch.object(cli.Path, "cwd", return_value=foreign / "nested"):
-            code, out, err = self.run_with_derived_instants(
-                fleet, ["pane-guard", "--porcelain", "--pane", "dt-solo"])
+            code, out, err = fleet.run(["pane-guard", "--porcelain", "--pane", "dt-solo"])
         self.assertIn(f"{cli.CADENCE_PREFIX} {foreign}", err)
         self.assertNotIn(cli.CADENCE_PREFIX, out)
 

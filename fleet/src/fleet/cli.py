@@ -7070,8 +7070,7 @@ def _cadence(ctx: Ctx, parsed: Parsed) -> list:
             nearest = candidate
             break
         instants_named = instants_were_named(parsed, os.environ)
-        if nearest is not None and (not instants_named or nearest == cwd or
-                                    nearest.parent.resolve() == target.resolve()):
+        if nearest is not None:
             target = nearest
         elif not instants_named:
             # A derived store/instants path may not be the caller's effort tree.
