@@ -201,6 +201,14 @@ class RowOwnership(unittest.TestCase):
         self.run_lib("it_own_cases 'F[0-9]+(-[A-Za-z0-9-]+)?'\nit_pass F1 '' a\n( it_pass F9-zero-delta '' b )\nit_pass F10 '' c\nit_pass F11 '' d")
         self.assertEqual([r[0] for r in self.rows()], ["A1", "F1", "F9-zero-delta", "F10", "F11", "G1", "Z9"])
 
+    def test_a_regex_with_a_backslash_is_read_alike_by_the_drop_and_the_ownership_check(self):
+        """awk -v processes escapes and grep -E does not; both readers now take the regex through ENVIRON."""
+        self.results.write_text("case\tverdict\tevidence\tnote\nX.1\tPASS\t\told\nXa1\tPASS\t\tnot ours\n")
+        self.run_lib("it_own_cases 'X\\.[0-9]+'\nit_pass X.1 '' 'new'")
+        ids = [r[0] for r in self.rows()]
+        self.assertEqual(ids, ["X.1", "Xa1"])
+        self.assertNotIn("OWN-X.1", ids)
+
     def test_it_last_verdict_names_the_row_just_written(self):
         out = self.run_lib("it_own_cases 'F[0-9]+'\nit_fail F1 '' x; echo v=$IT_LAST_VERDICT; "
                            "it_pass F2 '' y; echo v=$IT_LAST_VERDICT")
