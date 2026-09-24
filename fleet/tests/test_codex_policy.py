@@ -205,6 +205,24 @@ class VisibilityTests(unittest.TestCase):
         self.assertIn('-a never -s workspace-write', launcher)
 
 
+class DryRunTests(unittest.TestCase):
+    def test_a_codex_dispatch_dry_run_names_the_policy_and_claude_prints_none(self):
+        """RV-36. The dry-run answers the same question as the real call, before a slot is claimed."""
+        from fleet.runtime_config import write_runtime
+        f = Fleet()
+        self.addCleanup(shutil.rmtree, f.tmp)
+        for runtime, expected in (('codex', 1), ('claude', 0)):
+            with self.subTest(runtime=runtime):
+                write_runtime(f.home, runtime)
+                code, out, err = f.run(['dispatch', '--profile', str(f.profile()), '--title', 'dry task', '--dry-run'])
+                self.assertEqual(code, 0, err)
+                rows = [line for line in out.splitlines() if line.startswith('codex_policy')]
+                self.assertEqual(len(rows), expected, out)
+                if expected:
+                    self.assertIn('approval=never', rows[0])
+                self.assertEqual(f.store.all(), [])
+
+
 class DispatchRootsTests(unittest.TestCase):
     def test_a_codex_dispatch_into_a_worktree_slot_hands_the_worktree_roots_to_the_launcher(self):
         from fleet.runtime_config import write_runtime
