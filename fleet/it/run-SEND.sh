@@ -178,6 +178,10 @@ for index, row in enumerate(rows):
         digest = hashlib.sha256(pathlib.Path(src).read_text().encode()).hexdigest()
         if digest != row.get('sha256'):
             print(f'SHA mismatch for {src}'); ok = False
+    else:
+        #: RV-44. The pass text claims the digest was re-derived; a row whose file is gone cannot be, and
+        #: saying nothing would let the claim stand on a check that never ran.
+        print(f'SHA NOT RE-DERIVED: message_file {src!r} is not a file'); ok = False
 sys.exit(0 if ok else 1)
 PY
 }
@@ -239,7 +243,9 @@ fi
 # ---- SEND-3: the record ------------------------------------------------------------------------------
 record_check "$W" 2 'submitted' 'draft,placeholder' > "$OUT/SEND-3-record.txt" 2>&1; s3=$?
 fleet brief --instant "$W" --porcelain > "$OUT/SEND-3-brief.out" 2>&1
-s3_brief=0; awk -F'\t' '$1=="messages"' "$OUT/SEND-3-brief.out" | grep -q 'submitted' && s3_brief=1
+#: RV-44. Every messages row carries the word "submitted" ("N submitted, M uncertain"); the check must be
+#: able to fail, so it wants the COUNT this section produced and the last outcome.
+s3_brief=0; awk -F'\t' '$1=="messages"' "$OUT/SEND-3-brief.out" | grep -q '2 message(s) recorded.*(2 submitted, 0 uncertain).*: submitted (confirmed by placeholder)' && s3_brief=1
 if [ "$s3" = 0 ] && [ "$s3_brief" = 1 ]; then
   it_pass SEND-3 "fleet/it/SEND/out/SEND-3-record.txt" "both sends are RECORDED in the worker's .fleet/sends.jsonl — sender, time, pane, sha256 of the message (re-derived from the file and matching), chars/lines/head, outcome=submitted and HOW each was confirmed (SEND-1 by the draft read back, SEND-2 by the paste placeholder's count — so the FB-27 branch is what submitted the five lines) — and \`fleet brief --instant <worker>\` reads them back on its 'messages' row (B13: before the fix \`_do_send\` wrote nothing, so 'who wrote into this pane' had no subject)"
 else
