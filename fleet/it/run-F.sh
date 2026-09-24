@@ -149,6 +149,14 @@ f2b_declare_rc=$?
 fleet dispatch --profile "$OUT/profile" --title "secondD" --base 00000000 --optype append \
       --porcelain > "$OUT/F2b-dispatch.out" 2>&1
 f2b_rc=$?
+#: `FB-75`. At the default cap of 1, W2 from F2 alone refuses every later dispatch, so "the dispatch is
+#: still refused" was true for a reason unrelated to W1 — a control that cannot fail. The refusal names
+#: every holder (`guards.py`, `held`), so the assertion is on WHO holds the cap: W1 must be in the list.
+#: Measured: the real product names `capholder, secondc`; a product that wrongly frees an unbacked
+#: declaration names `secondc` only, and this case now fails on it (w2itharness evidence/01-red and
+#: 03-green, sectionF-mutant-*).
+f2b_w1_held=0
+command grep -E 'hold it: .*capholder' "$OUT/F2b-dispatch.out" >/dev/null && f2b_w1_held=1
 #: `RV-40`. Keyed on the TODO ID, which is what a board row's `identity` column carries
 #: (`render.BOARD_COLUMNS`); the first draft matched the INSTANT FOLDER name, which appears on no row, so
 #: the lookup returned "" and `[ "" != "AWAITING-CI" ]` passed on a failed measurement — absence read as
@@ -165,13 +173,13 @@ f2b_note="$(awk -F'\t' -v id="$W1_ID" '$1==id {print $7; exit}' "$OUT/F2b-board.
 f2b_disregarded=0
 case "$f2b_note" in *disregarded*) f2b_disregarded=1 ;; esac
 case "$f2b_state" in RUNNING|IDLE) f2b_counted=1 ;; *) f2b_counted=0 ;; esac
-if [ "$f2b_declare_rc" = 0 ] && [ "$f2b_board_rc" = 0 ] && [ "$f2b_rc" != 0 ] \
+if [ "$f2b_declare_rc" = 0 ] && [ "$f2b_board_rc" = 0 ] && [ "$f2b_rc" != 0 ] && [ "$f2b_w1_held" = 1 ] \
    && [ "$f2b_counted" = 1 ] && [ "$f2b_disregarded" = 1 ]; then
   it_pass F2b "fleet/it/F/out/F2b-dispatch.out" \
-    "the SAME declaration with no watcher behind it did NOT free the cap: declare exit 0, the board reports $W1_ID as $f2b_state with a note saying the declaration is disregarded, and the dispatch is still refused (exit $f2b_rc). F2 and F2b differ by one flag, so neither can be explained by the cap's state"
+    "the SAME declaration with no watcher behind it did NOT free the cap: declare exit 0, the board reports $W1_ID as $f2b_state with a note saying the declaration is disregarded, and the dispatch is still refused (exit $f2b_rc) with capholder NAMED among the holders — W1 still counts, which W2's presence alone could not show. F2 and F2b differ by one flag, so neither can be explained by the cap's state"
 else
   it_fail F2b "fleet/it/F/out/F2b-dispatch.out" \
-    "declare_rc=$f2b_declare_rc board_rc=$f2b_board_rc dispatch_rc=$f2b_rc state='$f2b_state' (want RUNNING or IDLE for $W1_ID) disregarded=$f2b_disregarded note='$f2b_note'"
+    "declare_rc=$f2b_declare_rc board_rc=$f2b_board_rc dispatch_rc=$f2b_rc w1_held=$f2b_w1_held (want 1: capholder must be named as a holder of the cap) state='$f2b_state' (want RUNNING or IDLE for $W1_ID) disregarded=$f2b_disregarded note='$f2b_note'"
 fi
 # ==================================================================================================
 # F2c — AN ATTESTED WATCHER WITH A PID IS CHECKED.  `FB-58` (r3 release worker OI-10): an attestation
