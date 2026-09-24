@@ -166,7 +166,7 @@ d_enter() {
   #: sun_path reason.
   D_SOCK="/tmp/itfD.$$"
   rm -rf "$D_SOCK"; mkdir -p "$D_SOCK"
-  export TMUX_TMPDIR="$D_SOCK"
+  it_move_tmux_tmpdir "$D_SOCK"                  # export + re-arm the guardian on this directory (FB-73)
   export PATH="$IT_ROOT/bin:$PATH"               # the `claude` stub, first
   mkdir -p "$EV/out" "$EV/bin" "$EV/home" "$EV/instants"
   printf '%s\n' "$D_LIVE_BEFORE" > "$EV/out/live-tmux-before.txt"

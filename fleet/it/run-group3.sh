@@ -119,7 +119,7 @@ g3_enter() {                    # g3_enter <SECTION>
   #: KEPT, not redundant with `-L`: this is what contains a tmux call that lost its socket name. See the
   #: two-layer note in the header. `-L NAME` under this becomes `$TMUX_TMPDIR/tmux-$UID/NAME`, and both
   #: this harness (via `it_tmux`) and every `fleet` subprocess (via FLEET_TMUX_SOCKET) inherit it.
-  export TMUX_TMPDIR="$G3_SOCK"
+  it_move_tmux_tmpdir "$G3_SOCK"                 # export + re-arm the guardian on this directory (FB-73)
   export PATH="$G3_HERE/bin:$PATH"
   mkdir -p "$EV/out"
   printf '%s\n' "$G3_TMUX_BEFORE" > "$EV/out/live-tmux-before.txt"
