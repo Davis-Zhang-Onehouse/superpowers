@@ -15,6 +15,7 @@ The whole fleet is built through the injected probes (`Probes`, `cwd_probe`, `al
 a process, a tmux or a repository, and nothing reads a `.md` file for a control signal.
 """
 import json
+import os
 import pathlib
 import re
 import shutil
@@ -878,6 +879,23 @@ class TestTheCapIsPerEffort(GuardCase):
                            child_instant=str(child), slot="ws1")
         held = CompactionExclusive().evaluate(claimed.ctx(cap=5).under_claim("ws2"))
         self.assertFalse(held.allowed, f"a same-base compaction claim stopped blocking: {held.reason}")
+
+
+    def test_a_relative_instants_dir_never_sets_this_efforts_own_records_aside(self):
+        # RV-C2. `resolve_instants` accepts a relative FLEET_INSTANTS. Judged against the cwd, a caller standing in
+        # the wrong directory would see every record of its own effort as "another instants directory" and the cap
+        # would admit — a silent slot leak against UNDER_TRIGGERS. A relative dir cannot place anything: base-only.
+        fleet = self.fleet(slots=2)
+        folder = fleet.worker("solo", slot="ws1")
+        elsewhere = fleet.tmp / "elsewhere"
+        elsewhere.mkdir()
+        here = os.getcwd()
+        self.addCleanup(os.chdir, here)
+        for cwd in (fleet.tmp, elsewhere):            # the right parent, and a wrong one
+            os.chdir(cwd)
+            verdict = WipCap().evaluate(fleet.ctx(cap=1, instants_dir=pathlib.Path("instants")))
+            self.assertFalse(verdict.allowed, f"cwd={cwd}: this effort's own worker was set aside: {verdict.reason}")
+            self.assertIn(folder, verdict.reason)
 
 
 if __name__ == "__main__":

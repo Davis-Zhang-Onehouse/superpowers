@@ -621,10 +621,14 @@ def _in_this_effort(ctx, instant: str) -> bool:
 
     A folder the join found is judged where it is, so one moved INTO this directory — which `reconcile`
     follows by name — stays this effort's, exactly as before. A relative path is relative to this directory.
-    An empty path is unattributable and keeps the old, base-only answer: the cap under-triggers by design, and
+    An empty path, or a relative instants dir, is unattributable and keeps the old, base-only answer: the cap under-triggers by design, and
     dropping a subject nobody can place is a change nothing measured asks for.
     """
     if not instant or not getattr(ctx, "instants_dir", None):
+        return True
+    #: RV-C2. A RELATIVE instants dir means whatever the cwd makes of it, so from the wrong directory every record of
+    #: this effort would read as another's and the cap would admit. It cannot place anything: base-only, as before.
+    if not Path(ctx.instants_dir).is_absolute():
         return True
     path = Path(instant)
     if not path.is_absolute():
