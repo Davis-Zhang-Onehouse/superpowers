@@ -8,6 +8,7 @@ A private store whose box runtime is claude, a private itfleet-RTC- tmux server,
 The only keystrokes the harness sends itself answer codex's update modal ("2. Skip"); a folder-TRUST screen is never
 answered, because the answer persists into the CLI's configuration.
 """
+import atexit
 import json
 import os
 from pathlib import Path
@@ -15,6 +16,7 @@ import re
 import shutil
 import subprocess
 import sys
+import tempfile
 import time
 
 repo = Path(__file__).resolve().parents[2]
@@ -65,6 +67,15 @@ def private_codex_home():
     trusted = list(dict.fromkeys(path for path in (repository, toplevel, str(root)) if path))
     body = '\n'.join(top).rstrip() + '\n\n' + ''.join(f'[projects."{path}"]\ntrust_level = "trusted"\n\n' for path in trusted)
     (home / 'config.toml').write_text(body)
+    #: FB-111. A codex dispatch is refused when its CODEX_HOME cannot see the superpowers skills, so this home gets them
+    #: the way a root's does: the installer's one link, through a releases area whose `current` is this checkout.
+    #: Outside the checkout: `current` names the checkout itself, and a link to an ancestor inside it would be a cycle
+    #: for any `rglob` over the tree. Removed when this process exits.
+    releases = Path(tempfile.mkdtemp(prefix='rtc-releases-'))
+    atexit.register(shutil.rmtree, releases, True)
+    (releases / 'current').symlink_to(Path(__file__).resolve().parents[2], target_is_directory=True)
+    subprocess.run(['bash', str(Path(__file__).resolve().parents[2] / 'scripts' / 'fleet-codex-skills.sh'),
+                    '--codex-home', str(home), '--releases', str(releases)], check=True, capture_output=True)
     return home
 
 

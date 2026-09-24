@@ -101,6 +101,7 @@ from fleet.workspace import GOLDEN_FILE, Workspace, default_git
 from fleet.runtime import choose_runtime, validate_runtime, observe
 from fleet.runtime_config import admission_lock, pane_lock, read_runtime, write_runtime
 from fleet import runtime_launch, messaging
+from fleet import codex_skills as codex_skills_mod
 
 # --- the flag spec ---------------------------------------------------------------------------------
 
@@ -525,6 +526,10 @@ class Ctx:
     launch_environment: object = None
     seed_delivery: object = None
     resume_verified: object = None
+    #: FB-111. `codex_home -> codex_skills.Visibility`: what a codex worker's CODEX_HOME can see of the superpowers
+    #: skills. `None` means the real filesystem probe; a fixture whose launch settings name a directory that does
+    #: not exist states the answer instead.
+    codex_skills: object = None
 
     def live_work_now(self) -> bool:
         if self.live_work is not None:
@@ -1979,6 +1984,7 @@ def _do_dispatch(ctx: Ctx, parsed: Parsed) -> int:
     verdicts = guards.evaluate_all(gctx, "dispatch")
 
     settings = None
+    skills = None
     if all(verdict.allowed for verdict in verdicts):
         if ctx.launch_settings is None:
             raise BadInput('Dispatch needs an injected runtime launch resolver')
@@ -2001,6 +2007,7 @@ def _do_dispatch(ctx: Ctx, parsed: Parsed) -> int:
                             "workspace is enrolled (`fleet enroll --slot <path>`)",
                 clears_who="the base owning a stale lease, or the operator")
         settings = _dispatch_settings(ctx, choice, ctx.pool.slot_path(candidate_slot))
+        skills = _codex_skills_gate(ctx, settings, parsed)
 
     if ctx.dry_run and all(verdict.allowed for verdict in verdicts):
         #: `B10` sweep. The real call's own refusals past the guards, asked here too: the same-minute
@@ -2018,7 +2025,7 @@ def _do_dispatch(ctx: Ctx, parsed: Parsed) -> int:
                  ("lineage_base", parsed.get("lineage-base") or "(none — no git lineage is recorded, so "
                                                                 "nothing gates a claim of done)"),
                  ("lineage_mode", lineage_mode or "(none)"),
-                 *_choice_rows(choice),
+                 *_choice_rows(choice), *_codex_skills_rows(skills, parsed),
                  ("seed_extra", (f"{parsed.get('seed-extra')} ({len(seed_extra)} chars would be appended "
                                  f"to the rendered seed)") if seed_extra else
                   "(none — the seed is exactly what the profile renders)")]
@@ -2055,7 +2062,7 @@ def _do_dispatch(ctx: Ctx, parsed: Parsed) -> int:
                                        lineage=lineage),
                                    "INSTANT": name.format(), "SLOT": lease.slot, "TODO_ID": todo_id,
                                    "PATH": str(child)})
-        rendered["seed"] = runtime_launch.seed_cli_header() + rendered["seed"]
+        rendered["seed"] = runtime_launch.seed_cli_header(settings.runtime, skills) + rendered["seed"]
         #: `SI-53`. Appended HERE, before the seed is written and before the delivery check reads it, so
         #: there is one seed and not two: `seed.txt`, `_verify_seed_delivery` and `seed-check` all compare
         #: against the same combined text. Marked with its source path because a worker reading two
@@ -2172,8 +2179,49 @@ def _do_dispatch(ctx: Ctx, parsed: Parsed) -> int:
                             ("golden_base", record.golden_base or "(none recorded)"),
                             ("coordinator", str(coordinator) if coordinator else
                              "(none — this child has no origin.json, so its `propose` stays LOCAL)"),
-                            ("launched_at", record.launched_at), *_choice_rows(choice)])
+                            ("launched_at", record.launched_at), *_choice_rows(choice),
+                            *_codex_skills_rows(skills, parsed)])
     return EXIT_OK
+
+
+def _codex_skills_clears(codex_home) -> tuple:
+    return (f"`{codex_skills_mod.install_command(codex_home)}` has run (it links {codex_home}/skills/superpowers to "
+            f"fleet-releases/current/skills, so every deploy moves them), or the dispatch passes "
+            f"--override \"<reason>\" to launch this worker without them",
+            "the operator, who owns that CODEX_HOME")
+
+
+def _codex_skills_gate(ctx: Ctx, settings, parsed):
+    """FB-111. What a codex worker's CODEX_HOME can see of the superpowers skills — and a refusal, before anything
+    is claimed, when it cannot see the core ones.
+
+    A refusal and not a warning, because the failure is silent: a codex worker with no systematic-debugging does
+    not know it is missing it. Its seed tells it to load skills it cannot see, and it improvises the step the skill
+    exists to discipline. A warning row is read once by a coordinator, if at all. `--override` still launches it,
+    and the reason is persisted in the record like any other override. A claude dispatch is never asked: claude
+    does not read CODEX_HOME. `resume`/`revive` are not asked either, because recovery is exempt from admission
+    (`guards.EXEMPTION_REASONS`)."""
+    if settings.runtime != 'codex':
+        return None
+    skills = (ctx.codex_skills or codex_skills_mod.visible_skills)(settings.config_dir)
+    if not skills.ok and parsed.get("override") is None:
+        clears_when, clears_who = _codex_skills_clears(settings.config_dir)
+        raise Refused(
+            f"this codex worker's CODEX_HOME {settings.config_dir} cannot see the superpowers skills its seed tells "
+            f"it to load: missing {', '.join(skills.missing)}. A codex worker without them improvises instead of "
+            f"following systematic-debugging, working-as-a-dispatched-instant and using-fleet. Refused before "
+            f"anything was claimed.", clears_when=clears_when, clears_who=clears_who)
+    return skills
+
+
+def _codex_skills_rows(skills, parsed) -> list:
+    if skills is None:
+        return []
+    where = skills.skills_root or f"{skills.codex_home}/skills"
+    if skills.ok:
+        return [("codex_skills", f"{len(skills.found)} skill(s) visible under {where}; every core skill among them")]
+    return [("codex_skills", f"MISSING {', '.join(skills.missing)} under {skills.codex_home} "
+                             f"(overridden: {parsed.get('override')})")]
 
 
 def _dispatch_settings(ctx: Ctx, choice, slot_path):
@@ -4843,6 +4891,18 @@ def _do_brief(ctx: Ctx, parsed: Parsed) -> int:
                         detail=(f"runtime={own.runtime} model="
                                 f"{own.runtime_model or '(none — the CLI configured default)'} "
                                 f"(record {own.todo_id}; `fleet revive` relaunches exactly this)")))
+        #: FB-111. A codex worker reads this row before it loads its first skill, so it is where it learns how.
+        if own.runtime == 'codex':
+            skills = (ctx.codex_skills or codex_skills_mod.visible_skills)(own.runtime_config_dir)
+            if skills.ok:
+                rows.append(Row(kind="skills", subject=child.name, severity=INFO,
+                                detail=codex_skills_mod.load_instruction(skills)))
+            else:
+                clears_when, clears_who = _codex_skills_clears(own.runtime_config_dir)
+                rows.append(Row(kind="skills", subject=child.name, severity=VIOLATION,
+                                detail=(f"this worker's CODEX_HOME {own.runtime_config_dir} cannot see "
+                                        f"{', '.join(skills.missing)}: the skills its seed names are not loadable"),
+                                clears_when=clears_when, clears_who=clears_who))
 
     coordinator = None
     if recorded is not None:
