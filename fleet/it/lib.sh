@@ -195,11 +195,11 @@ IT_ENV_UNNAMED=(-u FLEET_HOME -u FLEET_INSTANTS -u FLEET_ROOT -u FLEET_INSTANT -
 # A runner that moves its servers re-arms it through `it_move_tmux_tmpdir` below (a process's
 # /proc/<pid>/environ is its exec-time environment, so the guardian cannot follow an export by itself).
 #
-# The first argument is retained for callers that pass $$, but deliberately never used as a process key.
-# The child gets its actual parent from getppid(), which is scoped to its own pid namespace.
+# Match the runner pid against getppid() in the guardian's own pid namespace before watching it.
+# A parent change before Python starts must fail safe, including adoption by a subreaper.
 it_guard_server() {       # it_guard_server <runner-pid> <socket>
   [ "$BASHPID" = "$$" ] || { echo "it_guard_server: call from the runner's top-level shell" >&2; return 1; }
-  local sock="$2" pidfile tokenfile token dir uid_dir
+  local expected_parent="$1" sock="$2" pidfile tokenfile token dir uid_dir
   pidfile="$IT_ROOT/.guardians/$sock.pid"        # a subdirectory of fleet/it: generated, git-ignored
   mkdir -p "$IT_ROOT/.guardians"
   dir="${TMUX_TMPDIR:-/tmp}"
@@ -209,12 +209,16 @@ it_guard_server() {       # it_guard_server <runner-pid> <socket>
   tokenfile="$uid_dir/.$sock.guard"
   token="$$-$BASHPID-$RANDOM-$RANDOM"
   printf '%s\n' "$token" > "$tokenfile.tmp.$BASHPID" && mv -f "$tokenfile.tmp.$BASHPID" "$tokenfile"
-  setsid python3 -c '
+  python3 -c '
 import os, subprocess, sys, time
-sock, directory, tokenfile, token = sys.argv[2:6]
+sock, directory, tokenfile, token, expected_parent = sys.argv[2:7]
 parent = os.getppid()
-if parent == 1:  # runner died before the guardian could identify it; fail safe
+if parent != int(expected_parent):
     sys.exit(0)
+try:
+    os.setsid()
+except PermissionError:  # already a process group leader under bash job control
+    pass
 try:
     armed = os.stat(directory)
 except OSError:
@@ -235,7 +239,7 @@ except OSError:
     sys.exit(0)
 subprocess.run(["tmux", "-S", os.path.join(directory, "tmux-" + str(os.getuid()), sock), "kill-server"],
                stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
-  ' it-guardian "$sock" "$dir" "$tokenfile" "$token" </dev/null >/dev/null 2>&1 &
+  ' it-guardian "$sock" "$dir" "$tokenfile" "$token" "$expected_parent" </dev/null >/dev/null 2>&1 &
   printf '%s\n' "$!" > "$pidfile"
   disown 2>/dev/null || true
 }
