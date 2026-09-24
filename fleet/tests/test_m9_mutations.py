@@ -89,6 +89,21 @@ class TestAMutationThatDidNotApplyIsNeverAVerdictOnTheRule(unittest.TestCase):
         self.assertEqual(m9.classify(2, True, 1, f"... {why} ..."), ("PASS", "KILLED"))
         self.assertEqual(m9.classify(2, True, 1, "ModuleNotFoundError: fleet"), ("FAIL", "WRONG-REASON"))
 
+    def test_every_mutation_names_the_reason_that_must_kill_it(self):
+        for n, m in m9.MUTATIONS.items():
+            with self.subTest(mutation=n):
+                self.assertTrue(m["why"].strip(), f"{m['label']} has no expected kill reason")
+
+    def test_an_empty_expected_reason_is_never_a_kill(self):
+        #: RV-22. `"" in output` is True for every output, so an empty reason would turn any non-zero
+        #: audit into KILLED — a kill for no named reason, the very thing the reason table exists to refuse.
+        original = m9.MUTATIONS[3]["why"]
+        m9.MUTATIONS[3]["why"] = ""
+        self.addCleanup(m9.MUTATIONS[3].__setitem__, "why", original)
+        verdict, kind = m9.classify(3, True, 1, "ModuleNotFoundError: fleet")
+        self.assertEqual(verdict, "FAIL")
+        self.assertNotEqual(kind, "KILLED")
+
     def test_the_classify_cli_prints_not_applied_with_no_audit(self):
         r = subprocess.run([sys.executable, str(MODULE), "classify", "3", "0", "-", "-"],
                            capture_output=True, text=True)
