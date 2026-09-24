@@ -63,17 +63,15 @@ class RevivalTests(unittest.TestCase):
         self.assertEqual(self.f.run(self.args())[0],4)
         self.assertEqual(self.f.started,[])
 
-    def test_runtime_mismatch_refuses(self):
+    def test_a_box_selection_that_differs_from_the_record_does_not_stop_revival(self):
+        """pt2 (D-22/D-33) replaces RV-22's refusal: runtimes are chosen per dispatch and live on the record, so a
+        codex record on a claude box revives as codex — and the box selection is neither consulted nor written."""
         write_runtime(self.f.home,'claude')
-        code, _, err = self.f.run(self.args())
-        self.assertEqual(code, 4, err)
-        self.assertEqual(self.f.started,[])
-        #: RV-22. The route named `fleet runtime --set codex`, which this very record's open record and held
-        #: lease block — measured here, so the refusal can never again name it as the way out.
-        route = err.split('clears when:', 1)[-1]
-        self.assertNotIn('fleet runtime --set', route, err)
-        self.assertEqual(self.f.run(['runtime', '--set', 'codex'])[0], 4,
-                         'the switch ran in the revive state, so the old route was not dead after all')
+        code, out, err = self.f.run(self.args())
+        self.assertEqual(code, 0, err)
+        text = (Path(self.record.child_instant) / '.fleet/resume-worker.sh').read_text()
+        self.assertIn('exec /bin/true resume', text)
+        self.assertEqual(json.loads((self.f.home / 'runtime.json').read_text())['runtime'], 'claude')
 
     def test_occupied_pane_never_starts_another_worker(self):
         self.f.tmux_live.add(self.record.tmux)

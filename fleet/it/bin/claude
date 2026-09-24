@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 """Test stand-in: attest to received seed bytes, then hold the real tmux pane."""
 import datetime
+import json
 import os
 from pathlib import Path
 import sys
@@ -21,5 +22,7 @@ if digest(prompt) != digest(seed):
 write_delivery(instant, Delivery(at=datetime.datetime.now(datetime.timezone.utc).strftime('%Y-%m-%dT%H:%M:%SZ'), by='fleet IT stand-in (not a model)',
     channel='test-process-argv', delivered_chars=len(prompt), delivered_md5=digest(prompt),
     rendered_md5=digest(seed)))
+# pt2 (RT2): the whole argv as launched, so a case can assert the exact launch command (model flags included).
+(instant / '.fleet/it-stand-in-argv.json').write_text(json.dumps(sys.argv) + '\n')
 print('IT stand-in: received seed; no model was launched', flush=True)
 os.execv('/bin/sleep', ['sleep', '100000'])

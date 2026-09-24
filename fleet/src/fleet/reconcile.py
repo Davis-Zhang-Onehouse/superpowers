@@ -307,6 +307,8 @@ def _worker_subject(rec, pool, sessions, instants_dir: Path, idle_after_s: int, 
         "runtime": rec.runtime,
         "runtime_executable": rec.runtime_executable,
         "runtime_config_dir": rec.runtime_config_dir,
+        #: pt2. The model chosen at dispatch; "" = the CLI's configured default.
+        "runtime_model": rec.runtime_model,
         "base": rec.base_instant,
         "instant": str(instant) if instant is not None else f"{rec.child_instant} (missing)",
         "folder_state": folder_state or "missing",

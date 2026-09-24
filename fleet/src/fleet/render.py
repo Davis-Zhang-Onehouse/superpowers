@@ -44,7 +44,9 @@ LABEL_MIN_LEN = 3
 #:
 #: `B04`: columns are only ever APPENDED. Every awk recipe in the skills and the IT runners reads by
 #: position, so `LEASE_COLUMNS` gained `note` and `ROADMAP_COLUMNS` gained `title` and `owner` at the end.
-BOARD_COLUMNS = ("identity", "kind", "state", "label", "slot", "milestone", "note")
+#: pt2 appended `runtime`: each worker's runtime and, when one was chosen at dispatch, its model (`codex`,
+#: `claude/claude-fable-5-1`). Appended LAST so every positional reader of fields 1-7 is unmoved.
+BOARD_COLUMNS = ("identity", "kind", "state", "label", "slot", "milestone", "note", "runtime")
 STATUS_COLUMNS = ("field", "value")
 LEASE_COLUMNS = ("slot", "lease", "todo_id", "owner", "tmux", "claimed_at", "path", "note")
 #: `B03` appended `evidence`: each item as it resolves today, so a script can open what a milestone or a
@@ -166,8 +168,16 @@ def _board_cells(subjects) -> list:
             "slot": subject.evidence.get("slot", ""),
             "milestone": subject.evidence.get("milestone", ""),
             "note": subject.note,
+            "runtime": runtime_cell(subject.evidence),
         })
     return cells
+
+
+def runtime_cell(evidence) -> str:
+    """pt2. `codex`, or `claude/claude-fable-5-1` when a model was chosen; "" for a subject with no runtime."""
+    runtime = evidence.get("runtime", "") or ""
+    model = evidence.get("runtime_model", "") or ""
+    return f"{runtime}/{model}" if runtime and model else runtime
 
 
 def board(subjects, porcelain: bool = False, scope: str = None) -> str:
@@ -193,7 +203,7 @@ def board(subjects, porcelain: bool = False, scope: str = None) -> str:
         return _tsv(cells, BOARD_COLUMNS)
     banner = f"fleet: {counts}"
     return banner + "\n" + _columns(cells, ("label", "identity", "state", "slot", "milestone",
-                                                 "note"))
+                                                 "runtime", "note"))
 
 
 # --- one subject -----------------------------------------------------------------------------------

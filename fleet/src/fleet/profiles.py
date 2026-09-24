@@ -103,6 +103,10 @@ class Profile:
     placeholders: tuple = field(default=())
     requires_clauses: tuple = field(default=())
     invocation_templates: tuple = field(default=())
+    #: pt2. The runtime and model this profile's workers run on by default. "" = the box's saved runtime / the
+    #: CLI's configured model. `dispatch --runtime/--model` override both.
+    runtime: str = ""
+    model: str = ""
 
     @classmethod
     def load(cls, path: Path) -> "Profile":
@@ -139,6 +143,7 @@ class Profile:
         if not charter_path.is_file():
             raise BadInput(f"{path} has {MANIFEST} but no charter.md; a profile renders a charter.")
         seed_path = path / "seed.txt"
+        runtime, model = _runtime_fields(data, manifest)
 
         return cls(
             path=path,
@@ -148,6 +153,8 @@ class Profile:
             placeholders=_strings(data, "placeholders", manifest),
             requires_clauses=_strings(data, "requires_clauses", manifest),
             invocation_templates=_strings(data, "invocation_templates", manifest),
+            runtime=runtime,
+            model=model,
         )
 
     def artifacts(self) -> tuple:
@@ -175,6 +182,22 @@ class Profile:
                 )
             out[name.split(".")[0]] = rendered
         return out
+
+
+def _runtime_fields(data: dict, manifest: Path) -> tuple:
+    """pt2. `"runtime"` and `"model"`, both optional. A model without a runtime is refused: a model name belongs
+    to one CLI, and applying it to whichever runtime the box happens to be set to is a guess."""
+    from fleet.runtime import validate_model, validate_runtime
+    runtime, model = data.get("runtime", ""), data.get("model", "")
+    try:
+        runtime = validate_runtime(runtime) if runtime != "" else ""
+        model = validate_model(model) if model != "" else ""
+    except BadInput as exc:
+        raise BadInput(f"{manifest}: {exc}") from None
+    if model and not runtime:
+        raise BadInput(f"{manifest}: \"model\" {model!r} names no \"runtime\". A model belongs to one CLI; add "
+                       f"\"runtime\": \"claude\" or \"codex\" beside it")
+    return runtime, model
 
 
 def _strings(data: dict, key: str, manifest: Path) -> tuple:

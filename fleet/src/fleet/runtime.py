@@ -15,6 +15,18 @@ class LaunchSettings:
     runtime: RuntimeName
     executable: str
     config_dir: str
+    #: pt2. The model this worker is launched with; "" passes NO model flag, so the CLI uses its own configured
+    #: model (the slot's claude setting, codex's default) — exactly the launch before this field existed.
+    model: str = ""
+
+
+@dataclass(frozen=True)
+class RuntimeChoice:
+    """What one dispatch runs, and where each half came from (`flag` / `profile` / `box` / `default`)."""
+    runtime: RuntimeName
+    model: str
+    runtime_source: str
+    model_source: str
 
 
 @dataclass(frozen=True)
@@ -28,6 +40,41 @@ def validate_runtime(value: str) -> RuntimeName:
     if not isinstance(value, str) or value not in ("claude", "codex"):
         raise BadInput(f"Unknown fleet runtime {value!r}; expected claude or codex")
     return value
+
+
+#: One argv token naming a model: `claude-fable-5-1`, `claude-opus-5-5[1m]`, `gpt-6-sol`, `openai/gpt-5.1:high`.
+#: Never a leading `-`: the value is placed on the worker's argv, and `--model --dangerously-skip-permissions`
+#: must be a refusal rather than a flag the worker was launched with.
+_MODEL = re.compile(r"[A-Za-z0-9][A-Za-z0-9._:/\[\]-]*")
+
+
+def validate_model(value) -> str:
+    if not isinstance(value, str) or not _MODEL.fullmatch(value):
+        raise BadInput(f"Invalid model {value!r}; expected one model name such as claude-fable-5-1 or gpt-6-sol "
+                       f"(letters, digits and . _ : / [ ] -, not starting with -). Omit it to use the CLI's "
+                       f"configured default model")
+    return value
+
+
+def choose_runtime(box: RuntimeName, *, flag_runtime=None, flag_model=None,
+                   profile_runtime=None, profile_model=None) -> RuntimeChoice:
+    """pt2 (D-22/D-33). The runtime is `--runtime` > the profile's `runtime` > the box's saved selection; the
+    model is `--model` > the profile's `model` > none. A profile's model belongs to the profile's runtime, so it
+    applies only when that runtime is the one chosen: a `--runtime` override drops it rather than handing a
+    claude model name to codex. "No model" is not a value — it is the absence of a model flag on the argv."""
+    if flag_runtime is not None:
+        runtime, runtime_source = validate_runtime(flag_runtime), "flag"
+    elif profile_runtime:
+        runtime, runtime_source = validate_runtime(profile_runtime), "profile"
+    else:
+        runtime, runtime_source = validate_runtime(box), "box"
+    if flag_model is not None:
+        model, model_source = validate_model(flag_model), "flag"
+    elif profile_model and profile_runtime == runtime:
+        model, model_source = validate_model(profile_model), "profile"
+    else:
+        model, model_source = "", "default"
+    return RuntimeChoice(runtime, model, runtime_source, model_source)
 
 
 def recognizes_process(runtime: RuntimeName, comm: str, executable: str, argv: list[str]) -> bool:
