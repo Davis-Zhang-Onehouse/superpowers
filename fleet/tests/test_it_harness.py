@@ -32,14 +32,20 @@ def harness_copy(tmp: pathlib.Path) -> pathlib.Path:
     return it
 
 
-def clean_env(extra=None) -> dict:
+def clean_env(extra=None, home=None) -> dict:
+    """The operator's environment minus every fleet destination and tmux handle; `home` (a tmp dir) replaces
+    HOME for callers that reach it_section, whose isolation check lists $HOME/.fleet/instants and hashes
+    $HOME/.claude-* files — read-only, and still not this suite's to read."""
     env = {k: v for k, v in os.environ.items() if k not in FLEET_DESTINATIONS}
+    env.setdefault("TMUX_TMPDIR", tempfile.gettempdir())
+    if home is not None:
+        env["HOME"] = str(home)
     env.update(extra or {})
     return env
 
 
-def run_bash(script: str, cwd: pathlib.Path, env=None, stdin=subprocess.DEVNULL, timeout=120):
-    return subprocess.run(["bash", "-c", script], cwd=cwd, env=clean_env(env), stdin=stdin,
+def run_bash(script: str, cwd: pathlib.Path, env=None, stdin=subprocess.DEVNULL, timeout=120, home=None):
+    return subprocess.run(["bash", "-c", script], cwd=cwd, env=clean_env(env, home=home), stdin=stdin,
                           capture_output=True, text=True, timeout=timeout)
 
 
@@ -220,6 +226,16 @@ class RowOwnership(unittest.TestCase):
         # F9-zero-delta is NOT claimed by F[0-9]+, so it survives; F1's fresh row took its old line.
         self.assertEqual([r[0] for r in self.rows()], ["A1", "F1", "F9-zero-delta", "G1", "Z9"])
 
+    def test_run_b_targeted_b5_b6_b7_owns_all_three(self):
+        """B5, B6 and B7 share one case body and are written together; a targeted run of one must own all."""
+        text = (IT / "run-B.sh").read_text()
+        m = re.search(r"^b_owned_cases\(\) \{.*?^\}", text, re.S | re.M)
+        self.assertIsNotNone(m)
+        out = subprocess.run(["bash", "-c", m.group(0) + '\nb_owned_cases B6'], capture_output=True, text=True)
+        rx = re.compile("^(" + out.stdout.strip() + ")$")
+        for case in ("B5", "B6", "B7", "ISOLATION-B-enter"):
+            self.assertRegex(case, rx)
+
     def test_group5_claims_its_coverage_rows(self):
         """Found by the plan's pre-flight scan: run-group5.sh writes L7-coverage and M5-coverage."""
         text = (IT / "run-group5.sh").read_text()
@@ -246,7 +262,8 @@ class ZeroDelta(unittest.TestCase):
         # TMUX_TMPDIR under the test's tmp: it_section's isolation check reads the "default" tmux server, and
         # a hermetic test must not read the operator's — this makes that server an empty private one.
         return run_bash(f'. "{self.it}/lib.sh"\nit_section zd >/dev/null 2>&1; it_fresh_store\n{body}',
-                        self.tmp, env={"IT_RESULTS": str(self.results), "TMUX_TMPDIR": str(self.tmp)})
+                        self.tmp, env={"IT_RESULTS": str(self.results), "TMUX_TMPDIR": str(self.tmp)},
+                        home=self.tmp / "home")
 
     def row(self, case):
         return next(l.split("\t") for l in self.results.read_text().splitlines()[1:] if l.startswith(case + "\t"))
@@ -356,7 +373,7 @@ class ServerGuardian(unittest.TestCase):
         self.socket = f"itfleet-{self.section}"
         # Every tmux socket of this test — the section's private one AND the "default" server the isolation
         # check reads — lives under the test's tmp via TMUX_TMPDIR, so nothing here touches the operator's.
-        self.env = clean_env({"TMUX_TMPDIR": str(self.tmp)})
+        self.env = clean_env({"TMUX_TMPDIR": str(self.tmp)}, home=self.tmp / "home")
         self.addCleanup(subprocess.run, ["tmux", "-L", self.socket, "kill-server"], capture_output=True,
                         env=self.env)
 

@@ -10,7 +10,7 @@ obra/superpowers and does not apply to anything here.
 fleet/src/fleet/     18 modules, 31 verbs, entry point `python3 -m fleet.cli`
 fleet/tests/         the hermetic suite (864 tests) + fixtures/
 fleet/it/            the integration harness: run-*.sh, lib.sh, RESULTS.tsv, controls in bin/ (incl. `it-fleet`, the
-                     harness's ONLY route to the product, and `extract-m9.py`)
+                     harness's one subprocess route to the product, and `extract-m9.py`)
 ../bin/fleet         launcher, so you can type `fleet <verb>` from anywhere
 ```
 

@@ -780,6 +780,9 @@ b_owned_cases() {
   local iso='ISOLATION-B-(enter|leave|live-tmux|claude-count)'
   case "$1" in
     all)              printf 'B([1-9]|1[0-4])|%s' "$iso" ;;
+    #: B5, B6 and B7 are one case body (b5_b6_b7_compaction_presence_by_rename) and write all three rows,
+    #: so a targeted run of any one of them owns all three — or the writer's ownership check fails it.
+    B[5-7])           printf 'B[5-7]|%s' "$iso" ;;
     B[1-9]|B1[0-4])   printf '%s|%s' "$1" "$iso" ;;
     #: An unrecognised argument exits 2 below without running anything, so it must own nothing: a regex
     #: that matched everything here would wipe the register on a typo.
