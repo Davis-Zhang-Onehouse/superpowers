@@ -77,11 +77,19 @@ send_setup() {        # send_setup <section> <runtime> -> COORD, SLOT, PROFILE, 
   SLOT_PARENT="${SEND_SLOT_PARENT:-$(cd "$(git -C "$IT_ROOT" rev-parse --show-toplevel 2>/dev/null || echo "$IT_ROOT/../..")/.." && pwd)}"
   SLOT="$SLOT_PARENT/send-fixture-slot-$1-$$"; rm -rf "$SLOT"; mkdir -p "$SLOT"
   echo "slot: $SLOT" > "$OUT/setup-slot.txt"
+  #: RV-42. The teardown is armed the moment something exists outside the checkout, so a setup failure
+  #: below (or a source-pin refusal) cannot leave a fixture slot in the operator's workspace directory.
+  W_PID=""; TODO=""; TMUXN=""
+  trap 'send_teardown' EXIT
   PROFILE="$OUT/profile"; send_profile "$PROFILE"
   COORD="$(fleet init --base 00000000 --name sendCoord --porcelain | awk -F'\t' '$1=="path"{print $2}')"
-  fleet milestone --instant "$COORD" --id s1 --title "answer messages" > "$OUT/setup-milestone.out" 2>&1
-  fleet set-golden --path "$SLOT" > "$OUT/setup-golden.out" 2>&1
-  fleet enroll --slot "$SLOT" >> "$OUT/setup-golden.out" 2>&1
+  [ -n "$COORD" ] && [ -d "$COORD" ] || { echo "send_setup: fleet init produced no coordinator" >&2; return 2; }
+  fleet milestone --instant "$COORD" --id s1 --title "answer messages" > "$OUT/setup-milestone.out" 2>&1 \
+    || { echo "send_setup: fleet milestone failed: $(head -2 "$OUT/setup-milestone.out" | tr '\n' ' ')" >&2; return 2; }
+  fleet set-golden --path "$SLOT" > "$OUT/setup-golden.out" 2>&1 \
+    || { echo "send_setup: set-golden failed: $(head -2 "$OUT/setup-golden.out" | tr '\n' ' ')" >&2; return 2; }
+  fleet enroll --slot "$SLOT" >> "$OUT/setup-golden.out" 2>&1 \
+    || { echo "send_setup: enroll failed: $(tail -2 "$OUT/setup-golden.out" | tr '\n' ' ')" >&2; return 2; }
   if [ "$2" = codex ]; then
     fleet runtime --set codex > "$OUT/setup-runtime.out" 2>&1 || { cat "$OUT/setup-runtime.out"; return 2; }
   fi
@@ -116,6 +124,11 @@ send_clear_box() {    # after a FAILED case: empty whatever the verb left in the
 }
 send_teardown() {     # close + harvest the worker; never leaves the pane behind (FB-15/FB-73)
   local guard=11 waited=0
+  if [ -z "${TMUXN:-}" ]; then      # setup failed before a dispatch: only the slot and the server can exist
+    it_cleanup_tmux; it_tmux kill-server 2>/dev/null
+    case "${SLOT:-}" in */send-fixture-slot-*) rm -rf "$SLOT" ;; esac
+    return 0
+  fi
   while [ "$waited" -lt 20 ]; do
     fleet pane-guard --pane "$TMUXN" > "$OUT/teardown-guard.out" 2>&1; guard=$?
     case "$guard" in 10|11) : ;; *) break ;; esac
@@ -185,7 +198,6 @@ bash "$IT_ROOT/bin/source-pin.sh" before "$OUT" || exit 2
 export FLEET_CLAUDE_BIN="$REAL_CLAUDE"
 #: As §P: the real binary needs a real, authenticated config, so the resolver's own map decides (the operator's).
 if [ -n "${P_CLAUDE_OWNERS_MAP:-}" ]; then export CLAUDE_OWNERS_MAP="$P_CLAUDE_OWNERS_MAP"; else unset CLAUDE_OWNERS_MAP; fi
-trap 'send_teardown' EXIT
 
 if ! send_dispatch sendFixture; then
   it_fail SEND-1 "fleet/it/SEND/out/dispatch.out" "the real dispatch failed: $(head -3 "$OUT/dispatch.out" | tr '\n' ' ')"
@@ -277,7 +289,6 @@ TRUST_KEY="$(git -C "$SLOT" rev-parse --show-toplevel 2>/dev/null || echo "$SLOT
 { [ -f "$SEND_CODEX_HOME/config.toml" ] && grep -E '^(approval_policy|sandbox_mode|model_reasoning_effort|model) *=' "$SEND_CODEX_HOME/config.toml"
   printf '\n[projects."%s"]\ntrust_level = "trusted"\n' "$TRUST_KEY"; } > "$CODEX_HOME/config.toml"
 export FLEET_CODEX_BIN="$REAL_CODEX"
-trap 'send_teardown' EXIT
 if ! send_dispatch sendCodexFixture; then
   it_fail SENDC-1 "fleet/it/SENDC/out/dispatch.out" "the real codex dispatch failed: $(head -3 "$OUT/dispatch.out" | tr '\n' ' ')"
   it_assert_isolation SENDC-leave; exit 1
