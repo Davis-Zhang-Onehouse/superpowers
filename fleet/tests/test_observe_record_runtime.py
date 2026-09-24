@@ -98,7 +98,7 @@ class InventoryNamesTheOwningAgent(unittest.TestCase):
         self.assertFalse(found[300].nested)
         self.assertTrue(found[302].nested)
 
-    def test_control_lone_agents_are_not_nested(self):
+    def test_lone_agents_are_not_nested(self):
         """Without a nested agent every row stays outer: the plain claude pane, the plain codex pane, and a claude
         no pane owns at all (OBS-48's shape) — `nested` is not "unattributed"."""
         rows = (claude_pane(300, self.tmp, nested_codex=False) + codex_pane(200, self.tmp, nested_claude=False)
@@ -236,7 +236,7 @@ class VerbsJudgeThePaneByItsOwningAgent(unittest.TestCase):
         self.assertIn('live runtime codex differs from record runtime claude', row)
         self.assertEqual(self.f.run(['pane-guard', '--id', record.todo_id])[0], 14)
 
-    def test_control_a_claude_record_with_a_nested_codex_is_judged_as_claude(self):
+    def test_a_claude_record_with_a_nested_codex_is_judged_as_claude(self):
         record = self.worker('claude', claude_pane, (FRAMES / 'claude-busy.frame').read_text())
         self.assertNotIn('differs from record runtime', self.board_row(record))
         self.assertEqual(self.f.run(['pane-guard', '--id', record.todo_id])[0], 11)
@@ -309,7 +309,7 @@ class CodexBusyAsDrawnBy0156(unittest.TestCase):
         row = ('• Running the whole hermetic suite, the scripts/tests near the change and the live codex integration run…')
         self.assertEqual(observe('codex', self.with_spinner_row(row)).state, 'unknown')
 
-    def test_control_neighbours_that_stay_idle(self):
+    def test_neighbours_of_the_widened_spinner_stay_idle(self):
         """What the widened spinner must still turn away: prose with a paren but no elapsed time, a finished answer
         ending in a paren note, and an answer cut mid-word without a spinner shape."""
         for row in ('• The status row reads (esc to interrupt)',
