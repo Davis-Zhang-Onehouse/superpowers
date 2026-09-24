@@ -99,6 +99,8 @@ problem() { PROBLEMS+=("$1: $2"); printf '  %-12s %s\n' "PROBLEM" "$2"; }
 # The reason is the `<Type>: ` header nearest above the first route line, with any lines of a multi-line
 # message after it; the route is every route line, with a wrapped value's continuation kept. With no route,
 # the last `<Type>: ` line is the reason, so stdout that a pipe flushes after stderr is not mistaken for it.
+# With no `<Type>: ` line at all (a parse error, printed bare and followed by the verb's usage), the FIRST line
+# is the reason: the usage comes after it.
 refusal_line() {
   awk '
     { line[NR] = $0 }
@@ -109,7 +111,7 @@ refusal_line() {
       head = 0
       if (first) { for (i = first - 1; i >= 1; i--) if (line[i] ~ hdr) { head = i; break } }
       else { for (i = NR; i >= 1; i--) if (line[i] ~ hdr) { head = i; break } }
-      if (!head) { for (i = NR; i >= 1; i--) if (line[i] != "") { head = i; break } }
+      if (!head) { for (i = 1; i <= NR; i++) if (line[i] != "") { head = i; break } }
       if (!head) { printf "(no output)"; exit }
       reason = line[head]; stop = first ? first : head + 1
       for (i = head + 1; i < stop; i++) if (line[i] != "") reason = reason " " line[i]
