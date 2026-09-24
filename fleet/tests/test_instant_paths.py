@@ -4,10 +4,33 @@ from pathlib import Path
 import re
 
 from fleet import cli
-from tests.test_cli import CliCase
+from fleet.origin import Origin, write as write_origin
+from fleet.roadmap import Milestone, Roadmap
+from tests.test_cli import CliCase, NOW
 
 
 class TestInstantPaths(CliCase):
+    def test_symlinked_instants_dir_preserves_open_owner_route(self):
+        fleet = self.loaded()
+        coordinator = fleet.paths['readyWorker']
+        owner = fleet.paths['solo']
+        roadmap = Roadmap(coordinator)
+        roadmap.add(Milestone(id='M-symlink', title='symlinked owner', status='blocked',
+                              deps=[], evidence=[]))
+        roadmap.claim('M-symlink', str(owner))
+        write_origin(owner, Origin(coordinator=str(coordinator), dispatched_at=NOW,
+                                   milestone='M-symlink'))
+        physical = fleet.tmp / 'physical-instants'
+        fleet.instants.rename(physical)
+        fleet.instants.symlink_to(physical, target_is_directory=True)
+
+        code, out, err = fleet.run(['milestone', '--instant', str(coordinator),
+                                    '--id', 'M-symlink', '--disown', '--reason', 'probe'])
+
+        self.assertEqual(code, 4, err)
+        self.assertIn(f'fleet abort --instant {owner}', err)
+        self.assertEqual(str(owner), Roadmap(coordinator).milestone('M-symlink').owner)
+
     def test_bare_name_reaches_instants_dir_from_unrelated_cwd(self):
         fleet = self.loaded()
         target = fleet.paths['readyWorker']
