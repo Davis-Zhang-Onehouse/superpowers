@@ -269,6 +269,12 @@ def main(argv=None) -> int:
         return _check(home, releases)
 
     link, target = link_path(home), expected_target(releases)
+    if not os.path.isdir(home):
+        #: RV-29: the flag is required so a wrong guess never writes into someone else's config; a typo must not quietly
+        #: create a new config tree and report ok. A CODEX_HOME is made by codex itself (or its installer), not here.
+        _emit('refused', f'--codex-home {home} does not exist (or is not a directory). Nothing was written; check the '
+                         f'path, which is normally <root>/.codex.', sys.stderr)
+        return EXIT_REFUSED
     if not os.path.isdir(target):
         _emit('refused', f'{target} is not a directory: this release area has no deployed `current` with '
                          f'skills to link to. Nothing was written.', sys.stderr)
