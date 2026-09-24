@@ -213,7 +213,8 @@ Claude Code draws `[Pasted text #N +M lines]` for four or more lines, codex `[Pa
 about a thousand characters — and the verb confirms that summary against the message (M = its newlines,
 C = its characters) before the one Enter. The text is in the box behind the placeholder; a placeholder whose
 counts disagree is somebody else's paste and is never submitted. `send` prints `confirmation` as `draft`
-(the text was read back) or `placeholder` (the counts agreed), and the record says which.
+(the text was read back), `placeholder` (the counts agreed) or `placeholder-uncounted` (Claude Code's
+single-line `[Pasted text #N]`, which states no length at all), and the record says which.
 
 **Every send that reached the pane is recorded (`B13`)** in the worker's `.fleet/sends.jsonl`: when, by whom
 (`--by`, else the sender's own `FLEET_INSTANT`), the message's sha256, size and first line, the outcome

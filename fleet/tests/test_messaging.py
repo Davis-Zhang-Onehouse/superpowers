@@ -5,7 +5,7 @@ import unittest
 from types import SimpleNamespace
 
 from fleet.errors import BadInput, FleetError, Refused
-from fleet.messaging import (CONFIRMED_BY_DRAFT, CONFIRMED_BY_PLACEHOLDER, SUBMITTED, UNCERTAIN_AFTER_ENTER, line_count,
+from fleet.messaging import (CONFIRMED_BY_DRAFT, CONFIRMED_BY_PLACEHOLDER, CONFIRMED_BY_PLACEHOLDER_UNCOUNTED, SUBMITTED, confirms, UNCERTAIN_AFTER_ENTER, line_count,
                              UNCERTAIN_AFTER_INSERTION, SendRecord, read_sends, record_send, send, sends_path)
 from fleet.runtime import PaneObservation
 
@@ -252,3 +252,19 @@ class MessagingTests(unittest.TestCase):
         self.assertEqual(3, line_count('a\nb\nc'))
         self.assertEqual(3, line_count('a\nb\nc\n'))
         self.assertEqual(0, line_count(''))
+
+    def test_a_single_line_claude_placeholder_is_recorded_as_uncounted(self):
+        """RV-47. `[Pasted text #N]` states no length: it confirms only that a paste with no newline sits
+        in the box, which any single-line message of 800+ characters would also produce. It is accepted
+        (the box was observed empty before this paste) but the record must say how weak that is."""
+        text = 'x' * 900
+        with tempfile.TemporaryDirectory() as directory:
+            layer, events = self.runtime_fixture('claude', [
+                PaneObservation('idle'), PaneObservation('queued', '[Pasted text #4]'), PaneObservation('busy')])
+            self.assertEqual((SUBMITTED, CONFIRMED_BY_PLACEHOLDER_UNCOUNTED),
+                             send(Path(directory), layer, SimpleNamespace(tmux='worker'), text, sleep=lambda _: None))
+            self.assertEqual(events, [('literal', text), ('submit', None)])
+        # codex's placeholder always states the length, so it is never uncounted
+        self.assertEqual(CONFIRMED_BY_PLACEHOLDER, confirms('codex', f'[Pasted Content {len(text)} chars]', text))
+        # a claude placeholder WITH a line count is the counted kind
+        self.assertEqual(CONFIRMED_BY_PLACEHOLDER, confirms('claude', '[Pasted text #1 +2 lines]', 'a\nb\nc'))
