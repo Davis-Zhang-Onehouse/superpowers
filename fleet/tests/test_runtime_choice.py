@@ -14,7 +14,7 @@ from fleet.errors import BadInput
 from fleet.profiles import Profile
 from fleet.runtime import LaunchSettings, choose_runtime, validate_model
 from fleet.runtime_config import read_runtime, write_runtime
-from fleet.runtime_launch import launch_argv, resume_argv
+from fleet.runtime_launch import CODEX_POLICY, launch_argv, resume_argv
 from fleet.session import LiveSession
 from fleet.store import Record
 from tests.test_cli import Fleet
@@ -69,26 +69,29 @@ class ResolutionTests(unittest.TestCase):
 
 class ArgvTests(unittest.TestCase):
     def test_default_argv_is_byte_identical_to_the_base(self):
-        """(c). The exact lists the base emitted, typed out — a missing flag is not the same claim."""
+        """(c). The exact lists the base emitted, typed out — a missing flag is not the same claim. FB-110 (D-45) adds the
+        codex policy (`CODEX_POLICY`, pinned literally in test_codex_policy) and nothing else; claude is byte-identical."""
         claude = LaunchSettings('claude', '/b/claude', '/cfg')
         codex = LaunchSettings('codex', '/b/codex', '/cfg')
         self.assertEqual(launch_argv(claude, 'P'), ['/b/claude', '--permission-mode', 'auto', '--', 'P'])
-        self.assertEqual(launch_argv(codex, 'P', ('/w',)), ['/b/codex', '--add-dir', '/w', '--', 'P'])
+        self.assertEqual(launch_argv(codex, 'P', ('/w',)), ['/b/codex', *CODEX_POLICY, '--add-dir', '/w', '--', 'P'])
         self.assertEqual(resume_argv(claude, SESSION_ID),
                          ['/b/claude', '--permission-mode', 'auto', '--resume', SESSION_ID])
-        self.assertEqual(resume_argv(codex, SESSION_ID, ('/w',)), ['/b/codex', 'resume', '--add-dir', '/w', '--', SESSION_ID])
+        self.assertEqual(resume_argv(codex, SESSION_ID, ('/w',)),
+                         ['/b/codex', 'resume', *CODEX_POLICY, '--add-dir', '/w', '--', SESSION_ID])
 
     def test_a_model_reaches_the_argv_of_launch_and_resume(self):
         claude = LaunchSettings('claude', '/b/claude', '/cfg', 'claude-fable-5-1')
         codex = LaunchSettings('codex', '/b/codex', '/cfg', 'gpt-x')
         self.assertEqual(launch_argv(claude, 'P'),
                          ['/b/claude', '--permission-mode', 'auto', '--model', 'claude-fable-5-1', '--', 'P'])
-        self.assertEqual(launch_argv(codex, 'P', ('/w',)), ['/b/codex', '--add-dir', '/w', '-m', 'gpt-x', '--', 'P'])
+        self.assertEqual(launch_argv(codex, 'P', ('/w',)),
+                         ['/b/codex', *CODEX_POLICY, '--add-dir', '/w', '-m', 'gpt-x', '--', 'P'])
         self.assertEqual(resume_argv(claude, SESSION_ID),
                          ['/b/claude', '--permission-mode', 'auto', '--model', 'claude-fable-5-1',
                           '--resume', SESSION_ID])
         self.assertEqual(resume_argv(codex, SESSION_ID, ('/w',)),
-                         ['/b/codex', 'resume', '--add-dir', '/w', '-m', 'gpt-x', '--', SESSION_ID])
+                         ['/b/codex', 'resume', *CODEX_POLICY, '--add-dir', '/w', '-m', 'gpt-x', '--', SESSION_ID])
 
 
 class RecordTests(unittest.TestCase):

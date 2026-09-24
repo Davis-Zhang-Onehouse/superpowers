@@ -1749,14 +1749,17 @@ def _do_revive(ctx: Ctx, parsed: Parsed) -> int:
     session_id = parsed.get('session-id')
     transcript = runtime_launch.session_transcript(settings, session_id, lease.path)
     child = _child_of(ctx, record)
+    #: FB-110. The resumed session gets the same codex policy and roots as the launch, from the same functions.
+    revive_env = dict(ctx.launch_environment or {}, FLEET_HOME=str(ctx.home), FLEET_INSTANTS=str(ctx.instants_dir))
+    codex_git_dirs = _codex_git_dirs(ctx, settings.runtime, lease.path)
+    policy_rows = _codex_policy_rows(settings.runtime, revive_env, codex_git_dirs)
     if ctx.dry_run:
         _emit(ctx, 'revive', [('todo_id', record.todo_id), ('session_id', session_id),
-                            ('transcript', str(transcript)), ('dry-run', 'nothing started')])
+                            ('transcript', str(transcript)), *policy_rows, ('dry-run', 'nothing started')])
         return EXIT_OK
     record.child_instant = str(child)
-    launcher = runtime_launch.prepare(settings, record, child / '.fleet/seed.txt',
-                                     dict(ctx.launch_environment or {}, FLEET_HOME=str(ctx.home),
-                                          FLEET_INSTANTS=str(ctx.instants_dir)), session_id=session_id)
+    launcher = runtime_launch.prepare(settings, record, child / '.fleet/seed.txt', revive_env,
+                                     session_id=session_id, extra_writable=codex_git_dirs)
     layer.start(record.tmux, lease.path, shlex.join(['bash', str(launcher)]))
     if not _verify_resume(ctx, layer, record, session_id):
         raise FleetError('Resume not verified; the lease is retained. Inspect the pane before retrying')
@@ -1764,7 +1767,8 @@ def _do_revive(ctx: Ctx, parsed: Parsed) -> int:
     record.launched_at = ctx.now()
     ctx.store.write(record)
     _emit(ctx, 'revive', [('todo_id', record.todo_id), ('session_id', session_id), ('runtime', record.runtime),
-                          ('model', record.runtime_model or "(none — the CLI's configured default model)")])
+                          ('model', record.runtime_model or "(none — the CLI's configured default model)"),
+                          *policy_rows])
     return EXIT_OK
 
 
@@ -2026,6 +2030,9 @@ def _do_dispatch(ctx: Ctx, parsed: Parsed) -> int:
                                                                 "nothing gates a claim of done)"),
                  ("lineage_mode", lineage_mode or "(none)"),
                  *_choice_rows(choice), *_codex_skills_rows(skills, parsed, _releases_of(ctx)),
+                 *(_codex_policy_rows(settings.runtime, _fleet_dirs(ctx),
+                                      _codex_git_dirs(ctx, settings.runtime, ctx.pool.slot_path(candidate_slot)))
+                   if settings is not None else []),
                  ("seed_extra", (f"{parsed.get('seed-extra')} ({len(seed_extra)} chars would be appended "
                                  f"to the rendered seed)") if seed_extra else
                   "(none — the seed is exactly what the profile renders)")]
@@ -2111,7 +2118,8 @@ def _do_dispatch(ctx: Ctx, parsed: Parsed) -> int:
         source = ctx.harvest.record_dispatch(ctx.store, record)
         launch_env = dict(ctx.launch_environment or {}, FLEET_HOME=str(ctx.home),
                           FLEET_INSTANTS=str(ctx.instants_dir))
-        launcher = runtime_launch.prepare(settings, record, seed, launch_env)
+        codex_git_dirs = _codex_git_dirs(ctx, settings.runtime, lease.path)
+        launcher = runtime_launch.prepare(settings, record, seed, launch_env, extra_writable=codex_git_dirs)
         ctx.sessions.start(tmux, lease.path, shlex.join(['bash', str(launcher)]))
         started = True
         seed_verdict = _verify_seed_delivery(ctx, tmux, rendered["seed"], runtime=settings.runtime)
@@ -2180,7 +2188,8 @@ def _do_dispatch(ctx: Ctx, parsed: Parsed) -> int:
                             ("coordinator", str(coordinator) if coordinator else
                              "(none — this child has no origin.json, so its `propose` stays LOCAL)"),
                             ("launched_at", record.launched_at), *_choice_rows(choice),
-                            *_codex_skills_rows(skills, parsed, _releases_of(ctx))])
+                            *_codex_skills_rows(skills, parsed, _releases_of(ctx)),
+                            *_codex_policy_rows(settings.runtime, launch_env, codex_git_dirs)])
     return EXIT_OK
 
 
@@ -2247,6 +2256,26 @@ def _choice_rows(choice) -> list:
     model = (f"{choice.model} ({choice.model_source})" if choice.model else
              "(none — no model flag; the CLI's configured default model)")
     return [("runtime", f"{choice.runtime} ({runtime_from})"), ("model", model)]
+
+
+def _codex_git_dirs(ctx: Ctx, runtime, slot_path) -> tuple:
+    """FB-110. The slot's git dirs a codex worker must be able to write (`runtime_launch.git_writable_dirs`); none for
+    claude, whose argv carries no sandbox."""
+    return runtime_launch.git_writable_dirs(slot_path, ctx.git) if runtime == 'codex' and slot_path else ()
+
+
+def _codex_policy_rows(runtime, environ, extra) -> list:
+    """FB-110. The effective codex policy, from the same functions the launcher uses. Nothing is recorded: the policy is
+    a constant and the roots are derived at every launch, so an older binary still reads the record (pt2's rule)."""
+    if runtime != 'codex':
+        return []
+    return [("codex_policy", runtime_launch.codex_policy_summary(runtime_launch.writable_dirs(environ, extra)))]
+
+
+def _fleet_dirs(ctx: Ctx) -> dict:
+    """FLEET_HOME and FLEET_INSTANTS exactly as `dispatch` and `revive` hand them to the launcher."""
+    return {key: str(value) for key, value in (('FLEET_HOME', ctx.home), ('FLEET_INSTANTS', ctx.instants_dir))
+            if value}
 
 
 # --- resume ---------------------------------------------------------------------------------------
@@ -4897,7 +4926,9 @@ def _do_brief(ctx: Ctx, parsed: Parsed) -> int:
         rows.append(Row(kind="runtime", subject=child.name, severity=INFO,
                         detail=(f"runtime={own.runtime} model="
                                 f"{own.runtime_model or '(none — the CLI configured default)'} "
-                                f"(record {own.todo_id}; `fleet revive` relaunches exactly this)")))
+                                f"(record {own.todo_id}; `fleet revive` relaunches exactly this)"
+                                + "".join(f"; codex policy: {value}" for _, value in _codex_policy_rows(
+                                    own.runtime, _fleet_dirs(ctx), _codex_git_dirs(ctx, own.runtime, own.golden))))))
         #: FB-111. A codex worker reads this row before it loads its first skill, so it is where it learns how.
         if own.runtime == 'codex' and not own.runtime_config_dir:
             #: `visible_skills("")` would scan the caller's cwd: a false answer either way.

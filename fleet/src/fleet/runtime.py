@@ -126,6 +126,10 @@ def observe(runtime: RuntimeName, frame: str) -> PaneObservation:
 #:    `coordinator-dispatch/commands.jsonl:22`, where the harness had to answer it with Enter). A worker
 #:    parked here is blocked on a human exactly like the others; the review round that introduced measured
 #:    rows dropped this one as unmeasured, and it was measured.
+#:  - Codex 0.156's folder-trust screen: "enter continue · esc quit" (`fixtures/runtime/codex-trust-0156.frame`, a real
+#:    0.156.1 pane). Its "Update available" modal ends `enter continue · esc …` too (FB-105). The row starts with its
+#:    verb like the others, so prose quoting it mid-sentence is not matched. 0.156's approval prompt still ends
+#:    "Press enter to confirm or esc to cancel" (`codex-approval-0156.frame`), which the first codex row already reads.
 CLAUDE_DIALOG_ROWS = (
     ("enter to confirm", "esc to cancel"),
     ("enter to select", "tab/arrow keys to navigate", "esc to cancel"),
@@ -133,6 +137,7 @@ CLAUDE_DIALOG_ROWS = (
 CODEX_DIALOG_ROWS = (
     ("press enter to confirm", "esc to cancel"),
     ("press enter to continue",),
+    ("enter continue", "esc"),
 )
 
 
