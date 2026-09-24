@@ -1006,7 +1006,7 @@ def _resolve_instant(ctx: Ctx, raw) -> Path:
     try:
         InstantName.parse(found.name)        # refused, not judged: a non-instant is not an instant
     except InstantNameError as exc:
-        raise InstantNameError(f"{path}: {exc}") from exc
+        raise InstantNameError(f"resolved input {path}; parsed instant {found}: {exc}") from exc
     return found
 
 
