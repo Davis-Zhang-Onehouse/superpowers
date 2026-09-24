@@ -2220,7 +2220,11 @@ def _do_dispatch(ctx: Ctx, parsed: Parsed) -> int:
         if milestone_id is not None:
             Roadmap(coordinator).claim(milestone_id, str(child))
             claimed_milestone = milestone_id
-    except Exception as launch_error:
+    except BaseException as launch_error:
+        #: RV-C5. BaseException, like the under-claim gate above: a SIGINT (a wrapper's timeout, a Ctrl-C) in
+        #: `tmux new-session` or the seed poll must roll back too. It is re-raised UNCHANGED (`interrupted`
+        #: below) rather than converted, so the caller's interrupt handling still sees an interrupt.
+        interrupted = not isinstance(launch_error, Exception)
         #: RV-C4. The rollback's own reads may fail too, and must never replace the launch error: an
         #: unreadable store makes the record's state UNKNOWN, said so, and the rollback carries on.
         store_failure = ""
@@ -2272,12 +2276,16 @@ def _do_dispatch(ctx: Ctx, parsed: Parsed) -> int:
             if ctx.sessions.alive(tmux):
                 print(f"dispatch needs attention: {tmux} is still observable; lease {lease.slot} retained."
                       + stranded_note, file=ctx.err)
+                if interrupted:
+                    raise launch_error
                 raise not_started("retained", f"is retained: {tmux} is still observable after the kill, so "
                                               f"a process may still hold the slot") from launch_error
         try:
             ctx.pool.release(lease.slot, force=False)
         except (FleetError, OSError) as release_error:      # RV-C4: an OSError here must not mask the cause
             print(f"dispatch failed: {launch_error}; cleanup retained lease {lease.slot}", file=ctx.err)
+            if interrupted:
+                raise launch_error
             raise not_started("retained", f"is retained: the release was refused "
                                           f"({release_error})") from launch_error
         # `SI-21` applied to the roadmap: a rollback must not strand state it created. If the claim landed
@@ -2305,6 +2313,8 @@ def _do_dispatch(ctx: Ctx, parsed: Parsed) -> int:
         print(f"dispatch rolled back: the lease on {lease.slot!r} was given back. Anything already "
               f"written under {child} is left in place and named here rather than removed — no verb "
               f"deletes outward state." + stranded_note, file=ctx.err)
+        if interrupted:
+            raise launch_error
         raise not_started("given-back", "was given back") from launch_error
     _emit(ctx, "dispatch", [("todo_id", todo_id), ("instant", str(child)), ("slot", lease.slot),
                             ("tmux", tmux), *_title_rows(title), ("watched_source", source.base),

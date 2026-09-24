@@ -195,6 +195,15 @@ class TestAFailureAfterTheClaimIsNotStarted(DispatchCase):
         self.assertEqual(rows.get("left_lease"), "retained", out)
         self.assertIn("Permission denied", rows.get("remedy", ""), out)
 
+    def test_an_interrupt_during_the_launch_still_rolls_back_and_stays_an_interrupt(self):
+        #: RV-C5. A SIGINT (a wrapper's timeout, a Ctrl-C) in `tmux new-session` or the seed poll skipped the
+        #: rollback entirely: the lease stayed claimed. It is rolled back now, and the interrupt is re-raised
+        #: unchanged, so the caller's own interrupt handling still sees an interrupt.
+        self.start_raises(KeyboardInterrupt())
+        with self.assertRaises(KeyboardInterrupt):
+            self.dispatch()
+        self.assertIsNone(self.fleet.pool.lease("ws1"), "an interrupted launch must still give the lease back")
+
     def test_human_output_carries_the_same_rows(self):
         self.seed_fails()
         code, out, err = self.fleet.run(["dispatch", "--profile", str(self.fleet.profile()),
