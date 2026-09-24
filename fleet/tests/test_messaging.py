@@ -182,3 +182,36 @@ class MessagingTests(unittest.TestCase):
                 handle.write('{ not json\n')
             with self.assertRaises(BadInput):
                 read_sends(instant)
+
+    def test_a_raising_recorder_never_changes_the_delivery_verdict(self):
+        """RV-38. The recorder ran unguarded in `finally`: an OSError from the send log replaced a
+        SUBMITTED verdict with a raw traceback — the operator reads a failure for a delivered message and
+        retries, which is the duplicate send FI-9/FI-15 exist to prevent — and on the uncertain paths it
+        replaced the 'inspect before retrying' FleetError. The delivery verdict always wins; the recording
+        failure is reported through `unrecorded`, never raised over the verdict."""
+        def boom(outcome, confirmation):
+            raise PermissionError('sends.jsonl is read-only')
+        with tempfile.TemporaryDirectory() as directory:
+            layer, events = self.runtime_fixture('claude', [
+                PaneObservation('idle'), PaneObservation('queued', 'hello'), PaneObservation('busy')])
+            reported = []
+            self.assertEqual((SUBMITTED, CONFIRMED_BY_DRAFT),
+                             send(Path(directory), layer, SimpleNamespace(tmux='worker'), 'hello',
+                                  recorder=boom, unrecorded=reported.append))
+            self.assertEqual(events, [('literal', 'hello'), ('submit', None)])
+            self.assertEqual(1, len(reported))
+            self.assertIsInstance(reported[0], PermissionError)
+        with tempfile.TemporaryDirectory() as directory:
+            layer, _ = self.runtime_fixture('claude', [PaneObservation('idle'), PaneObservation('queued', 'other')])
+            reported = []
+            with self.assertRaisesRegex(FleetError, 'uncertain after insertion'):
+                send(Path(directory), layer, SimpleNamespace(tmux='worker'), 'hello', timeout_s=0,
+                     recorder=boom, unrecorded=reported.append)
+            self.assertEqual(1, len(reported))
+        #: With no `unrecorded` hook the failure is not swallowed silently: it is raised — but only AFTER a
+        #: verdict that was NOT a success, never over a submitted one.
+        with tempfile.TemporaryDirectory() as directory:
+            layer, _ = self.runtime_fixture('claude', [
+                PaneObservation('idle'), PaneObservation('queued', 'hello'), PaneObservation('busy')])
+            with self.assertRaisesRegex(FleetError, 'submitted.*NOT recorded'):
+                send(Path(directory), layer, SimpleNamespace(tmux='worker'), 'hello', recorder=boom)

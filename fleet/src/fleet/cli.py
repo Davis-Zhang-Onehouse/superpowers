@@ -1653,15 +1653,21 @@ def _do_send(ctx: Ctx, parsed: Parsed) -> int:
             head=messaging.head_of(text), outcome=outcome, confirmation=confirmation))
         written['outcome'], written['confirmation'] = outcome, confirmation
 
+    def unrecorded(exc):
+        #: RV-38. The delivery verdict wins; the unwritten record is said out loud, on both streams.
+        written['unrecorded'] = f"NOT RECORDED — {type(exc).__name__}: {exc}"
+        print(f"NOT RECORDED — the send could not be written to {messaging.sends_path(child)}: {exc}", file=ctx.err)
+
     try:
         outcome, confirmation = messaging.send(ctx.home, layer, record, text,
-                                               validate=lambda: _message_target(ctx, parsed), recorder=recorder)
+                                               validate=lambda: _message_target(ctx, parsed),
+                                               recorder=recorder, unrecorded=unrecorded)
     except FleetError:
-        if written:
+        if 'path' in written:
             print(f"recorded as {written['outcome']} in {written['path']}", file=ctx.err)
         raise
     _emit(ctx, 'send', [('todo_id', record.todo_id), ('delivery', outcome), ('confirmation', confirmation),
-                        ('sha256', sha), ('record', str(written.get('path', '')))])
+                        ('sha256', sha), ('record', written.get('unrecorded') or str(written.get('path', '')))])
     return EXIT_OK
 
 

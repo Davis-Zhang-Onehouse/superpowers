@@ -138,11 +138,18 @@ def read_sends(instant) -> list:
 
 
 def send(home, sessions, record, text, *, timeout_s=10.0, clock=time.monotonic,
-         sleep=time.sleep, validate=None, recorder=None):
+         sleep=time.sleep, validate=None, recorder=None, unrecorded=None):
     """-> `(outcome, confirmation)`; `outcome` is `SUBMITTED` on success, and every other outcome is raised
     as the `FleetError` it always was. `recorder(outcome, confirmation)` is called ONCE for every attempt
     that reached the pane, success or not, before the error propagates — a send that pasted and then could
-    not confirm is exactly the record a later reader needs."""
+    not confirm is exactly the record a later reader needs.
+
+    **The delivery verdict always wins over the recording** (RV-38). A recorder that raises — an unwritable
+    `.fleet`, a full disk, an instant renamed mid-send — must not turn a SUBMITTED message into a traceback:
+    the operator would read a failure for a delivered message and retry, and the retry is the duplicate
+    send FI-9/FI-15 exist to prevent. So the recorder's exception is handed to `unrecorded(exc)` and the
+    verdict is returned or raised unchanged. With no `unrecorded` hook the failure is not swallowed: it is
+    raised as a FleetError that NAMES the verdict it decorates, so nothing reads it as "not delivered"."""
     validate_message(text)
     runtime = getattr(sessions, "runtime", "claude")
     with pane_lock(home, sessions.socket, record.tmux):
@@ -151,6 +158,7 @@ def send(home, sessions, record, text, *, timeout_s=10.0, clock=time.monotonic,
         if sessions.observe(record.tmux).state != 'idle':
             raise not_idle(record)
         outcome, confirmation = UNCERTAIN, ""
+        failed_record = None
         try:
             sessions.send_literal(record.tmux, text)
             deadline = clock() + timeout_s
@@ -173,7 +181,7 @@ def send(home, sessions, record, text, *, timeout_s=10.0, clock=time.monotonic,
                 observation = sessions.observe(record.tmux)
                 if observation.state in ('busy', 'idle') and not observation.draft:
                     outcome = SUBMITTED
-                    return outcome, confirmation
+                    break
                 if observation.state == 'dialog' or clock() >= deadline:
                     outcome = UNCERTAIN_AFTER_ENTER
                     raise FleetError('Delivery uncertain after Enter; inspect the worker before retrying')
@@ -184,4 +192,13 @@ def send(home, sessions, record, text, *, timeout_s=10.0, clock=time.monotonic,
             raise FleetError(f'Delivery uncertain; inspect the worker before retrying: {exc}') from exc
         finally:
             if recorder is not None:
-                recorder(outcome, confirmation)
+                try:
+                    recorder(outcome, confirmation)
+                except Exception as exc:          # the verdict wins; see the docstring
+                    failed_record = exc
+                    if unrecorded is not None:
+                        unrecorded(exc)
+    if failed_record is not None and unrecorded is None:
+        raise FleetError(f'Message {outcome} (confirmed by {confirmation or "nothing"}) but NOT recorded: '
+                         f'{failed_record}') from failed_record
+    return outcome, confirmation
