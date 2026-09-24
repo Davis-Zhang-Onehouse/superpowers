@@ -924,5 +924,27 @@ class TestTheCapIsPerEffort(GuardCase):
         self.assertIn("set aside 1 subject(s) of base", verdict.reason, verdict.reason)
 
 
+    def test_folder_yes_whenever_the_folder_is_on_disk(self):
+        # RV-C5. The skill says a `folder: no, session: no` holder is a phantom to reap, so a wrong "no" invites reaping
+        # real work. Two ways it lied: a folder found on disk whose name is not an instant name (the join then reports
+        # folder_state "missing"), and a claim whose relative child path was checked against the cwd.
+        fleet = self.fleet(slots=3)
+        odd = fleet.instants / "notAnInstantName"
+        odd.mkdir()
+        fleet.store.write(Record(
+            todo_id="odd-07309993", child_instant=str(odd), base_instant=OURS, slot="", tmux="dt-odd",
+            profile="/p/worker", golden="/ws0", lineage_base="", title="odd",
+            dispatched_at="2026-07-30T03:12:00Z", launched_at="2026-07-30T03:13:00Z"))
+        verdict = WipCap().evaluate(fleet.ctx(cap=1))
+        self.assertIn("notAnInstantName [folder: yes, ", verdict.reason, verdict.reason)
+
+        claimed = self.fleet(slots=3)
+        rel = "00000000-07309994-inflight-append-rel"
+        (claimed.instants / rel).mkdir()
+        claimed.pool.claim(todo_id="rel", tmux="dt-rel", base_instant=OURS, child_instant=rel, slot="ws1")
+        held = self.verdict_of(evaluate_all(claimed.ctx(cap=1).under_claim("ws2"), "dispatch"), "wip-cap")
+        self.assertIn(f"{rel} [folder: yes, ", held.reason, held.reason)
+
+
 if __name__ == "__main__":
     unittest.main()
