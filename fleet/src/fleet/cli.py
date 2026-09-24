@@ -1651,7 +1651,7 @@ def _do_send(ctx: Ctx, parsed: Parsed) -> int:
         written['path'] = messaging.record_send(child, messaging.SendRecord(
             at=ctx.now(), by=_sender_identity(parsed), todo_id=record.todo_id, tmux=record.tmux,
             runtime=record.runtime, message_file=str(source.resolve()), sha256=sha, chars=len(text),
-            lines=len(text.splitlines()),
+            lines=messaging.line_count(text),
             head=messaging.head_of(text), outcome=outcome, confirmation=confirmation))
         written['outcome'], written['confirmation'] = outcome, confirmation
 

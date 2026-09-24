@@ -5,7 +5,7 @@ import unittest
 from types import SimpleNamespace
 
 from fleet.errors import BadInput, FleetError, Refused
-from fleet.messaging import (CONFIRMED_BY_DRAFT, CONFIRMED_BY_PLACEHOLDER, SUBMITTED, UNCERTAIN_AFTER_ENTER,
+from fleet.messaging import (CONFIRMED_BY_DRAFT, CONFIRMED_BY_PLACEHOLDER, SUBMITTED, UNCERTAIN_AFTER_ENTER, line_count,
                              UNCERTAIN_AFTER_INSERTION, SendRecord, read_sends, record_send, send, sends_path)
 from fleet.runtime import PaneObservation
 
@@ -243,3 +243,12 @@ class MessagingTests(unittest.TestCase):
             sends_path(instant).mkdir()
             with self.assertRaises(BadInput):
                 read_sends(instant)
+
+    def test_line_count_is_newline_separated_lines_only(self):
+        """RV-46. `str.splitlines` also splits on CR, VT, FF and U+2028, so `lines` could disagree with the
+        newline count the TUI's placeholder states; the record counts what the confirmation counts."""
+        self.assertEqual(1, line_count('a\x0cb c'))
+        self.assertEqual(2, line_count('a\r\nb'))
+        self.assertEqual(3, line_count('a\nb\nc'))
+        self.assertEqual(3, line_count('a\nb\nc\n'))
+        self.assertEqual(0, line_count(''))
