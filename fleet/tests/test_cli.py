@@ -7275,3 +7275,18 @@ class TestSendKeepsARecord(CliCase):
         self.assertEqual([line.split("\t", 1)[0] for line in dry.splitlines()],
                          [line.split("\t", 1)[0] for line in real.splitlines()])
         self.assertEqual("not observed (dry-run)", dict(l.split("\t", 1) for l in dry.splitlines())["confirmation"])
+
+    def test_an_empty_by_is_refused_and_the_user_fallback_names_the_login(self):
+        """RV-49. `--by "   "` was accepted as a sender name (FB-16's shape); the USER fallback was untested."""
+        fleet = self.loaded()
+        sent = self.message(fleet)
+        code, _, err = fleet.run(["send", "--id", fleet.ids["closable"], "--message-file", str(sent), "--by", "   "])
+        self.assertEqual(EXIT_BAD_INPUT, code, err)
+        self.assertIn("--by", err)
+        self.assertFalse((fleet.paths["closable"] / ".fleet" / "sends.jsonl").exists())
+        with mock.patch.dict(os.environ, {"USER": "davis"}, clear=False):
+            for gone in ("FLEET_INSTANT", "INSTANT"):
+                os.environ.pop(gone, None)
+            code, _, err = fleet.run(["send", "--id", fleet.ids["closable"], "--message-file", str(sent)])
+        self.assertEqual(EXIT_OK, code, err)
+        self.assertEqual("davis", messaging.read_sends(fleet.paths["closable"])[-1].by)
