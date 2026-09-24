@@ -194,7 +194,8 @@ class RowOwnership(unittest.TestCase):
                            "it_pass F1 '' 'shared'; echo IT_FAILED=${IT_FAILED:-0}")
         self.assertEqual([l.split("\t")[0] for l in neg.read_text().splitlines()], ["X-neg", "Y-neg"])
         self.assertIn("IT_FAILED=0", out.stdout)
-        self.assertEqual([r[0] for r in self.rows()], ["A1", "F1", "G1", "Z9"])
+        # F9-zero-delta is NOT claimed by F[0-9]+, so it survives; F1's fresh row took its old line.
+        self.assertEqual([r[0] for r in self.rows()], ["A1", "F1", "F9-zero-delta", "G1", "Z9"])
 
     def test_group5_claims_its_coverage_rows(self):
         """Found by the plan's pre-flight scan: run-group5.sh writes L7-coverage and M5-coverage."""
@@ -205,6 +206,45 @@ class RowOwnership(unittest.TestCase):
         self.assertRegex("M5-coverage", "^(" + m_re + ")$")
         self.assertRegex("M8-release-history", "^(" + m_re + ")$")
         self.assertRegex("M11b", "^(" + m_re + ")$")
+
+
+class ZeroDelta(unittest.TestCase):
+    """FB-38. A zero delta over a verb that never ran (exit 2) is a control that cannot fail. RED:
+    evidence/01-red/fb38-zero-delta-rc-base.txt (P-refused PASS on a status call that exited 2)."""
+
+    def setUp(self):
+        self.tmp = pathlib.Path(tempfile.mkdtemp(prefix="it-harness-"))
+        self.addCleanup(shutil.rmtree, self.tmp, True)
+        self.it = harness_copy(self.tmp)
+        self.results = self.tmp / "RESULTS.tsv"
+        self.results.write_text("case\tverdict\tevidence\tnote\n")
+
+    def run_lib(self, body):
+        return run_bash(f'. "{self.it}/lib.sh"\nit_section zd >/dev/null 2>&1; it_fresh_store\n{body}',
+                        self.tmp, env={"IT_RESULTS": str(self.results)})
+
+    def row(self, case):
+        return next(l.split("\t") for l in self.results.read_text().splitlines()[1:] if l.startswith(case + "\t"))
+
+    def test_a_refused_read_fails_even_with_a_zero_delta(self):
+        self.run_lib("it_zero_delta P-refused fleet status --id 00000000-00000000-inflight-append-nosuch --porcelain")
+        r = self.row("P-refused")
+        self.assertEqual(r[1], "FAIL")
+        self.assertIn("exited 2", r[3])
+
+    def test_a_read_that_ran_and_changed_nothing_passes(self):
+        self.run_lib("it_zero_delta P-control fleet board --porcelain")
+        self.assertEqual(self.row("P-control")[1], "PASS")
+
+    def test_want_names_a_deliberate_refusal(self):
+        self.run_lib("it_zero_delta --want 2 P-want fleet status --id 00000000-00000000-inflight-append-nosuch --porcelain")
+        self.assertEqual(self.row("P-want")[1], "PASS")
+
+    def test_a_write_fails_on_the_delta_not_only_the_code(self):
+        self.run_lib("it_zero_delta P-write fleet init --name zdprobe --base 00000000 --porcelain")
+        r = self.row("P-write")
+        self.assertEqual(r[1], "FAIL")
+        self.assertIn("delta", r[3])
 
 
 if __name__ == "__main__":
