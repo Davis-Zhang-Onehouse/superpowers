@@ -703,6 +703,40 @@ d10b_child_path_is_a_live_instant() {
 }
 
 # ==================================================================================================
+# D12 — tmux refuses the session after the claim: exit 5 and rows on STDOUT (V23-B, v2-05/v2-14)
+# ==================================================================================================
+
+d12_tmux_refusal_says_what_it_did() {
+  d_home d12 1
+  #: The session name `dispatch` will pick is already taken on THIS section's private server, so
+  #: `tmux new-session` refuses after the lease is claimed. Before V23-B that exited 2 (the caller-typo
+  #: code) with ZERO lines on stdout, and a wrapper reading stdout saw nothing at all.
+  it_tmux new-session -d -s dt-d12Taken 'sleep 100000'
+  fleet dispatch --profile "$P_WORKER" --title "d12 taken" --base "$BASE" --cap 9 --porcelain \
+    > "$CD/dispatch.stdout" 2> "$CD/dispatch.stderr"
+  local rc=$? err_row step_row lease_row title_row leases
+  it_tmux kill-session -t '=dt-d12Taken' 2>/dev/null
+  err_row="$(awk -F'\t' '$1=="error"{print $2}' "$CD/dispatch.stdout")"
+  step_row="$(awk -F'\t' '$1=="step"{print $2}' "$CD/dispatch.stdout")"
+  lease_row="$(awk -F'\t' '$1=="lease"{print $2}' "$CD/dispatch.stdout")"
+  title_row="$(awk -F'\t' '$1=="title_as_used"{print $2}' "$CD/dispatch.stdout")"
+  leases="$(d_n_leases)"
+  {
+    printf 'exit\t%s\nerror row\t%s\nstep row\t%s\nlease row\t%s\ntitle_as_used\t%s\nlease dirs left\t%s\n' \
+      "$rc" "$err_row" "$step_row" "$lease_row" "$title_row" "$leases"
+  } > "$CD/says.tsv"
+  case "$err_row" in "BadInput: tmux refused to start 'dt-d12Taken'"*) local named=1 ;; *) local named=0 ;; esac
+  if [ "$rc" = 5 ] && [ "$named" = 1 ] && [ "$step_row" = "tmux new-session" ] \
+     && [ "${lease_row#given back}" != "$lease_row" ] && [ "$title_row" = d12Taken ] && [ "$leases" = 0 ]; then
+    d_pass D12 "$CD/says.tsv" \
+      "a REAL tmux refusal after the claim (the session name already taken on the private server) exits 5 not-started and says so on STDOUT: an error row naming tmux's own refusal, step=tmux new-session, lease given back, title_as_used=d12Taken; 0 lease dirs left"
+  else
+    d_fail D12 "$CD/says.tsv" \
+      "exit $rc error_row_names_tmux=$named step='$step_row' lease='$lease_row' title_as_used='$title_row' leases=$leases"
+  fi
+}
+
+# ==================================================================================================
 # D11 / D11b — SIGKILL the dispatch process mid-transaction
 # ==================================================================================================
 
@@ -940,6 +974,7 @@ main() {
   d10b_child_path_is_a_live_instant
   d11_sigkill_before_the_folder
   d11b_sigkill_mid_bootstrap
+  d12_tmux_refusal_says_what_it_did
 
   d_leave
   #: P-3: instant-relative, at the very end, over the whole file this runner owns.
