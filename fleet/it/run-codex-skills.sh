@@ -30,7 +30,15 @@ export CXS_ATTEMPT
 CXS_ATTEMPT="$(mktemp -d "$EV/attempt-XXXXXX")"
 bash "$IT_ROOT/bin/source-pin.sh" before "$EV" || exit 2
 # The private CODEX_HOME's credential never outlives the run, pass or fail.
-trap 'it_tmux kill-server 2>/dev/null || true; rm -f "$CXS_ATTEMPT/codex-home/auth.json"' EXIT
+# The driver keeps CODEX_HOME outside the checkout and names it in outside.txt. The trap is the backstop for a driver
+# killed before its own atexit cleanup runs.
+cxs_cleanup() {
+  local outside
+  it_tmux kill-server 2>/dev/null || true
+  outside="$(cat "$CXS_ATTEMPT/outside.txt" 2>/dev/null)"
+  if [ -n "$outside" ]; then rm -f "$outside/codex-home/auth.json"; fi
+}
+trap cxs_cleanup EXIT
 echo "codex skills test: $CXS_ATTEMPT (inspect: tmux -L $FLEET_TMUX_SOCKET attach)"
 python3 "$IT_ROOT/codex-skills-live.py" > "$CXS_ATTEMPT/steps.log" 2>&1
 rc=$?
