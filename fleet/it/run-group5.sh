@@ -454,7 +454,7 @@ PY
     fi
     l7_verbs=$((l7_verbs+1))
     # shellcheck disable=SC2086
-    timeout 600 python3 -m fleet.cli "$v" $args --home "$L7H" --porcelain \
+    timeout 600 "$IT_FLEET" "$v" $args --home "$L7H" --porcelain \
         > "$EV/L7-$v.stdout" 2> "$EV/L7-$v.stderr"; rc=$?
     cad=$(grep -c '^cadence:' "$EV/L7-$v.stderr")
     named=$(grep -c 'l7stale' "$EV/L7-$v.stderr")
@@ -699,7 +699,7 @@ PY
     args="$(m_args "$v")"
     allowed="$(python3 -c "from fleet.cli import registered_codes; print(' '.join(str(c) for c in sorted(registered_codes('$v'))))")"
     # shellcheck disable=SC2086
-    timeout "$(m_timeout "$v")" python3 -m fleet.cli "$v" $args > "$EV/M1-$v.stdout" 2> "$EV/M1-$v.stderr"; rc=$?
+    timeout "$(m_timeout "$v")" "$IT_FLEET" "$v" $args > "$EV/M1-$v.stdout" 2> "$EV/M1-$v.stderr"; rc=$?
     ok=no
     for c in $allowed; do [ "$rc" = "$c" ] && ok=yes; done
     printf '%-20s rc=%-4s allowed=[%s] %s\n' "$v" "$rc" "$allowed" "$ok" >> "$M1LOG"
@@ -712,7 +712,7 @@ PY
   fi
 
   # ---- M2 / M6 ----------------------------------------------------------------------------------
-  it_run M2 python3 -m fleet.cli; m2rc=$RC
+  it_run M2 "$IT_FLEET"; m2rc=$RC
   missing=""
   for v in $VERBS_ALL; do
     grep -qF -- "$v" "$EV/M2.stdout" "$EV/M2.stderr" || missing="$missing $v"
@@ -723,7 +723,7 @@ PY
     it_fail M2 "$EV/M2.stderr" "usage omits:$missing"
   fi
 
-  it_run M6 python3 -m fleet.cli notaverb --porcelain; m6rc=$RC
+  it_run M6 "$IT_FLEET" notaverb --porcelain; m6rc=$RC
   missing=""
   for v in $VERBS_ALL; do grep -qF -- "$v" "$EV/M6.stderr" || missing="$missing $v"; done
   if [ "$m6rc" = 2 ] && [ -z "$missing" ] && grep -q "is not a fleet verb" "$EV/M6.stderr"; then
@@ -757,7 +757,7 @@ PY
   M4LOG="$EV/M4-per-verb.txt"; : > "$M4LOG"
   m4_bad=0
   for v in $VERBS_ALL; do
-    timeout 10 python3 -m fleet.cli "$v" --not-a-declared-flag > /dev/null 2> "$EV/M4-$v.stderr"; rc=$?
+    timeout 10 "$IT_FLEET" "$v" --not-a-declared-flag > /dev/null 2> "$EV/M4-$v.stderr"; rc=$?
     named=$(grep -c 'not-a-declared-flag' "$EV/M4-$v.stderr")
     printf '%-20s rc=%s names_flag=%s\n' "$v" "$rc" "$named" >> "$M4LOG"
     { [ "$rc" = 2 ] && [ "$named" -ge 1 ]; } || m4_bad=$((m4_bad+1))
@@ -779,7 +779,7 @@ PY
     if [ "$kind" = value ]; then
       m5_value=$((m5_value+1))
       # shape (a): the flag alone, last, with no value
-      timeout 5 python3 -m fleet.cli "$v" "$f" > /dev/null 2> "$EV/M5-a.stderr"; rca=$?
+      timeout 5 "$IT_FLEET" "$v" "$f" > /dev/null 2> "$EV/M5-a.stderr"; rca=$?
       diaga=$(grep -c 'needs a value' "$EV/M5-a.stderr")
       # shape (b): a full valid argv with the flag appended last
       args="$(m_args "$v")"
@@ -793,7 +793,7 @@ PY
         case " $m5_unmapped_list " in *" $v "*) ;; *) m5_unmapped_list="$m5_unmapped_list $v" ;; esac
         continue
       fi
-      timeout 5 python3 -m fleet.cli "$v" $args "$f" > /dev/null 2> "$EV/M5-b.stderr"; rcb=$?
+      timeout 5 "$IT_FLEET" "$v" $args "$f" > /dev/null 2> "$EV/M5-b.stderr"; rcb=$?
       diagb=$(grep -c 'needs a value' "$EV/M5-b.stderr")
       printf '%-20s %-18s value  alone:rc=%-4s diag=%s  appended:rc=%-4s diag=%s\n' \
              "$v" "$f" "$rca" "$diaga" "$rcb" "$diagb" >> "$M5LOG"
@@ -810,14 +810,14 @@ PY
         continue
       fi
       # shellcheck disable=SC2086
-      timeout 5 python3 -m fleet.cli "$v" $args "$f" > /dev/null 2>&1; rcs=$?
+      timeout 5 "$IT_FLEET" "$v" $args "$f" > /dev/null 2>&1; rcs=$?
       extra=""
       if [ "$rcs" = 124 ]; then
         # not a hang until it fails to terminate with a generous wall too — `m_timeout` above (600s — the suite is 1,849 tests and took 180 s under concurrent load
         # for `selftest`, unchanged 120s otherwise) so the real hermetic-suite run this verb performs
         # is not mistaken for a hang at the 120s wall every other verb is held to.
         # shellcheck disable=SC2086
-        timeout "$(m_timeout "$v")" python3 -m fleet.cli "$v" $args "$f" > /dev/null 2>&1; rc2=$?
+        timeout "$(m_timeout "$v")" "$IT_FLEET" "$v" $args "$f" > /dev/null 2>&1; rc2=$?
         extra="retry120:rc=$rc2"
         [ "$rc2" = 124 ] && m5_hang=$((m5_hang+1)) || m5_slow="$m5_slow $v$f"
       fi
@@ -1384,7 +1384,7 @@ PY
   M14LOG="$EV/M14-per-verb.txt"; : > "$M14LOG"
   m14_bad=0; m14_src=0
   for v in $VERBS_ALL; do
-    timeout 10 python3 -m fleet.cli "$v" --help > "$EV/M14-$v.stdout" 2> "$EV/M14-$v.stderr"; rc=$?
+    timeout 10 "$IT_FLEET" "$v" --help > "$EV/M14-$v.stdout" 2> "$EV/M14-$v.stderr"; rc=$?
     src=$(cat "$EV/M14-$v.stdout" "$EV/M14-$v.stderr" | grep -cE '^\s*(def |import |class |return |raise )')
     printf '%-20s rc=%s source_lines=%s\n' "$v" "$rc" "$src" >> "$M14LOG"
     [ "$rc" = 0 ] || m14_bad=$((m14_bad+1))

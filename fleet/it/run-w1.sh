@@ -281,6 +281,13 @@ mkdir -p "$OUT/w1-11"
   fleet init --instants-dir "$W11_LIVE" --name l7probe > "$OUT/w1-11/mint.out" 2>&1
   it_assert_isolation W1-11-injected >/dev/null 2>&1
 
+  # W1-13: the SAME stray minted the way 30 harness sites mint — behind `timeout`, where a bash function
+  # cannot be reached (B18). Before bin/it-fleet existed this call escaped the register and the folder was
+  # charged to "the operator using their own box"; evidence/01-red/b18-classifier-bypass-base.txt in the
+  # w2itharness instant is that PASS. It must be FAIL, for the instants reason, like W1-11.
+  timeout 60 "$IT_FLEET" init --instants-dir "$W11_LIVE" --name l7bypass > "$OUT/w1-11/mint-bypass.out" 2>&1
+  it_assert_isolation W1-13-bypass >/dev/null 2>&1
+
   RESULTS="$REAL_RESULTS"
 
   # BOTH conditions. `it_assert_isolation` also FAILs for the stores half and the tmux half, so matching
@@ -307,6 +314,17 @@ mkdir -p "$OUT/w1-11"
   else
     it_pass W1-12 "fleet/it/W1/out/w1-11/negative-control.tsv" \
       "the twin: an instant appearing in a live tree under a name this section NEVER asked for is a NOTE and not a FAIL, so W1-11's alarm discriminates rather than firing on any change at all"
+  fi
+
+  # W1-13's verdict. The mark must appear on EXACTLY two rows (W1-11's and this one), so that W1-13's
+  # FAIL cannot be W1-11's row read twice — the same reason W1-11 requires the mark and not just FAIL.
+  if grep -q '^ISOLATION-W1-13-bypass	FAIL' "$OUT/w1-11/negative-control.tsv" \
+     && [ "$(grep -c "$IT_INSTANTS_FAIL_MARK" "$OUT/w1-11/negative-control.tsv")" = 2 ]; then
+    it_pass W1-13 "fleet/it/W1/out/w1-11/negative-control.tsv" \
+      "a stray minted through the wrapper EXECUTABLE behind \`timeout\` — the shape 30 harness sites use, which no bash function can be reached from — is charged to this section like W1-11's. The register has one writer again (bin/it-fleet), so a call the harness makes the way it actually makes them is attributed"
+  else
+    it_fail W1-13 "fleet/it/W1/out/w1-11/negative-control.tsv" \
+      "the bypass-shaped mint was NOT charged to this section: $(grep '^ISOLATION-W1-13' "$OUT/w1-11/negative-control.tsv" | cut -f1,2,4 | cut -c1-200)"
   fi
 )
 rm -rf "$W11_LIVE"

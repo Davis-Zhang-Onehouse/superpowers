@@ -187,7 +187,7 @@ a1_fixture() {
   local d="$EV/A1"; mkdir -p "$d/wd" "$d/ctlhome" "$d/inst" "$d/slotsrc" "$d/rel" "$d/relrepo"
   #: One real instant, created through a valid FLEET_HOME, then addressed by ABSOLUTE path — so no A1
   #: probe can exit 2 merely because its `--instant` did not resolve in an empty fallback store.
-  A1_MK() { timeout 60 python3 -m fleet.cli init --home "$d/ctlhome" --instants-dir "$d/inst" \
+  A1_MK() { timeout 60 "$IT_FLEET" init --home "$d/ctlhome" --instants-dir "$d/inst" \
                     --name "$1" --base 00000000 >> "$OUT/A1-fixture.out" 2>&1; }
   A1_MK a1subject; A1_MK a1completee; A1_MK a1abortee
   A1_INST="$(find "$d/inst" -mindepth 1 -maxdepth 1 -name '*a1subject' | head -1)"
@@ -209,7 +209,7 @@ PY
   printf 'a1\n' > "$A1_INST/a1evidence"
   #: `complete` needs a passed review gate to reach its ok path; seeded here so its A1 probe is a real
   #: attempt to rename an instant and not a gate refusal in disguise.
-  timeout 60 python3 -m fleet.cli review --home "$d/ctlhome" --instants-dir "$d/inst" \
+  timeout 60 "$IT_FLEET" review --home "$d/ctlhome" --instants-dir "$d/inst" \
            --instant "$A1_COMP" --scope all --verdict READY >> "$OUT/A1-fixture.out" 2>&1
   A1_D="$d"
 }
@@ -296,7 +296,7 @@ a1_no_fallback() {
     # shellcheck disable=SC2086
     #: `IT_ENV_UNNAMED`, not `-u FLEET_HOME -u FLEET_INSTANTS`: a caller's FLEET_ROOT is a store named too.
     out="$(cd "$A1_D/wd" && env "${IT_ENV_UNNAMED[@]}" HOME="$fh" \
-           timeout 120 python3 -m fleet.cli "$v" $args 2>&1)"; rc=$?
+           timeout 120 "$IT_FLEET" "$v" $args 2>&1)"; rc=$?
     printf '%s\n' "$out" > "$OUT/A1-$v.out"
     created=no; [ -e "$fh/.fleet" ] && created=yes
     #: `II-10`. Anchored on the SENTENCE `SI-15` emits, not on the flag name. It was
@@ -761,7 +761,7 @@ print("attempted_elsewhere_and_allowed:", sorted(set(ALLOWED_ELSEWHERE)))
 assert not REFUSED, REFUSED
 print("OK A4c")
 PY
-  timeout 60 python3 -m fleet.cli init --home "$d/home" --instants-dir "$d/instants" \
+  timeout 60 "$IT_FLEET" init --home "$d/home" --instants-dir "$d/instants" \
            --name a4cbase --base 00000000 > "$OUT/A4c-setup.out" 2>&1
   local a4inst; a4inst="$(find "$d/instants" -mindepth 1 -maxdepth 1 -name '*a4cbase' | head -1)"
   ( cd "$d/wd" && env -u PYTHONPATH PYTHONPATH="$A3_CO" \
@@ -829,7 +829,7 @@ $4 $2"
 
 a5_drive() {              # a5_drive <state> <verb> <want> <args...>
   local state="$1" verb="$2" want="$3"; shift 3
-  a_run "A5-$state-$verb" timeout 300 python3 -m fleet.cli "$verb" "$@"
+  a_run "A5-$state-$verb" timeout 300 "$IT_FLEET" "$verb" "$@"
   a5_record "$state" "$verb" "$want" "$A_RC" "$state"
   A5_LAST_RC="$A_RC"
 }
@@ -840,7 +840,7 @@ a5_setup() {
   export FLEET_HOME="$A5_H" FLEET_INSTANTS="$A5_I"
   local mk
   for mk in a5subject a5lintbad a5gatefail a5gatepass a5abortee; do
-    timeout 60 python3 -m fleet.cli init --name "$mk" --base 00000000 >> "$OUT/A5-setup.out" 2>&1
+    timeout 60 "$IT_FLEET" init --name "$mk" --base 00000000 >> "$OUT/A5-setup.out" 2>&1
   done
   A5_INST="$(find "$A5_I" -mindepth 1 -maxdepth 1 -name '*a5subject' | head -1)"
   A5_LINTBAD="$(find "$A5_I" -mindepth 1 -maxdepth 1 -name '*a5lintbad' | head -1)"
@@ -868,24 +868,24 @@ PY
   #: The first pass of this runner seeded no round on the attention instant and got 2 where it wanted 1 —
   #: the test was wrong and the product's distinction is the point (`OI-3`: one non-zero class for two
   #: mechanisms is what a caller cannot act on). Both are now driven, separately.
-  timeout 60 python3 -m fleet.cli review --instant "$A5_GATEPASS" --scope all --verdict READY \
+  timeout 60 "$IT_FLEET" review --instant "$A5_GATEPASS" --scope all --verdict READY \
            >> "$OUT/A5-setup.out" 2>&1
-  timeout 60 python3 -m fleet.cli review --instant "$A5_GATEFAIL" --scope all --verdict NOT-READY \
+  timeout 60 "$IT_FLEET" review --instant "$A5_GATEFAIL" --scope all --verdict NOT-READY \
            >> "$OUT/A5-setup.out" 2>&1
   #: A fourth instant, left with NO review round, for the undecidable cell.
-  timeout 60 python3 -m fleet.cli init --name a5undecidable --base 00000000 >> "$OUT/A5-setup.out" 2>&1
+  timeout 60 "$IT_FLEET" init --name a5undecidable --base 00000000 >> "$OUT/A5-setup.out" 2>&1
   A5_UNDEC="$(find "$A5_I" -mindepth 1 -maxdepth 1 -name '*a5undecidable' | head -1)"
   #: A home of its own for the harvest pair, so the two ticks differ in ONE thing: the memory the first
   #: wrote. In the shared home they do not — see A5f.
   A5_H_HARVEST="$EV/A5/home-harvest"; A5_I_HARVEST="$EV/A5/instants-harvest"
   mkdir -p "$A5_H_HARVEST" "$A5_I_HARVEST"
-  timeout 60 python3 -m fleet.cli init --home "$A5_H_HARVEST" --instants-dir "$A5_I_HARVEST" \
+  timeout 60 "$IT_FLEET" init --home "$A5_H_HARVEST" --instants-dir "$A5_I_HARVEST" \
            --name a5hv --base 00000000 >> "$OUT/A5-setup.out" 2>&1
   #: Dedicated homes so `dispatch`'s three reachable codes are each forced by ONE differing condition.
   A5_H_EMPTY="$EV/A5/home-empty"; A5_I_EMPTY="$EV/A5/instants-empty"
   A5_H_FREE="$EV/A5/home-free";   A5_I_FREE="$EV/A5/instants-free"
   mkdir -p "$A5_H_EMPTY" "$A5_I_EMPTY" "$A5_H_FREE" "$A5_I_FREE" "$SLOTS/a5free"
-  timeout 60 python3 -m fleet.cli enroll --home "$A5_H_FREE" --slot "$SLOTS/a5free" \
+  timeout 60 "$IT_FLEET" enroll --home "$A5_H_FREE" --slot "$SLOTS/a5free" \
            >> "$OUT/A5-setup.out" 2>&1
   #: One real pane on the PRIVATE server, for `pane-guard` against something that exists. `sleep` and
   #: not the `bin/claude` stub, because the stub `exec sleep`s anyway and this verdict (12, not-claude)
@@ -1002,18 +1002,18 @@ print(json.loads(recs[0].read_text())['todo_id'] if recs else '')")"
 a5f_root_base_poisons_the_register() {
   local h="$EV/A5/home-a5f" i="$EV/A5/instants-a5f" t1 t2 t3 t4
   mkdir -p "$h" "$i"
-  timeout 60 python3 -m fleet.cli init --home "$h" --instants-dir "$i" --name a5f --base 00000000 \
+  timeout 60 "$IT_FLEET" init --home "$h" --instants-dir "$i" --name a5f --base 00000000 \
            > "$OUT/A5f-setup.out" 2>&1
   local inst; inst="$(find "$i" -mindepth 1 -maxdepth 1 -name '*a5f' | head -1)"
-  timeout 60 python3 -m fleet.cli harvest --home "$h" --instants-dir "$i" >/dev/null 2>&1; t1=$?
-  timeout 60 python3 -m fleet.cli harvest --home "$h" --instants-dir "$i" >/dev/null 2>&1; t2=$?
+  timeout 60 "$IT_FLEET" harvest --home "$h" --instants-dir "$i" >/dev/null 2>&1; t1=$?
+  timeout 60 "$IT_FLEET" harvest --home "$h" --instants-dir "$i" >/dev/null 2>&1; t2=$?
   #: `resume` and not `dispatch`, so the reproduction needs no tmux session and no `dt-` name at all —
   #: both verbs reach the same writer, `harvest.record_dispatch`.
-  timeout 60 python3 -m fleet.cli resume --home "$h" --instants-dir "$i" --instant "$inst" \
+  timeout 60 "$IT_FLEET" resume --home "$h" --instants-dir "$i" --instant "$inst" \
            --tmux "$TMUX_PREFIX-a5f" > "$OUT/A5f-resume.out" 2>&1
-  timeout 60 python3 -m fleet.cli harvest --home "$h" --instants-dir "$i" \
+  timeout 60 "$IT_FLEET" harvest --home "$h" --instants-dir "$i" \
            > "$OUT/A5f-tick3.out" 2>&1; t3=$?
-  timeout 60 python3 -m fleet.cli harvest --home "$h" --instants-dir "$i" \
+  timeout 60 "$IT_FLEET" harvest --home "$h" --instants-dir "$i" \
            > "$OUT/A5f-tick4.out" 2>&1; t4=$?
   cp "$h/harvest/sources.json" "$OUT/A5f-sources.json" 2>/dev/null
   local unreadable; unreadable="$(grep -c 'unreadable-source' "$OUT/A5f-tick4.out")"
