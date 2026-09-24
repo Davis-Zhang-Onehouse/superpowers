@@ -7032,8 +7032,8 @@ CHECKER_VERBS = checker_verbs()
 # --- the cadence trigger --------------------------------------------------------------------------
 
 
-def _cadence(ctx: Ctx, verb: str) -> list:
-    """Evaluate cadence staleness and print every overdue obligation to STDERR.
+def _cadence(ctx: Ctx, parsed: Parsed) -> list:
+    """Print overdue obligations for the caller's effort to STDERR.
 
     Called from `main` for **every** verb, which is the whole point. DA-6 drop 1, Critical: rev 1 made
     cadence pure state and named no evaluator, so the alarm fired only if somebody ran the very verb they
@@ -7051,16 +7051,50 @@ def _cadence(ctx: Ctx, verb: str) -> list:
     try:
         overdue = ctx.harvest.stale(ctx.now(), ctx.max_age_s, ctx.live_work_now())
     except Exception as exc:                       # a broken registry must not break the verb
-        print(f"{CADENCE_PREFIX} could not be evaluated during {verb!r}: {exc} · clears when: the "
+        print(f"{CADENCE_PREFIX} could not be evaluated during {parsed.verb!r}: {exc} · clears when: the "
               f"watched-source registry is readable · clears who: the coordinator", file=ctx.err)
         return []
+    named = parsed.get("instant") or parsed.get("from")
+    target = Path(named) if named else Path(ctx.instants_dir)
+    if named and not target.is_absolute():
+        target = Path(ctx.instants_dir) / target
+    if not named:
+        cwd = Path.cwd()
+        try:
+            InstantName.parse(cwd.name)
+        except FleetError:
+            pass
+        else:
+            target = cwd
+    try:
+        InstantName.parse(target.name)
+    except FleetError:
+        effort_dir = target.resolve()
+    else:
+        effort_dir = target.parent.resolve()
+
+    shown = []
+    seen = set()
     for source in overdue:
+        register = Path(source.issues_path)
+        if not register.is_absolute() or register.parent.parent.resolve() != effort_dir:
+            continue
+        # The source spellings can also straddle an instant's state rename.
+        # An instant's stable key omits that state while retaining its effort.
+        try:
+            key = (effort_dir, InstantName.parse(register.parent.name).stable_key())
+        except FleetError:
+            key = register.resolve()
+        if key in seen:
+            continue
+        seen.add(key)
+        shown.append(source)
         since = source.last_run or source.registered_at
         print(f"{CADENCE_PREFIX} {source.base} was last harvested at {since}, past the "
               f"{ctx.max_age_s}s window, while work is live — a register nobody reads is the silent "
               f"source OBS-68 was · clears when: `fleet harvest` runs against {source.issues_path} · "
               f"clears who: the coordinator of that effort, or this loop's own tick", file=ctx.err)
-    return overdue
+    return shown
 
 
 def _report_error(exc: BaseException, err) -> None:
@@ -7119,7 +7153,7 @@ def main(argv: list, *, stdout=None, stderr=None, context=None) -> int:
     # BEFORE the handler, for every verb. Staleness is asked before it can be answered: `harvest` stamps
     # `last_run` as it runs, so evaluating afterwards would make the cadence check pass forever — which is
     # the same ordering trap `harvest.report` documents inside itself.
-    _cadence(ctx, verb)
+    _cadence(ctx, parsed)
 
     try:
         admitted = verb in ('dispatch', 'resume', 'revive')

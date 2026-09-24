@@ -342,7 +342,9 @@ from pathlib import Path
 from fleet.harvest import Harvest
 from fleet.roadmap import Milestone, Roadmap
 home, inst = Path(os.environ["L7H"]), Path(os.environ["INSTP"])
-stale_base = Path(os.environ["EV"]) / "reg" / "l7stale"
+# Cadence is scoped to this section's effort.  Keep the stale source inside
+# its instants tree so every verb still proves the alarm reaches stderr.
+stale_base = inst.parent / "00000000-01010000-inflight-append-l7stale"
 stale_base.mkdir(parents=True, exist_ok=True)
 (stale_base / "ISSUES.md").write_text("# stale register\n## SS-1 — one issue nobody has harvested\n")
 src = Harvest(home, now=lambda: "2020-01-01T00:00:00Z").register(str(stale_base),
