@@ -525,14 +525,16 @@ fi
 #      server, because the operator's sessions are legitimately unclaimed and J7 is the case about those.
 # ==================================================================================================
 j5_live="$(it_tmux ls -F '#{session_name}' 2>/dev/null | grep '^dt-' | sort || true)"
-j5_claimed="$(python3 - "$FLEET_HOME" <<'PY'
+#: `FB-99`. `| sort` on the command line, BEFORE the heredoc body: a bare `sort)"` after the terminator is a
+#: separate command reading the runner's stdin, which under an open pipe never returns.
+j5_claimed="$(python3 - "$FLEET_HOME" <<'PY' | sort
 import pathlib, sys
 from fleet.store import Store
 for r in Store(pathlib.Path(sys.argv[1])).all():
     if r.tmux and not r.harvested_at:
         print(r.tmux)
 PY
-sort)"
+)"
 j5_harvested_gone=1
 it_tmux has-session -t "$TMUXN" 2>/dev/null && j5_harvested_gone=0
 if [ "$j5_harvested_gone" = 1 ]; then
