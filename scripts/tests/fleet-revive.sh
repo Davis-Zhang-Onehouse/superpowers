@@ -372,6 +372,10 @@ try:
     # Neighbour: a traceback (no route) is still reported by its exception line.
     got = refusal_line('Traceback (most recent call last):\n  File "x", line 1, in <module>\nValueError: boom\n')
     check('refusal_line: a traceback is reported by its exception line', got == 'ValueError: boom', got)
+    # RV-23: output that is ONLY a route says so, and prints the route once.
+    got = refusal_line('  clears who: the operator\n')
+    check('refusal_line: route-only output names the missing reason and prints the route once',
+          got == '(no reason line) (clears who: the operator)', got)
 finally:
     shutil.rmtree(home, ignore_errors=True)
 
