@@ -1,4 +1,5 @@
 from pathlib import Path
+import json
 import tempfile
 import unittest
 from types import SimpleNamespace
@@ -215,3 +216,30 @@ class MessagingTests(unittest.TestCase):
                 PaneObservation('idle'), PaneObservation('queued', 'hello'), PaneObservation('busy')])
             with self.assertRaisesRegex(FleetError, 'submitted.*NOT recorded'):
                 send(Path(directory), layer, SimpleNamespace(tmux='worker'), 'hello', recorder=boom)
+
+    def test_read_sends_refuses_bad_bytes_and_wrong_field_types_as_bad_input(self):
+        """RV-39 (an FB-74 member). `read_text` sat outside the per-line try, so a torn multibyte append
+        raised UnicodeDecodeError past `brief`'s `except BadInput`; and a line with the right keys but
+        `"sha256": 5` was returned and crashed `brief` at `sha256[:8]`."""
+        with tempfile.TemporaryDirectory() as directory:
+            instant = Path(directory) / 'inst'
+            good = SendRecord(at='2026-09-24T00:00:00Z', by='coord', todo_id='w-1', tmux='dt-w', runtime='claude',
+                              message_file='/tmp/m.txt', sha256='ab' * 32, chars=5, lines=1, head='hello…',
+                              outcome=SUBMITTED, confirmation=CONFIRMED_BY_DRAFT)
+            record_send(instant, good)
+            with sends_path(instant).open('ab') as handle:
+                handle.write(b'{"torn": "\xe2\x80')          # a multibyte sequence cut mid-append
+            with self.assertRaises(BadInput):
+                read_sends(instant)
+            sends_path(instant).unlink()
+            record_send(instant, good)
+            wrong = dict(good.__dict__, sha256=5)
+            with sends_path(instant).open('a') as handle:
+                handle.write(json.dumps(wrong) + '\n')
+            with self.assertRaises(BadInput):
+                read_sends(instant)
+            #: An unreadable log (a directory in its place) is refused the same way, never an OSError.
+            sends_path(instant).unlink()
+            sends_path(instant).mkdir()
+            with self.assertRaises(BadInput):
+                read_sends(instant)
