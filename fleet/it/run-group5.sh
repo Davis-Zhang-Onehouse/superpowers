@@ -32,8 +32,8 @@ WANTED=("$@")
 own=''
 for want in "${WANTED[@]}"; do
   case "$want" in
-    L) own="$own|L[0-9]+|ISOLATION-L-(enter|leave)" ;;
-    M) own="$own|M[0-9]+[a-z]?|M8-[a-z-]+|ISOLATION-M-(enter|leave)" ;;
+    L) own="$own|L[0-9]+(-coverage)?|ISOLATION-L-(enter|leave)" ;;
+    M) own="$own|M[0-9]+[a-z]?(-coverage)?|M8-[a-z-]+|ISOLATION-M-(enter|leave)" ;;
     N) own="$own|N[0-9]+[a-z]?|ISOLATION-N-(enter|leave)" ;;
   esac
 done
@@ -940,7 +940,7 @@ PY
     args="$(m_args "$v")"
     # shellcheck disable=SC2086
     it_zero_delta "M8-$v" fleet "$v" $args
-    [ "$(tail -1 "$RESULTS" | cut -f2)" = FAIL ] && m8_fails=$((m8_fails+1))
+    [ "$IT_LAST_VERDICT" = FAIL ] && m8_fails=$((m8_fails+1))   # the newest row is no longer the last line (FB-76)
   done
   [ "$m8_fails" = 0 ] \
     && it_pass M8 "$RESULTS" "each of the $(printf '%s\n' $RO_VERBS | wc -l | tr -d ' ') read-only verbs left a zero delta over FLEET_HOME+slots, asserted per verb (content AND mtime)" \

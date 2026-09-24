@@ -24,7 +24,7 @@ IT_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 . "$IT_ROOT/lib.sh"
 
 IT_FAILED=0
-it_own_cases 'E9-leak-[a-z]+'
+it_own_cases 'E9-leak-[a-z]+|ISOLATION-E9leak-(enter|leave)'
 
 # `it_section` rather than hand-rolled variables: it is what asserts the isolation contract on entry, and
 # §A's A2c audit found this runner (and run-m9-mutation.sh) skipping it entirely — running without ever

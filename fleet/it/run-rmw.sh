@@ -19,7 +19,7 @@ IT_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 . "$IT_ROOT/lib.sh"
 
 IT_FAILED=0
-it_own_cases 'RMW-(review|roadmap)'
+it_own_cases 'RMW-(review|roadmap)|ISOLATION-RMW-(enter|leave)'
 
 ITERS="${1:-10}"
 WRITERS=6

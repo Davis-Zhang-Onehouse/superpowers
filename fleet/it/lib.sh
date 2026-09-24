@@ -240,10 +240,53 @@ it_fresh_store() {
 # that captured stdout to inspect it would change what the suite measures in order to measure it.
 fleet() { "$IT_FLEET" "$@"; }
 
-it_pass() { printf '%s\tPASS\t%s\t%s\n' "$1" "${2:-}" "${3:-}" >> "$RESULTS"; printf 'PASS %s %s\n' "$1" "${3:-}"; }
+# THE ROW WRITER. One function, because the register's invariants live here and not in three copies:
+#
+#   1. OWNERSHIP IS CHECKED AT WRITE TIME (FB-37). A runner declares the ids it owns with `it_own_cases`,
+#      and that declaration used to be the only thing keeping RESULTS.tsv current — typed once, by hand,
+#      compared to nothing. §F's regex missed the `F9-zero-delta` and `F10-*` rows §F itself writes, so a
+#      targeted run left the stale twin standing and APPENDED a fresh one (nine duplicate ids after two
+#      runs: w2itharness evidence/01-red/fb75-76-sectionF-real-base.txt). A row this runner writes that
+#      its own regex does not claim is now a FAIL row of its own, `OWN-<case>`, and sets IT_FAILED — the
+#      stale twin cannot survive silently, because the run that would leave it goes red.
+#   2. A SECTION IS REWRITTEN IN PLACE (FB-76). `it_own_cases` remembers the line its first dropped row
+#      stood on, and the fresh rows are inserted there in order, so a targeted run changes the rows it
+#      re-measured and nothing else — instead of moving the whole section to the end of the file. A runner
+#      with no prior rows, or one writing before `it_own_cases`, appends as before.
+#   3. `IT_LAST_VERDICT` is the verdict just written — the reader that used `tail -1 "$RESULTS"` (M8) reads
+#      this, because the newest row is no longer the last line.
+#
+# Both 1 and 2 apply ONLY to the register `it_own_cases` was called on (`IT_OWN_FILE`). A negative control
+# repoints `RESULTS` at a private file inside a subshell (W1-11, A2) and asserts on that file's rows; an
+# insertion index or an ownership verdict carried over from the shared register would be about the wrong
+# file. There the writer appends, as it always did.
+#
+# The row goes through `ENVIRON`, never `awk -v`: `-v` processes escape sequences, so a note containing a
+# backslash would not arrive byte-exact. Staged next to the target and `mv`ed, as `it_own_cases` does.
+_it_row() {               # _it_row <case> <verdict> <evidence> <note>
+  local case="$1" verdict="$2" line tmp
+  line="$(printf '%s\t%s\t%s\t%s' "$1" "$2" "$3" "$4")"
+  IT_LAST_VERDICT="$verdict"
+  if [ -n "${IT_OWN_AT:-}" ] && [ "$RESULTS" = "${IT_OWN_FILE:-}" ] && [ -f "$RESULTS" ]; then
+    tmp="$(mktemp "$(dirname "$RESULTS")/.$(basename "$RESULTS").XXXXXX")"
+    IT_ROW="$line" awk -v at="$IT_OWN_AT" 'NR==at{print ENVIRON["IT_ROW"]; done=1} {print} END{if(!done) print ENVIRON["IT_ROW"]}' "$RESULTS" > "$tmp" \
+      && mv "$tmp" "$RESULTS"
+    IT_OWN_AT=$((IT_OWN_AT+1))
+  else
+    printf '%s\n' "$line" >> "$RESULTS"
+  fi
+  if [ -n "${IT_OWN_RE:-}" ] && [ "$RESULTS" = "${IT_OWN_FILE:-}" ] \
+     && ! printf '%s' "$case" | grep -qE "^(OWN-)?(${IT_OWN_RE})\$"; then
+    case "$case" in OWN-*) ;; *)
+      _it_row "OWN-$case" FAIL "" "this runner wrote the row '$case' but its it_own_cases regex '$IT_OWN_RE' does not claim it, so a stale copy of that row survives every re-run and the register stops being current state (FB-37). Widen the regex to cover every id this runner writes."
+      IT_FAILED=1 ;;
+    esac
+  fi
+}
+it_pass() { _it_row "$1" PASS "${2:-}" "${3:-}"; printf 'PASS %s %s\n' "$1" "${3:-}"; }
 # shellcheck disable=SC2034  # read by each runner's own exit gate (e.g. run-G.sh) after lib.sh is sourced in
-it_fail() { printf '%s\tFAIL\t%s\t%s\n' "$1" "${2:-}" "${3:-}" >> "$RESULTS"; printf 'FAIL %s %s\n' "$1" "${3:-}" >&2; IT_FAILED=1; }
-it_skip() { printf '%s\tSKIP\t%s\t%s\n' "$1" "${2:-}" "${3:-cannot run — reason must be stated}" >> "$RESULTS"
+it_fail() { _it_row "$1" FAIL "${2:-}" "${3:-}"; printf 'FAIL %s %s\n' "$1" "${3:-}" >&2; IT_FAILED=1; }
+it_skip() { _it_row "$1" SKIP "${2:-}" "${3:-cannot run — reason must be stated}"
             printf 'SKIP %s %s\n' "$1" "${3:-}" >&2; }
 
 # A runner OWNS its cases: it drops its own prior rows before writing new ones, so RESULTS.tsv is the
@@ -255,13 +298,23 @@ it_skip() { printf '%s\tSKIP\t%s\t%s\n' "$1" "${2:-}" "${3:-cannot run — reaso
 # cannot even be expressed in an append-only file: a NOT-RUN row has to be REPLACED, not annotated.
 # History is not lost — git holds it, which is the right home for a log.
 it_own_cases() {          # it_own_cases <extended regex matched against the whole case field>
-  local re="$1" tmp
+  local re="$1" tmp at
+  IT_OWN_RE="$re"
+  IT_OWN_FILE="$RESULTS"
+  IT_OWN_AT=""
   [ -f "$RESULTS" ] || return 0
   # Staged NEXT TO the target, not in $TMPDIR. §A's A8c audit found this was the harness's only write that
   # left the instant altogether — and `mv` across filesystems is not atomic, so a temp in /tmp also gave up
   # the atomicity this function depends on. Same directory means same filesystem means a real rename.
   tmp="$(mktemp "$(dirname "$RESULTS")/.$(basename "$RESULTS").XXXXXX")"
-  awk -F'\t' -v re="^($re)\$" 'NR==1 || $1 !~ re' "$RESULTS" > "$tmp" && mv "$tmp" "$RESULTS"
+  # The line the section's first row stood on, so `_it_row` can put the fresh rows back there (FB-76). Its
+  # own `OWN-<case>` rows from an earlier run are dropped too: they are this runner's, and a fixed regex
+  # makes them stale. The insertion point is a line number in the file AFTER the drop, which is the same
+  # number: nothing above the first owned row is removed.
+  at="$(awk -F'\t' -v re="^(OWN-)?($re)\$" 'NR>1 && $1 ~ re {print NR; exit}' "$RESULTS")"
+  awk -F'\t' -v re="^(OWN-)?($re)\$" 'NR==1 || $1 !~ re' "$RESULTS" > "$tmp" && mv "$tmp" "$RESULTS"
+  [ -n "$at" ] && IT_OWN_AT="$at"
+  return 0
 }
 
 it_expect_exit() {        # it_expect_exit <case> <want> <cmd...>
