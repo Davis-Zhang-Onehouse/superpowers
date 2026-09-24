@@ -259,6 +259,7 @@ NEAR_MISS = "near-miss-declaration"
 EXECUTED = "executed"
 NEVER_EXECUTED = "never-executed"
 OUTSIDE_SANDBOX = "outside-sandbox"
+UNVOUCHED = "unvouched"
 REAPED = "reaped"
 REAP_REFUSED = "reap-refused"
 #: A stale lease this base OWNS and could not give back. Distinct from `reap-refused`, which is somebody
@@ -5114,6 +5115,114 @@ def _redirects_to(command: str, token: str) -> bool:
     return bool(re.search(r"(?:>>?|\btee\b)\s*" + re.escape(token), str(command)))
 
 
+#: `B21`. What `verify` VOUCHES for. The denylist above answers "is this shape known to be outward"; it
+#: fails OPEN — `curl … | bash`, an interpreter one-liner that deletes a tree and `find / -delete` contain
+#: none of its fourteen substrings and were all handed to `bash -c`. So the decision to RUN a recipe is an
+#: allowlist, and the denylist is the first line that names a better reason when both would refuse.
+#:
+#: A head is vouched when it reads and prints and can neither spawn nor write beyond its arguments. Left out
+#: on purpose, each for a named reason: `awk` (`system()`), `sed` (GNU `e`, `-i`), `find` (`-exec`,
+#: `-delete`), `xargs`/`env`/`bash`/`sh`/`python*` (run anything), `curl`/`wget`/`ssh` (fetch or reach out),
+#: `tee` (writes). A recipe that needs one of them is the author's to run by hand; `verify` says so.
+_VOUCHED_HEADS = frozenset({
+    "echo", "printf", "cat", "ls", "head", "tail", "wc", "grep", "sort", "uniq", "cut", "tr", "diff",
+    "cmp", "sha256sum", "md5sum", "stat", "file", "basename", "dirname", "readlink", "realpath", "date",
+    "test", "[", "true", "false", "pwd", "cd", "jq",
+})
+#: `git` is vouched by SUBCOMMAND: these read the repository and print. `bundle` only as `bundle verify`.
+_VOUCHED_GIT = frozenset({
+    "log", "show", "diff", "status", "rev-parse", "rev-list", "ls-files", "ls-tree", "cat-file",
+    "describe", "shortlog", "blame", "grep", "name-rev", "merge-base",
+})
+_GIT_OPTIONS_WITH_VALUE = ("-C", "-c", "--git-dir", "--work-tree")
+#: Text `verify` cannot see through: what runs is decided at run time, by something it did not read.
+_OPAQUE_SHAPES = (("$(", "command substitution"), ("`", "a backtick substitution"),
+                  ("<(", "process substitution"), (">(", "process substitution"))
+_OPAQUE_HEADS = frozenset({"eval", "exec", "source", "."})
+_SEPARATORS = frozenset({"|", "||", "&&", ";", ";;", "&", "(", ")"})
+_ASSIGNMENT = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*=")
+
+
+def _segments(tokens: list) -> list:
+    """The simple commands of a token list, each as `[head, *args]` with a redirection's operator and
+    target removed. A redirection token is one made only of `<`, `>` and `&` that is not a separator;
+    the `2` of `2>` comes through shlex as its own token and is left in the argument list, where it
+    is harmless: only the head, and for `git`/`fleet` the first subcommand word, decide anything."""
+    out, current, skip = [], [], False
+    for token in tokens:
+        if skip:
+            skip = False
+            continue
+        if token in _SEPARATORS:
+            if current:
+                out.append(current)
+            current = []
+            continue
+        if token and set(token) <= set("<>&"):
+            skip = True
+            continue
+        current.append(token)
+    if current:
+        out.append(current)
+    return out
+
+
+def unvouched_reason(command: str) -> str:
+    """Why `verify` will not vouch for this recipe, or `""` when it will.
+
+    Pure. Refused BEFORE execution, like `outward_reason`, and for the same reason: the way to find out
+    what an unvouched shape does is to run it, which is the mistake this verb exists to remove.
+    """
+    text = str(command)
+    for shape, why in _OPAQUE_SHAPES:
+        if shape in text:
+            return f"it uses {why} ({shape!r}), which verify cannot see through"
+    lexer = shlex.shlex(text, posix=True, punctuation_chars=True)
+    lexer.whitespace_split = True
+    try:
+        tokens = list(lexer)
+    except ValueError as exc:
+        return f"it does not tokenise as a shell command ({exc})"
+    for segment in _segments(tokens):
+        words = [word for word in segment if not _ASSIGNMENT.match(word)]
+        if not words:
+            continue
+        head, args = words[0], words[1:]
+        if head in _OPAQUE_HEADS:
+            return f"it runs `{head}`, which executes text verify has not read"
+        if head.startswith("$"):
+            return f"its command is a variable ({head}), which verify cannot resolve"
+        if "/" in head:
+            return f"its command is a path ({head}); verify vouches for names on PATH only"
+        if head == "git":
+            sub, rest = "", list(args)
+            while rest:
+                word = rest.pop(0)
+                if word in _GIT_OPTIONS_WITH_VALUE:
+                    rest = rest[1:]
+                elif word.startswith("-"):
+                    continue
+                else:
+                    sub = word
+                    break
+            if sub in _VOUCHED_GIT or (sub == "bundle" and rest[:1] == ["verify"]):
+                continue
+            return (f"`git {sub or '(no subcommand)'}` is not a read-only subcommand verify vouches for "
+                    f"({', '.join(sorted(_VOUCHED_GIT))}, bundle verify)")
+        if head == "fleet":
+            verb = args[0] if args else ""
+            spec = VERBS.get(verb)
+            if spec is not None and spec.read_only:
+                continue
+            return (f"`fleet {verb or '(no verb)'}` is not a read-only verb by the verb table; verify vouches "
+                    f"for read-only fleet verbs only")
+        if head in _VOUCHED_HEADS:
+            continue
+        return (f"`{head}` is not a shape verify vouches for (read-and-print tools, read-only `git` "
+                f"subcommands, read-only `fleet` verbs)")
+    return ""
+
+
 def _sandbox_env(sandbox: Path) -> dict:
     return {"HOME": str(sandbox), "TMPDIR": str(sandbox), "PWD": str(sandbox),
             "PATH": os.environ.get("PATH", "/usr/bin:/bin"), "LC_ALL": "C"}
@@ -5134,6 +5243,18 @@ def _do_verify(ctx: Ctx, parsed: Parsed) -> int:
                         f"recipe {recipe.command!r} was not run, because finding out by running it is "
                         f"the mistake F-14 measured four times."),
                 clears_when="the recipe is rewritten to touch only paths the sandbox owns",
+                clears_who="the author of that document"))
+            continue
+        reason = unvouched_reason(recipe.command)
+        if reason:
+            rows.append(Row(
+                kind=UNVOUCHED, subject=recipe.command, severity=VIOLATION,
+                detail=(f"{recipe.source}:{recipe.line} — refused BEFORE execution: {reason}. `verify` "
+                        f"executes only what it can vouch for (B21: a denylist alone fails open, and three "
+                        f"shapes it did not name were measured reaching the runner)."),
+                clears_when=("the recipe is rewritten in vouched shapes — read-and-print tools, read-only "
+                             "`git` subcommands, read-only `fleet` verbs, no substitution — or its author "
+                             "runs it by hand and records the output under evidence/"),
                 clears_who="the author of that document"))
             continue
         code, out, err = ctx.runner(recipe.command, cwd=sandbox, env=_sandbox_env(sandbox))
@@ -6460,7 +6581,8 @@ VERBS = {spec.name: spec for spec in (
           checker=True, flags=(
         Flag("--instant", True, True, "the instant to check"),
     )),
-    _verb("verify", _do_verify, True, "EXECUTE every documented recipe in a sandbox (F-14)",
+    _verb("verify", _do_verify, True, "EXECUTE every documented recipe it can vouch for, in a sandbox; "
+                                      "the rest are reported unexecuted (F-14, B21)",
           checker=True, flags=(
         Flag("--instant", True, True, "the instant whose recipes are checked"),
     )),

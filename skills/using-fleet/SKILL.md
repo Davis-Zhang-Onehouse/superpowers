@@ -82,7 +82,7 @@ Read-only. Safe to run at any time; they change nothing.
 | `fleet pane-guard` | the pane contract every send and close branches on, as an exit code; keyed by `--id <todo>` or `--pane <session>` |
 | `fleet seed-check` | is every live worker running the briefing that was rendered FOR it? Exits `1` on any row that is not a pass — `foreign`, a collision, `unreadable` (the check could not run) or `not-delivered` (clear it with `fleet seed-delivered`) |
 | `fleet lint` | the layout matrix, the watched-source registry, the near-miss rule |
-| `fleet verify` | EXECUTE every documented recipe in a sandbox |
+| `fleet verify` | EXECUTE every documented recipe it can vouch for, in a sandbox; the rest are reported unexecuted |
 | `fleet selftest` | discover and run every suite; the tree state is always stamped |
 | `fleet release-status` | what is deployed right now, since when, by whom and why |
 | `fleet release-list` | every release, its state and its cut time |
