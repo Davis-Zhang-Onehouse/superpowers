@@ -21,8 +21,9 @@ FLEET_DESTINATIONS = ("FLEET_HOME", "FLEET_INSTANTS", "FLEET_ROOT", "FLEET_INSTA
                       "FLEET_TMUX_SOCKET",              # the product's `-L`: inherited, it names the operator's server
                       "IT_ASKED_NAMES", "IT_RESULTS",   # an IT section runs this suite (M13)
                       "TMUX", "TMUX_PANE")              # a bare `tmux` inside a pane follows $TMUX, not TMUX_TMPDIR
-#: One private tmux directory per test process: every tmux socket any subprocess of this module resolves —
-#: the "default" server and any -L one — lives here, never under /tmp/tmux-<uid> where the operator's do.
+#: One private tmux directory per test process for ordinary cases. ServerGuardian's missing-directory
+#: regression cases use a uniquely named server under tmux's real default directory to prove that a
+#: fallback cannot kill it; each registers an explicit kill-server cleanup for only that fixture.
 #: (`tempfile.gettempdir()` would be /tmp, which IS tmux's default — found in review.)
 PRIVATE_TMUX_DIR = tempfile.mkdtemp(prefix="it-harness-tmux-")
 atexit.register(shutil.rmtree, PRIVATE_TMUX_DIR, True)
@@ -438,7 +439,8 @@ class StdinImmunity(unittest.TestCase):
 
 class ServerGuardian(unittest.TestCase):
     """FB-73. A runner's EXIT trap cannot run when the shell tree is SIGKILLed (what TaskStop does); its
-    private server must still go away. Private socket only; the default server is never touched. RED:
+    private server must still go away. All socket names are unique to this process; the fallback cases
+    create and clean up only their own same-named server under the real default directory. RED:
     evidence/01-red/fb73-kill9-base.txt (the server still up 10 s after kill -9)."""
 
     def setUp(self):
@@ -537,6 +539,98 @@ class ServerGuardian(unittest.TestCase):
         self.start_runner()               # immediately: within the old guardian's window
         time.sleep(6)                      # past that window
         self.assertTrue(self.server_up(), "the predecessor's guardian killed the successor's server")
+
+    def _start_guarded_runner(self, armed_dir, runner_pid='"$$"'):
+        started = self.tmp / "started"
+        script = (f'. "{self.it}/lib.sh"\n'
+                  f'export TMUX_TMPDIR="{armed_dir}"\n'
+                  f'it_guard_server {runner_pid} "{self.socket}"\n'
+                  f'touch "{started}"\n'
+                  f'sleep 300 & echo $! > "{self.tmp}/sleep.pid"; wait\n')
+        (self.tmp / "runner.sh").write_text(script)
+        p = subprocess.Popen(["bash", str(self.tmp / "runner.sh")], cwd=self.tmp, env=self.env,
+                             stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+        self.addCleanup(lambda: (p.kill(), p.wait()))
+        self.addCleanup(lambda: subprocess.run(
+            ["bash", "-c", f'kill "$(cat "{self.tmp}/sleep.pid" 2>/dev/null)" 2>/dev/null; true'],
+            capture_output=True))
+        pidfile = self.it / ".guardians" / f"{self.socket}.pid"
+        def stop_our_guardian():
+            if pidfile.exists():
+                try:
+                    guardian_pid = int(pidfile.read_text().strip())
+                    argv = pathlib.Path(f"/proc/{guardian_pid}/cmdline").read_bytes()
+                    if f"it-guardian\0{self.socket}\0".encode() in argv:
+                        os.kill(guardian_pid, 15)
+                except (FileNotFoundError, ProcessLookupError, ValueError):
+                    pass
+        self.addCleanup(stop_our_guardian)
+        for _ in range(100):
+            if started.exists():
+                break
+            time.sleep(0.1)
+        self.assertTrue(started.exists(), "guardian was not armed")
+        return p
+
+    def _default_server_up(self):
+        env = dict(self.env)
+        env.pop("TMUX_TMPDIR")
+        return subprocess.run(["tmux", "-L", self.socket, "ls"], capture_output=True, env=env).returncode == 0
+
+    def _assert_missing_armed_dir_preserves_default_server(self, move):
+        armed = self.tmp / "armed"
+        armed.mkdir()
+        p = self._start_guarded_runner(armed)
+        if move:
+            armed.rename(self.tmp / "renamed")
+        else:
+            armed.rmdir()
+        env = dict(self.env)
+        env.pop("TMUX_TMPDIR")
+        self.addCleanup(subprocess.run, ["tmux", "-L", self.socket, "kill-server"],
+                        capture_output=True, env=env)
+        started = subprocess.run(["tmux", "-L", self.socket, "new-session", "-d", "-s", "victim"],
+                                 capture_output=True, env=env)
+        self.assertEqual(started.returncode, 0, started.stderr)
+        p.kill()
+        p.wait()
+        time.sleep(3)
+        self.assertTrue(self._default_server_up(), "guardian killed a same-named default-dir server")
+
+    def test_deleted_armed_directory_does_not_kill_default_server(self):
+        self._assert_missing_armed_dir_preserves_default_server(move=False)
+
+    def test_moved_armed_directory_does_not_kill_default_server(self):
+        self._assert_missing_armed_dir_preserves_default_server(move=True)
+
+    def test_foreign_namespace_pid_does_not_keep_guardian_alive(self):
+        """PID 1 stands in for a runner PID that resolves to a different, still-live process."""
+        p = self._start_guarded_runner(self.tmp, runner_pid="1")
+        started = subprocess.run(["tmux", "-L", self.socket, "new-session", "-d", "-s", "victim"],
+                                 capture_output=True, env=self.env)
+        self.assertEqual(started.returncode, 0, started.stderr)
+        p.kill()
+        p.wait()
+        for _ in range(100):
+            if not self.server_up():
+                break
+            time.sleep(0.1)
+        self.assertFalse(self.server_up(), "foreign PID kept the guardian waiting after runner exit")
+
+    def test_rearm_does_not_signal_a_pidfile_impostor(self):
+        """A numeric pid and matching argv in the pidfile cannot authorize a signal."""
+        pidfile = self.it / ".guardians" / f"{self.socket}.pid"
+        pidfile.parent.mkdir()
+        impostor = subprocess.Popen(["bash", "-c", f'exec -a "it-guardian {self.socket} impostor" sleep 300'],
+                                    stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL,
+                                    stderr=subprocess.DEVNULL)
+        self.addCleanup(lambda: (impostor.kill(), impostor.wait()))
+        pidfile.write_text(str(impostor.pid))
+        time.sleep(0.1)
+        runner = self._start_guarded_runner(self.tmp)
+        self.assertIsNone(impostor.poll(), "rearm signalled a process identified only by pidfile and argv")
+        runner.kill()
+        runner.wait()
 
 
 if __name__ == "__main__":

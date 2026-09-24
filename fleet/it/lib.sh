@@ -173,49 +173,63 @@ IT_ENV_UNNAMED=(-u FLEET_HOME -u FLEET_INSTANTS -u FLEET_ROOT -u FLEET_INSTANT -
 # THE GUARDIAN (FB-73). Every runner tears its private server down in an EXIT trap, and a shell that is
 # SIGKILLed — which is what stopping the wrapping shell tree does — runs no trap: `itfleet-M` was found
 # alive with 6 sessions and no owner. So the teardown is also owned by a process OUTSIDE the runner's
-# process group: a `setsid` shell that waits for THIS runner's pid to go (checked by its /proc start
-# time, never by name — a recycled pid must not keep the server alive) and then kills the server on this
-# section's socket, the one server this runner created. After a clean EXIT trap it finds nothing and exits.
+# process group: a `setsid` child that watches its kernel parent relationship, which remains meaningful
+# even when /proc shows host pids but the runner's $$ came from another pid namespace. A recycled pid
+# cannot become the guardian's parent. It then kills the server on this section's socket. After a clean
+# EXIT trap it finds nothing and exits.
 # Not a reap-by-name at entry: sockets are per uid, not per slot, so an `itfleet-F` found alive at start
 # may be a peer slot's live run (w2itharness ISSUES I-1).
 #
-# A PREDECESSOR guardian on the same socket is retired first (found in review): a second run of the same
-# section started inside the 2 s poll window after the first runner exited — a scripted back-to-back rerun —
-# would otherwise create the server the old guardian is about to kill. The guardian's pid is kept per socket
-# under $IT_ROOT/.guardians/, and only a pid that is still a guardian of this socket (its argv names it) is
-# signalled.
+# A PREDECESSOR guardian on the same socket must not kill a new runner's server. Each arm writes a new
+# generation token before the new runner can start that server; an older guardian checks the token before
+# killing. A pidfile and argv cannot establish process identity when /proc and kill use different pid
+# namespaces, so re-arming never signals the pid in the previous pidfile.
 #
 # THE SERVER IS FOUND WHERE THE RUNNER PUT IT (found in review): four runners export their own TMUX_TMPDIR
 # after it_section (`run-B/C/D.sh`, `run-group3.sh` for §E/§K), so a kill by `-L name` under the directory the
 # guardian inherited would miss the server they created and reach a same-named one elsewhere. The guardian
-# kills the socket `<dir>/tmux-<uid>/<name>` (as `TMUX_TMPDIR=<dir> tmux -L <name>`, the form run-A's A8a audit
-# recognises as private) with the directory current when it was ARMED,
-# and a runner that moves its servers re-arms it through `it_move_tmux_tmpdir` below (a process's
+# kills the socket `<dir>/tmux-<uid>/<name>` using an absolute `-S` path, with the directory current when
+# it was ARMED. `tmux -L` would mkdir `<dir>/tmux-<uid>` and can refuse a foreign-owned or other-writable
+# directory; if `<dir>` disappears it falls back to /tmp and can kill a different server of the same name.
+# A runner that moves its servers re-arms it through `it_move_tmux_tmpdir` below (a process's
 # /proc/<pid>/environ is its exec-time environment, so the guardian cannot follow an export by itself).
 #
-# /proc/<pid>/stat field 22 is starttime; the parenthesised comm (field 2) may contain spaces, so it is
-# stripped first and starttime is then field 20 of what remains, and the state is field 1 — a zombie (`Z`)
-# holds nothing and counts as gone. Verified on this box.
+# The first argument is retained for callers that pass $$, but deliberately never used as a process key.
+# The child gets its actual parent from getppid(), which is scoped to its own pid namespace.
 it_guard_server() {       # it_guard_server <runner-pid> <socket>
-  local pid="$1" sock="$2" start pidfile old
-  start="$(sed 's/^.*) //' "/proc/$pid/stat" 2>/dev/null | awk '{print $20}')"
-  [ -n "$start" ] || return 0
+  local sock="$2" pidfile tokenfile token
   pidfile="$IT_ROOT/.guardians/$sock.pid"        # a subdirectory of fleet/it: generated, git-ignored
   mkdir -p "$IT_ROOT/.guardians"
-  old="$(cat "$pidfile" 2>/dev/null)"
-  if [ -n "$old" ] && tr '\0' ' ' 2>/dev/null < "/proc/$old/cmdline" | grep -qF -- "it-guardian $sock "; then
-    kill "$old" 2>/dev/null
-  fi
-  setsid bash -c '
-    pid="$2"; sock="$3"; start="$4"; dir="$5"
-    alive() {
-      local f; f="$(sed "s/^.*) //" "/proc/$pid/stat" 2>/dev/null)" || return 1
-      [ -n "$f" ] && [ "$(printf "%s" "$f" | awk "{print \$20}")" = "$start" ] \
-        && [ "$(printf "%s" "$f" | awk "{print \$1}")" != Z ]
-    }
-    while alive; do sleep 2; done
-    TMUX_TMPDIR="$dir" tmux -L "$sock" kill-server 2>/dev/null
-  ' it-guardian "$sock" "$pid" "$sock" "$start" "${TMUX_TMPDIR:-/tmp}" </dev/null >/dev/null 2>&1 &
+  tokenfile="$IT_ROOT/.guardians/$sock.token"
+  token="$$-$BASHPID-$RANDOM-$RANDOM"
+  printf '%s\n' "$token" > "$tokenfile.tmp.$BASHPID" && mv -f "$tokenfile.tmp.$BASHPID" "$tokenfile"
+  setsid python3 -c '
+import os, subprocess, sys, time
+sock, directory, tokenfile, token = sys.argv[2:6]
+parent = os.getppid()
+if parent == 1:  # runner died before the guardian could identify it; fail safe
+    sys.exit(0)
+try:
+    armed = os.stat(directory)
+except OSError:
+    sys.exit(0)
+while os.getppid() == parent:
+    time.sleep(2)
+try:
+    current = os.stat(directory)
+except OSError:
+    sys.exit(0)
+if not os.path.isdir(directory) or (current.st_dev, current.st_ino) != (armed.st_dev, armed.st_ino):
+    sys.exit(0)
+try:
+    with open(tokenfile, encoding="ascii") as stream:
+        if stream.read().strip() != token:
+            sys.exit(0)
+except OSError:
+    sys.exit(0)
+subprocess.run(["tmux", "-S", os.path.join(directory, "tmux-" + str(os.getuid()), sock), "kill-server"],
+               stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+  ' it-guardian "$sock" "${TMUX_TMPDIR:-/tmp}" "$tokenfile" "$token" </dev/null >/dev/null 2>&1 &
   printf '%s\n' "$!" > "$pidfile"
   disown 2>/dev/null || true
 }
