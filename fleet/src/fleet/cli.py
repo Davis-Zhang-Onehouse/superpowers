@@ -2259,7 +2259,7 @@ def _choice_rows(choice) -> list:
 
 
 def _codex_git_dirs(ctx: Ctx, runtime, slot_path) -> tuple:
-    """FB-110. The slot's git dirs a codex worker must be able to write (`runtime_launch.git_writable_dirs`); none for
+    """FB-110. The git paths a codex worker in this slot must write to commit (`runtime_launch.git_writable_dirs`); none for
     claude, whose argv carries no sandbox."""
     return runtime_launch.git_writable_dirs(slot_path, ctx.git) if runtime == 'codex' and slot_path else ()
 

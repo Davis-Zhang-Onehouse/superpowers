@@ -79,9 +79,10 @@ retry does not consume capacity twice.
 
 **Codex WORKERS that fleet launches or revives run unattended (FB-110, operator decision D-45).** Their launch and
 resume argv always carry `-a never -s workspace-write -c sandbox_workspace_write.network_access=true
--c check_for_update_on_startup=false`, plus `--add-dir` for FLEET_HOME (the store), FLEET_INSTANTS and the git
-common dir of every repository at the slot root or one level below. That last one is how a linked-worktree slot
-commits: codex makes `<root>/.git` read-only. The slot itself is the sandbox cwd. No prompt ever appears. A command
+-c check_for_update_on_startup=false`, plus `--add-dir` for FLEET_HOME (the store), FLEET_INSTANTS and, for each
+linked worktree at the slot root or one level below, its common dir's `objects`, `refs` and `logs` plus its own
+per-worktree git dir. That is how a linked-worktree slot commits, branches and fetches, since codex makes `<root>/.git`
+read-only. It is never the whole common dir, whose `hooks/` and `config` would then be writable from the sandbox. The slot itself is the sandbox cwd. No prompt ever appears. A command
 the sandbox refuses fails back to the model (a write outside those roots reads `Read-only file system`). Never
 danger-full-access, and no knob loosens it; the argv outranks `CODEX_HOME/config.toml`, which fleet never edits.
 `dispatch`, `revive` (and its `--dry-run`) print a `codex_policy` row, and `brief`'s `runtime` row carries the same
