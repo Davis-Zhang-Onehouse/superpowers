@@ -191,22 +191,23 @@ def load_instruction(vis: Visibility) -> str:
 
 
 def _ours(link: Path) -> bool:
-    """A link this installer may repoint: it resolves to a superpowers skills tree. Anything else at that
-    path belongs to someone else, and is refused rather than overwritten."""
+    """A link this installer may repoint: one whose LITERAL target has the installer's own shape,
+    `<releases>/current/skills` or `<releases>/fleet-vN/skills` (a pin), and that either resolves to a superpowers skills
+    tree or no longer resolves at all (a pin whose release was pruned). Anything else at that path belongs to someone
+    else and is refused, even a live link to a superpowers DEV checkout that an operator made on purpose (RV-30)."""
     if not os.path.islink(link):
         return False
-    if os.path.isfile(link / 'using-superpowers' / 'SKILL.md'):
-        return True
-    #: A pin this installer's own shape left behind: `<releases>/fleet-vN/skills` or `<releases>/current/skills`
-    #: whose release was pruned. It dangles now, and it is still ours to repoint: postflight prints this install
-    #: for exactly that state.
-    if os.path.exists(link):
-        return False                                 # resolves, and not to a superpowers tree: someone else's
     try:
         target = Path(os.readlink(link))
     except OSError:
         return False
-    return target.name == 'skills' and (target.parent.name == 'current' or target.parent.name.startswith('fleet-v'))
+    shaped = target.name == 'skills' and (target.parent.name == 'current' or target.parent.name.startswith('fleet-v'))
+    if not shaped:
+        return False
+    if os.path.isfile(link / 'using-superpowers' / 'SKILL.md'):
+        return True
+    #: A dangling pin: its release was pruned, and postflight prints this install for exactly that state.
+    return not os.path.exists(link)
 
 
 def _emit(state: str, detail: str, stream=None) -> None:
