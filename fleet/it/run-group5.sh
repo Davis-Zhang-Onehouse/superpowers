@@ -936,10 +936,15 @@ PY
   # ---- M8 — zero delta per read-only verb --------------------------------------------------------
   RO_VERBS="$(python3 -c 'from fleet.cli import VERBS; print(" ".join(sorted(n for n,s in VERBS.items() if s.read_only)))')"
   m8_fails=0
+  # The code each read-only verb returns with m_args's arguments, MEASURED (w2itharness
+  # evidence/01-red/m8-zero-delta-rc.tsv): pane-guard 13 (unknown pane), seed-check 1 (a row that is not a
+  # pass), everything else 0. `it_zero_delta` judges the code (FB-38) — a verb that never ran its logic
+  # cannot show it writes nothing — so a non-zero code is named here rather than accepted.
+  declare -A M8_WANT=([pane-guard]=13 [seed-check]=1)
   for v in $RO_VERBS; do
     args="$(m_args "$v")"
     # shellcheck disable=SC2086
-    it_zero_delta "M8-$v" fleet "$v" $args
+    it_zero_delta --want "${M8_WANT[$v]:-0}" "M8-$v" fleet "$v" $args
     [ "$IT_LAST_VERDICT" = FAIL ] && m8_fails=$((m8_fails+1))   # the newest row is no longer the last line (FB-76)
   done
   [ "$m8_fails" = 0 ] \

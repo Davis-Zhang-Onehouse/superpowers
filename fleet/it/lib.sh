@@ -338,14 +338,28 @@ it_manifest() { find "$@" -mindepth 0 2>/dev/null | sort | while read -r f; do
                   printf '%s %s\n' "$(sha256sum "$f" 2>/dev/null | cut -d' ' -f1 || echo dir)" \
                                    "$(stat -c '%Y.%n' "$f" 2>/dev/null)"; done; }
 
-it_zero_delta() {         # it_zero_delta <case> <cmd...>   over FLEET_HOME + slots
+# `it_zero_delta [--want <rc>] <case> <cmd...>` over FLEET_HOME + slots.
+#
+# The exit code is JUDGED (FB-38). `F10-status` PASSed for as long as it existed on `fleet status --id
+# <folder name>` — exit 2, bad input, the verb never read anything — because a zero delta over a command
+# that did not run is vacuously true and this helper never looked. Default want is 0; a case that
+# deliberately interrogates a refusal names it (`--want 4` for a dry run at a full cap), so the code is
+# always an assertion and never an accident.
+it_zero_delta() {
+  local want=0
+  if [ "$1" = --want ]; then want="$2"; shift 2; fi
   local case="$1"; shift
-  local before after
+  local before after rc
   before="$(it_manifest "$FLEET_HOME" "$SLOTS")"
-  "$@" >/dev/null 2>&1
+  "$@" >/dev/null 2>&1; rc=$?
   after="$(it_manifest "$FLEET_HOME" "$SLOTS")"
-  if [ "$before" = "$after" ]; then it_pass "$case" "" "zero delta (content+mtime)"
-  else it_fail "$case" "" "delta: $(diff <(printf '%s' "$before") <(printf '%s' "$after") | head -3 | tr '\n' ' ')"; fi
+  if [ "$before" != "$after" ]; then
+    it_fail "$case" "" "delta: $(diff <(printf '%s' "$before") <(printf '%s' "$after") | head -3 | tr '\n' ' ')"
+  elif [ "$rc" != "$want" ]; then
+    it_fail "$case" "" "zero delta, but the command exited $rc (want $want) — a verb that did not run cannot show it writes nothing (FB-38)"
+  else
+    it_pass "$case" "" "zero delta (content+mtime), exit $rc"
+  fi
 }
 
 # The SESSION NAMES on the live (default) tmux server, sorted. Names rather than `tmux ls` lines, because
