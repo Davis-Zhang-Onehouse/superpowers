@@ -204,29 +204,49 @@ def _observe_codex(rows: list[str], visible: list[str]) -> PaneObservation:
                 return PaneObservation("unknown")
             content.append(_undim(_cells(row)))
     draft = "\n".join(content).strip() or None
-    return PaneObservation("busy" if _codex_spinner_above(rows, prompt) else "queued" if draft else "idle", draft)
+    spinner = _codex_spinner_above(rows, prompt)
+    if spinner == "unknown":
+        return PaneObservation("unknown", draft)
+    return PaneObservation("busy" if spinner == "busy" else "queued" if draft else "idle", draft)
 
 
 #: v23-k (FB-113). codex 0.156's live-turn row, measured (`it/fixtures/runtime/codex-busy-bgterm-0156.frame`,
 #: `codex-waiting-bgterm-0156.frame`): the spinner glyph, a status, the elapsed time and the interrupt hint in one paren
 #: group — `• Working (8s • esc to interrupt)`, `◦ Waiting for background terminal (35s • esc to interrupt)` — then, while
 #: an exec session is open (every tool turn: even a foreground command runs as one), ` · 1 background terminal running ·
-#: /ps to view…`, cut with `…` at the pane edge. Matched from the row START, with the elapsed time in the paren, so an
-#: agent's prose quoting the hint is not a spinner; the tail after the paren is allowed, never required.
-_CODEX_SPINNER = re.compile(r"[◦•] \S[^()]*\((?:\d+h )?(?:\d+m )?\d+s • esc to interrupt\)(?: · .*)?")
+#: /ps to view…`, cut with `…` at the pane edge. Matched from the row START and anchored on the ELAPSED TIME in the paren,
+#: so prose quoting the hint is not a spinner; the status before it is any text (codex writes reasoning titles there,
+#: parentheses included — RV-21), and the tail after it is allowed, never required.
+_CODEX_ELAPSED = r"\((?:\d+h )?(?:\d+m )?\d+s • esc to interrupt\)"
+_CODEX_SPINNER = re.compile(r"[◦•] \S.*" + _CODEX_ELAPSED + r"(?: · .*)?")
+#: RV-21. fleet starts panes 80 columns wide (`new-session -d`, no `-x`), and codex cuts the row with `…` at the edge. A long
+#: status pushes the cut into the paren group: a paren that opens on a digit and never closes before the `…` is the elapsed
+#: time cut short, and is still a turn.
+_CODEX_SPINNER_CUT = re.compile(r"[◦•] \S.*\(\d[^()]*…")
 
 
-def _codex_spinner_above(rows: list[str], prompt: int) -> bool:
-    """Whether the current input sits under codex's live-turn row. Walks UP from the caret over blank rows and INDENTED
-    detail rows — `  └ sleep 41` under "Waiting for background terminal" is one — and asks only of the first other row.
-    Any unindented row (the agent's answer, a finished `• Ran …`) ends the walk, so a spinner in scrollback is not a turn.
-    Bounded by the input window, like every other codex predicate."""
+def _codex_spinner_above(rows: list[str], prompt: int) -> Optional[str]:
+    """`"busy"` when the current input sits under codex's live-turn row, `"unknown"` when the row above it is cut before
+    anything could prove or rule out a turn, else None. Walks UP from the caret over blank rows and INDENTED detail rows —
+    `  └ sleep 41` under "Waiting for background terminal" is one — and asks only of the first other row. Any other
+    unindented row (the agent's answer, a finished `• Ran …`) ends the walk, so a spinner in scrollback is not a turn.
+    Bounded by the input window, like every other codex predicate.
+
+    The `"unknown"` answer is the fail-closed one (RV-21): a glyph row cut with `…` before any elapsed time may be a live
+    turn whose status was too long for the pane, and reading it idle would be `0 safe` for a busy worker. In every 0.156
+    frame captured for this change (the §OR frames, the pilot's) codex WRAPS an unindented transcript row and cuts only
+    indented detail rows with `…`, so a finished answer is not expected to end this way; if one does, the cost is a 14."""
     for index in range(prompt - 1, max(-1, prompt - 1 - PROMPT_TAIL_LINES), -1):
         text = plain(rows[index])
         if not text.strip() or text.startswith("  "):
             continue
-        return bool(_CODEX_SPINNER.fullmatch(text.strip()))
-    return False
+        row = text.strip()
+        if _CODEX_SPINNER.fullmatch(row) or _CODEX_SPINNER_CUT.fullmatch(row):
+            return "busy"
+        if row.startswith(("• ", "◦ ")) and row.endswith("…"):
+            return "unknown"
+        return None
+    return None
 
 
 def _codex_caret_row(row: str) -> bool:
