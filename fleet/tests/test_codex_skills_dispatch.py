@@ -127,6 +127,20 @@ class CodexSkillsDispatchTests(unittest.TestCase):
         self.assertIn('systematic-debugging', rows[0])
         self.assertIn('fleet-codex-skills.sh', text)
 
+    def test_brief_on_a_codex_record_with_no_config_dir_never_probes_the_cwd(self):
+        """Final review minor 4: `Record.runtime_config_dir` defaults to "", and `visible_skills("")` would scan ./skills."""
+        asked = []
+        self.f.codex_skills = lambda home: asked.append(home) or missing(home)
+        path = self.f.worker('coder', slot='ws1', live=False)
+        record = self.f.store.read(self.f.ids['coder'])
+        record.runtime, record.runtime_config_dir = 'codex', ''
+        self.f.store.write(record)
+        code, out, err = self.f.run(['brief', '--instant', str(path)])
+        rows = [line for line in out.splitlines() if line.startswith('skills')]
+        self.assertEqual(asked, [])
+        self.assertEqual(len(rows), 1, out)
+        self.assertIn('no CODEX_HOME', rows[0])
+
     def test_brief_says_nothing_about_codex_skills_to_a_claude_worker(self):
         self.f.codex_skills = refuses_to_be_asked
         code, rows, text = self.brief_rows('claude')

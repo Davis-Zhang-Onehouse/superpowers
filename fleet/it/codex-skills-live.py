@@ -13,6 +13,9 @@ installer's one link, through a releases area OUTSIDE the checkout whose `curren
           an RCA written before the fix, naming the skill's Phase 1, a passing test, and fleet's exit codes 3 and 4
           as the skill states them (facts a model does not know without the skill).
 
+The credential is a COPY: if codex refreshes it inside the private home, the refresh token of the source config may
+rotate (the same exposure RTC and SEND have). The copy is deleted at exit either way.
+
 `CXS_INSTALL=0` skips steps 0 and 1: that is the RED capture, run against the BASE fleet (`CXS_FLEET_REPO`), where
 the same probe finds no skills. In that mode nothing is asserted; `verdict.json` records what was observed.
 
@@ -215,6 +218,32 @@ def tool_calls(rows):
     return [(calls[k], outputs.get(k, '')) for k in calls]
 
 
+def _writes(name):
+    """Patterns that WRITE `name` itself, never a file whose name merely contains it (test_calc.py is not calc.py,
+    and `python3 test_calc.py > log` writes the log)."""
+    base = r'[\w./~-]*(?<![\w-])' + re.escape(name) + r'(?![\w.-])'
+    return [re.compile(r'\*\*\* (?:Add|Update) File: ' + base),
+            re.compile(r'(?:>>?|\btee\s+(?:-a\s+)?)\s*' + base),
+            re.compile(r'\bsed\s+-i\b[^|;&]*\s' + base)]
+
+
+def first_write(rows, name):
+    """The transcript position of the first change to `name`: a FileChange item naming it, or a tool call that writes
+    it. Taken from the transcript, not from file mtimes, so a worker that writes rca.md first and amends it after the
+    fix still reads as RCA-first (final review minor 1)."""
+    patterns = _writes(name)
+    for index, row in enumerate(rows):
+        payload = row.get('payload') or {}
+        item = payload.get('item') or {}
+        if item.get('type') == 'FileChange' and any(str(path).endswith('/' + name) for path in (item.get('changes') or {})):
+            return index
+        if row.get('type') == 'response_item' and str(payload.get('type', '')).endswith('_call'):
+            text = str(payload.get('input') or payload.get('arguments') or '')
+            if any(pattern.search(text) for pattern in patterns):
+                return index
+    return None
+
+
 def read_skill(calls, skill, marker):
     """The call that opened `<skill>/SKILL.md` AND whose output carries text only that file has."""
     hits = [(c, o) for c, o in calls if f'{skill}/SKILL.md' in c]
@@ -300,10 +329,13 @@ verdict.update(
     codex_tools_opened=any('codex-tools.md' in c for c, _ in calls),
     skill_not_found=(slot / 'SKILL-NOT-FOUND.md').read_text() if (slot / 'SKILL-NOT-FOUND.md').exists() else None,
     rca=rca.read_text() if rca.exists() else None,
-    rca_before_fix=rca.exists() and rca.stat().st_mtime_ns <= (slot / 'calc.py').stat().st_mtime_ns,
+    rca_first_write=first_write(rows, 'rca.md'), calc_first_write=first_write(rows, 'calc.py'),
     calc=(slot / 'calc.py').read_text(), test_exit=test.returncode,
     exit_codes=codes.read_text() if codes.exists() else None,
     replies=said(rows)[-3:])
+verdict['rca_before_fix'] = (verdict['rca_first_write'] is not None
+                             and (verdict['calc_first_write'] is None
+                                  or verdict['rca_first_write'] < verdict['calc_first_write']))
 verdict['slot'] = str(slot)
 for name in ('rca.md', 'exit-codes.md', 'calc.py', 'SKILL-NOT-FOUND.md'):
     if (slot / name).exists():
@@ -320,7 +352,8 @@ if install:
         (verdict['using_fleet']['content_seen'], 'using-fleet/SKILL.md was not read'),
         (verdict['systematic_debugging']['via_link'] and verdict['using_fleet']['via_link'],
          'a skill was read from somewhere other than the CODEX_HOME link to the deployed release'),
-        (verdict['rca'] is not None and 'phase 1' in verdict['rca'].lower(), 'rca.md missing or names no Phase 1'),
+        (verdict['rca'] is not None and re.search(r'phase\s*(1|one)|root cause investigation', verdict['rca'].lower()),
+         'rca.md missing or names no Phase 1 / root cause investigation'),
         (verdict['rca_before_fix'], 'rca.md was written after calc.py changed'),
         (verdict['test_exit'] == 0, 'the test still fails'),
         ('no capacity' in lowered and 'admission' in lowered, 'exit-codes.md does not state the skill\'s 3 and 4'),

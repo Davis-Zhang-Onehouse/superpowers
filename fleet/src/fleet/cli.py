@@ -4892,7 +4892,15 @@ def _do_brief(ctx: Ctx, parsed: Parsed) -> int:
                                 f"{own.runtime_model or '(none — the CLI configured default)'} "
                                 f"(record {own.todo_id}; `fleet revive` relaunches exactly this)")))
         #: FB-111. A codex worker reads this row before it loads its first skill, so it is where it learns how.
-        if own.runtime == 'codex':
+        if own.runtime == 'codex' and not own.runtime_config_dir:
+            #: `visible_skills("")` would scan the caller's cwd: a false answer either way.
+            rows.append(Row(kind="skills", subject=child.name, severity=VIOLATION,
+                            detail="this codex record names no CODEX_HOME, so what its worker can see of the "
+                                   "superpowers skills cannot be determined",
+                            clears_when="the worker is revived or re-dispatched through a fleet that records its "
+                                        "runtime configuration directory",
+                            clears_who="the coordinator"))
+        elif own.runtime == 'codex':
             skills = (ctx.codex_skills or codex_skills_mod.visible_skills)(own.runtime_config_dir)
             if skills.ok:
                 rows.append(Row(kind="skills", subject=child.name, severity=INFO,

@@ -8,6 +8,7 @@ import contextlib
 import io
 import os
 from pathlib import Path
+import shutil
 import tempfile
 import unittest
 
@@ -154,6 +155,31 @@ class CodexSkillsTests(unittest.TestCase):
         self.assertEqual(_tree(self.home), before)
         self.assertEqual(self.main(*self.args())[0], 0)
         self.assertEqual(os.readlink(self.link), str(self.rel / 'current' / 'skills'))
+
+    def test_a_pin_left_dangling_by_a_pruned_release_is_repointed_not_refused(self):
+        """Final review minor 2: after `release.prune` removes the release a pin named, the pin dangles. It is still
+        this installer's own link (`<releases>/fleet-vN/skills`), so the install postflight prints must repoint it."""
+        self.link.parent.mkdir(parents=True)
+        self.link.symlink_to(self.rel / 'fleet-v0' / 'skills')     # a release that no longer exists
+        code, out, err = self.main(*self.args())
+        self.assertEqual(code, 0, out + err)
+        self.assertEqual(os.readlink(self.link), str(self.rel / 'current' / 'skills'))
+
+    def test_dry_run_fails_when_the_deployed_release_lacks_a_core_skill(self):
+        """Final review minor 5: --dry-run exits 0 only when the real run would succeed."""
+        shutil.rmtree(self.rel / 'fleet-v1' / 'skills' / 'using-fleet')
+        code, out, err = self.main(*self.args('--dry-run'))
+        self.assertEqual(code, 1, out + err)
+        self.assertIn('using-fleet', out + err)
+        self.assertEqual(self.main(*self.args())[0], 1)
+
+    def test_the_load_instruction_for_a_home_that_sees_nothing_says_not_to_improvise(self):
+        """Final review minor 3: an --override launch must not tell the worker to read a skill it cannot see."""
+        text = codex_skills.load_instruction(codex_skills.visible_skills(self.home))
+        self.assertNotIn('Read superpowers:using-superpowers first', text)
+        self.assertNotIn('codex-tools.md', text)
+        self.assertIn('not installed', text)
+        self.assertIn('improvise', text)
 
     # 6
     def test_a_real_directory_in_the_way_is_refused_and_left_untouched(self):
