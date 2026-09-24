@@ -1,0 +1,26 @@
+#!/usr/bin/env bash
+# it-fleet — the IT harness's ONLY route to the product, as an EXECUTABLE.
+#
+# `lib.sh`'s `fleet()` used to be the only writer of `$IT_ASKED_NAMES`, the register that lets the isolation
+# classifier charge an instant that appears in a live tree to the section that asked for it. It was a bash
+# FUNCTION — and a function cannot be the argument of `timeout`, `env -u …` or `exec`, which is what 30 of
+# the harness's 36 direct `python3 -m fleet.cli` sites were doing (B18). Every one of those calls escaped the
+# register, and a stray they minted was classified as "the operator using their own box" (NOTE), never FAIL.
+#
+# Same contract as the function had: argv is read, both streams and the exit code pass through untouched
+# (`exec`, so the product IS this process — `timeout` signals it directly). With no register in the
+# environment it records nothing, which is the state before `it_section`.
+set -u
+if [ -n "${IT_ASKED_NAMES:-}" ]; then
+  _prev=""
+  for _a in "$@"; do
+    case "$_prev" in --name|--title) printf '%s\n' "$_a" >> "$IT_ASKED_NAMES" ;; esac
+    _prev="$_a"
+  done
+fi
+# PYTHONPATH is normally exported by lib.sh; a caller that stripped the environment gets the package this
+# wrapper sits beside, never the caller's cwd (FI-34's rule for launchers).
+if [ -z "${PYTHONPATH:-}" ]; then
+  PYTHONPATH="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)/src"; export PYTHONPATH
+fi
+exec python3 -m fleet.cli "$@"
