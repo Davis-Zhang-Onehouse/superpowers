@@ -147,6 +147,7 @@ send_teardown() {     # close + harvest the worker; never leaves the pane behind
   #: RV-43 / FB-102: the private codex home holds a COPY of a credential; it must not outlive the run in a
   #: slot that will be re-leased.
   case "${CODEX_HOME:-}" in */codex-home) rm -rf "$CODEX_HOME" ;; esac
+  case "${SEND_RELEASES:-}" in */tmp.*) rm -rf "$SEND_RELEASES" ;; esac
 }
 record_check() {      # record_check <child instant> <expected count> <outcome regex> [confirmations, comma-joined, one per row]
   #: RV-21. The CONFIRMATION per row is asserted, not only the outcome: a green SEND-2 that does not say
@@ -297,6 +298,15 @@ cp "$SEND_CODEX_HOME/auth.json" "$CODEX_HOME/auth.json"; chmod 600 "$CODEX_HOME/
 TRUST_KEY="$(git -C "$SLOT" rev-parse --show-toplevel 2>/dev/null || echo "$SLOT")"
 { [ -f "$SEND_CODEX_HOME/config.toml" ] && grep -E '^(approval_policy|sandbox_mode|model_reasoning_effort|model) *=' "$SEND_CODEX_HOME/config.toml"
   printf '\n[projects."%s"]\ntrust_level = "trusted"\n' "$TRUST_KEY"; } > "$CODEX_HOME/config.toml"
+#: FB-111: a codex dispatch is refused when CODEX_HOME cannot see the superpowers skills. Link them in the way a root
+#: does, through a releases area OUTSIDE the checkout (a `current -> checkout` link inside it is an rglob cycle).
+SEND_RELEASES="$(mktemp -d)"
+ln -s "$(cd "$IT_ROOT/../.." && pwd)" "$SEND_RELEASES/current"
+if ! bash "$IT_ROOT/../../scripts/fleet-codex-skills.sh" --codex-home "$CODEX_HOME" --releases "$SEND_RELEASES" \
+     > "$OUT/codex-skills.txt" 2>&1; then
+  it_fail SENDC-1 "fleet/it/SENDC/out/codex-skills.txt" "SETUP, not a verdict: the codex skills link could not be installed"
+  it_assert_isolation SENDC-leave; exit 1
+fi
 export FLEET_CODEX_BIN="$REAL_CODEX"
 if ! send_dispatch sendCodexFixture; then
   it_fail SENDC-1 "fleet/it/SENDC/out/dispatch.out" "the real codex dispatch failed: $(head -3 "$OUT/dispatch.out" | tr '\n' ' ')"
