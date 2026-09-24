@@ -22,7 +22,9 @@ from unittest import mock
 from fleet import EXIT_BAD_INPUT, EXIT_CODES, EXIT_NO_CAPACITY, EXIT_OK, EXIT_REFUSED
 from fleet import cli, seedcheck
 from fleet.errors import BadInput, Refused
-from tests.test_cli import Fleet
+from fleet.errors import FleetError
+from fleet.roadmap import Milestone, Roadmap
+from tests.test_cli import CliCase, Fleet
 
 #: Written as the NUMBER, so a base without the constant fails on the behaviour rather than on an import.
 NOT_STARTED = 5
@@ -167,6 +169,29 @@ class TestAFailureAfterTheClaimIsNotStarted(DispatchCase):
                                          "--title", "says what", "--cap", "9"])
         self.assertEqual(code, NOT_STARTED, err)
         self.assertEqual([line.split()[0] for line in out.splitlines()][:2], ["error", "step"], out)
+
+
+class TestALostMilestoneClaimNamesTheRecordAsItIs(CliCase):
+    """RV-C2. The claim is the LAST step, after `launch record` stamped `launched_at` — so a lost claim race
+    rolls back a record that reads launched, not PENDING-LAUNCH. The row must say what the store holds."""
+
+    def test_the_record_row_reads_launched_after_a_lost_claim(self):
+        fleet = self.loaded()
+        coordinator = fleet.paths["readyWorker"]
+        Roadmap(coordinator).add(Milestone(id="M9", title="carried work", status="ready", deps=[], evidence=[]))
+
+        def lose(self_, milestone_id, owner):
+            raise FleetError("milestone 'M9' was claimed by another instant first")
+        with mock.patch.object(Roadmap, "claim", lose):
+            code, out, err = fleet.run(["dispatch", "--porcelain", "--profile", str(fleet.profile("worker")),
+                                        "--title", "claim race", "--base", "00000000", "--optype", "append",
+                                        "--cap", "99", "--from", str(coordinator), "--milestone", "M9"])
+        self.assertEqual(code, NOT_STARTED, err)
+        rows = kv(out)
+        self.assertEqual(rows.get("step"), "milestone claim", out)
+        self.assertEqual(rows.get("left_record"), "launched", out)
+        self.assertNotIn("PENDING-LAUNCH", rows.get("remedy", ""), out)
+        self.assertNotIn("PENDING-LAUNCH", err, "stderr must not call a launched record pending either")
 
 
 class TestANonStartBeforeTheClaimKeepsItsCodeAndSaysSo(DispatchCase):

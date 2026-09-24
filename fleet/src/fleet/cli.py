@@ -2221,9 +2221,14 @@ def _do_dispatch(ctx: Ctx, parsed: Parsed) -> int:
             Roadmap(coordinator).claim(milestone_id, str(child))
             claimed_milestone = milestone_id
     except Exception as launch_error:
-        stranded = any(r.todo_id == todo_id for r in ctx.store.all())
+        stored = next((r for r in ctx.store.all() if r.todo_id == todo_id), None)
+        stranded = stored is not None
+        #: RV-C2. What the store HOLDS: past `launch record` the record carries `launched_at`, so a lost claim
+        #: race rolls back a record that reads launched — calling it PENDING-LAUNCH would be a false row.
+        record_state = "none" if stored is None else ("launched" if stored.launched_at else "pending-launch")
+        record_reads = "LAUNCHED (its worker was rolled back)" if record_state == "launched" else "PENDING-LAUNCH"
         stranded_note = (f" A RECORD for todo {todo_id!r} was already written and is left in place: it reads "
-                         f"PENDING-LAUNCH and counts against the WIP cap until it is resolved. Clear it with "
+                         f"{record_reads} and counts against the WIP cap until it is resolved. Clear it with "
                          f"`fleet abort --instant {child} --reason <why>`." if stranded else "")
         def not_started(lease_state, lease_why):
             """V23-B. The answer, whatever surfaced: exit 5 and rows naming the step and what was left —
@@ -2237,13 +2242,13 @@ def _do_dispatch(ctx: Ctx, parsed: Parsed) -> int:
                 #: as "it started" or cds into `instant` must not match a non-start. The prose is `remedy`.
                 rows=[("step", step), ("left_todo_id", todo_id),
                       ("left_instant", str(child) if child.exists() else "(none)"),
-                      ("left_record", "pending-launch" if stranded else "none"),
+                      ("left_record", record_state),
                       ("left_lease", lease_state),
                       ("remedy", " ".join(filter(None, (
                           f"The lease on {lease.slot!r} {lease_why}.",
                           f"{child} is left in place (no verb deletes outward state)." if child.exists()
                           else "",
-                          f"Record {todo_id!r} reads PENDING-LAUNCH and counts against the WIP cap until "
+                          f"Record {todo_id!r} reads {record_reads} and counts against the WIP cap until "
                           f"`fleet abort --instant {child} --reason <why>` resolves it." if stranded else "",
                           "Re-run once the cause in the error row is cleared.")))),
                       ],
