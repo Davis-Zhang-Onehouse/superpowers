@@ -153,6 +153,30 @@ class VerbsJudgeThePaneByItsOwningAgent(unittest.TestCase):
         code, out, err = self.f.run(['close', '--id', record.todo_id])
         self.assertIn('mid-turn', out + err, 'close must refuse a busy codex pane as mid-turn, not as a mismatch')
 
+    def refused_as_mid_turn(self, record, argv):
+        code, out, err = self.f.run(argv)
+        self.assertNotEqual(code, 0, out + err)
+        self.assertIn('mid-turn', out + err)
+        self.assertNotIn('runtime differs', out + err)
+        self.assertEqual(self.f.killed, [], 'the busy pane was killed on a refusing path')
+
+    def test_abort_refuses_a_busy_codex_worker_as_mid_turn_not_as_a_mismatch(self):
+        """RV-17. `abort` kills the pane too and asks the same `_pane_refusal` as `close` (FB-88)."""
+        record = self.worker('codex', codex_pane, (FRAMES / 'codex-busy-bgterm-0156.frame').read_text())
+        self.refused_as_mid_turn(record, ['abort', '--instant', str(self.f.paths['coder']), '--reason', 'x'])
+
+    def test_harvest_refuses_a_busy_codex_worker_as_mid_turn_not_as_a_mismatch(self):
+        """RV-17. `harvest --id` of a completed, reviewed worker whose pane is still busy: the same `_pane_refusal`."""
+        path = self.f.worker('done', state='complete', slot='ws1', live=False)
+        self.f.reviewed(path)
+        record = self.f.store.read(self.f.ids['done'])
+        record.runtime = 'codex'
+        self.f.store.write(record)
+        self.f.procs.extend(fake_inventory(self.proc, codex_pane(200, path), {200: record.tmux}))
+        self.f.panes[record.tmux] = (FRAMES / 'codex-busy-bgterm-0156.frame').read_text()
+        self.f.tmux_live.add(record.tmux)
+        self.refused_as_mid_turn(record, ['harvest', '--id', record.todo_id])
+
     def test_an_idle_codex_worker_running_a_claude_child_is_safe_to_message(self):
         record = self.worker('codex', codex_pane, (FRAMES / 'codex-idle.frame').read_text())
         self.assertEqual(self.f.run(['pane-guard', '--id', record.todo_id])[0], 0)
