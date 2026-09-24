@@ -7264,3 +7264,14 @@ class TestSendKeepsARecord(CliCase):
                 self.assertEqual(1, len(messages), out)
                 self.assertIn("\tviolation\t", messages[0])
                 self.assertIn("could not be read", messages[0])
+
+    def test_dry_run_and_the_real_send_emit_the_same_row_set(self):
+        """RV-45 (RV-24's shape one row along): a porcelain consumer keyed on the row set must see one shape."""
+        fleet = self.loaded()
+        sent = self.message(fleet)
+        argv = ["send", "--porcelain", "--id", fleet.ids["closable"], "--message-file", str(sent)]
+        _, dry, _ = fleet.run([argv[0], "--dry-run", *argv[1:]])
+        _, real, _ = fleet.run(argv)
+        self.assertEqual([line.split("\t", 1)[0] for line in dry.splitlines()],
+                         [line.split("\t", 1)[0] for line in real.splitlines()])
+        self.assertEqual("not observed (dry-run)", dict(l.split("\t", 1) for l in dry.splitlines())["confirmation"])

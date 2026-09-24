@@ -1638,7 +1638,9 @@ def _do_send(ctx: Ctx, parsed: Parsed) -> int:
     if ctx.dry_run:
         if layer.observe(record.tmux).state != 'idle':
             raise messaging.not_idle(record)
-        _emit(ctx, 'send', [('todo_id', record.todo_id), ('delivery', 'would-submit'), ('sha256', sha),
+        #: RV-45 (RV-24's shape, one row along): the dry-run and the real call emit the SAME row set.
+        _emit(ctx, 'send', [('todo_id', record.todo_id), ('delivery', 'would-submit'),
+                            ('confirmation', 'not observed (dry-run)'), ('sha256', sha),
                             ('record', 'dry-run: nothing recorded')])
         return EXIT_OK
     written = {}
