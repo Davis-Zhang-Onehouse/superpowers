@@ -1,5 +1,13 @@
 # fleet — changelog
 
+## fleet/v0.6.10 — 2026-09-24T21:02:21Z
+Cut from c20d00b on `stack/0.6.9` (upstream base snapshot/2026-09-22-152849). 1 commit(s) since fleet/v0.6.9.
+
+Every release ships the whole repository — all skills, `commands/`, `hooks/` and the plugin manifest, not only `fleet/`.
+Payload: fleet (1 file).
+
+- c20d00b fleet/it: the FB-73 guardian kills its server as TMUX_TMPDIR=<dir> tmux -L <sock> (A8a, 0.6.9 gate RED)
+
 ## fleet/v0.6.9 — 2026-09-24T19:34:40Z
 Cut from 66acc21 on `stack/0.6.9` (upstream base snapshot/2026-09-22-152849). 83 commit(s) since fleet/v0.6.8.
 
