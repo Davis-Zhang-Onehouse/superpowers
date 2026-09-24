@@ -5,6 +5,13 @@
 # cannot prove it touched nothing does not get to report a pass. "Absence is never success" applies to the
 # harness itself — a section that skips silently is a false pass, so `it_skip` writes a row saying so.
 set -uo pipefail
+# NO RUNNER READS STDIN, so none inherits one (FB-99). `run-J.sh`'s J5 ended a `$( … <<'PY' … PY` substitution
+# with a bare `sort)"` on its own line — a separate command reading the RUNNER's stdin — and under a
+# harness whose stdin is an open pipe it blocked forever (teardown-safety OI-4: `sort` as the runner's
+# only child). The site is fixed, and this line makes the class harmless: a non-interactive shell that
+# sources this file gets /dev/null as stdin. An INTERACTIVE shell keeps its own — `it_rebaseline_live_tmux`
+# is used by sourcing this file into an operator's shell (RV-25), and closing that stdin ends the shell.
+case "$-" in *i*) ;; *) exec </dev/null ;; esac
 
 IT_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 # The fleet package root — the directory holding src/ and tests/. One level up from `it/`, where the old

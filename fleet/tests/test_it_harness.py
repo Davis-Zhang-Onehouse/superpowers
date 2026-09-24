@@ -247,5 +247,41 @@ class ZeroDelta(unittest.TestCase):
         self.assertIn("delta", r[3])
 
 
+class StdinImmunity(unittest.TestCase):
+    """FB-99. A runner sourcing lib.sh must never block on its stdin: a bare command after a heredoc read the
+    harness's pipe forever (J5). RED: evidence/01-red/fb99-stdin-base.txt (rc 124 under a pipe)."""
+
+    def setUp(self):
+        self.tmp = pathlib.Path(tempfile.mkdtemp(prefix="it-harness-"))
+        self.addCleanup(shutil.rmtree, self.tmp, True)
+        self.it = harness_copy(self.tmp)
+        (self.tmp / "inner.sh").write_text(
+            f'. "{self.it}/lib.sh"\nx="$(python3 - <<\'PY\'\nprint("b")\nprint("a")\nPY\nsort)"\n'
+            'echo "x=[$x] stdin=$(readlink /proc/$$/fd/0)"\n')
+
+    def _with_open_pipe(self, argv):
+        r, w = os.pipe()
+        try:
+            return subprocess.run(argv, cwd=self.tmp, env=clean_env(), stdin=r, capture_output=True,
+                                  text=True, timeout=15)
+        finally:
+            os.close(r)
+            os.close(w)
+
+    def test_j5_shape_returns_with_an_open_pipe_on_stdin(self):
+        out = self._with_open_pipe(["bash", str(self.tmp / "inner.sh")])
+        self.assertIn("stdin=/dev/null", out.stdout)
+
+    def test_an_interactive_shell_keeps_its_stdin(self):
+        out = self._with_open_pipe(["bash", "-i", "-c", f'. "{self.it}/lib.sh"; readlink /proc/$$/fd/0'])
+        self.assertIn("pipe:", out.stdout)
+
+    def test_j5_site_pipes_its_heredoc(self):
+        text = (IT / "run-J.sh").read_text()
+        self.assertNotRegex(text, r"\nPY\nsort\)\"",
+                            "J5 still runs `sort` as a separate command reading the runner's stdin")
+        self.assertIn("<<'PY' | sort", text)
+
+
 if __name__ == "__main__":
     unittest.main()
