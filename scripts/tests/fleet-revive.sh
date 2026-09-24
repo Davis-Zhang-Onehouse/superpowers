@@ -344,6 +344,27 @@ try:
     r = run(C, 'revive', fleet=shim)
     check('nothing-dead: rc 0 and says so', r.returncode == 0 and 'nothing to revive' in r.stdout, r.stderr + r.stdout)
     check('nothing-dead: nothing started', not calls(), calls())
+
+    # ---- refusal_line, the script's own function, over recorded verb output -----------------------------
+    # Extracted from the script rather than copied, so this is the function that ships. Each input is the
+    # shape `fleet revive` really prints: a Refused through `cli._report_error`, or a parse error, which is
+    # printed bare and followed by the verb's usage (`cli.main`'s `except BadInput`).
+    fn = re.search(r'^refusal_line\(\) \{\n.*?^\}\n', script.read_text(), re.S | re.M).group(0)
+
+    def refusal_line(text):
+        return subprocess.run(['bash', '-c', fn + '\nrefusal_line'], input=text, capture_output=True,
+                              text=True).stdout
+
+    PARSE_ERROR = ("revive: '--bogus' is not a flag revive declares. Declared: --dry-run, --help, --home, --id, "
+                   "--instants-dir, --porcelain, --root, --session-id. Refused, not ignored: a parser that accepts "
+                   "what no spec declares is a second, hand-maintained copy of the flag list.\n"
+                   "fleet revive --id <value> --session-id <value>\n"
+                   "    14 indeterminate\n"
+                   "    15 awaiting-operator\n")
+    got = refusal_line(PARSE_ERROR)
+    check("refusal_line: a parse error (no Type header) is reported by its reason, not by the usage's last row",
+          got.startswith("revive: '--bogus' is not a flag revive declares.") and 'awaiting-operator' not in got,
+          got)
 finally:
     shutil.rmtree(home, ignore_errors=True)
 
