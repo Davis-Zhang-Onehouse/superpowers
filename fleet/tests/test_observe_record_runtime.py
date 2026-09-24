@@ -23,7 +23,7 @@ import tempfile
 import unittest
 from unittest.mock import patch
 
-from fleet.runtime import observe
+from fleet.runtime import observe, plain
 from fleet.session import default_probes
 from tests.test_cli import Fleet
 
@@ -235,6 +235,46 @@ class CodexBusyAsDrawnBy0156(unittest.TestCase):
             with self.subTest(prose=prose):
                 text = self.frame('codex-waiting-bgterm-0156').replace('  └ sleep 41', prose)
                 self.assertEqual(observe('codex', text).state, 'idle')
+
+    def with_spinner_row(self, row):
+        """The real `codex-busy-bgterm-0156` frame with its spinner row replaced by `row`, drawn DIM as codex draws it.
+        Everything else — the blank rows, the bold caret, the footer — is the capture's own."""
+        lines = self.frame('codex-busy-bgterm-0156').split('\n')
+        spinner = [i for i, line in enumerate(lines) if 'esc' in line and plain(line).startswith(('•', '◦'))]
+        self.assertEqual(len(spinner), 1, 'the fixture has exactly one spinner row')
+        lines[spinner[0]] = f'\x1b[2m{row}\x1b[0m\x1b[39m\x1b[49m'
+        return '\n'.join(lines)
+
+    def test_a_header_with_parentheses_is_still_a_turn(self):
+        """RV-21. codex writes reasoning titles into the header; a paren in one read `idle` (the base regex matched it)."""
+        text = self.with_spinner_row('• Inspecting list_processes (nested walk) (8s • esc to interrupt) · 1 background '
+                                     'terminal running · /ps to view…')
+        self.assertEqual(observe('codex', text).state, 'busy')
+
+    def test_a_row_cut_at_the_pane_edge_inside_its_paren_is_still_a_turn(self):
+        """RV-21. fleet starts panes 80 columns wide and codex cuts the row with `…`, as the committed frames show; a long
+        header pushes the cut into the paren group."""
+        for row in ('• Running tests for the new inventory walk and the reconcile ordering (1m 05s • esc to inte…',
+                    '◦ Running tests for the new inventory walk and the reconcile ordering, all of them (1m…',
+                    '• Running tests for the new inventory walk and the reconcile ordering (12s…'):
+            with self.subTest(row=row):
+                self.assertEqual(observe('codex', self.with_spinner_row(row)).state, 'busy')
+
+    def test_a_spinner_row_cut_before_its_paren_fails_closed(self):
+        """RV-21. Cut before the paren there is no elapsed time to prove a turn and no way to rule one out: `unknown`
+        (pane-guard 14, wait) rather than `idle` (0, send)."""
+        row = ('• Running the whole hermetic suite, the scripts/tests near the change and the live codex integration run…')
+        self.assertEqual(observe('codex', self.with_spinner_row(row)).state, 'unknown')
+
+    def test_control_neighbours_that_stay_idle(self):
+        """What the widened spinner must still turn away: prose with a paren but no elapsed time, a finished answer
+        ending in a paren note, and an answer cut mid-word without a spinner shape."""
+        for row in ('• The status row reads (esc to interrupt)',
+                    '• Inspecting list_processes (nested walk)',
+                    '• DONE (see evidence/INDEX.md)',
+                    '• DONE2'):
+            with self.subTest(row=row):
+                self.assertEqual(observe('codex', self.with_spinner_row(row)).state, 'idle')
 
     def test_pane_guard_reads_a_busy_codex_pane_as_mid_turn_on_a_claude_box(self):
         for name in self.BUSY:
