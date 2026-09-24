@@ -402,7 +402,9 @@ def _slot_holder_pid(rec, pool, live_sessions):
     """
     if not rec.slot:
         return None
-    for session in live_sessions or ():
+    #: RV-23 (v23-k). The worker before any agent it started: `pgrep` lists claude first, and a codex worker's `claude
+    #: agents --json` child sits in the same slot. `scripts/fleet-finished-pids.sh` keys auto-resume exclusion on this pid.
+    for session in sorted(live_sessions or (), key=lambda s: bool(getattr(s, "nested", False))):
         try:
             if _slot_holding(pool, session.cwd) == rec.slot:
                 return session.pid
