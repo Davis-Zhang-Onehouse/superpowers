@@ -125,7 +125,13 @@ def code_regions(text: str, src: pathlib.Path = DEFAULT_FLEET_SRC) -> list:
     """
     if "fleet" not in sys.modules:
         _on_path(src)                 # never ahead of a package `main` already put on the path (FLEET_SRC)
-    from fleet.markdown import FENCE, PROSE, lines as md_lines   # noqa: E402 - after the path is set
+    try:
+        from fleet.markdown import FENCE, PROSE, lines as md_lines   # noqa: E402 - after the path is set
+    except Exception as exc:                       # noqa: BLE001 - reported, never guessed around (RV-33)
+        where = os.environ.get("FLEET_SRC") or src
+        print(f"lint-skill: cannot import fleet.markdown from {where} ({exc}). The reader ships with fleet "
+              f"0.6.7+; set FLEET_SRC to a package that has it.", file=sys.stderr)
+        raise SystemExit(2)                        # bad input, never "findings"
     blocks, prose_text = {}, []
     for line in md_lines(text):
         if line.enclosure == FENCE and not line.boundary:
