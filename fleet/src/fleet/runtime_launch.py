@@ -89,17 +89,27 @@ def git_writable_dirs(workspace, git) -> tuple:
     slot = Path(workspace)
     found = []
     try:
-        candidates = [slot, *sorted(child for child in slot.iterdir() if child.is_dir())]
+        #: RV-29: the slot is the worker's own writable tree and these roots are re-derived at every revive, so a
+        #: symlink a worker planted must not reach someone else's repository.
+        candidates = [slot, *sorted(child for child in slot.iterdir() if child.is_dir() and not child.is_symlink())]
     except OSError:
         return ()
     for candidate in candidates:
-        if not (candidate / '.git').is_file():              # a directory `.git` is a clone or the slot itself
+        dotgit = candidate / '.git'
+        if dotgit.is_symlink() or not dotgit.is_file():    # a directory `.git` is a clone or the slot itself
             continue
         code, out = git(['rev-parse', '--path-format=absolute', '--git-dir', '--git-common-dir'], candidate)
         lines = out.split('\n') if code == 0 else []
         if len(lines) < 2 or not lines[0].strip() or not lines[1].strip():
             continue
         own, common = Path(lines[0].strip()).resolve(), Path(lines[1].strip()).resolve()
+        #: RV-29: a `.git` FILE is the worker's to write, so it proves nothing. Git's back-link — `<own>/gitdir`, written
+        #: by `git worktree add` in the OWNING repository, outside the sandbox — must name this very `.git`.
+        try:
+            if Path((own / 'gitdir').read_text().strip()).resolve() != dotgit.resolve():
+                continue
+        except (OSError, ValueError):
+            continue
         found += [str(common / name) for name in ('objects', 'refs', 'logs') if (common / name).is_dir()]
         found.append(str(own))
     return tuple(dict.fromkeys(found))
