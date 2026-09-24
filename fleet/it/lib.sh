@@ -198,6 +198,7 @@ IT_ENV_UNNAMED=(-u FLEET_HOME -u FLEET_INSTANTS -u FLEET_ROOT -u FLEET_INSTANT -
 # The first argument is retained for callers that pass $$, but deliberately never used as a process key.
 # The child gets its actual parent from getppid(), which is scoped to its own pid namespace.
 it_guard_server() {       # it_guard_server <runner-pid> <socket>
+  [ "$BASHPID" = "$$" ] || { echo "it_guard_server: call from the runner's top-level shell" >&2; return 1; }
   local sock="$2" pidfile tokenfile token dir uid_dir
   pidfile="$IT_ROOT/.guardians/$sock.pid"        # a subdirectory of fleet/it: generated, git-ignored
   mkdir -p "$IT_ROOT/.guardians"
