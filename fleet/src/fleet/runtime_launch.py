@@ -83,13 +83,22 @@ def linked_worktrees(workspace) -> tuple:
     the shared checkout's repository is outside the slot). A codex worker cannot commit there, since its sandbox
     makes only the slot, the store and the instants writable, and the git roots it would need were shown forgeable (FB-110
     review). So codex dispatch, revive and resume refuse such a slot. A clone (`.git` a directory, ws8–ws10) needs nothing.
-    Filesystem only, no git: a `.git` file is refused whatever it names."""
+    Filesystem only, no git: a `.git` file is refused whatever it names. FAILS CLOSED (RV-52): a slot or child that
+    cannot be inspected (an OSError such as an unsearchable directory) is returned too, so the caller refuses rather than
+    crashes or admits."""
     slot = Path(workspace)
     try:
         candidates = [slot, *sorted(child for child in slot.iterdir() if child.is_dir())]
     except OSError:
-        return ()
-    return tuple(str(candidate) for candidate in candidates if (candidate / '.git').is_file())
+        return (str(slot),)
+    found = []
+    for candidate in candidates:
+        try:
+            if (candidate / '.git').is_file():
+                found.append(str(candidate))
+        except OSError:
+            found.append(str(candidate))
+    return tuple(found)
 
 
 def launch_argv(settings: LaunchSettings, prompt: str, writable_dirs=()) -> list[str]:
