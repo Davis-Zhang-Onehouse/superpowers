@@ -77,10 +77,6 @@ class MutationExtractor(unittest.TestCase):
             self.assertEqual(n, 1, f"{rel}: anchor {anchor!r} occurs {n} times")
 
 
-if __name__ == "__main__":
-    unittest.main()
-
-
 class MergeResults(unittest.TestCase):
     """run-all.sh's merge (bin/merge-results.py): sections that ran replace their rows; an OWN-<case> row is
     dropped only when this run re-judged its case or its section (found in review: a default-roster run
@@ -141,3 +137,6 @@ class MergeResults(unittest.TestCase):
         self.assertNotIn("OWN-M8-board", out)
         self.assertNotIn("§M", out)
 
+
+if __name__ == "__main__":
+    unittest.main()
