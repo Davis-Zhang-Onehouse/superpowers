@@ -18,7 +18,7 @@ CLI (what the runner calls):
     python3 m9_mutations.py why <n>                         -> the audit text that must kill mutant n
     python3 m9_mutations.py inject <copy-root> <n>          -> rc 0 applied; rc 3 not applied, file untouched
     python3 m9_mutations.py classify <n> <applied 0|1> <audit-rc|-> <audit-output|->
-                                                            -> prints `<PASS|FAIL> <KILLED|SURVIVED|WRONG-REASON|NOT-APPLIED>`
+                                                            -> prints `<PASS|FAIL> <KILLED|SURVIVED|WRONG-REASON|NO-REASON|NOT-APPLIED>`
 """
 import sys
 from pathlib import Path
@@ -103,6 +103,9 @@ def classify(n, applied, audit_rc, output):
         raise ValueError(f"M{n} was applied but no audit exit code was given")
     if audit_rc == 0:
         return "FAIL", "SURVIVED"
+    #: RV-22. An empty reason is a substring of every output, so it would read any non-zero audit as a kill.
+    if not MUTATIONS[n]["why"].strip():
+        return "FAIL", "NO-REASON"
     if MUTATIONS[n]["why"] in output:
         return "PASS", "KILLED"
     return "FAIL", "WRONG-REASON"

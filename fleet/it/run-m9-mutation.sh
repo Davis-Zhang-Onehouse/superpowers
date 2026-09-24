@@ -159,6 +159,9 @@ for n in 1 2 3 4; do
     WRONG-REASON)
       it_fail "M9-mut-$n" "fleet/it/M9-mutation/mut$n.out" \
         "died for the WRONG reason — a kill that is really an import failure proves nothing: $(grep -m1 -E 'Error' "$EV/mut$n.out" | cut -c1-200)" ;;
+    NO-REASON)
+      it_fail "M9-mut-$n" "fleet/it/m9_mutations.py" \
+        "no expected kill reason is declared for this mutation, so no audit output can count as its kill" ;;
     NOT-APPLIED)
       it_fail "M9-mut-$n" "fleet/it/M9-mutation/mut$n.inject" \
         "NOT-APPLIED: the mutation was never written into its copy, so the audit was not run on it — neither a kill nor a survival, a harness defect: $(grep -m1 'NOT APPLIED' "$EV/mut$n.inject" | cut -c1-200)" ;;
