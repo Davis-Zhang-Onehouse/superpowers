@@ -70,8 +70,9 @@ log = (evidence / 'commands.jsonl').open('w')
 verdict = dict(mode='green' if install else 'red', fleet_repo=str(fleet_repo))
 
 
-def command(args, codes=(0,), cwd=None):
-    done = subprocess.run(args, stdin=subprocess.DEVNULL, capture_output=True, text=True, timeout=120, cwd=cwd or root)
+def command(args, codes=(0,), cwd=None, env=None):
+    done = subprocess.run(args, stdin=subprocess.DEVNULL, capture_output=True, text=True, timeout=120, cwd=cwd or root,
+                          env=env)
     log.write(json.dumps(dict(argv=args, code=done.returncode, out=done.stdout, err=done.stderr)) + '\n')
     log.flush()
     if done.returncode not in codes:
@@ -80,7 +81,10 @@ def command(args, codes=(0,), cwd=None):
 
 
 def fleet(*args, codes=(0,)):
-    return command([str(fleet_repo / 'bin/fleet'), *args, '--porcelain'], codes)
+    #: Through the harness wrapper (B18), with the package of the fleet under test first on PYTHONPATH: exactly what
+    #: that repo's own launcher would put there, so the RED capture still drives the base tree.
+    path = str(fleet_repo / 'fleet/src') + (':' + os.environ['PYTHONPATH'] if os.environ.get('PYTHONPATH') else '')
+    return command([os.environ['IT_FLEET'], *args, '--porcelain'], codes, env={**os.environ, 'PYTHONPATH': path})
 
 
 def fields(output):

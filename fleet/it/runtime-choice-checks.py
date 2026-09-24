@@ -21,7 +21,7 @@ steps = []
 
 
 def fleet(*args, codes=(0,)):
-    done = subprocess.run([str(repo / 'bin/fleet'), *args, '--porcelain'],
+    done = subprocess.run([os.environ['IT_FLEET'], *args, '--porcelain'],   # the harness wrapper, never the launcher (B18)
                           stdin=subprocess.DEVNULL, capture_output=True, text=True, timeout=60)
     steps.append(dict(args=args, code=done.returncode, out=done.stdout, err=done.stderr))
     print(json.dumps(steps[-1]), flush=True)

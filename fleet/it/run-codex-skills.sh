@@ -16,7 +16,7 @@ mode="${1:-}"
 case "$mode" in
   --live) [ "$#" = 1 ] || { echo 'usage: run-codex-skills.sh --live | --red <fleet-repo>' >&2; exit 2; } ;;
   --red)
-    [ "$#" = 2 ] && [ -x "$2/bin/fleet" ] || { echo 'usage: run-codex-skills.sh --red <fleet-repo with bin/fleet>' >&2; exit 2; }
+    [ "$#" = 2 ] && [ -f "$2/fleet/src/fleet/cli.py" ] || { echo 'usage: run-codex-skills.sh --red <fleet-repo with fleet/src>' >&2; exit 2; }
     export CXS_FLEET_REPO CXS_INSTALL=0 CXS_FLEET_REV
     CXS_FLEET_REPO="$(cd "$2" && pwd)"
     # A base export is not a git checkout; name its sha (CXS_FLEET_REV=<sha>) so the RED capture records what it drove.
