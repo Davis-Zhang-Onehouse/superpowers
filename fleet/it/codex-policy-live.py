@@ -276,25 +276,14 @@ def answer_update(name, text):
     raise RuntimeError(f'could not select "2. Skip" on {name}')
 
 
-def said(word):
-    """True once the worker's own transcript carries its final reply `word` — the turn is over, not merely paused
-    between two tool calls."""
-    path = codex_transcript()
-    if path is None:
-        return False
-    for line in path.read_text().splitlines():
-        row = json.loads(line) if line.strip() else {}
-        payload = row.get('payload') or {}
-        if (row.get('type') == 'response_item' and payload.get('type') == 'message' and payload.get('role') == 'assistant'
-                and any(word in (part.get('text') or '') for part in payload.get('content', []) if isinstance(part, dict))):
-            return True
-    return False
-
-
-def run_probe(record, n, tag, word='DONE'):
-    """Wait for probe run `n` to finish with the pane idle and the reply `word` said (green), or for the defect (red)."""
+def run_probe(record, n, tag):
+    """Wait for probe run `n` to finish or for the defect (red). Finished = its result written and the pane idle (0) for
+    three consecutive polls (~9 s; the idle frame between two tool calls lasts milliseconds). Neither the reply word (a
+    CXP2 worker ended with a sentence instead of DONE, instant evidence 08-head-7ff8c846/cxp--green-escalate) nor codex's
+    `task_complete` event (missing for a turn whose pane was killed soon after) is reliable enough to decide it."""
     codes = []
     stuck = dict(since=None)
+    idle_polls = dict(n=0)
 
     def step():
         code = guard(record)
@@ -305,7 +294,8 @@ def run_probe(record, n, tag, word='DONE'):
         if code in (14, 15) and answer_update(record.tmux, text):
             return None
         done = result(record, n)
-        if done is not None and code == 0 and said(word):
+        idle_polls['n'] = idle_polls['n'] + 1 if code == 0 else 0
+        if done is not None and idle_polls['n'] >= 3:
             return dict(kind='finished', result=done)
         #: A pane that is not idle and has not changed for 30 s is waiting on something that is not the model — whatever
         #: `pane-guard` calls it (an unrecognised modal reads 14, FB-105). A recognised dialog (15) is a stall at once.
@@ -451,7 +441,7 @@ try:
 except RuntimeError:
     frame(record.tmux, 'send-failed')
     raise
-second = run_probe(record, 2, 'revive', word='AGAIN')
+second = run_probe(record, 2, 'revive')
 verdict['revive'] = second
 assert_green(second, 2)
 facts2 = transcript_facts(transcript)
