@@ -304,6 +304,17 @@ class TestANonStartBeforeTheClaimKeepsItsCodeAndSaysSo(DispatchCase):
         self.assertTrue(answers[1]["refused"].startswith("Refused: "), answers)
         self.assertEqual(answers[0], answers[1])
 
+    def test_a_flag_in_the_title_position_is_not_reported_as_the_title(self):
+        #: RV-C9. `--title --dry-run`: the parser refuses it, and `--dry-run` is a flag, not a title — so no
+        #: title was used, and the row must not invent `dryRun`.
+        code, out, err = self.fleet.run(["dispatch", "--profile", str(self.fleet.profile()), "--title",
+                                         "--dry-run", "--porcelain"])
+        self.assertEqual(code, EXIT_BAD_INPUT, err)
+        rows = kv(out)
+        self.assertIn("error", rows, out)
+        self.assertEqual(rows.get("title_as_used"), "(none)", out)
+        self.assertNotIn("title_rewritten", rows, out)
+
     def test_every_row_value_is_one_line(self):
         #: A refusal is a paragraph; as a FIELD it must stay one line, or `cut -f2` reads the wrong row.
         code, out, err = self.dispatch("--slot", "wsNope")
