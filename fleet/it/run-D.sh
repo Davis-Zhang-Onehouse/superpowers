@@ -718,7 +718,7 @@ d12_tmux_refusal_says_what_it_did() {
   it_tmux kill-session -t '=dt-d12Taken' 2>/dev/null
   err_row="$(awk -F'\t' '$1=="error"{print $2}' "$CD/dispatch.stdout")"
   step_row="$(awk -F'\t' '$1=="step"{print $2}' "$CD/dispatch.stdout")"
-  lease_row="$(awk -F'\t' '$1=="lease"{print $2}' "$CD/dispatch.stdout")"
+  lease_row="$(awk -F'\t' '$1=="left_lease"{print $2}' "$CD/dispatch.stdout")"
   title_row="$(awk -F'\t' '$1=="title_as_used"{print $2}' "$CD/dispatch.stdout")"
   leases="$(d_n_leases)"
   {
@@ -727,7 +727,7 @@ d12_tmux_refusal_says_what_it_did() {
   } > "$CD/says.tsv"
   case "$err_row" in "BadInput: tmux refused to start 'dt-d12Taken'"*) local named=1 ;; *) local named=0 ;; esac
   if [ "$rc" = 5 ] && [ "$named" = 1 ] && [ "$step_row" = "tmux new-session" ] \
-     && [ "${lease_row#given back}" != "$lease_row" ] && [ "$title_row" = d12Taken ] && [ "$leases" = 0 ]; then
+     && [ "$lease_row" = given-back ] && [ "$title_row" = d12Taken ] && [ "$leases" = 0 ]; then
     d_pass D12 "$CD/says.tsv" \
       "a REAL tmux refusal after the claim (the session name already taken on the private server) exits 5 not-started and says so on STDOUT: an error row naming tmux's own refusal, step=tmux new-session, lease given back, title_as_used=d12Taken; 0 lease dirs left"
   else
