@@ -60,8 +60,11 @@ def codex_policy_args(writable_dirs=()) -> list[str]:
 
 
 def codex_policy_summary(writable_dirs=()) -> str:
-    """One line for `dispatch`, `revive` and `brief`: the effective policy, as fleet puts it on the argv."""
-    roots = ', '.join(['the slot (cwd)', *dict.fromkeys(str(d) for d in writable_dirs)])
+    """One line for `dispatch`, `revive` and `brief`: the effective policy, as fleet puts it on the argv. RV-33: roots that
+    the operator's CODEX_HOME config.toml lists under `[sandbox_workspace_write] writable_roots` still apply on top of the
+    argv, and fleet does not read that file, so the line says so rather than claiming to be the whole set."""
+    roots = ', '.join(['the slot (cwd)', *dict.fromkeys(str(d) for d in writable_dirs),
+                       'plus any [sandbox_workspace_write] writable_roots in CODEX_HOME/config.toml'])
     return (f'approval=never sandbox=workspace-write network=on update-check=off; writable: {roots} '
             f'(argv: {" ".join(CODEX_POLICY)})')
 

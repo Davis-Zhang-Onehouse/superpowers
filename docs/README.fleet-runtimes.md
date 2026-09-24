@@ -86,7 +86,8 @@ read-only. It is never the whole common dir, whose `hooks/` and `config` would t
 the sandbox refuses fails back to the model (a write outside those roots reads `Read-only file system`). Never
 danger-full-access, and no knob loosens it; the argv outranks `CODEX_HOME/config.toml`, which fleet never edits.
 `dispatch`, `revive` (and its `--dry-run`) print a `codex_policy` row, and `brief`'s `runtime` row carries the same
-text. The launcher exports GH_TOKEN from `~/.gh-token-<root>` for codex as for claude. Without it, `gh` in the
+text. Roots listed under `[sandbox_workspace_write] writable_roots` in `CODEX_HOME/config.toml` still apply on top, and
+the row says so because fleet does not read that file. The launcher exports GH_TOKEN from `~/.gh-token-<root>` for codex as for claude. Without it, `gh` in the
 sandbox acts as whatever account `~/.config/gh` names.
 Known limit (measured on 0.156.1): the sandbox runs each command in its own PID namespace, so `pgrep`/`/proc` see
 only the sandbox. Verbs that decide liveness from the process census (`board`, `pane-guard`, `close`, `harvest`,

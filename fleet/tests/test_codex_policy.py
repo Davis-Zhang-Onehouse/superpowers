@@ -56,6 +56,9 @@ class PolicyArgvTests(unittest.TestCase):
         for needle in ('approval=never', 'sandbox=workspace-write', 'network=on', 'update-check=off',
                        'the slot (cwd)', '/store', '/instants'):
             self.assertIn(needle, summary)
+        #: RV-33: `[sandbox_workspace_write] writable_roots` in CODEX_HOME/config.toml still ADDS roots the argv cannot
+        #: see, so the row must not read as the whole set.
+        self.assertIn('plus any [sandbox_workspace_write] writable_roots in CODEX_HOME/config.toml', summary)
 
 
 def git(*args, cwd):
