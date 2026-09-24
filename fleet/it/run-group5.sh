@@ -862,7 +862,7 @@ VIEWS = {
 POPULATION_MARKER = {"board": "kind", "leases": "lease"}
 
 def run(verb, args, porcelain):
-    cmd = [sys.executable, "-m", "fleet.cli", verb] + args + (["--porcelain"] if porcelain else [])
+    cmd = [os.environ["IT_FLEET"], verb] + args + (["--porcelain"] if porcelain else [])   # the wrapper (B18)
     done = subprocess.run(cmd, capture_output=True, text=True, env=ENV)
     return done.returncode, done.stdout, done.stderr
 
@@ -1469,7 +1469,7 @@ assert captured.rstrip("\n") == on_disk.rstrip("\n"), "the probe's capture diffe
 print("busy:", sl.busy(captured), "unsubmitted:", repr(sl.unsubmitted(captured)))
 assert sl.busy(captured) is False
 assert sl.unsubmitted(captured) is None, "a quiet shell reported queued text"
-done = subprocess.run([sys.executable, "-m", "fleet.cli", "pane-guard", "--pane", name],
+done = subprocess.run([os.environ["IT_FLEET"], "pane-guard", "--pane", name],   # the wrapper (B18)
                       capture_output=True, text=True, env=dict(os.environ))
 print("pane-guard rc:", done.returncode)
 print(done.stdout)

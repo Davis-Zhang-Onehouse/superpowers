@@ -60,7 +60,7 @@ def command(args, codes=(0,)):
 
 
 def fleet(*args, codes=(0,)):
-    return command([str(repo / 'bin/fleet'), *args, '--porcelain'], codes).stdout
+    return command([os.environ['IT_FLEET'], *args, '--porcelain'], codes).stdout   # the harness wrapper (B18)
 
 
 def tmux(*args, codes=(0,)):
@@ -92,7 +92,7 @@ def wait_for(label, predicate):
 
 
 def idle(name):
-    return command([str(repo / 'bin/fleet'), 'pane-guard', '--pane', name, '--porcelain'],
+    return command([os.environ['IT_FLEET'], 'pane-guard', '--pane', name, '--porcelain'],
                    tuple(range(15))).returncode == 0
 
 

@@ -112,17 +112,26 @@ class WrapperExecutable(unittest.TestCase):
                        self.tmp)
         self.assertIn("rc=0", out.stdout)
 
+    #: The shapes a product subprocess takes in this harness. The launcher form (`bin/fleet`) is checked in
+    #: the python files only: run-Q.sh is the section that tests the launcher itself, and its verbs cannot
+    #: mint. A line whose first non-blank character is `#` is a comment (run-C.sh carries two).
+    BYPASS_SHAPES = {".sh": ("python3 -m fleet.cli",), ".py": ('"-m", "fleet.cli"', "'-m', 'fleet.cli'", "bin/fleet")}
+
     def test_no_direct_python_m_fleet_cli_outside_the_wrapper(self):
-        """The lint: every executed `python3 -m fleet.cli` in the harness is inside bin/it-fleet. A line
-        whose first non-blank character is `#` is a comment (run-C.sh carries two)."""
+        """The lint: every product subprocess in the harness goes through bin/it-fleet — the shell form
+        `python3 -m fleet.cli`, and in the embedded/standalone python the `"-m", "fleet.cli"` and
+        `bin/fleet` forms (found in review: run-D, run-group5 and runtime-*.py minted through them)."""
         hits = []
-        files = sorted(list(IT.glob("*.sh")) + [p for p in (IT / "bin").iterdir() if p.is_file()])
-        self.assertGreater(len(files), 30)
+        files = sorted(list(IT.glob("*.sh")) + list(IT.glob("*.py")) + [p for p in (IT / "bin").iterdir() if p.is_file()])
+        self.assertGreater(len(files), 32)
         for path in files:
             if path.name == "it-fleet":
                 continue
+            shapes = self.BYPASS_SHAPES[".py"] if path.suffix == ".py" else self.BYPASS_SHAPES[".sh"]
+            if path.suffix == ".sh":
+                shapes = shapes + self.BYPASS_SHAPES[".py"][:2]     # python embedded in a runner via a heredoc
             for n, line in enumerate(path.read_text(errors="replace").splitlines(), 1):
-                if "python3 -m fleet.cli" in line and not line.lstrip().startswith("#"):
+                if any(s in line for s in shapes) and not line.lstrip().startswith("#"):
                     hits.append(f"{path.relative_to(REPO)}:{n}")
         self.assertEqual(hits, [], "direct sites bypass the attribution register (B18): " + ", ".join(hits))
 
