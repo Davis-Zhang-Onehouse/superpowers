@@ -98,7 +98,9 @@ starts them, one after another, printing `pane-guard` for each and the board at 
 
 Both runtimes are handled the same way: a Claude record resumes with `claude --resume <uuid>`, a Codex
 record with `codex resume <uuid>`, each under its recorded executable and configuration directory and with its
-recorded model (`--model` / `-m`) when one was chosen at dispatch. The record decides, not the fleet
+recorded model (`--model` / `-m`) when one was chosen at dispatch. A Codex record resumes with the same unattended
+policy it launched with (`-a never -s workspace-write`, network on, the same writable roots); `revive --dry-run`
+prints it as a `codex_policy` row before anything starts. The record decides, not the fleet
 selection: a codex record on a claude box revives as codex. A
 legacy Claude record (no recorded configuration) resolves the slot's owner through
 `scripts/claude-config-dir.sh` and says so.
