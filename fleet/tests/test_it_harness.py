@@ -370,6 +370,16 @@ class F2bHolderPattern(unittest.TestCase):
     MUTANT = ("hold it: 00000000-09240007-inflight-append-secondc. examined 2 subject(s) of 00000000; "
               "1 counted, 1 excluded (00000000-09240007-inflight-append-capholder (RUNNING))")
 
+    #: V23-D (RV-C6). The holder text now carries `[folder …, session …, age …]`. REAL is the line measured by §F at
+    #: fix/v23-d (v23dwipcapeffort evidence/05-it/real-refusal-lines.txt); MUTANT is the same shape with capholder
+    #: only in the excluded list.
+    REAL_V23D = ("hold it: 00000000-09242212-inflight-append-capholder [folder: yes, session: yes, age: 2s], "
+                 "00000000-09242212-inflight-append-secondc [folder: yes, session: yes, age: 1s]. examined 2 "
+                 "subject(s) of 00000000 in /it/F/instants; 2 counted, 0 excluded")
+    MUTANT_V23D = ("hold it: 00000000-09242212-inflight-append-secondc [folder: yes, session: yes, age: 1s]. examined 2 "
+                   "subject(s) of 00000000 in /it/F/instants; 1 counted, 1 excluded "
+                   "(00000000-09242212-inflight-append-capholder (RUNNING))")
+
     def pattern(self):
         m = re.search(r"command grep -E '([^']+)' \"\$OUT/F2b-dispatch.out\"", (IT / "run-F.sh").read_text())
         self.assertIsNotNone(m, "F2b's holder grep is missing from run-F.sh")
@@ -381,6 +391,13 @@ class F2bHolderPattern(unittest.TestCase):
         mutant = subprocess.run(["grep", "-E", pat], input=self.MUTANT + "\n", capture_output=True, text=True)
         self.assertEqual(real.returncode, 0, pat)
         self.assertEqual(mutant.returncode, 1, f"{pat!r} still matches the mutant's refusal (capholder is only in the EXCLUDED list)")
+
+    def test_pattern_matches_the_bracketed_holder_format_and_not_its_mutant(self):
+        pat = self.pattern()
+        real = subprocess.run(["grep", "-E", pat], input=self.REAL_V23D + "\n", capture_output=True, text=True)
+        mutant = subprocess.run(["grep", "-E", pat], input=self.MUTANT_V23D + "\n", capture_output=True, text=True)
+        self.assertEqual(real.returncode, 0, pat)
+        self.assertEqual(mutant.returncode, 1, f"{pat!r} matches the bracketed mutant (capholder only EXCLUDED)")
 
 
 class StdinImmunity(unittest.TestCase):
