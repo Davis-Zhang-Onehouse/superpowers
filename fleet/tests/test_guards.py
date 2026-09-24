@@ -913,5 +913,16 @@ class TestTheCapIsPerEffort(GuardCase):
         self.assertIn("loopy", verdict.reason)
 
 
+    def test_a_foreign_same_base_claim_is_reported_as_set_aside(self):
+        # RV-C4. The keying is visible for records; a foreign CLAIM dropped under a claim must be said too.
+        fleet = self.fleet(slots=3)
+        fleet.pool.claim(todo_id="foreignSameBase", tmux="dt-foreignSameBase", base_instant=OURS,
+                         child_instant=str(self.other_effort(fleet) / "00000000-07309995-inflight-append-z"),
+                         slot="ws1")
+        verdict = self.verdict_of(evaluate_all(fleet.ctx(cap=1).under_claim("ws2"), "dispatch"), "wip-cap")
+        self.assertTrue(verdict.allowed, verdict.reason)
+        self.assertIn("set aside 1 subject(s) of base", verdict.reason, verdict.reason)
+
+
 if __name__ == "__main__":
     unittest.main()
