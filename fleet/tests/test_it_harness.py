@@ -16,7 +16,8 @@ import unittest
 
 REPO = pathlib.Path(__file__).resolve().parents[2]
 IT = REPO / "fleet" / "it"
-FLEET_DESTINATIONS = ("FLEET_HOME", "FLEET_INSTANTS", "FLEET_ROOT", "FLEET_INSTANT", "FLEET_RELEASES")
+FLEET_DESTINATIONS = ("FLEET_HOME", "FLEET_INSTANTS", "FLEET_ROOT", "FLEET_INSTANT", "FLEET_RELEASES",
+                      "IT_ASKED_NAMES", "IT_RESULTS")   # the last two: an IT section runs this suite (M13)
 
 
 def harness_copy(tmp: pathlib.Path) -> pathlib.Path:
@@ -77,7 +78,8 @@ class WrapperExecutable(unittest.TestCase):
         return direct, wrapped
 
     def test_it_fleet_passes_argv_streams_and_exit_code_through(self):
-        for argv in (["notaverb", "--porcelain"], ["init", "--help"], ["board", "--porcelain"]):
+        for argv in (["notaverb", "--porcelain"], ["init", "--help"],
+                     ["board", "--home", str(self.tmp / "store"), "--porcelain"]):
             direct, wrapped = self._direct_and_wrapped(*argv)
             self.assertEqual((wrapped.returncode, wrapped.stdout, wrapped.stderr),
                              (direct.returncode, direct.stdout, direct.stderr), argv)
@@ -170,6 +172,12 @@ class RowOwnership(unittest.TestCase):
         self.run_lib(f"it_own_cases 'F[0-9]+'\nit_pass F1 '' '{note}'")
         self.assertEqual(next(r for r in self.rows() if r[0] == "F1")[3], note)
 
+    def test_a_row_written_in_a_subshell_keeps_the_section_in_order(self):
+        """F9-zero-delta is written inside `( … )`: a counter would advance only there, and every later row
+        would land BEFORE it. The insertion point is re-derived from the file instead."""
+        self.run_lib("it_own_cases 'F[0-9]+(-[A-Za-z0-9-]+)?'\nit_pass F1 '' a\n( it_pass F9-zero-delta '' b )\nit_pass F10 '' c\nit_pass F11 '' d")
+        self.assertEqual([r[0] for r in self.rows()], ["A1", "F1", "F9-zero-delta", "F10", "F11", "G1", "Z9"])
+
     def test_it_last_verdict_names_the_row_just_written(self):
         out = self.run_lib("it_own_cases 'F[0-9]+'\nit_fail F1 '' x; echo v=$IT_LAST_VERDICT; "
                            "it_pass F2 '' y; echo v=$IT_LAST_VERDICT")
@@ -204,10 +212,10 @@ class RowOwnership(unittest.TestCase):
     def test_a_repointed_register_is_appended_to_and_never_judged(self):
         """A negative control repoints RESULTS inside a subshell: no OWN row, no in-place index."""
         neg = self.tmp / "neg.tsv"
-        out = self.run_lib(f"it_own_cases 'F[0-9]+'\n( RESULTS='{neg}'; : > \"$RESULTS\"; it_pass X-neg '' 'n'; it_pass Y-neg '' 'm' )\n"
-                           "it_pass F1 '' 'shared'; echo IT_FAILED=${IT_FAILED:-0}")
+        self.run_lib(f"it_own_cases 'F[0-9]+'\n( RESULTS='{neg}'; : > \"$RESULTS\"; it_pass X-neg '' 'n'; it_pass Y-neg '' 'm' )\n"
+                     "it_pass F1 '' 'shared'")
         self.assertEqual([l.split("\t")[0] for l in neg.read_text().splitlines()], ["X-neg", "Y-neg"])
-        self.assertIn("IT_FAILED=0", out.stdout)
+        self.assertNotIn("OWN-", neg.read_text())
         # F9-zero-delta is NOT claimed by F[0-9]+, so it survives; F1's fresh row took its old line.
         self.assertEqual([r[0] for r in self.rows()], ["A1", "F1", "F9-zero-delta", "G1", "Z9"])
 
@@ -234,8 +242,10 @@ class ZeroDelta(unittest.TestCase):
         self.results.write_text("case\tverdict\tevidence\tnote\n")
 
     def run_lib(self, body):
+        # TMUX_TMPDIR under the test's tmp: it_section's isolation check reads the "default" tmux server, and
+        # a hermetic test must not read the operator's — this makes that server an empty private one.
         return run_bash(f'. "{self.it}/lib.sh"\nit_section zd >/dev/null 2>&1; it_fresh_store\n{body}',
-                        self.tmp, env={"IT_RESULTS": str(self.results)})
+                        self.tmp, env={"IT_RESULTS": str(self.results), "TMUX_TMPDIR": str(self.tmp)})
 
     def row(self, case):
         return next(l.split("\t") for l in self.results.read_text().splitlines()[1:] if l.startswith(case + "\t"))
@@ -259,6 +269,28 @@ class ZeroDelta(unittest.TestCase):
         r = self.row("P-write")
         self.assertEqual(r[1], "FAIL")
         self.assertIn("delta", r[3])
+
+
+class F2bHolderPattern(unittest.TestCase):
+    """FB-75. The refusal line names the held list AND, after a full stop, the population with the EXCLUDED
+    subjects; F2b's pattern must match the real product's line and not the mutant's. Both lines are the
+    measured ones (evidence/01-red/sectionF-{real,mutant}-base/F2b-dispatch.out)."""
+    REAL = ("hold it: 00000000-09240005-inflight-append-capholder, 00000000-09240005-inflight-append-secondc. "
+            "examined 2 subject(s) of 00000000; 2 counted, 0 excluded")
+    MUTANT = ("hold it: 00000000-09240007-inflight-append-secondc. examined 2 subject(s) of 00000000; "
+              "1 counted, 1 excluded (00000000-09240007-inflight-append-capholder (RUNNING))")
+
+    def pattern(self):
+        m = re.search(r"command grep -E '([^']+)' \"\$OUT/F2b-dispatch.out\"", (IT / "run-F.sh").read_text())
+        self.assertIsNotNone(m, "F2b's holder grep is missing from run-F.sh")
+        return m.group(1)
+
+    def test_pattern_matches_the_real_refusal_and_not_the_mutants(self):
+        pat = self.pattern()
+        real = subprocess.run(["grep", "-E", pat], input=self.REAL + "\n", capture_output=True, text=True)
+        mutant = subprocess.run(["grep", "-E", pat], input=self.MUTANT + "\n", capture_output=True, text=True)
+        self.assertEqual(real.returncode, 0, pat)
+        self.assertEqual(mutant.returncode, 1, f"{pat!r} still matches the mutant's refusal (capholder is only in the EXCLUDED list)")
 
 
 class StdinImmunity(unittest.TestCase):
@@ -287,7 +319,7 @@ class StdinImmunity(unittest.TestCase):
         self.assertIn("stdin=/dev/null", out.stdout)
 
     def test_an_interactive_shell_keeps_its_stdin(self):
-        out = self._with_open_pipe(["bash", "-i", "-c", f'. "{self.it}/lib.sh"; readlink /proc/$$/fd/0'])
+        out = self._with_open_pipe(["bash", "--norc", "-i", "-c", f'. "{self.it}/lib.sh"; readlink /proc/$$/fd/0'])
         self.assertIn("pipe:", out.stdout)
 
     def test_j5_site_pipes_its_heredoc(self):
@@ -310,10 +342,14 @@ class ServerGuardian(unittest.TestCase):
         self.it = harness_copy(self.tmp)
         self.section = f"selftest{os.getpid()}g"
         self.socket = f"itfleet-{self.section}"
-        self.addCleanup(subprocess.run, ["tmux", "-L", self.socket, "kill-server"], capture_output=True)
+        # Every tmux socket of this test — the section's private one AND the "default" server the isolation
+        # check reads — lives under the test's tmp via TMUX_TMPDIR, so nothing here touches the operator's.
+        self.env = clean_env({"TMUX_TMPDIR": str(self.tmp)})
+        self.addCleanup(subprocess.run, ["tmux", "-L", self.socket, "kill-server"], capture_output=True,
+                        env=self.env)
 
     def server_up(self):
-        return subprocess.run(["tmux", "-L", self.socket, "ls"], capture_output=True).returncode == 0
+        return subprocess.run(["tmux", "-L", self.socket, "ls"], capture_output=True, env=self.env).returncode == 0
 
     def start_runner(self):
         started = self.tmp / "started"
@@ -321,7 +357,7 @@ class ServerGuardian(unittest.TestCase):
                   f'it_tmux new-session -d -s {self.socket}-victim "sleep 300"\n'
                   f'touch "{started}"\nsleep 300 & echo $! > "{self.tmp}/sleep.pid"; wait\n')
         (self.tmp / "runner.sh").write_text(script)
-        p = subprocess.Popen(["bash", str(self.tmp / "runner.sh")], cwd=self.tmp, env=clean_env(),
+        p = subprocess.Popen(["bash", str(self.tmp / "runner.sh")], cwd=self.tmp, env=self.env,
                              stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
         self.addCleanup(lambda: (p.kill(), p.wait()))
         self.addCleanup(lambda: subprocess.run(
@@ -348,6 +384,17 @@ class ServerGuardian(unittest.TestCase):
         self.start_runner()
         time.sleep(5)
         self.assertTrue(self.server_up())
+
+    def test_a_back_to_back_rerun_keeps_its_server(self):
+        """The first runner's guardian is inside its 2 s poll window when the second runner of the same
+        section starts; it must not kill the second runner's server (found in review)."""
+        p = self.start_runner()
+        p.kill()
+        p.wait()
+        (self.tmp / "started").unlink()
+        self.start_runner()               # immediately: within the old guardian's window
+        time.sleep(6)                      # past that window
+        self.assertTrue(self.server_up(), "the predecessor's guardian killed the successor's server")
 
 
 if __name__ == "__main__":

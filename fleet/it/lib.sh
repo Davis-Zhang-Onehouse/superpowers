@@ -11,6 +11,8 @@ set -uo pipefail
 # only child). The site is fixed, and this line makes the class harmless: a non-interactive shell that
 # sources this file gets /dev/null as stdin. An INTERACTIVE shell keeps its own — `it_rebaseline_live_tmux`
 # is used by sourcing this file into an operator's shell (RV-25), and closing that stdin ends the shell.
+# (A runner fed its own script on stdin — `bash < run-X.sh`, `ssh … bash -s` — would stop right here; no
+# caller does that, and every runner is a file.)
 case "$-" in *i*) ;; *) exec </dev/null ;; esac
 
 IT_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -177,19 +179,34 @@ IT_ENV_UNNAMED=(-u FLEET_HOME -u FLEET_INSTANTS -u FLEET_ROOT -u FLEET_INSTANT -
 # Not a reap-by-name at entry: sockets are per uid, not per slot, so an `itfleet-F` found alive at start
 # may be a peer slot's live run (w2itharness ISSUES I-1).
 #
+# A PREDECESSOR guardian on the same socket is retired first (found in review): a second run of the same
+# section started inside the 2 s poll window after the first runner exited — a scripted back-to-back rerun —
+# would otherwise create the server the old guardian is about to kill. The guardian's pid is kept per socket
+# under $IT_ROOT, and only a pid that is still a guardian of this socket (its argv names it) is signalled.
+#
 # /proc/<pid>/stat field 22 is starttime; the parenthesised comm (field 2) may contain spaces, so it is
-# stripped first and starttime is then field 20 of what remains. Verified on this box.
+# stripped first and starttime is then field 20 of what remains, and the state is field 1 — a zombie (`Z`)
+# holds nothing and counts as gone. Verified on this box.
 it_guard_server() {       # it_guard_server <runner-pid> <socket>
-  local pid="$1" sock="$2" start
+  local pid="$1" sock="$2" start pidfile old
   start="$(sed 's/^.*) //' "/proc/$pid/stat" 2>/dev/null | awk '{print $20}')"
   [ -n "$start" ] || return 0
+  pidfile="$IT_ROOT/.guardian-$sock.pid"
+  old="$(cat "$pidfile" 2>/dev/null)"
+  if [ -n "$old" ] && tr '\0' ' ' < "/proc/$old/cmdline" 2>/dev/null | grep -qF -- "it-guardian $sock "; then
+    kill "$old" 2>/dev/null
+  fi
   setsid bash -c '
-    pid="$1"; sock="$2"; start="$3"
-    while [ -r "/proc/$pid/stat" ] && [ "$(sed "s/^.*) //" "/proc/$pid/stat" 2>/dev/null | awk "{print \$20}")" = "$start" ]; do
-      sleep 2
-    done
+    pid="$2"; sock="$3"; start="$4"
+    alive() {
+      local f; f="$(sed "s/^.*) //" "/proc/$pid/stat" 2>/dev/null)" || return 1
+      [ -n "$f" ] && [ "$(printf "%s" "$f" | awk "{print \$20}")" = "$start" ] \
+        && [ "$(printf "%s" "$f" | awk "{print \$1}")" != Z ]
+    }
+    while alive; do sleep 2; done
     tmux -L "$sock" kill-server 2>/dev/null
-  ' _ "$pid" "$sock" "$start" </dev/null >/dev/null 2>&1 &
+  ' it-guardian "$sock" "$pid" "$sock" "$start" </dev/null >/dev/null 2>&1 &
+  printf '%s\n' "$!" > "$pidfile"
   disown 2>/dev/null || true
 }
 
@@ -301,10 +318,19 @@ _it_row() {               # _it_row <case> <verdict> <evidence> <note>
   line="$(printf '%s\t%s\t%s\t%s' "$1" "$2" "$3" "$4")"
   IT_LAST_VERDICT="$verdict"
   if [ -n "${IT_OWN_AT:-}" ] && [ "$RESULTS" = "${IT_OWN_FILE:-}" ] && [ -f "$RESULTS" ]; then
-    tmp="$(mktemp "$(dirname "$RESULTS")/.$(basename "$RESULTS").XXXXXX")"
-    IT_ROW="$line" awk -v at="$IT_OWN_AT" 'NR==at{print ENVIRON["IT_ROW"]; done=1} {print} END{if(!done) print ENVIRON["IT_ROW"]}' "$RESULTS" > "$tmp" \
-      && mv "$tmp" "$RESULTS"
-    IT_OWN_AT=$((IT_OWN_AT+1))
+    # The insertion line is re-derived from the FILE on every write — after the last row this runner
+    # owns, or at the remembered line when none is there yet — never from a counter: a row written inside
+    # a subshell (F9-zero-delta) would advance a counter only in that subshell, and every later row would
+    # then land before it. A staging failure falls back to an append rather than losing the row.
+    local at
+    at="$(awk -F'\t' -v re="^(OWN-)?(${IT_OWN_RE:-})\$" -v fallback="$IT_OWN_AT" 'NR>1 && $1 ~ re {last=NR} END{print (last ? last+1 : fallback)}' "$RESULTS")"
+    tmp="$(mktemp "$(dirname "$RESULTS")/.$(basename "$RESULTS").XXXXXX" 2>/dev/null)" || tmp=""
+    if [ -n "$tmp" ] && IT_ROW="$line" awk -v at="$at" 'NR==at{print ENVIRON["IT_ROW"]; done=1} {print} END{if(!done) print ENVIRON["IT_ROW"]}' "$RESULTS" > "$tmp" \
+       && mv "$tmp" "$RESULTS"; then
+      :
+    else
+      rm -f "$tmp"; printf '%s\n' "$line" >> "$RESULTS"
+    fi
   else
     printf '%s\n' "$line" >> "$RESULTS"
   fi

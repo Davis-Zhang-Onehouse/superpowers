@@ -183,7 +183,9 @@ for sec in "ABCDEFGHIJKLMNOP":
     if any(r.split("\t")[0].startswith(sec) and r.split("\t")[0][1:2].isdigit() for r in fresh):
         owned.add(f"§{sec}")
 existing = rows(main)
-kept = [r for r in existing if r.split("\t")[0] not in owned]
+# An `OWN-<case>` FAIL row (lib.sh: a runner wrote a row its own regex did not claim) is that run's verdict on
+# its own regex; once the regex is fixed no runner owns the OWN- id, so it would otherwise be kept forever.
+kept = [r for r in existing if r.split("\t")[0] not in owned and not r.startswith("OWN-")]
 notrun = [r for r in kept if "\tNOT-RUN\t" in r]
 kept = [r for r in kept if "\tNOT-RUN\t" not in r]
 main.write_text("\n".join([header] + kept + fresh + notrun) + "\n")
