@@ -4,6 +4,10 @@
 #
 # Usage:  scripts/release-postflight.sh <version>
 #
+# Six assertions: `current` names the version; every root sharing this release area agrees (its `current`
+# and its claude marketplace path); every .version-bump.json file carries the version; the deployed evidence
+# says GREEN or EXEMPT; and every such root's codex skills link follows `current` (FB-111).
+#
 # Invokes `fleet` NOT AT ALL, on purpose. `release-status` reports relative to the FLEET_HOME it is
 # handed, and davis2_root/fleet-releases is a SYMLINK to davis_root/fleet-releases -- so running it from
 # the second root printed "current DEV / checkout ... / head unknown" for a deployment that was perfectly
@@ -275,6 +279,30 @@ else
       ;;
   esac
 fi
+
+# --- assertion 6 (FB-111): every in-scope root's codex skills link follows `current` ---------------------------
+# A codex worker gets its superpowers skills through one link, <root>/.codex/skills/superpowers ->
+# <releases>/current/skills (scripts/fleet-codex-skills.sh). Because the link names `current`, a deploy has
+# nothing to refresh; this proves it is still true after this one. A link pinned to one fleet-vX goes stale
+# at the next deploy, and a missing link means codex workers on that root get no skills. Both are MISMATCHes.
+# A root with no .codex at all does not run codex, so it is a SKIP, not an OK: nothing was verified there.
+#
+# Still no `fleet`: the check is the stdlib module behind fleet-codex-skills.sh, handed both paths explicitly,
+# so the answer is box-relative like the rest of this script. `--check` writes nothing.
+for root in "${IN_SCOPE_ROOTS[@]}"; do
+  codex_home="$root/.codex"
+  if [ ! -d "$codex_home" ]; then
+    echo "SKIP: $codex_home does not exist — codex is not configured on this root, so there is no skills link to verify"
+    continue
+  fi
+  if cs="$(bash "$REPO/scripts/fleet-codex-skills.sh" --check --codex-home "$codex_home" --releases "$R" 2>&1)"; then
+    ok "$codex_home: superpowers skills link follows $R/current ($(printf '%s' "$cs" | tail -1 | sed 's/^codex-skills  ok  //'))"
+  else
+    mismatch "$codex_home: codex workers on this root would not get the deployed superpowers skills:" \
+             "$(printf '%s' "$cs" | tr '\n' ' ')— run: bash $REPO/scripts/fleet-codex-skills.sh --codex-home $codex_home" \
+             "--releases $R (--dry-run first)"
+  fi
+done
 
 [ "$FAILED" = 0 ]
 exit $?

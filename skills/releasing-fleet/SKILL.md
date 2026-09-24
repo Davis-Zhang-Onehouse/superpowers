@@ -46,6 +46,20 @@ handed, which once printed a misleading `current DEV / head unknown` for a deplo
 correct. Postflight answers the box-relative question directly instead of inheriting the artifact that
 caused the confusion, and it is read-only — it proves a deployment, it never performs one.
 
+**Codex workers follow the deploy too, once each root is set up (FB-111).** A codex worker gets the superpowers
+skills through one link, `<root>/.codex/skills/superpowers -> $FLEET_RELEASES/current/skills`. Because it names
+`current`, a deploy moves codex and claude together and there is nothing to refresh. Each root that runs codex
+workers needs it installed once (it is the operator's config, so do a dry run first):
+
+```bash
+bash "$REPO/scripts/fleet-codex-skills.sh" --codex-home <root>/.codex --releases "$FLEET_RELEASES" --dry-run
+bash "$REPO/scripts/fleet-codex-skills.sh" --codex-home <root>/.codex --releases "$FLEET_RELEASES"
+```
+
+Postflight's assertion 6 checks the link on every root that has a `.codex`. A missing link or one pinned to a
+single `fleet-vX` is a MISMATCH that prints this command. A root with no `.codex` is a SKIP. The first deploy
+that ships this check reads MISMATCH until the install has run; that is the correct reading, not a failed deploy.
+
 ## Do the suites need to run?
 
 Usually you do not have to care: `release-verify` decides and returns in ~2 seconds when they are not

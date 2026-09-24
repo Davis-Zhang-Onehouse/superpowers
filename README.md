@@ -100,16 +100,19 @@ This is a new root-local Claude configuration; signing in elsewhere does not con
 
 #### Codex CLI setup
 
-Codex workers use your existing `CODEX_HOME`, or `$HOME/.codex` if unset. Authenticate and install into that same configuration:
+Codex workers use your existing `CODEX_HOME`, or `$HOME/.codex` if unset. Authenticate, then give that same configuration the superpowers skills:
 
 ```bash
 fleet runtime --set codex
 codex login
-codex plugin marketplace add "$FLEET_SETUP_ROOT/superpowers"
-codex plugin add superpowers@superpowers-dev
+bash "$FLEET_SETUP_ROOT/superpowers/scripts/fleet-codex-skills.sh" \
+  --codex-home "${CODEX_HOME:-$HOME/.codex}" --releases "$FLEET_RELEASES" --dry-run
+# then the same command without --dry-run
 ```
 
-Keep native hooks enabled, review and trust the plugin's hook, and start a fresh session after installation. See the official [plugin instructions](https://developers.openai.com/codex/plugins) and [hook settings](https://developers.openai.com/codex/hooks). Fleet may require specific command approvals for tmux and peer-process inspection outside the Codex sandbox; do not disable the sandbox globally to get started.
+On a root that deploys releases, this writes one link, `<codex-home>/skills/superpowers -> $FLEET_RELEASES/current/skills`, so every deploy moves codex workers onto the deployed skills, the same way the marketplace entry moves claude workers. Codex lists them as `superpowers:<name>`, and a worker loads one by reading its `SKILL.md` ([codex-tools.md](skills/using-superpowers/references/codex-tools.md)). `fleet dispatch --runtime codex` refuses a `CODEX_HOME` that cannot see the core skills, and `scripts/release-postflight.sh` checks the link after each deploy. The link is used rather than `codex plugin marketplace add`, which records the release `current` resolves to today, and rather than `codex plugin add`, which copies a snapshot. Neither follows a deploy.
+
+A root that runs straight from this checkout, with nothing deployed under `$FLEET_RELEASES/current` yet, can install the plugin instead: `codex plugin marketplace add "$FLEET_SETUP_ROOT/superpowers"`, then `codex plugin add superpowers@superpowers-dev`. Re-run that after you update the checkout. For the plugin, keep native hooks enabled, review and trust its hook, and start a fresh session after installation. See the official [plugin instructions](https://developers.openai.com/codex/plugins) and [hook settings](https://developers.openai.com/codex/hooks). Fleet may require specific command approvals for tmux and peer-process inspection outside the Codex sandbox; do not disable the sandbox globally to get started.
 
 #### Check that skills actually load
 

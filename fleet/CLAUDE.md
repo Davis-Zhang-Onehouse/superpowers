@@ -408,7 +408,7 @@ be 100755 in the index (FB-31).
 
 - **`scripts/release-postflight.sh <version>`** — proves a deployment reached every root that shares this
   release area (`current`'s target, each root's marketplace path, every `.version-bump.json` manifest,
-  the deployed evidence's verdict), invoking `fleet` **not at all** — `release-status` from a second root
+  the deployed evidence's verdict, and — FB-111 — each root's codex skills link via `fleet-codex-skills.sh --check`), invoking `fleet` **not at all** — `release-status` from a second root
   reports relative to whichever `FLEET_HOME` it is handed, which is what read a correct deployment as
   `current DEV / head unknown` from `davis2_root`. Read-only: it proves a deployment, never performs one.
 
