@@ -20,7 +20,7 @@ import unittest
 from unittest import mock
 from dataclasses import fields as dataclass_fields
 
-from fleet.guards import CAP_EXCLUDED_STATES
+from fleet.guards import CAP_EXCLUDED_STATES, _counts_against_cap
 from fleet.pool import Pool
 from fleet.reconcile import (AWAITING_CI, BLOCKED, COMPLETE, DEAD, IDLE, KINDS, PARKED, RUNNING, STALE_WAIT_S, STATES,
                              UNKNOWN_SESSION, UNREACHABLE, Subject, _awaiting_note, needs_a_human, reconcile)
@@ -263,6 +263,25 @@ class TestReconcile(unittest.TestCase):
         s = self.subject("deadWorker-07300301")
         self.assertEqual(s.state, "DEAD")
         self.assertTrue(s.holds_slot, "a dead worker still holds its slot until something releases it")
+
+    def test_folderless_harvested_and_closed_records_do_not_count(self):
+        for todo, stamp in (("harvestedGone-07300310", "harvested_at"),
+                            ("closedGone-07300311", "closed_at")):
+            rec = _record(todo_id=todo, child_instant=str(self.fleet.instants / f"missing-{todo}"),
+                          slot="ws9", tmux=f"dt-{todo}",
+                          launched_at=None if stamp == "closed_at" else "2026-07-30T03:13:00Z",
+                          **{stamp: "2026-07-30T04:00:00Z"})
+            self.fleet.store.write(rec)
+        subjects = {s.identity: s for s in self.fleet.reconcile()}
+        for todo, state in (("harvestedGone-07300310", "HARVESTED"),
+                            ("closedGone-07300311", "CLOSED")):
+            with self.subTest(todo=todo):
+                subject = subjects[todo]
+                self.assertEqual(subject.state, state)
+                self.assertFalse(_counts_against_cap(subject))
+                self.assertIn(todo, subjects, "the historical record must remain auditable")
+        self.assertEqual(subjects["deadWorker-07300301"].state, DEAD)
+        self.assertTrue(_counts_against_cap(subjects["deadWorker-07300301"]))
 
     def test_a_live_process_with_no_record_is_reported_as_an_unknown(self):
         # OBS-48. A records-first join is structurally blind to this session; process-first is the only

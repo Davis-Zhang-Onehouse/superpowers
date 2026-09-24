@@ -41,6 +41,8 @@ BLOCKED = "BLOCKED"
 PARKED = "PARKED"
 AWAITING_CI = "AWAITING-CI"
 COMPLETE = "COMPLETE"
+HARVESTED = "HARVESTED"
+CLOSED = "CLOSED"
 DEAD = "DEAD"
 #: `SI-39`. A live process holds this record's SLOT, but no session answers for its tmux name. The work is
 #: running; what is missing is our ability to reach its session — almost always because the caller is
@@ -56,7 +58,7 @@ UNREACHABLE = "UNREACHABLE"
 UNKNOWN_SESSION = "UNKNOWN-SESSION"
 STALE_LEASE = "STALE-LEASE"
 
-STATES = (PENDING_LAUNCH, RUNNING, IDLE, BLOCKED, PARKED, AWAITING_CI, COMPLETE, DEAD,
+STATES = (PENDING_LAUNCH, RUNNING, IDLE, BLOCKED, PARKED, AWAITING_CI, COMPLETE, HARVESTED, CLOSED, DEAD,
           UNREACHABLE, UNKNOWN_SESSION, STALE_LEASE)
 
 KIND_WORKER = "worker"
@@ -426,6 +428,10 @@ def _state_of(rec, folder_state, live, phase, parked, pane, sessions, instant, i
         # what "a renamed instant is followed" means. `abort` is terminal too: W2-21's fix reached
         # inflight and complete and never abort, and abort is legal.
         return COMPLETE, f"the instant folder is `-{folder_state}-`; the work is over", False
+    if rec.harvested_at:
+        return HARVESTED, f"record harvested at {rec.harvested_at}; the work is over", False
+    if rec.closed_at:
+        return CLOSED, f"record closed at {rec.closed_at}; the session was intentionally closed", False
     observed = sessions.observe(rec.tmux).state if (live and rec.runtime == 'codex') else None
     if observed in ('unknown', 'dialog'):
         #: `RV-25`. Only a dialog fleet SAW is on the pane for an attached human to answer. `unknown` is

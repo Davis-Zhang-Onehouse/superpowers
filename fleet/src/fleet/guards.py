@@ -34,7 +34,7 @@ from pathlib import Path
 from fleet.errors import BadInput, InstantNameError, NoCapacity, Refused
 from fleet.identity import InstantName
 from fleet.profiles import OPTYPES_OF_KIND, Profile, agrees_with_optype
-from fleet.reconcile import AWAITING_CI, COMPLETE, KIND_WORKER, PENDING_LAUNCH, Subject, reconcile
+from fleet.reconcile import AWAITING_CI, CLOSED, COMPLETE, HARVESTED, KIND_WORKER, PENDING_LAUNCH, Subject, reconcile
 
 #: A guard's failure DIRECTION, part of the contract rather than a comment (`FR2-11.6`). An
 #: under-triggering guard's worst day is a coordinator asking a question it did not need to ask; a
@@ -47,7 +47,8 @@ DEFAULT_WIP_CAP = 1
 #: The only states the cap excludes. Everything else counts — including `DEAD` and `PENDING-LAUNCH`,
 #: deliberately: a stopped worker's half-finished tree is exactly what a second dispatch collides with,
 #: and inventing an exemption for it is the silent slot leak this direction exists to avoid.
-CAP_EXCLUDED_STATES = (AWAITING_CI, COMPLETE)
+#: A stamped harvest or close is an explicit terminal act, even after its folder is removed.
+CAP_EXCLUDED_STATES = (AWAITING_CI, COMPLETE, HARVESTED, CLOSED)
 
 #: Verbs no admission rule is evaluated for. `OI-2`/`MD-9.2`/`FD-9`, and the reason is recorded below
 #: rather than left to be re-derived: rev 1 of the design deleted this door entirely (`FI-8`) precisely
