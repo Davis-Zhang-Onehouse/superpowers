@@ -766,7 +766,7 @@ def snapshot():
 t0 = time.monotonic()
 with open(outfile, "w") as sink:
     proc = subprocess.Popen(
-        [sys.executable, "-m", "fleet.cli", "dispatch", "--profile", profile, "--title", title,
+        [os.environ["IT_FLEET"], "dispatch", "--profile", profile, "--title", title,   # the wrapper (B18)
          "--base", base, "--cap", cap],
         stdout=sink, stderr=subprocess.STDOUT)
     fired, at_kill = "", {}
