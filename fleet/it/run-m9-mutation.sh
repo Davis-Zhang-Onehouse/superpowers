@@ -82,6 +82,7 @@ else
   it_fail M9-mut-baseline "fleet/it/M9-mutation/real.out" \
     "the audit does not pass on the unmutated package, so no kill below means anything: $(grep -m1 -E 'AssertionError|Error' "$EV/real.out" | cut -c1-200)"
   m9_unreached "the baseline audit is red" M9-mut-inject M9-mut-1 M9-mut-2 M9-mut-3 M9-mut-4
+  it_assert_isolation M9mut-leave
   echo "baseline is red — refusing to report mutation results" >&2
   exit 1
 fi
