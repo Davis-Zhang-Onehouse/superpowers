@@ -147,6 +147,27 @@ releases = Path(tempfile.mkdtemp(prefix='cxs-releases-'))
 atexit.register(shutil.rmtree, releases, True)
 (releases / 'current').symlink_to(repo, target_is_directory=True)
 
+
+def _salvage():
+    """RV-32: on ANY exit (a timeout, an exception, an operator dialog) keep what the run saw before the cleanup above
+    deletes it. atexit runs last-registered first, so this runs BEFORE `outside` (the codex sessions) and the slot are
+    removed. A run that finished normally has already written its verdict, and nothing is overwritten."""
+    try:
+        if not (evidence / 'verdict.json').exists():
+            verdict['incomplete'] = True
+            path = codex_transcript(slot)
+            if path:
+                shutil.copy2(path, evidence / 'transcript.jsonl')
+            for name in ('rca.md', 'exit-codes.md', 'calc.py', 'SKILL-NOT-FOUND.md'):
+                if (slot / name).exists():
+                    shutil.copy2(slot / name, evidence / f'worker-{name}')
+            (evidence / 'verdict.json').write_text(json.dumps(verdict, indent=2) + '\n')
+    except Exception as exc:  # noqa: BLE001 - salvage must never mask the original failure
+        print(f'salvage failed: {exc}', file=sys.stderr)
+
+
+atexit.register(_salvage)
+
 # --- screens -----------------------------------------------------------------------------------------------------
 SCREENS = (('update available', '2. skip'),)
 TRUST = ('trust this folder', 'do you trust the contents', 'trust the files in this folder')
