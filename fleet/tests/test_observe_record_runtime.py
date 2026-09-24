@@ -195,6 +195,25 @@ class VerbsJudgeThePaneByItsOwningAgent(unittest.TestCase):
         record = self.worker('codex', codex_pane, (FRAMES / 'codex-approval-0156.frame').read_text())
         self.assertEqual(self.f.run(['pane-guard', '--id', record.todo_id])[0], 15)
 
+    def test_the_slot_holder_named_for_a_record_is_the_outer_agent_not_its_nested_child(self):
+        """RV-23. With no process attributed to the record's pane (its session answers nowhere), `evidence.pid` falls back
+        to whatever live process holds the slot — in pgrep order, claude first. `scripts/fleet-finished-pids.sh` keys the
+        auto-resume exclusion on that pid, so it must be the worker (codex 201), not its short-lived claude child (204)."""
+        path = self.f.worker('coder', slot='ws1', live=False)
+        record = self.f.store.read(self.f.ids['coder'])
+        record.runtime = 'codex'
+        self.f.store.write(record)
+        slot = self.f.pool.slot_path('ws1')
+        rows = [row[:4] + (slot,) + row[5:] for row in codex_pane(200, slot)]      # every process sits in the slot
+        inventory = fake_inventory(self.proc, rows, {})                            # and no pane owns any of them
+        self.assertEqual(sorted((s.pid, s.runtime, s.nested) for s in inventory),
+                         [(201, 'codex', False), (204, 'claude', True)])
+        self.assertEqual([s.pid for s in inventory], [204, 201], 'pgrep lists claude first — the order that misled')
+        self.f.procs.extend(inventory)
+        code, out, err = self.f.run(['status', '--id', record.todo_id, '--porcelain'])
+        self.assertEqual(code, 0, err)
+        self.assertIn('pid\t201', out, out)
+
     # --- the mismatch that IS real still reads as one -------------------------------------------------------------
 
     def test_a_codex_record_whose_pane_agent_is_claude_is_still_a_mismatch(self):
