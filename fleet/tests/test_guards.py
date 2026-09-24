@@ -946,5 +946,16 @@ class TestTheCapIsPerEffort(GuardCase):
         self.assertIn(f"{rel} [folder: yes, ", held.reason, held.reason)
 
 
+    def test_a_foreign_worker_with_record_and_lease_is_set_aside_once(self):
+        # RV-X1 (fix-introduced by RV-C4). A foreign same-base worker has a RECORD (set aside by the records pass) and a
+        # LEASE; under a claim the lease must not be set aside a second time — the count is the same on both passes.
+        fleet = self.fleet(slots=3)
+        fleet.worker("theirsWorking", slot="ws1", instants=self.other_effort(fleet))
+        advisory = WipCap().evaluate(fleet.ctx(cap=1))
+        held = self.verdict_of(evaluate_all(fleet.ctx(cap=1).under_claim("ws2"), "dispatch"), "wip-cap")
+        for label, verdict in (("advisory", advisory), ("under a claim", held)):
+            self.assertIn("set aside 1 subject(s) of base", verdict.reason, f"{label}: {verdict.reason}")
+
+
 if __name__ == "__main__":
     unittest.main()

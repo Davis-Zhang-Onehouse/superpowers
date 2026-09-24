@@ -673,8 +673,11 @@ def _claims_ahead(ctx, recorded: list, by_effort=True, aside=None) -> list:
             continue
         #: `V23-D`: the same base string in another instants directory is another effort's claim.
         if by_effort and not _in_this_effort(ctx, lease.child_instant or ""):
-            if aside is not None and lease.base_instant and lease.todo_id not in known:
-                aside.append(_claim_subject(lease))     # RV-C4: said, not silently dropped
+            #: RV-C4: said, not silently dropped. RV-X1: once — a foreign worker whose RECORD the records pass
+            #: already set aside keeps its lease, and counting that lease again doubled the clause under a claim.
+            if (aside is not None and lease.base_instant and lease.todo_id not in known
+                    and lease.todo_id not in {s.identity for s in aside}):
+                aside.append(_claim_subject(lease))
             continue
         if not lease.base_instant or lease.todo_id in known:
             continue
