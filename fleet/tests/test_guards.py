@@ -16,6 +16,7 @@ a process, a tmux or a repository, and nothing reads a `.md` file for a control 
 """
 import json
 import pathlib
+import re
 import shutil
 import tempfile
 import unittest
@@ -103,13 +104,15 @@ class Fleet:
     # ---- fixture construction ---------------------------------------------------------------
 
     def worker(self, name, *, optype="append", state="inflight", phase=None, pane=BUSY_PANE,
-               live=True, base=OURS, slot=None, launched=True, handoff="Updated: now\n"):
-        """One dispatched subject: a folder, a record, optionally a lease, a process and a declaration."""
+               live=True, base=OURS, slot=None, launched=True, handoff="Updated: now\n", instants=None):
+        """One dispatched subject: a folder, a record, optionally a lease, a process and a declaration.
+
+        `instants` puts the folder in ANOTHER effort's instants directory (V23-D), sharing this store."""
         self._n += 1
         curr = f"0730{self._n:04d}"
         folder = f"00000000-{curr}-{state}-{optype}-{name}"
-        path = self.instants / folder
-        path.mkdir()
+        path = (instants or self.instants) / folder
+        path.mkdir(parents=True)
         (path / "HANDOFF.md").write_text(handoff)
         todo_id, tmux = f"{name}-{curr}", f"dt-{name}"
         self.store.write(Record(
@@ -747,6 +750,115 @@ class TestTheCapUnderAClaim(GuardCase):
         self.assertEqual(fleet.record_state(), before_records, "the claim-held pass wrote a record")
         self.assertEqual(fleet.pool_state(), before_pool, "the claim-held pass touched a lease")
         self.assertEqual(snapshot(fleet.tmp), before_fs, "the claim-held pass changed a file")
+
+
+class TestTheCapIsPerEffort(GuardCase):
+    """`V23-D` (quanton backlog v2-04, Critical). The cap counted every record whose BASE STRING matched, and
+    efforts share base strings — ROOT_BASE `00000000` is every effort's root base. Measured on a copy of the
+    live store at fleet 0.6.10: quanton's population and fleetInfraOps' were the same 121 subjects, and twelve
+    harvested, folderless fleetInfraOps records held quanton's cap, which was raised 4 -> 7 -> 12 -> 16 in a
+    day. An effort is its instants directory (`FLEET_INSTANTS`) AND its base; one store serves them all.
+    """
+
+    def other_effort(self, fleet):
+        return fleet.tmp / "otherEffort" / "instants"
+
+    def test_two_efforts_sharing_a_base_string_each_count_only_their_own(self):
+        fleet = self.fleet(slots=3)
+        theirs_dir = self.other_effort(fleet)
+        ours = fleet.worker("oursWorking", slot="ws1")
+        theirs = fleet.worker("theirsWorking", slot="ws2", instants=theirs_dir)
+
+        for label, ctx, mine, foreign in (
+                ("ours", fleet.ctx(cap=2), ours, theirs),
+                ("theirs", fleet.ctx(cap=2, instants_dir=theirs_dir), theirs, ours)):
+            verdict = WipCap().evaluate(ctx)
+            self.assertTrue(verdict.allowed,
+                            f"{label}: another effort's worker filled this effort's cap of 2: {verdict.reason}")
+            self.assertIn("1 of 2 active-dev slot(s) in use", verdict.reason, f"{label}: {verdict.reason}")
+            self.assertIn(mine, verdict.reason, f"{label}: its own worker is not named: {verdict.reason}")
+            self.assertNotIn(foreign, verdict.reason.split("set aside")[0],
+                             f"{label}: the other effort's worker is named as counted: {verdict.reason}")
+
+        # Control: each effort's own worker still holds a cap of 1 — the keying removed only the foreign one.
+        self.assertFalse(WipCap().evaluate(fleet.ctx(cap=1)).allowed)
+        self.assertFalse(WipCap().evaluate(fleet.ctx(cap=1, instants_dir=theirs_dir)).allowed)
+
+    def test_the_population_line_says_what_was_set_aside(self):
+        fleet = self.fleet(slots=3)
+        fleet.worker("theirsWorking", slot="ws2", instants=self.other_effort(fleet))
+        verdict = WipCap().evaluate(fleet.ctx(cap=1))
+        self.assertTrue(verdict.allowed, verdict.reason)
+        self.assertIn("set aside 1 subject(s) of base", verdict.reason,
+                      "the keying is silent: a reader cannot tell a foreign record was seen and not counted")
+
+    def test_a_folderless_record_of_another_effort_never_counts(self):
+        fleet = self.fleet(slots=2)
+        folder = fleet.worker("augustPhantom", live=False, state="inflight",
+                              instants=self.other_effort(fleet))
+        shutil.rmtree(fleet.paths["augustPhantom"])            # harvested, then its folder moved away
+        [subject] = [s for s in fleet.subjects() if s.kind == "worker"]
+        self.assertEqual(subject.state, "DEAD", "setup: a folderless, sessionless launched record reads DEAD")
+        verdict = WipCap().evaluate(fleet.ctx(cap=1))
+        self.assertTrue(verdict.allowed,
+                        f"another effort's folderless record {folder} held this effort's cap: {verdict.reason}")
+
+    def test_a_folderless_record_of_THIS_effort_still_counts_and_says_folder_no(self):
+        # The cap under-triggers by design; a phantom of our own is ours to reap, and now it is VISIBLE.
+        fleet = self.fleet(slots=2)
+        folder = fleet.worker("ownPhantom", live=False)
+        shutil.rmtree(fleet.paths["ownPhantom"])
+        verdict = WipCap().evaluate(fleet.ctx(cap=1))
+        self.assertFalse(verdict.allowed, "this effort's own folderless record stopped counting")
+        self.assertIn(f"{folder} [folder: no, session: no, age: ", verdict.reason, verdict.reason)
+
+    def test_a_live_holder_is_named_with_folder_yes_session_yes_and_an_age(self):
+        fleet = self.fleet(slots=2)
+        folder = fleet.worker("solo", slot="ws1")
+        verdict = WipCap().evaluate(fleet.ctx(cap=1))
+        self.assertFalse(verdict.allowed)
+        self.assertRegex(verdict.reason, re.escape(f"{folder} [folder: yes, session: yes, age: ") + r"\d+[dhms]")
+        self.assertIn("folder: yes, session: yes", verdict.clears_who,
+                      "clears_who names the holder without the facts that tell a phantom apart")
+
+    def test_another_efforts_folder_changing_state_cannot_change_this_efforts_count(self):
+        # The reboot-identity case: before the reboot the August records' folders read `-complete-` (excluded);
+        # after it they were gone (DEAD, counted), and quanton's holders changed identity with no quanton change.
+        fleet = self.fleet(slots=3)
+        mine = fleet.worker("oursWorking", slot="ws1")
+        fleet.worker("augustRecord", live=False, state="complete", instants=self.other_effort(fleet))
+        before = WipCap().evaluate(fleet.ctx(cap=2))
+        shutil.rmtree(fleet.paths["augustRecord"])
+        after = WipCap().evaluate(fleet.ctx(cap=2))
+        self.assertTrue(after.allowed, f"another effort's folder vanishing filled this cap: {after.reason}")
+        self.assertEqual((before.allowed, before.reason.split(" examined ")[0]),
+                         (after.allowed, after.reason.split(" examined ")[0]),
+                         "this effort's counted holders changed because another effort's folder did")
+        self.assertIn(mine, after.reason)
+
+    def test_a_folder_moved_into_this_instants_dir_is_still_this_efforts(self):
+        # Compatibility: `reconcile` follows a recorded path from another dir to a same-named folder HERE; the
+        # folder that answers is where the subject lives, so the record keeps counting as it did before.
+        fleet = self.fleet(slots=2)
+        folder = fleet.worker("moved", slot="ws1", instants=self.other_effort(fleet))
+        shutil.move(str(fleet.paths["moved"]), str(fleet.instants / folder))
+        verdict = WipCap().evaluate(fleet.ctx(cap=1))
+        self.assertFalse(verdict.allowed, f"a folder that lives in this effort's dir stopped counting: {verdict.reason}")
+
+    def test_another_efforts_claim_on_the_same_base_does_not_count_under_a_claim(self):
+        fleet = self.fleet(slots=3)
+        fleet.pool.claim(todo_id="foreignSameBase", tmux="dt-foreignSameBase", base_instant=OURS,
+                         child_instant=str(self.other_effort(fleet) / "00000000-07309999-inflight-append-x"),
+                         slot="ws1")
+        verdict = self.verdict_of(evaluate_all(fleet.ctx(cap=1).under_claim("ws2"), "dispatch"), "wip-cap")
+        self.assertTrue(verdict.allowed,
+                        f"another effort's claim on the same base string held this cap: {verdict.reason}")
+        # Control: the same claim in THIS effort's dir does count.
+        fleet.pool.claim(todo_id="ownClaim", tmux="dt-ownClaim", base_instant=OURS,
+                         child_instant=str(fleet.instants / "00000000-07309998-inflight-append-y"), slot="ws2")
+        held = self.verdict_of(evaluate_all(fleet.ctx(cap=1).under_claim("ws3"), "dispatch"), "wip-cap")
+        self.assertFalse(held.allowed, held.reason)
+        self.assertIn("00000000-07309998-inflight-append-y [folder: no, session: no, age: ", held.reason)
 
 
 if __name__ == "__main__":

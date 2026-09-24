@@ -79,11 +79,16 @@ the integration step assume a common root.
 Run the dispatch with `--dry-run` first and read `guard.wip-cap` out of the output:
 
 ```
-guard.wip-cap  allow: 0 of 1 active-dev slot(s) in use. examined 0 subject(s) of 00000000; 0 counted, 0 excluded
+guard.wip-cap  allow: 0 of 1 active-dev slot(s) in use. examined 0 subject(s) of 00000000 in /work/effortA/instants; 0 counted, 0 excluded
 ```
 
 That row names the count, the cap, the population examined, who is counted and who is excluded. It is the
-answer. The guard's own cost note says it is free and safe to ask before every dispatch and safe to ask
+answer. The population is **this effort's**: records of your `--base` whose instant lives in your
+`FLEET_INSTANTS`. One store serves every effort on the root and base strings repeat (`00000000` is every
+effort's root base), so same-base records of another instants directory are reported as `set aside` and
+never counted. Each counted holder carries `[folder: yes|no, session: yes|no, age: …]`. A holder with
+`folder: no, session: no` is a phantom of your own effort — a record nothing is working on — so reap or
+harvest it; raising `--cap` to get past it makes the cap decorative. The guard's own cost note says it is free and safe to ask before every dispatch and safe to ask
 twice, so there is no reason to ask anything else.
 
 **Do not carry a formula.** The tempting one — *me, plus the workers already running, plus this one* — is
