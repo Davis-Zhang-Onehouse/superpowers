@@ -72,11 +72,26 @@ an indeterminate observation, which refuses messaging rather than guessing input
 
 Codex uses the dispatching shell's `CODEX_HOME`, or `$HOME/.codex` when unset. Claude uses the existing
 `scripts/claude-config-dir.sh` workspace-owner mapping (`CLAUDE_OWNERS_MAP` can name an explicit map).
-The selected configuration directory must exist. Codex may ask for ordinary approval to run fleet commands
-outside its sandbox because tmux sockets and peer-process inspection require host access. Approve the
-specific fleet command through the CLI; no global permission-mode change is needed. Denied tmux access
-fails before dispatch creates a worker record or lease, so an approved retry does not consume capacity
-twice. `FLEET_CODEX_BIN` and `FLEET_CLAUDE_BIN` can name the actual executable; do not point them at
+The selected configuration directory must exist. A codex session YOU start (a coordinator) runs under your own
+configuration and may ask for approval to run fleet commands outside its sandbox. Approve the specific fleet
+command through the CLI. Denied tmux access fails before dispatch creates a worker record or lease, so an approved
+retry does not consume capacity twice.
+
+**Codex WORKERS that fleet launches or revives run unattended (FB-110, operator decision D-45).** Their launch and
+resume argv always carry `-a never -s workspace-write -c sandbox_workspace_write.network_access=true
+-c check_for_update_on_startup=false`, plus `--add-dir` for FLEET_HOME (the store), FLEET_INSTANTS and the git
+common dir of every repository at the slot root or one level below. That last one is how a linked-worktree slot
+commits: codex makes `<root>/.git` read-only. The slot itself is the sandbox cwd. No prompt ever appears. A command
+the sandbox refuses fails back to the model (a write outside those roots reads `Read-only file system`). Never
+danger-full-access, and no knob loosens it; the argv outranks `CODEX_HOME/config.toml`, which fleet never edits.
+`dispatch`, `revive` (and its `--dry-run`) print a `codex_policy` row, and `brief`'s `runtime` row carries the same
+text. The launcher exports GH_TOKEN from `~/.gh-token-<root>` for codex as for claude. Without it, `gh` in the
+sandbox acts as whatever account `~/.config/gh` names.
+Known limit (measured on 0.156.1): the sandbox runs each command in its own PID namespace, so `pgrep`/`/proc` see
+only the sandbox. Verbs that decide liveness from the process census (`board`, `pane-guard`, `close`, `harvest`,
+`reap`) are blind when a codex worker runs them. That is fine for a fix worker's verbs (`brief`, `propose`,
+`review`, `park`, `complete`, `base-check`), but it is a reason to keep coordinator, stack and release instants
+on claude. tmux works inside the sandbox only because the network is on. `FLEET_CODEX_BIN` and `FLEET_CLAUDE_BIN` can name the actual executable; do not point them at
 a seed-delivery shim. Claude's existing `REAL_CLAUDE` override
 remains supported. Executable, configuration directory and runtime are recorded for recovery; credentials
 are never copied into fleet records or launchers.

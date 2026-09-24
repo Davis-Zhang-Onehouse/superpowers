@@ -149,8 +149,8 @@ Branch on the code before any send.
 Treat it as wait, never as permission: before a send everything but `0` waits anyway, but before a CLOSE the
 difference is a live pane mid-turn being torn down (`FI-7`).
 
-`15` means the pane is showing an operator dialog — `AskUserQuestion`, the folder-trust screen, or Codex's
-approval prompt — blocked on YOU, not on a turn that
+`15` means the pane is showing an operator dialog — `AskUserQuestion`, the folder-trust screen (Codex 0.156's
+reads `enter continue · esc quit`, as does its update modal), or Codex's approval prompt — blocked on YOU, not on a turn that
 will finish by itself (`I-16`). It reads nothing like `10`/`11`/`14`: those clear with time, this one does
 not, so a coordinator that sees `15` should stop polling and go answer the pane, not wait on it. Before
 this code existed a dialog fell through to `0 safe`, the same answer an idle worker gets — a scheduled
@@ -174,6 +174,10 @@ record: `board` shows a `runtime` column (`codex`, `claude/claude-fable-5-1`), `
 `--dry-run` prints the choice and where each half came from; a fleet older than the release carrying these fields
 ignores the profile fields silently and has no such rows, so a missing `runtime` row means the choice was not made. A codex worker on a claude box is admitted like any
 other; do not switch the box to get one.
+A codex worker runs with NO approval prompts inside the workspace-write sandbox, network on (FB-110, D-45):
+`dispatch`/`revive` print a `codex_policy` row with the argv and the writable roots, and `brief` repeats it. A codex
+worker's own `pgrep`/`/proc` see only its sandbox, so keep coordinator, stack and release instants on claude
+(docs/README.fleet-runtimes.md).
 
 ### Selecting the box's default runtime
 
