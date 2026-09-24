@@ -7088,6 +7088,7 @@ def _cadence(ctx: Ctx, parsed: Parsed) -> list:
     seen = set()
     for source in overdue:
         register = Path(source.issues_path)
+        # Legacy relative register paths have no trustworthy effort owner here; harvest reports them.
         if not register.is_absolute() or (not unscoped and register.parent.parent.resolve() != effort_dir):
             continue
         source_effort = register.parent.parent.resolve()
