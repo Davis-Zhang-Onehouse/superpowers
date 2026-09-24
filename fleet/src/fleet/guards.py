@@ -259,10 +259,16 @@ def _holder(ctx, subject, dispatched: dict, now: float) -> str:
     `V23-D`. Read-only: the folder and session come from the join's own evidence; a claim, which the join
     never saw, is asked of the filesystem and the session layer (both reads)."""
     evidence = subject.evidence
+    #: RV-C5. Presence is whether the join FOUND the folder (no missing suffix), not whether its name parsed; and a
+    #: claim's relative child path is relative to the instants dir, never the cwd. A wrong "no" reads as a phantom.
     if "folder_state" in evidence:
-        folder = evidence.get("folder_state") != "missing"
+        folder = not str(evidence.get("instant", "")).endswith(_MISSING_SUFFIX)
     else:
-        folder = bool(_recorded_instant(subject)) and Path(_recorded_instant(subject)).is_dir()
+        raw = _recorded_instant(subject)
+        path = Path(raw) if raw else None
+        if path is not None and not path.is_absolute() and getattr(ctx, "instants_dir", None):
+            path = Path(ctx.instants_dir) / path
+        folder = path is not None and path.is_dir()
     if "liveness" in evidence:
         session = evidence.get("liveness") != "none"
     else:
