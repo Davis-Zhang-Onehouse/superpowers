@@ -996,10 +996,12 @@ def _resolve_instant(ctx: Ctx, raw) -> Path:
             f"{path} is not an instant on disk. A recorded path goes stale when the worker renames its "
             "own folder, so resolution follows the full stable key with only `state` varying — and a "
             "path that resolves to nothing is refused rather than invented (FD-1).",
-            clears_when=(f"--instant names a folder that exists; this one is GONE and the open record "
+            clears_when=(f"--instant names an existing folder (a relative path from the current "
+                         f"directory or a bare name from the instants directory); this one is GONE and the open record "
                          f"{holder.todo_id!r} still names it, so `fleet close --id {holder.todo_id}` is the "
                          f"door that runs without it" if holder is not None else
-                         "--instant names a folder that exists under the instants directory"),
+                         "--instant names an existing folder using an absolute path, a relative path from "
+                         "the current directory, or a bare name from the instants directory"),
             clears_who="the caller")
     try:
         InstantName.parse(found.name)        # refused, not judged: a non-instant is not an instant
