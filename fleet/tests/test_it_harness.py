@@ -24,7 +24,7 @@ FLEET_DESTINATIONS = ("FLEET_HOME", "FLEET_INSTANTS", "FLEET_ROOT", "FLEET_INSTA
                       "TMUX", "TMUX_PANE")              # a bare `tmux` inside a pane follows $TMUX, not TMUX_TMPDIR
 #: One private tmux directory per test process for ordinary cases. ServerGuardian's missing-directory
 #: regression cases use a uniquely named server under tmux's real default directory to prove that a
-#: fallback cannot kill it; each registers an explicit kill-server cleanup for only that fixture.
+#: fallback cannot kill it; each cleans up only that fixture's server and socket file.
 #: (`tempfile.gettempdir()` would be /tmp, which IS tmux's default — found in review.)
 PRIVATE_TMUX_DIR = tempfile.mkdtemp(prefix="it-harness-tmux-")
 atexit.register(shutil.rmtree, PRIVATE_TMUX_DIR, True)
@@ -580,6 +580,10 @@ class ServerGuardian(unittest.TestCase):
         env.pop("TMUX_TMPDIR")
         return subprocess.run(["tmux", "-L", self.socket, "ls"], capture_output=True, env=env).returncode == 0
 
+    def _cleanup_default_server(self, env):
+        subprocess.run(["tmux", "-L", self.socket, "kill-server"], capture_output=True, env=env)
+        (pathlib.Path("/tmp") / f"tmux-{os.getuid()}" / self.socket).unlink(missing_ok=True)
+
     def _assert_missing_armed_dir_preserves_default_server(self, move):
         armed = self.tmp / "armed"
         armed.mkdir()
@@ -590,8 +594,7 @@ class ServerGuardian(unittest.TestCase):
             shutil.rmtree(armed)
         env = dict(self.env)
         env.pop("TMUX_TMPDIR")
-        self.addCleanup(subprocess.run, ["tmux", "-L", self.socket, "kill-server"],
-                        capture_output=True, env=env)
+        self.addCleanup(self._cleanup_default_server, env)
         started = subprocess.run(["tmux", "-L", self.socket, "new-session", "-d", "-s", "victim"],
                                  capture_output=True, env=env)
         self.assertEqual(started.returncode, 0, started.stderr)
@@ -605,6 +608,14 @@ class ServerGuardian(unittest.TestCase):
 
     def test_moved_armed_directory_does_not_kill_default_server(self):
         self._assert_missing_armed_dir_preserves_default_server(move=True)
+
+    def test_default_socket_fixture_is_unlinked_after_cleanup(self):
+        case = ServerGuardian("test_deleted_armed_directory_does_not_kill_default_server")
+        result = unittest.TestResult()
+        case.run(result)
+        self.assertTrue(result.wasSuccessful(), result.errors or result.failures)
+        socket_path = pathlib.Path("/tmp") / f"tmux-{os.getuid()}" / case.socket
+        self.assertFalse(socket_path.exists(), f"fixture left a stale socket: {socket_path}")
 
     def test_mismatched_runner_pid_fails_safe(self):
         """A caller whose claimed pid is not the guardian's parent cannot authorize a kill."""
