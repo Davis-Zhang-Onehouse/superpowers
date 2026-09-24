@@ -94,7 +94,7 @@ from fleet.roadmap import (ATTENTION, COORDINATOR, RETIRED, SUPERSEDED, TERMINAL
                            Proposal, Roadmap, _check_evidence, _check_status,
                            _proposer as roadmap_proposer,
                            last_index)
-from fleet.session import (TMUX_SOCKET_ENV, SessionLayer, default_probes,
+from fleet.session import (TMUX_SOCKET_ENV, SessionLayer, default_probes, outer,
                            plain as pane_plain)
 from fleet.store import ATTESTED_PREFIX, Declarations, Record, Store
 from fleet.workspace import GOLDEN_FILE, Workspace, default_git
@@ -1600,7 +1600,9 @@ def _message_target(ctx, parsed):
                                   f'work goes to a new worker (`fleet dispatch`), which is then messaged',
                       clears_who='the coordinator')
     layer = ctx.sessions_for(record)
-    matches = [item for item in layer.live() if item.name == record.tmux]
+    #: v23-k. The pane's own agent (`session.outer`), not an agent it started: a codex worker running
+    #: `claude agents --json` has a claude child whose runtime and cwd are not the worker's.
+    matches = outer(layer.live(), record.tmux)
     unreadable = [item for item in matches if getattr(item, "unreadable", False)]
     if unreadable:
         #: RV-27. Attributed to this pane through `stat`, but its cwd was never read, so ownership cannot be proven.
@@ -2307,7 +2309,7 @@ def _do_resume(ctx: Ctx, parsed: Parsed) -> int:
     verdicts = guards.evaluate_all(gctx, "resume")
     todo_id = f"{name.name}-{name.curr}"
     tmux = parsed.get("tmux", f"dt-{name.name}")
-    observed = [item.runtime for item in ctx.sessions.live() if item.name == tmux]
+    observed = [item.runtime for item in outer(ctx.sessions.live(), tmux)]      # v23-k: the pane's own agent
     existing = None
     try:
         existing = ctx.store.read(todo_id)
@@ -3905,7 +3907,8 @@ def _pane_refusal(ctx: Ctx, record: Record, override: str = ""):
     captured = layer.capture(tmux)
     text = captured or ''
     live = layer.live()   # one census for every question below (see `_do_pane_guard`)
-    if any(item.name == tmux and item.runtime != record.runtime for item in live):
+    #: v23-k. The pane's OWN agent decides its runtime; an agent it started (`LiveSession.nested`) does not.
+    if any(item.runtime != record.runtime for item in outer(live, tmux)):
         return ('indeterminate', f'{tmux} runtime differs from its record',
                 'resolve the runtime mismatch before closing', record.todo_id)
     agent = layer.is_agent_process(tmux, live)
@@ -5703,7 +5706,9 @@ def _do_pane_guard(ctx: Ctx, parsed: Parsed) -> int:
                 f"That is a failed observation, not an observation of a non-agent pane; an empty pane "
                 f"that captured cleanly is reported {PANE_NOT_CLAUDE}, not this. WAIT and re-poll; do "
                 f"not send, and do not close")
-        elif any(item.name == pane and item.runtime != layer.runtime for item in live):
+        elif any(item.runtime != layer.runtime for item in outer(live, pane)):
+            #: v23-k. Only the pane's own agent (`session.outer`): a claude that a codex worker is running — the suite's
+            #: or `fleet peers`' `claude agents --json` — is that worker's child, and read 14 for its whole life.
             code, detail = PANE_INDETERMINATE, f'{pane} runtime differs from the recorded or selected runtime'
         elif agent and state == 'unknown':
             code, detail = PANE_INDETERMINATE, f'{pane} is a {layer.runtime} worker with an unrecognized input layout'

@@ -78,6 +78,7 @@ IT_RESULTS="$R" bash run-group5.sh             # §L §M §N in one process — 
 | `run-lineage` | §LB the lineage gate on `propose --status done` |
 | `run-w1` | §W1 the private tmux server |
 | `run-e9-leak` `run-m9-mutation` `run-rmw` | targeted regressions |
+| `run-OR` | §OR a real codex worker on a claude box read with its record's runtime (live; spends codex turns) |
 | `run-P` | §P the real dispatch — see below |
 
 **The live-session baseline is per RUN** (FB-60). `lib.sh` mints `IT_RUN_ID` without exporting it, and `run-all.sh`

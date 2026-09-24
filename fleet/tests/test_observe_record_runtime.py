@@ -1,0 +1,260 @@
+"""v23-k (FB-113): each pane is observed as the runtime of the agent that OWNS it, judged with its RECORD's layer.
+
+Measured on the first codex worker (`v23ainstantpath`, fleet 0.6.10): `fleet board` flapped the record to BLOCKED
+"live runtime claude differs from record runtime codex" for the 76 s its hermetic suite ran, and `pane-guard --id`
+read `0 safe` for a codex pane drawing "• Working (… • esc to interrupt) · 1 background terminal running · …".
+
+Two causes, both pinned here:
+
+1. The inventory attributed EVERY recognised claude/codex process under a pane to that pane, and the runtime checks
+   asked "is any of them another runtime". The suite (and `fleet peers`) runs the REAL `claude agents --json`, so a
+   codex worker's pane briefly held a genuine claude process — its CHILD, not its agent. A row is now `nested` when an
+   ancestor below the pane root is itself an inventoried agent, and runtime identity is read from the outer rows.
+2. codex 0.156's busy row was matched only as a bare `• Working (… esc to interrupt)` directly above the caret. The
+   live row carries a ` · 1 background terminal running · …` tail, and a `└ <command>` row can sit under it.
+
+The inventory is built by the REAL `default_probes` over a fake `/proc`, and the verbs run through `cli.main`, so a
+test here fails on the base for the reason the pilot did, not for a missing keyword.
+"""
+from pathlib import Path
+import shutil
+import subprocess
+import tempfile
+import unittest
+from unittest.mock import patch
+
+from fleet.runtime import observe
+from fleet.session import default_probes
+from tests.test_cli import Fleet
+
+FRAMES = Path(__file__).resolve().parents[1] / 'it' / 'fixtures' / 'runtime'
+CLAUDE_EXE = '/home/u/.local/share/claude/versions/2.1.282'
+CODEX_EXE = '/home/u/.local/node/lib/node_modules/@openai/codex/vendor/bin/codex'
+
+
+def fake_inventory(proc_root: Path, rows, owners):
+    """`list_processes()` of the real probes over a fake /proc.
+
+    rows: (pid, ppid, comm, exe, cwd, argv); owners: {pane pid: session}. `pgrep -x <name>` answers the pids whose
+    comm is <name>, `tmux list-panes -a` answers `owners`, exactly the two commands the real probe runs."""
+    for pid, ppid, comm, exe, cwd, argv in rows:
+        proc = proc_root / str(pid)
+        proc.mkdir(parents=True)
+        (proc / 'comm').write_text(comm + '\n')
+        (proc / 'cmdline').write_text('\0'.join(argv) + '\0')
+        (proc / 'stat').write_text(f'{pid} ({comm}) S {ppid} {pid} {pid} 0 -1 4194304 0 0 0 0')
+        (proc / 'exe').symlink_to(exe)
+        (proc / 'cwd').symlink_to(cwd)
+
+    def run(argv, **kw):
+        if argv[0] == 'pgrep':
+            pids = [str(pid) for pid, _, comm, *_ in rows if comm == argv[-1]]
+            return subprocess.CompletedProcess(argv, 0 if pids else 1, ''.join(p + '\n' for p in pids), '')
+        return subprocess.CompletedProcess(argv, 0, ''.join(f'{p} {s}\n' for p, s in owners.items()), '')
+
+    with patch('subprocess.run', run):
+        return default_probes(tmux_socket='itfleet-v23k', both_runtimes=True, proc_root=proc_root).list_processes()
+
+
+def codex_pane(pane_pid, cwd, *, nested_claude=True):
+    """node (the pane) -> codex -> zsh -> python3 -> claude agents --json: the pilot's tree during its suite run."""
+    rows = [(pane_pid, 1, 'node', '/usr/bin/node', cwd, ['node', '/home/u/.local/node/bin/codex']),
+            (pane_pid + 1, pane_pid, 'codex', CODEX_EXE, cwd, [CODEX_EXE, '-a', 'never'])]
+    if nested_claude:
+        rows += [(pane_pid + 2, pane_pid + 1, 'zsh', '/usr/bin/zsh', cwd, ['/usr/bin/zsh', '-c', 'fleet selftest']),
+                 (pane_pid + 3, pane_pid + 2, 'python3', '/usr/bin/python3', cwd, ['python3', '-m', 'unittest']),
+                 (pane_pid + 4, pane_pid + 3, 'claude', CLAUDE_EXE, '/tmp', ['/home/u/.local/bin/claude', 'agents',
+                                                                            '--json'])]
+    return rows
+
+
+def claude_pane(pane_pid, cwd, *, nested_codex=True):
+    """claude IS the pane process; it runs a codex (a real `codex exec`, say) through a shell."""
+    rows = [(pane_pid, 1, 'claude', CLAUDE_EXE, cwd, ['/home/u/.local/bin/claude', '--permission-mode', 'auto'])]
+    if nested_codex:
+        rows += [(pane_pid + 1, pane_pid, 'bash', '/usr/bin/bash', cwd, ['bash', '-c', 'codex exec']),
+                 (pane_pid + 2, pane_pid + 1, 'codex', CODEX_EXE, cwd, [CODEX_EXE, 'exec'])]
+    return rows
+
+
+class InventoryNamesTheOwningAgent(unittest.TestCase):
+    def setUp(self):
+        self.tmp = Path(tempfile.mkdtemp(prefix='fleet-v23k-inv-'))
+        self.addCleanup(shutil.rmtree, self.tmp, True)
+
+    def inventory(self, rows, owners):
+        return {s.pid: s for s in fake_inventory(self.tmp / 'proc', rows, owners)}
+
+    def test_a_claude_started_under_a_codex_worker_is_nested_and_the_codex_is_not(self):
+        rows = codex_pane(200, self.tmp)
+        found = self.inventory(rows, {200: 'dt-coder'})
+        self.assertEqual({pid: (s.name, s.runtime) for pid, s in found.items()},
+                         {201: ('dt-coder', 'codex'), 204: ('dt-coder', 'claude')})
+        self.assertFalse(found[201].nested, 'the codex under node IS the pane\'s agent')
+        self.assertTrue(found[204].nested, 'the claude the codex worker started is its child, not the pane\'s agent')
+
+    def test_a_codex_started_under_a_claude_pane_is_nested_and_the_pane_root_claude_is_not(self):
+        found = self.inventory(claude_pane(300, self.tmp), {300: 'dt-writer'})
+        self.assertFalse(found[300].nested)
+        self.assertTrue(found[302].nested)
+
+    def test_control_lone_agents_are_not_nested(self):
+        """Without a nested agent every row stays outer: the plain claude pane, the plain codex pane, and a claude
+        no pane owns at all (OBS-48's shape) — `nested` is not "unattributed"."""
+        rows = (claude_pane(300, self.tmp, nested_codex=False) + codex_pane(200, self.tmp, nested_claude=False)
+                + [(400, 1, 'claude', CLAUDE_EXE, self.tmp, ['claude'])])
+        found = self.inventory(rows, {200: 'dt-coder', 300: 'dt-writer'})
+        self.assertEqual(sorted(found), [201, 300, 400])
+        self.assertEqual([s.nested for s in found.values()], [False, False, False])
+        self.assertIsNone(found[400].name)
+
+    def test_the_walk_stops_at_the_pane_so_a_neighbouring_pane_never_nests_another(self):
+        """tmux's server is the common ancestor of every pane: a walk that ran past the pane root would find the
+        agent of some OTHER pane above it only if that agent were an ancestor, which a pane never is — but a pane
+        started FROM an agent (a worker's own `tmux new-session`) is, and it is its own pane, not nested."""
+        rows = claude_pane(300, self.tmp, nested_codex=False) + [
+            (500, 300, 'tmux: server', '/usr/bin/tmux', self.tmp, ['tmux']),
+            (501, 500, 'codex', CODEX_EXE, self.tmp, [CODEX_EXE])]
+        found = self.inventory(rows, {300: 'dt-writer', 501: 'dt-inner'})
+        self.assertFalse(found[501].nested, 'a pane root is its own pane\'s agent, whoever started its server')
+
+
+class VerbsJudgeThePaneByItsOwningAgent(unittest.TestCase):
+    """board, pane-guard, close, send and resume over a real-probe inventory, for a codex record on a claude box."""
+
+    def setUp(self):
+        self.f = Fleet()
+        self.addCleanup(shutil.rmtree, self.f.tmp)
+        self.proc = self.f.tmp / 'proc'
+
+    def worker(self, runtime, rows_for, frame, **tree):
+        path = self.f.worker('coder', slot='ws1', live=False)
+        record = self.f.store.read(self.f.ids['coder'])
+        record.runtime = runtime
+        self.f.store.write(record)
+        self.f.procs.extend(fake_inventory(self.proc, rows_for(200 if rows_for is codex_pane else 300, path, **tree),
+                                           {200 if rows_for is codex_pane else 300: record.tmux}))
+        self.f.panes[record.tmux] = frame
+        self.f.tmux_live.add(record.tmux)
+        return record
+
+    def board_row(self, record):
+        code, out, err = self.f.run(['board', '--porcelain'])
+        self.assertEqual(code, 0, err)
+        return next(line for line in out.splitlines() if line.startswith(record.todo_id))
+
+    def test_a_busy_codex_worker_running_a_claude_child_is_running_and_mid_turn(self):
+        record = self.worker('codex', codex_pane, (FRAMES / 'codex-busy.frame').read_text())
+        row = self.board_row(record)
+        self.assertNotIn('differs from record runtime', row)
+        self.assertIn('\tRUNNING\t', row)
+        code, out, err = self.f.run(['pane-guard', '--id', record.todo_id])
+        self.assertEqual(code, 11, out + err)
+        code, out, err = self.f.run(['close', '--id', record.todo_id])
+        self.assertIn('mid-turn', out + err, 'close must refuse a busy codex pane as mid-turn, not as a mismatch')
+
+    def test_an_idle_codex_worker_running_a_claude_child_is_safe_to_message(self):
+        record = self.worker('codex', codex_pane, (FRAMES / 'codex-idle.frame').read_text())
+        self.assertEqual(self.f.run(['pane-guard', '--id', record.todo_id])[0], 0)
+        self.assertEqual(self.f.run(['pane-guard', '--pane', record.tmux])[0], 0)
+        message = self.f.tmp / 'msg.txt'
+        message.write_text('hello')
+        code, out, err = self.f.run(['send', '--id', record.todo_id, '--message-file', str(message)])
+        self.assertNotIn('No matching live runtime process owns the recorded pane', out + err)
+
+    def test_resume_adopts_a_codex_session_whose_worker_is_running_a_claude_child(self):
+        record = self.worker('codex', codex_pane, (FRAMES / 'codex-idle.frame').read_text())
+        code, out, err = self.f.run(['resume', '--instant', str(self.f.paths['coder'])])
+        self.assertEqual(code, 0, out + err)
+
+    def test_a_codex_dialog_reads_15_with_a_claude_child_running(self):
+        record = self.worker('codex', codex_pane, (FRAMES / 'codex-approval-0156.frame').read_text())
+        self.assertEqual(self.f.run(['pane-guard', '--id', record.todo_id])[0], 15)
+
+    # --- the mismatch that IS real still reads as one -------------------------------------------------------------
+
+    def test_a_codex_record_whose_pane_agent_is_claude_is_still_a_mismatch(self):
+        """The pane's OWN agent is claude (a nested codex under it changes nothing): board BLOCKED, pane-guard 14,
+        send and resume refused."""
+        record = self.worker('codex', claude_pane, (FRAMES / 'claude-idle.frame').read_text())
+        row = self.board_row(record)
+        self.assertIn('\tBLOCKED\t', row)
+        self.assertIn('live runtime claude differs from record runtime codex', row)
+        self.assertEqual(self.f.run(['pane-guard', '--id', record.todo_id])[0], 14)
+        message = self.f.tmp / 'msg.txt'
+        message.write_text('hello')
+        code, out, err = self.f.run(['send', '--id', record.todo_id, '--message-file', str(message)])
+        self.assertNotEqual(code, 0, out + err)
+        self.assertEqual(self.f.run(['resume', '--instant', str(self.f.paths['coder'])])[0], 4)
+
+    def test_a_claude_record_whose_pane_agent_is_codex_is_still_a_mismatch(self):
+        record = self.worker('claude', codex_pane, (FRAMES / 'codex-idle.frame').read_text())
+        row = self.board_row(record)
+        self.assertIn('live runtime codex differs from record runtime claude', row)
+        self.assertEqual(self.f.run(['pane-guard', '--id', record.todo_id])[0], 14)
+
+    def test_control_a_claude_record_with_a_nested_codex_is_judged_as_claude(self):
+        record = self.worker('claude', claude_pane, (FRAMES / 'claude-busy.frame').read_text())
+        self.assertNotIn('differs from record runtime', self.board_row(record))
+        self.assertEqual(self.f.run(['pane-guard', '--id', record.todo_id])[0], 11)
+
+
+class CodexBusyAsDrawnBy0156(unittest.TestCase):
+    """Real codex-cli 0.156 frames (`it/fixtures/runtime/*-0156.frame`, captured by §OR on a private server).
+
+    `codex-busy-bgterm-0156`: `• Working (8s • esc to interrupt) · 1 background terminal running · /ps to view…` — codex
+    runs even a foreground command as an exec session, so this tail is on the spinner row of every tool turn.
+    `codex-waiting-bgterm-0156`: `◦ Waiting for background terminal (35s • esc to interrupt) · …` with `  └ sleep 41`
+    beneath it. Both read `idle` on the base, so pane-guard said `0 safe` for a worker mid-turn."""
+
+    BUSY = ('codex-busy-bgterm-0156', 'codex-waiting-bgterm-0156')
+
+    def frame(self, name):
+        return (FRAMES / f'{name}.frame').read_text()
+
+    def test_both_live_busy_frames_are_busy(self):
+        for name in self.BUSY:
+            with self.subTest(frame=name):
+                self.assertEqual(observe('codex', self.frame(name)).state, 'busy')
+
+    def test_control_the_idle_frame_after_those_turns_is_idle(self):
+        self.assertEqual(observe('codex', self.frame('codex-idle-after-turns-0156')).state, 'idle')
+        self.assertEqual(observe('codex', self.frame('codex-idle')).state, 'idle')
+        self.assertEqual(observe('codex', self.frame('codex-busy')).state, 'busy')
+
+    def test_a_spinner_above_a_finished_answer_is_scrollback_not_a_turn(self):
+        """The detail rows skipped on the way up are INDENTED rows; an unindented row (the agent's answer) ends the
+        walk, so a stale spinner above it is never read as the current turn."""
+        text = self.frame('codex-waiting-bgterm-0156').replace('  └ sleep 41', '• DONE2')
+        self.assertIn('• DONE2', text)
+        self.assertEqual(observe('codex', text).state, 'idle')
+
+    def test_prose_that_quotes_the_hint_is_not_a_spinner(self):
+        for prose in ('• Pressing esc to interrupt (any time) stops a turn',
+                      '• The status row reads (esc to interrupt)'):
+            with self.subTest(prose=prose):
+                text = self.frame('codex-waiting-bgterm-0156').replace('  └ sleep 41', prose)
+                self.assertEqual(observe('codex', text).state, 'idle')
+
+    def test_pane_guard_reads_a_busy_codex_pane_as_mid_turn_on_a_claude_box(self):
+        for name in self.BUSY:
+            with self.subTest(frame=name):
+                f = Fleet()
+                self.addCleanup(shutil.rmtree, f.tmp)
+                path = f.worker('coder', slot='ws1', live=False)
+                record = f.store.read(f.ids['coder'])
+                record.runtime = 'codex'
+                f.store.write(record)
+                f.procs.extend(fake_inventory(f.tmp / 'proc', codex_pane(200, path, nested_claude=False),
+                                              {200: record.tmux}))
+                f.panes[record.tmux] = self.frame(name)
+                f.tmux_live.add(record.tmux)
+                self.assertEqual(f.run(['pane-guard', '--id', record.todo_id])[0], 11)
+                self.assertEqual(f.run(['pane-guard', '--pane', record.tmux])[0], 11)
+                code, out, err = f.run(['close', '--id', record.todo_id])
+                self.assertNotEqual(code, 0, out + err)
+                self.assertIn('mid-turn', out + err)
+
+
+if __name__ == '__main__':
+    unittest.main()

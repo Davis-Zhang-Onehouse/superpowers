@@ -101,6 +101,17 @@ codex worker runs them: `abort`, `apply`, `board`, `close`, `compaction-status`,
 `park`, `complete`, `base-check`) reach none. Whether coordinator, stack or release instants may run on codex under
 this limit is an operator decision that has not been made yet (raised with the FB-110 delivery). tmux works inside the sandbox only because the network is on.
 
+**How a pane's runtime is observed (v23-k, FB-113).** Every reader judges a pane with its RECORD's runtime, whatever
+`fleet runtime` says, and the pane's runtime is read from the agent process that owns it: the claude or codex nearest
+the pane root (for codex, the native `codex` under the `node` launcher). An agent that agent started is `nested` and
+does not count: a codex worker running the hermetic suite or `fleet peers` has a real `claude agents --json` child,
+which `board` used to report as "live runtime claude differs from record runtime codex" and `pane-guard` as `14`. A
+pane whose OWN agent is the other runtime is still a mismatch (BLOCKED, `14`, and `send`/`resume` refuse). codex-cli
+0.156 draws a live turn as `• Working (8s • esc to interrupt) · 1 background terminal running · …`, or `◦ Waiting for
+background terminal (…)` with a `└ <command>` row under it; both read `11` (they read `0 safe` before).
+`bash fleet/it/run-OR.sh` proves it on a real codex worker (one short model turn per step, private `CODEX_HOME` as
+in `--choice-live` below).
+
 `FLEET_CODEX_BIN` and `FLEET_CLAUDE_BIN` can name the actual executable; do not point them at
 a seed-delivery shim. Claude's existing `REAL_CLAUDE` override
 remains supported. Executable, configuration directory and runtime are recorded for recovery; credentials
