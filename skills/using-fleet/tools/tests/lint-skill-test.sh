@@ -70,13 +70,15 @@ run_case V2-fake-case fakecite \
 bad_input_case() {              # bad_input_case <rule> <env-assignment> <needle>
   local rule="$1" assignment="$2" needle="$3" d out rc
   d="$(mk "badinput-$rule" 'Run `fleet roadmap --instant .` to see readiness.')"
-  out="$(env "$assignment" python3 "$LINT" "$d" 2>&1)"; rc=$?
+  # PYTHONPATH scrubbed (RV-45): the case is about what the TOOL does with its own source setting, and a
+  # fleet-bearing PYTHONPATH (this box's login shell carries one) must not be able to answer for it.
+  out="$(env -u PYTHONPATH "$assignment" python3 "$LINT" "$d" 2>&1)"; rc=$?
   if [ "$rc" != 2 ]; then note "FAIL $rule: expected exit 2 (bad input), got $rc:"; printf '%s\n' "$out" | sed 's/^/      /'; fails=1
   elif ! printf '%s' "$out" | grep -qF "$needle"; then note "FAIL $rule: exit 2 but no line mentioning '$needle':"; printf '%s\n' "$out" | sed 's/^/      /'; fails=1
   elif printf '%s' "$out" | grep -q 'Traceback'; then note "FAIL $rule: a traceback reached the user:"; printf '%s\n' "$out" | sed 's/^/      /'; fails=1
   fi
 }
-bad_input_case no-package "FLEET_SRC=$TMP/nowhere" 'cannot import fleet.cli'
+bad_input_case no-package "FLEET_SRC=$TMP/nowhere" 'no fleet package at'
 mkdir -p "$TMP/oldpkg/fleet"; printf 'VERBS = {}\n' > "$TMP/oldpkg/fleet/cli.py"; : > "$TMP/oldpkg/fleet/__init__.py"
 bad_input_case package-without-reader "FLEET_SRC=$TMP/oldpkg" 'cannot import fleet.markdown'
 bad_input_case no-results "FLEET_RESULTS=$TMP/nowhere.tsv" 'no results file'
