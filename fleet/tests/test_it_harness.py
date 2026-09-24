@@ -635,6 +635,49 @@ class ServerGuardian(unittest.TestCase):
         runner.kill()
         runner.wait()
 
+    def test_new_arm_in_another_harness_copy_keeps_its_server(self):
+        """Two leased slots can run the same section on the same default socket directory."""
+        peer_it = harness_copy(self.tmp / "peer")
+        armed = self.tmp / "shared-sockets"
+        armed.mkdir()
+        env = dict(self.env, TMUX_TMPDIR=str(armed))
+        self.addCleanup(subprocess.run, ["tmux", "-L", self.socket, "kill-server"],
+                        capture_output=True, env=env)
+
+        def runner(it, label):
+            ready = self.tmp / f"{label}.ready"
+            sleeper = self.tmp / f"{label}.sleep.pid"
+            script = (f'. "{it}/lib.sh"\n'
+                      f'it_guard_server "$$" "{self.socket}"\n'
+                      f'touch "{ready}"\n'
+                      f'sleep 300 & echo $! > "{sleeper}"; wait\n')
+            proc = subprocess.Popen(["bash", "-c", script], cwd=self.tmp, env=env,
+                                    stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL,
+                                    stderr=subprocess.DEVNULL)
+            self.addCleanup(lambda: (proc.kill(), proc.wait()))
+            self.addCleanup(lambda: subprocess.run(
+                ["bash", "-c", f'kill "$(cat "{sleeper}" 2>/dev/null)" 2>/dev/null; true'],
+                capture_output=True))
+            for _ in range(100):
+                if ready.exists():
+                    break
+                time.sleep(0.1)
+            self.assertTrue(ready.exists(), f"{label} did not arm")
+            return proc
+
+        first = runner(self.it, "first")
+        started = subprocess.run(["tmux", "-L", self.socket, "new-session", "-d", "-s", "victim"],
+                                 capture_output=True, env=env)
+        self.assertEqual(started.returncode, 0, started.stderr)
+        second = runner(peer_it, "second")
+        first.kill()
+        first.wait()
+        time.sleep(3)
+        self.assertIsNone(second.poll(), "second runner did not remain alive")
+        self.assertEqual(subprocess.run(["tmux", "-L", self.socket, "ls"],
+                                        capture_output=True, env=env).returncode, 0,
+                         "first copy's guardian killed the second copy's server")
+
 
 if __name__ == "__main__":
     unittest.main()
