@@ -215,15 +215,21 @@ def transcript_facts(path):
     probe's output as the tool returned it to the model."""
     rows = [json.loads(line) for line in path.read_text().splitlines() if line.strip()]
     turns = [row['payload'] for row in rows if row.get('type') == 'turn_context']
-    approvals = [row for row in rows if 'approval' in json.dumps(row.get('payload', {}).get('type', '')).lower()
-                 or 'approval' in str(row.get('type', '')).lower()]
+    #: RV-30. codex 0.156 does not write a pending approval into the rollout (the RED-ESC session was killed at the
+    #: prompt and its rollout has no approval row), so an absence of approval rows proved nothing. The REQUEST is
+    #: recorded: a tool call whose input asks `sandbox_permissions: "require_escalated"`. CXP-RED-ESC asserts it is
+    #: present (the positive control) and CXP2 asserts it is present too, so the refusal was really exercised.
+    calls = [row['payload'] for row in rows if row.get('type') == 'response_item'
+             and (row.get('payload') or {}).get('type') in ('custom_tool_call', 'function_call')]
+    escalations = [json.dumps(call.get('input') or call.get('arguments')) for call in calls
+                   if 'require_escalated' in json.dumps(call.get('input') or call.get('arguments') or '')]
     outputs = [row['payload'].get('output') for row in rows
                if row.get('type') == 'response_item' and row.get('payload', {}).get('type') in
                ('function_call_output', 'custom_tool_call_output')]
     outputs = [o if isinstance(o, str) else json.dumps(o) for o in outputs]
     return dict(session=rows[0]['payload']['id'],
                 policies=[dict(approval=t.get('approval_policy'), sandbox=t.get('sandbox_policy')) for t in turns],
-                approval_rows=approvals,
+                escalation_requests=escalations,
                 probe_outputs=[o for o in outputs if 'outside-write:' in o])
 
 
@@ -350,6 +356,9 @@ if EXPECT == 'red':
     red = first['kind'] == 'stalled' or (not ESCALATE and any(bad in first.get('result', '')
                                                               for bad in ('commit:FAIL', 'network:FAIL')))
     verdict['escalate'] = ESCALATE
+    if ESCALATE:
+        #: RV-30's positive control: the stall must come WITH a recorded escalation request, or the detector is blind.
+        red = red and bool(verdict['launch_transcript']['escalation_requests'])
     verdict['red_observed'] = red
     verdict['red_shape'] = ('stalled at an operator dialog' if first['kind'] == 'stalled' else
                             'probe steps failed: ' + ' '.join(l for l in first.get('result', '').split('\n') if 'FAIL' in l))
@@ -369,12 +378,12 @@ facts = verdict['launch_transcript']
 assert facts['policies'] and all(p['approval'] == 'never' for p in facts['policies']), facts['policies']
 assert all((p['sandbox'] or {}).get('type') == 'workspace-write' and (p['sandbox'] or {}).get('network_access') is True
            for p in facts['policies']), facts['policies']
-assert not facts['approval_rows'], facts['approval_rows']
 assert any('outside-write:DENIED' in o and 'Read-only file system' in o for o in facts['probe_outputs']), facts
 assert keystrokes == [], keystrokes
 if ESCALATE:
     #: RV-14: the worker asked to write outside its roots with escalated permissions; at the fix nothing prompted, the
     #: pane never showed a dialog, nobody pressed a key, and the write did not happen.
+    assert facts['escalation_requests'], 'the worker never asked to escalate, so the refusal was not exercised'
     assert not (outside / 'cxp-escalated').exists(), 'an escalated write outside the roots was ALLOWED'
     verdict['escalated_write_absent'] = True
     tmux('kill-session', '-t', '=' + record.tmux)
@@ -407,7 +416,7 @@ facts2 = transcript_facts(transcript)
 verdict['revive_transcript'] = facts2
 assert facts2['session'] == session_id
 assert all(p['approval'] == 'never' for p in facts2['policies']), facts2['policies']
-assert not facts2['approval_rows'], facts2['approval_rows']
+assert not facts2['escalation_requests'], facts2['escalation_requests']   # the resume seed never asks
 assert keystrokes == [], keystrokes
 verdict['keystrokes_total'] = len(keystrokes)
 
