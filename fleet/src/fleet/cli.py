@@ -2095,7 +2095,13 @@ def _do_dispatch(ctx: Ctx, parsed: Parsed) -> int:
         if code != EXIT_OK:
             #: V23-B: a refusing dry-run names its answer in one row too, not only inside `guard.*` rows.
             refusing = next(verdict for verdict in verdicts if not verdict.allowed)
-            rows.append(("refused", _one_line(f"guard {refusing.guard}: {refusing.reason}")))
+            #: RV-C7. The same shape the real call's refusal prints from `main` (the class the guard raises,
+            #: its reason, its clears rows), so one refusal reads as one answer on both.
+            raises = getattr({guard.name: guard for guard in guards.guards_for(gctx)}.get(refusing.guard),
+                             "raises", Refused)
+            rows.append(("refused", _one_line(f"{raises.__name__}: {refusing.reason}")))
+            rows += [(field, _one_line(value)) for field, value in
+                     (("clears_when", refusing.clears_when), ("clears_who", refusing.clears_who)) if value]
         rows += _title_rows(title)
         rows += [("coordinator", str(coordinator) if coordinator else
                   "(none — the child will have no origin.json and `propose` will stay LOCAL)"),
