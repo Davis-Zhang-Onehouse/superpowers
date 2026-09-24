@@ -127,7 +127,9 @@ def observe(runtime: RuntimeName, frame: str) -> PaneObservation:
 #:    parked here is blocked on a human exactly like the others; the review round that introduced measured
 #:    rows dropped this one as unmeasured, and it was measured.
 #:  - Codex 0.156's folder-trust screen: "enter continue · esc quit" (`fixtures/runtime/codex-trust-0156.frame`, a real
-#:    0.156.1 pane). Its "Update available" modal ends `enter continue · esc …` too (FB-105). The row starts with its
+#:    0.156.1 pane). The pt2 harness recorded the same hint on 0.156.0's "Update available" modal (the comment above
+#:    `SCREENS` in `fleet/it/runtime-choice-live.py`), but no frame of it is committed, and fleet turns the update check
+#:    off on every codex argv (`runtime_launch.CODEX_POLICY`), so that modal is mitigated, not observed (FB-105). The row starts with its
 #:    verb like the others, so prose quoting it mid-sentence is not matched. 0.156's approval prompt still ends
 #:    "Press enter to confirm or esc to cancel" (`codex-approval-0156.frame`), which the first codex row already reads.
 CLAUDE_DIALOG_ROWS = (
