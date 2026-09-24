@@ -280,7 +280,11 @@ if ! send_wait_ready "$TMUXN" 'READY'; then
 fi
 C1="$OUT/c1.txt"; printf 'Reply OK.\n' > "$C1"
 C2="$OUT/c2.txt"; printf 'Reply OK.\nline two\nline three\nline four\nline five\nline six\nline seven\nline eight, the last one.\n' > "$C2"
+#: A file as an editor or heredoc writes it: with a trailing newline. The RCA measured codex's placeholder
+#: count on texts WITHOUT one (A2), so this case also measures whether the trailing newline is counted —
+#: the count asserted below is DERIVED from the file, never typed (RV-40).
 C3="$OUT/c3.txt"; python3 -c "print('Reply OK — ' + ('déjà·vu — ' * 100) + 'end')" > "$C3"
+C3_CHARS="$(python3 -c "import sys; print(len(open(sys.argv[1], encoding='utf-8').read()))" "$C3")"
 send_case SENDC-1 "$C1"; c1=$?
 if [ "$c1" = 0 ] && grep -q $'^delivery\tsubmitted$' "$OUT/SENDC-1-send.out" && send_wait_idle "$TMUXN"; then
   it_pass SENDC-1 "fleet/it/SENDC/out/SENDC-1-send.out" "a one-line \`fleet send\` into a real codex pane exited 0 with delivery=submitted (the codex control)"
@@ -299,7 +303,7 @@ send_case SENDC-3 "$C3"; c3=$?
 c3_idle=0; send_wait_idle "$TMUXN" && c3_idle=1
 c3_placeholder=0; grep -q 'Pasted Content' "$OUT/SENDC-3-pane.txt" && c3_placeholder=1
 if [ "$c3" = 0 ] && grep -q $'^delivery\tsubmitted$' "$OUT/SENDC-3-send.out" && [ "$c3_idle" = 1 ]; then
-  it_pass SENDC-3 "fleet/it/SENDC/out/SENDC-3-send.out" "a 1014-character non-ASCII \`fleet send\` into a real codex pane exited 0 with delivery=submitted: codex shows '[Pasted Content 1014 chars]' for it (placeholder seen: $c3_placeholder) and the verb confirmed the count against the message and submitted"
+  it_pass SENDC-3 "fleet/it/SENDC/out/SENDC-3-send.out" "a ${C3_CHARS}-character non-ASCII \`fleet send\` (trailing newline included, as an editor writes a file) into a real codex pane exited 0 with delivery=submitted: codex shows '[Pasted Content ${C3_CHARS} chars]' for it (placeholder seen in the box: $c3_placeholder) and the verb confirmed the count against the message and submitted"
 else
   it_fail SENDC-3 "fleet/it/SENDC/out/SENDC-3-send.out" "the over-length codex send was not submitted: rc=$c3 idle_after=$c3_idle placeholder=$c3_placeholder — $(tr '\n' ' ' < "$OUT/SENDC-3-send.out" | cut -c1-200)"
 fi
