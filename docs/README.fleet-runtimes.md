@@ -90,9 +90,10 @@ text. Roots listed under `[sandbox_workspace_write] writable_roots` in `CODEX_HO
 the row says so because fleet does not read that file. The launcher exports GH_TOKEN from `~/.gh-token-<root>` for codex as for claude. Without it, `gh` in the
 sandbox acts as whatever account `~/.config/gh` names.
 Known limit (measured on 0.156.1): the sandbox runs each command in its own PID namespace, so `pgrep`/`/proc` see
-only the sandbox. Verbs whose cli.py reach includes a process or pane probe (`board`, `pane-guard`, `close`,
-`harvest`, `reap`, `abort`, `resume`, `revive`, `send`, `status`, `runtime`, `declare`'s pane check, `seed-check`,
-`dispatch`) cannot see host processes when a codex worker runs them (static map in the FB-110 instant,
+only the sandbox. The 22 verbs whose cli.py reach includes a process or pane probe cannot see host processes when a
+codex worker runs them: `abort`, `apply`, `board`, `close`, `compaction-status`, `declare` (its pane check),
+`dispatch`, `harvest`, `pane-guard`, `peers`, `reap`, `reconcile`, `release-cut`, `release-deploy`,
+`release-rollback`, `release-verify`, `resume`, `revive`, `runtime`, `seed-check`, `send` and `status` (static map in the FB-110 instant,
 evidence/01-settle/census-verbs.txt). The verbs a fix worker reports and finishes with (`brief`, `propose`, `review`,
 `park`, `complete`, `base-check`) reach none. Whether coordinator, stack or release instants may run on codex under
 this limit is an operator decision that has not been made yet (raised as ISSUES I-4 of the FB-110 instant). tmux works inside the sandbox only because the network is on.
