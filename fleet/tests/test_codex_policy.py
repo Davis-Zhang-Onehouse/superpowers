@@ -1,6 +1,6 @@
 """FB-110 (D-45): every codex worker fleet launches or resumes runs with the operator's policy — approval=never, inside the
 workspace-write sandbox, network on — from ONE place, and never with danger-full-access. Measured on codex-cli 0.156.1
-(the instant's evidence/01-settle/settle.txt): `codex` and `codex resume` both take `-a`, `-s`, `-c` and `--add-dir`;
+(`codex exec` in a private CODEX_HOME, FB-110): `codex` and `codex resume` both take `-a`, `-s`, `-c` and `--add-dir`;
 the sandbox makes `<root>/.git` read-only at the top of each writable root, so a linked-worktree slot can commit only with
 its common dir's objects, refs and logs and its own git dir added (never the whole common dir); without GH_TOKEN `gh` acts as whatever account ~/.config/gh names.
 """
@@ -68,7 +68,7 @@ def git(*args, cwd):
 
 def worktree_roots(main, name):
     """RV-28. What a linked worktree must write to commit, fetch and branch, measured on codex-cli 0.156.1
-    (evidence/01-settle/settle-roots-push.txt, R2), and nothing else: never the common dir itself, whose hooks/
+    (measured in a private CODEX_HOME, FB-110), and nothing else: never the common dir itself, whose hooks/
     and config would let a sandboxed worker plant code the next unsandboxed git run executes (R1: both ALLOWED)."""
     common = (main / '.git').resolve()
     return [str(common / 'objects'), str(common / 'refs'), str(common / 'logs'), str(common / 'worktrees' / name)]

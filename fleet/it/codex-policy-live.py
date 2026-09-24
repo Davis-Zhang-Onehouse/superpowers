@@ -183,7 +183,7 @@ if ESCALATE:
             f'retry either step. Step 3: reply with exactly the word DONE and stop.')
 (profile / 'seed.txt').write_text('({{TITLE}}) ' + seed + '\n')
 #: The resumed turn is asked in ONE short line through `fleet send`: a 358-char line that wraps in codex 0.156's input
-#: box read `uncertain-after-insertion` (routed as ISSUES I-3 of the FB-110 instant; not this case's subject).
+#: box read `uncertain-after-insertion` (routed to the coordinator with the FB-110 delivery; not this case's subject).
 shutil.copy2(probe, slot / 'p.sh')
 message = root / 'again.txt'
 message.write_text('Run `bash p.sh 2` once with your shell tool, then reply with exactly the word AGAIN.')

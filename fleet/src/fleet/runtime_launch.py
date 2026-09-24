@@ -80,7 +80,7 @@ def git_writable_dirs(workspace, git) -> tuple:
     """What a LINKED WORKTREE at the slot root or one level below must write to commit: its common dir's `objects`,
     `refs` and `logs`, and its own per-worktree git dir (index, HEAD). Nothing else.
 
-    Measured (codex-cli 0.156.1, evidence/01-settle/settle-roots-push.txt): workspace-write makes `<root>/.git`
+    Measured (codex-cli 0.156.1, `codex exec` in a private CODEX_HOME, FB-110): workspace-write makes `<root>/.git`
     read-only at the TOP of each writable root, so a linked worktree — ws5's shape, whose common dir is the shared
     checkout's `.git` — cannot commit (`index.lock: Read-only file system`). With these four roots a detached commit,
     a branch create, a commit on the branch and a fetch all work. Adding the whole common dir ALSO made `hooks/` and
