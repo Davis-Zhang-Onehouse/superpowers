@@ -22,7 +22,7 @@
 #   no-seed-match     a seed no transcript received → rc 2, no start
 #   codex-seed-match  a DEAD Codex record whose rollout has the real shape (developer messages, a
 #                     `<recommended_plugins>` user block, an AGENTS.md preamble AHEAD of the prompt) → matched
-#   dry-run-refused   the verb's own refusal (executable unavailable) → rc 2, no start
+#   dry-run-refused   the verb's own refusal (executable unavailable) → rc 2, no start, its sentence (not its route) in the plan
 #   write-time-tie    two candidates with identical write times → rc 2 (nothing says which is live)
 #   search-error      a transcript path that cannot be opened → rc 2 as a failed search, never as an undelivered seed
 #   duplicate-session two records resolving to one transcript → rc 2, no start
@@ -313,6 +313,13 @@ try:
     check('dry-run-refused: rc 2 naming the verb refusal, nothing started',
           r.returncode == 2 and 'fleet revive --dry-run refused' in r.stdout and 'executable' in r.stdout and not calls(),
           r.stderr + r.stdout)
+    # PT2-I1: the plan carries the refusal's own sentence, with its route after it — not only the route's
+    # last line ("clears who: the operator"), which is what reporting the last stderr line produced.
+    check('dry-run-refused: the refusal sentence first, its route after it',
+          re.search(r'fleet revive --dry-run refused: Refused: Recorded runtime executable is unavailable '
+                    r'\(clears when: .*no-such-claude exists and is executable.*; clears who: the operator\)',
+                    r.stdout) is not None,
+          r.stdout)
 
     # ---- root E: two records resolving to one transcript -------------------------------------------
     E = make_root('revivee')

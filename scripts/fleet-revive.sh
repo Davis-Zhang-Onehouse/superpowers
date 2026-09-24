@@ -92,6 +92,24 @@ F() { local verb="$1"; shift; "$FLEET" "$verb" --root "$ROOT" "$@"; }
 PROBLEMS=()
 problem() { PROBLEMS+=("$1: $2"); printf '  %-12s %s\n' "PROBLEM" "$2"; }
 
+# refusal_line < verb-output -> the error's own sentence, then its route in parentheses, on one line.
+# `cli._report_error` prints `Refused: <sentence>` and THEN indented `blocker:` / `clears when:` / `clears who:`
+# lines, so the last line of a refusal is its route, never its reason. Reporting the last line put
+# "clears who: the operator" in the plan and lost "Recorded runtime executable is unavailable" (PT2-I1).
+refusal_line() {
+  awk '
+    /^  (blocker|clears when|clears who): / {
+      if (!inroute) { reason = last; route = "" }
+      inroute = 1; sub(/^  /, ""); route = route (route == "" ? "" : "; ") $0; next
+    }
+    NF { last = $0; inroute = 0 }
+    END {
+      if (route == "") reason = last
+      if (reason == "") reason = "(no output)"
+      printf "%s%s", reason, (route == "" ? "" : " (" route ")")
+    }'
+}
+
 # derive <todo-id> -> RT SESSION RSOCKET INSTANT SLOT CONFIG_DIR CONFIG_SOURCE SEED SESSION_ID MATCHES
 derive() {
   local id="$1" status leases
@@ -336,7 +354,7 @@ done
 if [ "${#PROBLEMS[@]}" -eq 0 ]; then
   for id in "${DEAD[@]}"; do
     if ! out="$(F revive --id "$id" --session-id "${PLAN_SESSION[$id]}" --instants-dir "$(dirname "${PLAN_INSTANT[$id]}")" --dry-run 2>&1)"; then
-      problem "$id" "fleet revive --dry-run refused: $(printf '%s' "$out" | tail -1)"
+      problem "$id" "fleet revive --dry-run refused: $(printf '%s\n' "$out" | refusal_line)"
     fi
   done
 fi
