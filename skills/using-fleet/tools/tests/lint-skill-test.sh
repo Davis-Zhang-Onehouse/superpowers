@@ -64,8 +64,25 @@ run_case V2-fake-case fakecite \
   'Note that `fleet propose` refuses an empty evidence list.
 <!-- v2-cite: empty-evidence NOSUCHCASE -->' finding 'NOSUCHCASE'
 
+# Bad input is exit 2 and one line on stderr, never exit 1 ("findings") and never a traceback (RV-33, RV-39,
+# RV-42). Two doors: a package with no fleet.cli at all, and one that has fleet.cli but predates the markdown
+# reader (fleet < 0.6.7) — the second is a fake package built here, so the case needs no old checkout.
+bad_input_case() {              # bad_input_case <rule> <env-assignment> <needle>
+  local rule="$1" assignment="$2" needle="$3" d out rc
+  d="$(mk "badinput-$rule" 'Run `fleet roadmap --instant .` to see readiness.')"
+  out="$(env "$assignment" python3 "$LINT" "$d" 2>&1)"; rc=$?
+  if [ "$rc" != 2 ]; then note "FAIL $rule: expected exit 2 (bad input), got $rc:"; printf '%s\n' "$out" | sed 's/^/      /'; fails=1
+  elif ! printf '%s' "$out" | grep -qF "$needle"; then note "FAIL $rule: exit 2 but no line mentioning '$needle':"; printf '%s\n' "$out" | sed 's/^/      /'; fails=1
+  elif printf '%s' "$out" | grep -q 'Traceback'; then note "FAIL $rule: a traceback reached the user:"; printf '%s\n' "$out" | sed 's/^/      /'; fails=1
+  fi
+}
+bad_input_case no-package "FLEET_SRC=$TMP/nowhere" 'cannot import fleet.cli'
+mkdir -p "$TMP/oldpkg/fleet"; printf 'VERBS = {}\n' > "$TMP/oldpkg/fleet/cli.py"; : > "$TMP/oldpkg/fleet/__init__.py"
+bad_input_case package-without-reader "FLEET_SRC=$TMP/oldpkg" 'cannot import fleet.markdown'
+bad_input_case no-results "FLEET_RESULTS=$TMP/nowhere.tsv" 'no results file'
+
 if [ "$fails" = 0 ]; then
-  echo "PASS: lint-skill.py fires on an unknown verb, an uncited refusal claim, a stale proposed-verb marker and a citation to a case that did not pass — and stays quiet on prose, a real verb, a marked forward reference and a properly cited claim"
+  echo "PASS: lint-skill.py fires on an unknown verb, an uncited refusal claim, a stale proposed-verb marker and a citation to a case that did not pass — and stays quiet on prose, a real verb, a marked forward reference and a properly cited claim — and answers bad input (no package, a package without the markdown reader, no results file) with exit 2 and one line, never exit 1 or a traceback"
   exit 0
 fi
 echo "FAIL"
