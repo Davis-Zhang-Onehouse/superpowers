@@ -382,7 +382,7 @@ if install:
         (verdict['using_fleet']['content_seen'], 'using-fleet/SKILL.md was not read'),
         (verdict['systematic_debugging']['via_link'] and verdict['using_fleet']['via_link'],
          'a skill was read from somewhere other than the CODEX_HOME link to the deployed release'),
-        (verdict['rca'] is not None and re.search(r'phases?\s*(?:[1-4]|one|two|three|four)\b|root cause investigation|hypothesis and testing',
+        (verdict['rca'] is not None and re.search(r'phases?\s*(?:[1-4]|one|two|three|four)\b|hypothesis and testing',
                                                  verdict['rca'].lower()),
          'rca.md missing or names none of the skill\'s phases'),
         (verdict['rca_before_fix'], 'rca.md was written after calc.py changed'),
