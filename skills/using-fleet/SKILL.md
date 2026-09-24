@@ -150,7 +150,7 @@ Treat it as wait, never as permission: before a send everything but `0` waits an
 difference is a live pane mid-turn being torn down (`FI-7`).
 
 `15` means the pane is showing an operator dialog — `AskUserQuestion`, the folder-trust screen (Codex 0.156's
-reads `enter continue · esc quit`, as does its update modal), or Codex's approval prompt — blocked on YOU, not on a turn that
+reads `enter continue · esc quit`), or Codex's approval prompt — blocked on YOU, not on a turn that
 will finish by itself (`I-16`). It reads nothing like `10`/`11`/`14`: those clear with time, this one does
 not, so a coordinator that sees `15` should stop polling and go answer the pane, not wait on it. Before
 this code existed a dialog fell through to `0 safe`, the same answer an idle worker gets — a scheduled
