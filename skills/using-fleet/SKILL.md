@@ -263,7 +263,9 @@ Seven things you cannot guess, each of which cost something to learn:
    status. That script reports; it is not a gate. A release once recorded GREEN over a suite with seven
    FAIL rows because something asked it (`SI-38`).
 5. **To triage a RED, read the per-runner registers** — `.release/evidence/it-RESULTS-closeout-*.tsv` —
-   and never the merged `it-RESULTS.tsv`, which keeps rows from runs that did not happen this time. The
+   and never the merged `it-RESULTS.tsv`, which keeps rows from runs that did not happen this time (its
+   fifth column, `origin`, says so per row — `this-run:<runner>` or `carried-over` — so filter on it if you
+   must open it). The
    evidence a FAIL row cites is copied into `evidence/it-cited/`, because the worktree it lived in is
    deleted when the run ends.
 6. **Retention is 10 releases.** The oldest beyond that are removed at the next cut — never the deployed

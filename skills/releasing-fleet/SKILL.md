@@ -296,7 +296,8 @@ which of the two you are about to get before you commit to the run.
 
 **Never trust `run-all.sh`'s exit status.** It has no final `exit`, so it returns 0 however many sections
 failed — release `0.1.1` recorded GREEN over 7 FAIL rows that way (`SI-38`). **Never read the merged
-`it-RESULTS.tsv`** either; it keeps rows from runs that did not happen this time.
+`it-RESULTS.tsv`** either; it keeps rows from runs that did not happen this time (its fifth column, `origin`,
+marks each row `this-run:<runner>` or `carried-over` — filter on it if you must open it).
 
 Read the FAIL rows of **this run's own** per-runner registers:
 

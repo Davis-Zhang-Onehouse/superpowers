@@ -543,6 +543,32 @@ class Verify:
         return carried
 
     @staticmethod
+    def _mark_origin(merged: Path, copy_root: Path) -> str:
+        """The merged register with a fifth column, `origin` (FB-81).
+
+        `run-all.sh` merges this run's rows over the committed baseline and KEEPS every row whose id no
+        runner of this run owned, unmarked; a reader of the evidence copy saw `F2b PASS` from a gate that
+        never ran §F, and the skills could only say "do not read this file". Each row now carries
+        `this-run:<runner>` when it appears in one of this run's `RESULTS-closeout-*.tsv` registers, and
+        `carried-over` otherwise, so the file can be filtered instead of distrusted. The tracked
+        `RESULTS.tsv` keeps its four columns: three readers parse it.
+        """
+        it_dir = copy_root / IT_SCRIPT[0] / IT_SCRIPT[1]
+        origin = {}
+        for path in sorted(it_dir.glob("RESULTS-closeout-*.tsv")):
+            runner = path.stem.replace("RESULTS-closeout-", "")
+            for line in path.read_text(errors="replace").splitlines()[1:]:
+                if line.strip():
+                    origin.setdefault(line.split("\t")[0], f"this-run:{runner}")
+        out = []
+        for i, line in enumerate(merged.read_text(errors="replace").splitlines()):
+            if i == 0:
+                out.append(line + "\torigin")
+            elif line.strip():
+                out.append(line + "\t" + origin.get(line.split("\t")[0], "carried-over"))
+        return "\n".join(out) + "\n"
+
+    @staticmethod
     def it_failures(copy_root: Path) -> list:
         """Every FAIL row THIS run produced, read from the per-runner registers.
 
@@ -582,7 +608,7 @@ class Verify:
         (evidence / "it-FULL-RUN.log").write_text((out or "") + (err or ""))
         merged = copy_root.joinpath(*IT_RESULTS)
         if merged.is_file():
-            shutil.copy(merged, evidence / "it-RESULTS.tsv")
+            (evidence / "it-RESULTS.tsv").write_text(self._mark_origin(merged, copy_root))
         for name in IT_ARTEFACTS:
             candidate = copy_root / IT_SCRIPT[0] / IT_SCRIPT[1] / name
             if candidate.is_file():
