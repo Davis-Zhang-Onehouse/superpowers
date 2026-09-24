@@ -1553,6 +1553,19 @@ class TestCadence(CliCase):
     observed failure was 19 hours of silence from an actor who had stalled. This is `git gc --auto`'s
     shape and needs no daemon."""
 
+    def run_with_derived_instants(self, fleet, argv):
+        """Drive an unnamed instants directory derived from the private fixture store."""
+        out, err = io.StringIO(), io.StringIO()
+        def context(parsed, stdout, stderr):
+            ctx = fleet.context()(parsed, stdout, stderr)
+            ctx.instants_dir = fleet.home / "instants"
+            return ctx
+        with hermetic_environment(fleet.instants, home=fleet.tmp):
+            os.environ.pop("FLEET_INSTANTS")
+            os.environ["FLEET_HOME"] = str(fleet.home)
+            code = cli.main(argv, stdout=out, stderr=err, context=context)
+        return code, out.getvalue(), err.getvalue()
+
     def test_foreign_effort_is_silent_for_local_verbs_and_explicit_target_is_honored(self):
         fleet = self.loaded()
         foreign = fleet.tmp / "other-effort" / FRESH_BASE
@@ -1592,8 +1605,20 @@ class TestCadence(CliCase):
         self.assertNotIn(cli.CADENCE_PREFIX, out)
 
         with mock.patch.object(cli.Path, "cwd", return_value=foreign / "nested"):
-            code, out, err = fleet.run(["pane-guard", "--porcelain", "--pane", "dt-solo"])
-        self.assertNotIn(cli.CADENCE_PREFIX, err)
+            code, out, err = self.run_with_derived_instants(
+                fleet, ["pane-guard", "--porcelain", "--pane", "dt-solo"])
+        self.assertIn(f"{cli.CADENCE_PREFIX} {foreign}", err)
+        self.assertNotIn(cli.CADENCE_PREFIX, out)
+
+    def test_derived_instants_outside_an_instant_preserves_the_stale_alarm(self):
+        fleet = self.loaded()
+        outside = fleet.tmp / "outside"
+        outside.mkdir()
+        with mock.patch.object(cli.Path, "cwd", return_value=outside):
+            code, out, err = self.run_with_derived_instants(
+                fleet, ["pane-guard", "--porcelain", "--pane", "dt-solo"])
+        self.assertIn(f"{cli.CADENCE_PREFIX} {fleet.instants / OURS}", err)
+        self.assertNotIn(cli.CADENCE_PREFIX, out)
 
     def test_path_and_base_sources_for_one_register_print_once(self):
         for state in ("inflight", "complete"):
