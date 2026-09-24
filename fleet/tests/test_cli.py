@@ -1714,6 +1714,28 @@ class TestVerify(CliCase):
         self.assertEqual(code, EXIT_ATTENTION)
         self.assertEqual(snapshot(fleet.tmp), before, "verify itself mutated the tree")
 
+    def test_recipes_of_reads_tilde_fences_and_ignores_non_shell_fences(self):
+        """`recipes_of` used to keep a private fence flag (`_FENCE`, `inside`); it now reads through
+        `fleet.markdown`, so a ~~~ fence is a fence and a ```markdown fence is prose in a box."""
+        fleet = self.loaded()
+        path = fleet.paths["readyWorker"] / "RUNBOOK.md"
+        path.write_text("~~~bash\necho tilde\n~~~\n```markdown\necho quoted-not-a-recipe\n```\n"
+                        "```sh\necho sh\n```\n")
+        self.assertEqual([r.command for r in cli.recipes_of(path)], ["echo tilde", "echo sh"])
+
+    def test_a_dangling_continuation_does_not_cross_fences(self):
+        fleet = self.loaded()
+        path = fleet.paths["readyWorker"] / "RUNBOOK.md"
+        path.write_text("```bash\necho one \\\n```\n```bash\necho two\n```\n")
+        self.assertEqual([r.command for r in cli.recipes_of(path)], ["echo two"])
+
+    def test_recipes_keep_their_opening_line_number(self):
+        fleet = self.loaded()
+        path = fleet.paths["readyWorker"] / "RUNBOOK.md"
+        path.write_text("# R\n\n```bash\n# a comment\necho a \\\n  b\necho c\n```\n")
+        self.assertEqual([(r.command, r.line) for r in cli.recipes_of(path)],
+                         [("echo a b", 5), ("echo c", 7)])
+
 
 class TestPaneGuard(CliCase):
     """FD-10: the external watcher is REQUIRED to call this before any send-keys, and DA-2 enumerated
