@@ -68,7 +68,7 @@ from typing import Callable
 from fleet import EXIT_ATTENTION, EXIT_BAD_INPUT, EXIT_CODES, EXIT_OK, EXIT_REFUSED, __version__
 from fleet import guards, layout, peers as peers_mod, render, seedcheck
 from fleet.atomic import atomic_symlink, atomic_write
-from fleet.errors import BadInput, FleetError, NoCapacity, Refused
+from fleet.errors import BadInput, FleetError, InstantNameError, NoCapacity, Refused
 from fleet.harvest import DEFAULT_MAX_AGE_S, REGISTER_NAME, Harvest
 from fleet.identity import ROOT_BASE, InstantName, resolve, same_instant
 from fleet.layout import INFO, VIOLATION
@@ -972,9 +972,10 @@ def _resolve_instant(ctx: Ctx, raw) -> Path:
     `_instant` got the keying wrong silently (`Parsed.values` is keyed `--instant` and holds a list), which
     made `--to` a no-op that fell back to the proposer. A shared resolver cannot drift the way two copies
     of this logic would."""
-    path = Path(raw)
-    if not path.is_absolute():
-        path = ctx.instants_dir / raw
+    # An instant operand is a filesystem path supplied by the caller. Resolve it from cwd
+    # before the rename lookup or name grammar sees it; `.` and `../sibling` must identify
+    # the same folder as their absolute spelling in every verb using this helper.
+    path = Path(raw).resolve()
     found = resolve(path)
     if found is None:
         #: `B11` (NEW-3). A record that still names the path is the one case with a door that runs: every
@@ -995,7 +996,10 @@ def _resolve_instant(ctx: Ctx, raw) -> Path:
                          f"door that runs without it" if holder is not None else
                          "--instant names a folder that exists under the instants directory"),
             clears_who="the caller")
-    InstantName.parse(found.name)            # refused, not judged: a non-instant is not an instant
+    try:
+        InstantName.parse(found.name)        # refused, not judged: a non-instant is not an instant
+    except InstantNameError as exc:
+        raise InstantNameError(f"{path}: {exc}") from exc
     return found
 
 
