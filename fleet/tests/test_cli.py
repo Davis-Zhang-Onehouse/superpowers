@@ -1093,8 +1093,10 @@ class TestExitCodes(CliCase):
         self.assertEqual(set(EXIT_CODES), {0, 1, 2, 3, 4})
         self.assertTrue(set(EXIT_CODES) < set(cli.EXIT_CODES_ALL))
         self.assertEqual(set(cli.EXIT_CODES_ALL) - set(EXIT_CODES),
-                         set(cli.PANE_GUARD_CODES) - set(EXIT_CODES),
-                         "cli extends the registry with something other than FD-10's contract")
+                         (set(cli.PANE_GUARD_CODES) - set(EXIT_CODES)) | set(cli.DISPATCH_CODES),
+                         "cli extends the registry with something other than FD-10's contract and "
+                         "dispatch's V23-B `not-started`")
+        self.assertEqual(cli.DISPATCH_CODES, {5: "not-started"})
         self.assertEqual(set(cli.PANE_GUARD_CODES) - set(EXIT_CODES), {10, 11, 12, 13, 14, 15},
                          "the pane-guard extension is not the documented contract")
         #: `14` was added for `FI-7` and is pinned here BY NUMBER on purpose: it is the code that must
@@ -1517,7 +1519,8 @@ class TestOutwardState(CliCase):
         fleet.context = context
         code, out, err = fleet.run(['dispatch', '--profile', str(fleet.profile()),
                                     '--title', 'seed failure'])
-        self.assertEqual(code, EXIT_ATTENTION, err)
+        #: V23-B: a launch rolled back after the claim is `5 not-started`, not the generic `1`.
+        self.assertEqual(code, cli.DISPATCH_NOT_STARTED, err)
         self.assertEqual(len(fleet.started), 1)
         self.assertEqual(fleet.killed, [fleet.started[0][0]])
         record = fleet.store.all()[0]
@@ -1549,7 +1552,7 @@ class TestOutwardState(CliCase):
                                                                        fleet.tmux_live.add(name))
         code, out, err = fleet.run(['dispatch', '--profile', str(fleet.profile()),
                                     '--title', 'stuck kill'])
-        self.assertEqual(code, EXIT_ATTENTION, err)
+        self.assertEqual(code, cli.DISPATCH_NOT_STARTED, err)
         self.assertEqual(fleet.killed, [fleet.started[0][0]])
         self.assertIsNotNone(fleet.pool.lease("ws1"), "the slot must stay leased while a process may hold it")
         self.assertIn("retained", err)
