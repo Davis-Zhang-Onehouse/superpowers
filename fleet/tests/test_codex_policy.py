@@ -2,7 +2,7 @@
 workspace-write sandbox, network on — from ONE place, and never with danger-full-access. Measured on codex-cli 0.156.1
 (the instant's evidence/01-settle/settle.txt): `codex` and `codex resume` both take `-a`, `-s`, `-c` and `--add-dir`;
 the sandbox makes `<root>/.git` read-only at the top of each writable root, so a linked-worktree slot can commit only with
-its git common dir added; without GH_TOKEN `gh` acts as whatever account ~/.config/gh names.
+its common dir's objects, refs and logs and its own git dir added (never the whole common dir); without GH_TOKEN `gh` acts as whatever account ~/.config/gh names.
 """
 import json
 import os
@@ -107,7 +107,8 @@ class GitRootsTests(unittest.TestCase):
         """RV-29. The slot is writable by the worker, and roots are re-derived at every revive and dispatch, so nothing
         a worker can create there may name a root: a symlink to someone else's worktree, or a `.git` file pointing at
         another repository or at another worktree's git dir. Git's own back-link (`<git dir>/gitdir` naming this
-        `.git`) is the proof a worktree is really this one, and only the owning repository can write it."""
+        `.git`) is the proof a worktree is really this one. For ANOTHER repository only that repository can write it;
+        a git dir forged inside the slot is refused separately (the common dir must lie outside the slot)."""
         other = self.tmp / 'other'
         other.mkdir()
         git('init', '-q', '.', cwd=other)
@@ -323,8 +324,8 @@ class ReviveTests(unittest.TestCase):
 
 
 class DialogRowTests(unittest.TestCase):
-    """FB-105: codex 0.156's trust screen (and its update modal, same hint row) end `enter continue · esc …`,
-    which pane-guard read as 14 unrecognized. Both frames are real captures from a 0.156.1 pane."""
+    """FB-105: codex 0.156's trust screen ends `enter continue · esc quit`, which pane-guard read as 14 unrecognized.
+    The trust and approval frames are real captures from a 0.156.1 pane; the update modal has none (DEC-9)."""
 
     def test_0156_trust_screen_is_a_dialog(self):
         self.assertEqual(observe('codex', (FRAMES / 'codex-trust-0156.frame').read_text()).state, 'dialog')

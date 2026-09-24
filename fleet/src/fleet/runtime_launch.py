@@ -117,7 +117,8 @@ def git_writable_dirs(workspace, git) -> tuple:
         if common == slot.resolve() or slot.resolve() in common.parents:
             continue
         #: RV-29: a `.git` FILE is the worker's to write, so it proves nothing. Git's back-link — `<own>/gitdir`, written
-        #: by `git worktree add` in the OWNING repository, outside the sandbox — must name this very `.git`.
+        #: by `git worktree add` in the owning repository — must name this very `.git`. For a repository the worker cannot
+        #: write, it cannot forge that; its OWN worktree dir is a root, so rewriting it only breaks its own roots.
         try:
             if Path((own / 'gitdir').read_text().strip()).resolve() != dotgit.resolve():
                 continue
