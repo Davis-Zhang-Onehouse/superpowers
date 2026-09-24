@@ -5123,17 +5123,20 @@ def _redirects_to(command: str, token: str) -> bool:
 #: A head is vouched when it reads and prints and can neither spawn nor write beyond its arguments. Left out
 #: on purpose, each for a named reason: `awk` (`system()`), `sed` (GNU `e`, `-i`), `find` (`-exec`,
 #: `-delete`), `xargs`/`env`/`bash`/`sh`/`python*` (run anything), `curl`/`wget`/`ssh` (fetch or reach out),
-#: `tee` (writes), `cd` (moves every relative write out of the sandbox). `sort` and `date` are vouched with
-#: their writing/spawning options refused (`sort -o`, `--compress-program`; `date -s`). A recipe that needs
-#: one of them is the author's to run by hand; `verify` says so.
+#: `tee` (writes), `cd` (moves every relative write out of the sandbox), `uniq` (its second positional is an
+#: output file). `sort` and `date` are vouched with their writing/spawning options refused (`sort -o`,
+#: `--compress-program`; `date -s`), `git grep` with its pager option refused. A recipe that needs one of
+#: them is the author's to run by hand; `verify` says so.
 #:
-#: Review of the first cut found six ways round it, all closed here and each pinned as a regression row:
-#: shlex's default `#` comment (bash starts a comment only at a word), `|&`, a `NAME=value` prefix
-#: (`GIT_EXTERNAL_DIFF`, `LD_PRELOAD`), git options that spawn or write (`-c`, `--output`, `--ext-diff`,
-#: `--open-files-in-pager`, `--exec-path`, `--config-env`), `sort -o`, and a redirect target that is
-#: absolute, climbs `..`, or is reached after a `cd`.
+#: HOW THE RECIPE IS READ, because two review rounds found the reading was the weak part. The token stream
+#: is shlex's QUOTE-PRESERVING one (`posix=False`): only a token with no quote and no backslash can be a
+#: separator, a redirection or a comment, which is how bash decides too, so `echo '#';curl …` and
+#: `echo '<' ;find …` cannot hide the command after them. A head that carries a quote or a backslash is
+#: refused rather than resolved. Option checks run on the unquoted form of each argument. A long option
+#: is judged by getopt's rule (an unambiguous PREFIX selects it), a short cluster by its letters. A write
+#: redirection's target must be a plain relative path — no `$`, `~`, quotes or `..` — or a descriptor.
 _VOUCHED_HEADS = frozenset({
-    "echo", "printf", "cat", "ls", "head", "tail", "wc", "grep", "sort", "uniq", "cut", "tr", "diff",
+    "echo", "printf", "cat", "ls", "head", "tail", "wc", "grep", "sort", "cut", "tr", "diff",
     "cmp", "sha256sum", "md5sum", "stat", "file", "basename", "dirname", "readlink", "realpath", "date",
     "test", "[", "true", "false", "pwd", "jq",
 })
@@ -5146,39 +5149,55 @@ _VOUCHED_GIT = frozenset({
 #: `--exec-path`, `-p` and the rest can make a read-only subcommand run or write something.
 _GIT_LEADING_WITH_VALUE = ("-C",)
 _GIT_LEADING_FLAGS = ("--no-pager",)
-#: Arguments to a vouched git subcommand that spawn or write: refused wherever they appear.
-_GIT_ARG_BLOCKLIST = ("--output", "--ext-diff", "--textconv", "--open-files-in-pager", "-O", "--exec-path",
-                      "--config-env")
-#: Per-head options that write or spawn: a short cluster carrying the letter, or the long form's prefix.
-_HEAD_OPTION_BLOCKLIST = {"sort": ("o", ("--output", "--compress-program")), "date": ("s", ("--set",))}
+#: Long options to a vouched git subcommand that spawn or write, refused by name or unambiguous prefix;
+#: the short letters that do the same, per subcommand (`-O` is `grep`'s pager, `log`'s order file).
+_GIT_LONG_BLOCKLIST = ("output", "ext-diff", "textconv", "open-files-in-pager", "exec-path", "config-env")
+_GIT_SHORT_BLOCKLIST = {"grep": "O"}
+#: Per-head options that write or spawn: the short letters, and the long names (prefix rule).
+_HEAD_OPTION_BLOCKLIST = {"sort": ("o", ("output", "compress-program")), "date": ("s", ("set",))}
 #: Text `verify` cannot see through: what runs is decided at run time, by something it did not read.
 _OPAQUE_SHAPES = (("$(", "command substitution"), ("`", "a backtick substitution"),
                   ("<(", "process substitution"), (">(", "process substitution"))
 _OPAQUE_HEADS = frozenset({"eval", "exec", "source", "."})
 _SEPARATORS = frozenset({"|", "||", "&&", ";", ";;", "&", "|&", "(", ")"})
 _PUNCTUATION = frozenset("();<>|&")
+_QUOTING = frozenset("'\"\\")
 _ASSIGNMENT = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*=")
+_PLAIN_TARGET = re.compile(r"^[A-Za-z0-9_./-]+$")
+
+
+def _unquoted(token: str) -> str:
+    """The word bash would hand the command for this token, when that is one word; else the token."""
+    if not (_QUOTING & set(token)):
+        return token
+    try:
+        words = shlex.split(token, posix=True)
+    except ValueError:
+        return token
+    return words[0] if len(words) == 1 else token
 
 
 def _redirect_reason(operator: str, target) -> str:
     """Why a redirection may not run, or `""`. A read (`<`) is fine. A write's target must be a file
-    descriptor (`2>&1`), a close (`>&-`), or a relative path that stays inside the sandbox."""
+    descriptor (`2>&1`), a close (`>&-`), or a PLAIN relative path: no quote, no `$`, no `~`, no `..`."""
     if ">" not in operator:
         return ""
     if target is None:
         return f"it ends in the redirection {operator!r} with no target"
     if target.isdigit() or target == "-":
         return ""
-    if target.startswith("/") or ".." in target.split("/"):
-        return f"it writes through {operator!r} to {target}, outside the sandbox"
+    if not _PLAIN_TARGET.match(target) or target.startswith("/") or ".." in target.split("/"):
+        return f"it writes through {operator!r} to {target}, which is not a plain relative path inside the sandbox"
     return ""
 
 
 def _segments(tokens: list):
-    """`(segments, reason)`: the simple commands of a token list, each as `[head, *args]`, or the reason
-    the recipe cannot be split into commands verify can judge. A token that starts with `#` is a comment
-    and ends the recipe, as it does in bash. A redirection's operator and target are removed after the
-    target is judged. Any other punctuation-only token is a shell operator verify does not model."""
+    """`(segments, reason)`: the simple commands of a QUOTE-PRESERVING token list, each as `[head, *args]`
+    with quotes still on, or the reason the recipe cannot be split into commands verify can judge. A
+    token that starts with an unquoted `#` is a comment and ends the recipe, as it does in bash. A
+    redirection's operator and target are removed after the target is judged. Any other unquoted
+    punctuation-only token is a shell operator verify does not model. A quoted `;`, `|`, `#` or `>` is an
+    argument, as it is to bash."""
     out, current, index = [], [], 0
     while index < len(tokens):
         token = tokens[index]
@@ -5206,8 +5225,19 @@ def _segments(tokens: list):
     return out, ""
 
 
+def _long_option_hits(word: str, names) -> str:
+    """The blocked long option `word` selects, by getopt's rule (an exact name or a prefix of it), or `""`."""
+    if not word.startswith("--"):
+        return ""
+    given = word[2:].split("=", 1)[0]
+    for name in names:
+        if given and name.startswith(given):
+            return name
+    return ""
+
+
 def _git_reason(args: list) -> str:
-    rest, sub = list(args), ""
+    rest, sub = [_unquoted(word) for word in args], ""
     while rest:
         word = rest.pop(0)
         if word in _GIT_LEADING_WITH_VALUE:
@@ -5223,19 +5253,29 @@ def _git_reason(args: list) -> str:
     if not (sub in _VOUCHED_GIT or (sub == "bundle" and rest[:1] == ["verify"])):
         return (f"`git {sub or '(no subcommand)'}` is not a read-only subcommand verify vouches for "
                 f"({', '.join(sorted(_VOUCHED_GIT))}, bundle verify)")
+    letters = _GIT_SHORT_BLOCKLIST.get(sub, "")
     for word in rest:
-        if word.startswith(_GIT_ARG_BLOCKLIST):
-            return f"`git {sub} {word}` can write or spawn beyond its arguments"
+        if word == "--":
+            break
+        hit = _long_option_hits(word, _GIT_LONG_BLOCKLIST)
+        if hit:
+            return f"`git {sub} {word}` selects --{hit}, which writes or spawns beyond its arguments"
+        if letters and word.startswith("-") and not word.startswith("--") and any(c in word[1:] for c in letters):
+            return f"`git {sub} {word}` carries -{letters}, which spawns a program"
     return ""
 
 
 def _head_option_reason(head: str, args: list) -> str:
-    letter, longs = _HEAD_OPTION_BLOCKLIST.get(head, ("", ()))
-    for word in args:
-        if word.startswith("--") and word.startswith(longs):
-            return f"`{head} {word}` writes or spawns beyond its arguments"
-        if letter and word.startswith("-") and not word.startswith("--") and letter in word[1:]:
-            return f"`{head} {word}` writes or spawns beyond its arguments (`-{letter}`)"
+    letters, longs = _HEAD_OPTION_BLOCKLIST.get(head, ("", ()))
+    for raw in args:
+        word = _unquoted(raw)
+        if word == "--":
+            break
+        hit = _long_option_hits(word, longs)
+        if hit:
+            return f"`{head} {word}` selects --{hit}, which writes or spawns beyond its arguments"
+        if letters and word.startswith("-") and not word.startswith("--") and any(c in word[1:] for c in letters):
+            return f"`{head} {word}` carries -{letters}, which writes or spawns beyond its arguments"
     return ""
 
 
@@ -5249,7 +5289,9 @@ def unvouched_reason(command: str) -> str:
     for shape, why in _OPAQUE_SHAPES:
         if shape in text:
             return f"it uses {why} ({shape!r}), which verify cannot see through"
-    lexer = shlex.shlex(text, posix=True, punctuation_chars=True)
+    #: Quotes are KEPT (`posix=False`): whether a token is an operator is decided on what bash sees before
+    #: quote removal, which is the only reading under which `'#'` and `';'` are arguments.
+    lexer = shlex.shlex(text, posix=False, punctuation_chars=True)
     lexer.whitespace_split = True
     lexer.commenters = ""                 # bash comments start at a WORD; shlex's default starts mid-word
     try:
@@ -5264,6 +5306,8 @@ def unvouched_reason(command: str) -> str:
         if _ASSIGNMENT.match(head):
             return (f"it sets an environment variable for the command ({head.split('=')[0]}=…), which "
                     f"verify does not vouch for: the environment can make a read-only tool run code")
+        if _QUOTING & set(head):
+            return f"its command is quoted or escaped ({head}), which verify does not resolve"
         if head in _OPAQUE_HEADS:
             return f"it runs `{head}`, which executes text verify has not read"
         if head.startswith("$"):
@@ -5276,7 +5320,7 @@ def unvouched_reason(command: str) -> str:
                 return reason
             continue
         if head == "fleet":
-            verb = args[0] if args else ""
+            verb = _unquoted(args[0]) if args else ""
             spec = VERBS.get(verb)
             if spec is not None and spec.read_only:
                 continue
