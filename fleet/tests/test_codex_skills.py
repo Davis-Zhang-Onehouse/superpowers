@@ -165,6 +165,16 @@ class CodexSkillsTests(unittest.TestCase):
         self.assertEqual(code, 0, out + err)
         self.assertEqual(os.readlink(self.link), str(self.rel / 'current' / 'skills'))
 
+    def test_a_live_link_to_another_tools_current_skills_is_still_foreign(self):
+        """Re-review residual: only a DANGLING `.../current/skills` or `.../fleet-vN/skills` pin is ours by shape."""
+        other = self.tmp / 'othertool' / 'current' / 'skills'
+        other.mkdir(parents=True)
+        self.link.parent.mkdir(parents=True)
+        self.link.symlink_to(other)
+        before = _tree(self.home)
+        self.assertEqual(self.main(*self.args())[0], 4)
+        self.assertEqual(_tree(self.home), before)
+
     def test_dry_run_fails_when_the_deployed_release_lacks_a_core_skill(self):
         """Final review minor 5: --dry-run exits 0 only when the real run would succeed."""
         shutil.rmtree(self.rel / 'fleet-v1' / 'skills' / 'using-fleet')

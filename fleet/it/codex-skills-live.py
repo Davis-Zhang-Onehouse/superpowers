@@ -224,7 +224,8 @@ def _writes(name):
     base = r'[\w./~-]*(?<![\w-])' + re.escape(name) + r'(?![\w.-])'
     return [re.compile(r'\*\*\* (?:Add|Update) File: ' + base),
             re.compile(r'(?:>>?|\btee\s+(?:-a\s+)?)\s*' + base),
-            re.compile(r'\bsed\s+-i\b[^|;&]*\s' + base)]
+            re.compile(r'\bsed\s+-i\b[^|;&]*\s' + base),
+            re.compile(r'open\(\s*[\'"]' + base + r'[\'"]\s*,\s*[\'"][wa]')]
 
 
 def first_write(rows, name):
@@ -238,7 +239,7 @@ def first_write(rows, name):
         if item.get('type') == 'FileChange' and any(str(path).endswith('/' + name) for path in (item.get('changes') or {})):
             return index
         if row.get('type') == 'response_item' and str(payload.get('type', '')).endswith('_call'):
-            text = str(payload.get('input') or payload.get('arguments') or '')
+            text = str(payload.get('input') or payload.get('arguments') or payload.get('action') or '')
             if any(pattern.search(text) for pattern in patterns):
                 return index
     return None

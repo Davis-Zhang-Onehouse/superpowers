@@ -177,6 +177,8 @@ def _ours(link: Path) -> bool:
     #: A pin this installer's own shape left behind: `<releases>/fleet-vN/skills` or `<releases>/current/skills`
     #: whose release was pruned. It dangles now, and it is still ours to repoint: postflight prints this install
     #: for exactly that state.
+    if os.path.exists(link):
+        return False                                 # resolves, and not to a superpowers tree: someone else's
     try:
         target = Path(os.readlink(link))
     except OSError:
