@@ -13,6 +13,11 @@ IT_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 # src/ and tests/.
 INSTANT="$(cd "$IT_ROOT/.." && pwd)"
 export PYTHONPATH="$INSTANT/src"
+# The wrapper EXECUTABLE (B18). Reached as "$IT_FLEET" wherever a bash function cannot go — behind `timeout`,
+# `env -u …`, `exec`, or in a subshell that rebuilds its environment. `fleet()` below delegates to it, so
+# there is exactly one writer of $IT_ASKED_NAMES, and `tests/test_it_harness.py` fails on any
+# `python3 -m fleet.cli` that appears anywhere else in the harness.
+IT_FLEET="$IT_ROOT/bin/it-fleet"; export IT_FLEET
 # One results file per RUNNER when asked, so two sections can run concurrently without a shared
 # read-modify-write. `it_own_cases` rewrites this file; two runners doing that at once is `FI-16`/`FI-29`'s
 # shape — concurrent writers to one register — and last-writer-wins would silently drop a section's rows.
@@ -203,7 +208,7 @@ it_section() {            # it_section <name> -> own FLEET_HOME, own slots, own 
   # The section's register of every instantName it ASKED the product to create. It is what lets the
   # isolation assertion tell OUR escape from the operator dispatching into their own tree while we run —
   # without it the check either misses the defect or cries wolf, and a check that cries wolf gets ignored.
-  IT_ASKED_NAMES="$EV/it-asked-names.txt"
+  IT_ASKED_NAMES="$EV/it-asked-names.txt"; export IT_ASKED_NAMES   # exported: the recorder is a child process
   : > "$IT_ASKED_NAMES"
   it_assert_isolation "$SECTION-enter"
 }
@@ -228,20 +233,12 @@ it_fresh_store() {
 
 # Never a bare `fleet` on PATH — FLEET_HOME must be explicit.
 #
-# The wrapper records every instantName this section ASKS for and touches nothing else: argv is read, both
-# streams and the exit code pass through untouched. That matters — §A parses `--porcelain` stdout
-# byte-for-byte and several sections branch on `$?`, so a wrapper that captured stdout to inspect it would
-# change what the suite measures in order to measure it.
-fleet() {
-  if [ -n "${IT_ASKED_NAMES:-}" ]; then
-    local _prev="" _a
-    for _a in "$@"; do
-      case "$_prev" in --name|--title) printf '%s\n' "$_a" >> "$IT_ASKED_NAMES" ;; esac
-      _prev="$_a"
-    done
-  fi
-  python3 -m fleet.cli "$@"
-}
+# The function form, for every site a function CAN reach. It delegates to the executable so the recording
+# of every instantName this section ASKS for lives in one place — see bin/it-fleet for what is recorded and
+# why the executable exists at all. Argv is read there, both streams and the exit code pass through
+# untouched: §A parses `--porcelain` stdout byte-for-byte and several sections branch on `$?`, so a wrapper
+# that captured stdout to inspect it would change what the suite measures in order to measure it.
+fleet() { "$IT_FLEET" "$@"; }
 
 it_pass() { printf '%s\tPASS\t%s\t%s\n' "$1" "${2:-}" "${3:-}" >> "$RESULTS"; printf 'PASS %s %s\n' "$1" "${3:-}"; }
 # shellcheck disable=SC2034  # read by each runner's own exit gate (e.g. run-G.sh) after lib.sh is sourced in
