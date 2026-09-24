@@ -13,7 +13,7 @@ import tempfile
 import unittest
 
 from fleet.runtime import LaunchSettings, observe
-from fleet.runtime_launch import (CODEX_POLICY, codex_policy_summary, launch_argv, prepare,
+from fleet.runtime_launch import (CODEX_POLICY, codex_policy_summary, launch_argv, linked_worktrees, prepare,
                                   resume_argv)
 from fleet.workspace import default_git
 from tests.test_cli import Fleet
@@ -64,6 +64,91 @@ class PolicyArgvTests(unittest.TestCase):
 def git(*args, cwd):
     subprocess.run(['git', '-c', 'user.email=t@t', '-c', 'user.name=t', *args], cwd=cwd, check=True,
                    capture_output=True)
+
+
+def worktree_into(slot, tmp, name='repo'):
+    """A linked worktree of a repository outside `slot`, at `slot/name` — ws5's shape."""
+    main = tmp / ('main-' + slot.name)
+    main.mkdir()
+    git('init', '-q', '.', cwd=main)
+    git('commit', '-q', '--allow-empty', '-m', 'i', cwd=main)
+    git('worktree', 'add', '-q', '--detach', str(slot / name), cwd=main)
+    return main
+
+
+class WorktreeSlotTests(unittest.TestCase):
+    """RV-29 / D-51: codex runs only in CLONE slots. A slot whose checkout is a linked worktree could only commit with git
+    roots derived from state the worker can touch, which review showed forgeable, so dispatch, revive and resume refuse it."""
+
+    def setUp(self):
+        self.tmp = Path(tempfile.mkdtemp(prefix='fb110 wt '))
+        self.addCleanup(shutil.rmtree, self.tmp)
+
+    def test_linked_worktrees_finds_a_git_file_at_the_slot_root_or_one_level_down(self):
+        slot = self.tmp / 'slot'
+        slot.mkdir()
+        self.assertEqual(linked_worktrees(slot), ())
+        (slot / 'clone').mkdir()
+        git('init', '-q', '.', cwd=slot / 'clone')                       # a clone: `.git` is a directory
+        (slot / 'deeper' / 'x').mkdir(parents=True)
+        (slot / 'deeper' / 'x' / '.git').write_text('gitdir: /elsewhere\n')   # two levels down: not a slot checkout
+        self.assertEqual(linked_worktrees(slot), ())
+        worktree_into(slot, self.tmp)
+        self.assertEqual(linked_worktrees(slot), (str(slot / 'repo'),))
+        root_wt = self.tmp / 'rootwt'
+        (root_wt).mkdir()
+        (root_wt / '.git').write_text('gitdir: /elsewhere\n')             # the slot itself is a worktree
+        self.assertEqual(linked_worktrees(root_wt), (str(root_wt),))
+
+    def dispatch(self, f, runtime, *extra):
+        from fleet.runtime_config import write_runtime
+        write_runtime(f.home, runtime)
+        return f.run(['dispatch', '--profile', str(f.profile()), '--title', f'{runtime} task', '--slot', 'ws1', *extra])
+
+    def test_codex_dispatch_into_a_worktree_slot_is_refused_before_any_claim_dry_run_too(self):
+        f = Fleet()
+        self.addCleanup(shutil.rmtree, f.tmp)
+        worktree_into(f.pool.slot_path('ws1'), f.tmp)
+        for extra in (['--dry-run'], []):
+            with self.subTest(extra=extra):
+                code, out, err = self.dispatch(f, 'codex', *extra)
+                self.assertEqual(code, 4, out + err)
+                self.assertIn('linked git worktree', err)
+                self.assertIn('clone', err)                              # clears_when names a clone slot
+                self.assertEqual(f.store.all(), [])
+                self.assertIsNone(f.pool.lease('ws1'))
+                self.assertEqual(f.started, [])
+
+    def test_claude_into_a_worktree_slot_and_codex_into_a_clone_slot_are_admitted(self):
+        f = Fleet()
+        self.addCleanup(shutil.rmtree, f.tmp)
+        worktree_into(f.pool.slot_path('ws1'), f.tmp)
+        code, out, err = self.dispatch(f, 'claude', '--dry-run')
+        self.assertEqual(code, 0, out + err)
+        g = Fleet()
+        self.addCleanup(shutil.rmtree, g.tmp)
+        (g.pool.slot_path('ws1') / 'repo').mkdir()
+        git('init', '-q', '.', cwd=g.pool.slot_path('ws1') / 'repo')
+        code, out, err = self.dispatch(g, 'codex')
+        self.assertEqual(code, 0, out + err)
+
+    def test_codex_revive_and_resume_in_a_worktree_slot_are_refused(self):
+        from tests.test_runtime_revival import RevivalTests
+        fixture = RevivalTests('test_exact_uuid_and_recorded_configuration')
+        fixture.setUp()
+        self.addCleanup(fixture.doCleanups)
+        worktree_into(Path(fixture.record.golden), fixture.f.tmp)
+        for extra in (['--dry-run'], []):
+            with self.subTest(verb='revive', extra=extra):
+                code, out, err = fixture.f.run(fixture.args() + extra)
+                self.assertEqual(code, 4, out + err)
+                self.assertIn('linked git worktree', err)
+        self.assertFalse((Path(fixture.record.child_instant) / '.fleet/resume-worker.sh').exists())
+        for extra in (['--dry-run'], []):
+            with self.subTest(verb='resume', extra=extra):
+                code, out, err = fixture.f.run(['resume', '--instant', fixture.record.child_instant, *extra])
+                self.assertEqual(code, 4, out + err)
+                self.assertIn('linked git worktree', err)
 
 
 class PrepareTests(unittest.TestCase):
@@ -170,12 +255,9 @@ class ReviveTests(unittest.TestCase):
         fixture = RevivalTests('test_exact_uuid_and_recorded_configuration')
         fixture.setUp()
         self.addCleanup(fixture.doCleanups)
-        fixture.f.git = default_git()                           # the real seam, over a worktree-shaped slot
-        main = fixture.f.tmp / 'main'
-        main.mkdir()
-        git('init', '-q', '.', cwd=main)
-        git('commit', '-q', '--allow-empty', '-m', 'i', cwd=main)
-        git('worktree', 'add', '-q', '--detach', str(Path(fixture.record.golden) / 'repo'), cwd=main)
+        clone = Path(fixture.record.golden) / 'repo'                 # D-51: codex slots are CLONE-shaped
+        clone.mkdir()
+        git('init', '-q', '.', cwd=clone)
         args = fixture.args()
         code, out, err = fixture.f.run(args + ['--dry-run'])
         self.assertEqual(code, 0, err)
@@ -188,7 +270,7 @@ class ReviveTests(unittest.TestCase):
         text = (Path(fixture.record.child_instant) / '.fleet/resume-worker.sh').read_text()
         self.assertIn('resume -a never -s workspace-write -c sandbox_workspace_write.network_access=true', text)
         self.assertIn(REVIVE_ID, text)
-        self.assertNotIn(str((main / '.git').resolve()), text)     # RV-46: no git root, whatever the slot holds
+        self.assertEqual(text.count('--add-dir'), 2, text)          # RV-46: the store and the instants dir, nothing else
 
 
 class DialogRowTests(unittest.TestCase):

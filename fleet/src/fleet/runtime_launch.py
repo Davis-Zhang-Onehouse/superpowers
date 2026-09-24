@@ -78,6 +78,20 @@ def writable_dirs(environ) -> tuple:
                                if environ.get(key)))
 
 
+def linked_worktrees(workspace) -> tuple:
+    """D-51. The checkouts at the slot root or one level below whose `.git` is a FILE — a linked git worktree (ws5's shape:
+    the shared checkout's repository is outside the slot). A codex worker cannot commit there, since its sandbox
+    makes only the slot, the store and the instants writable, and the git roots it would need were shown forgeable (FB-110
+    review). So codex dispatch, revive and resume refuse such a slot. A clone (`.git` a directory, ws8–ws10) needs nothing.
+    Filesystem only, no git: a `.git` file is refused whatever it names."""
+    slot = Path(workspace)
+    try:
+        candidates = [slot, *sorted(child for child in slot.iterdir() if child.is_dir())]
+    except OSError:
+        return ()
+    return tuple(str(candidate) for candidate in candidates if (candidate / '.git').is_file())
+
+
 def launch_argv(settings: LaunchSettings, prompt: str, writable_dirs=()) -> list[str]:
     validate_runtime(settings.runtime)
     args = [settings.executable]
