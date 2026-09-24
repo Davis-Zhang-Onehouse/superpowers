@@ -120,6 +120,22 @@ class TestAFailureAfterTheClaimIsNotStarted(DispatchCase):
         self.assertTrue(rows.get("lease", "").startswith("retained"), out)
         self.assertIsNotNone(self.fleet.pool.lease("ws1"))
 
+    def test_a_render_failure_keeps_the_code_its_dry_run_gives(self):
+        #: An unresolved placeholder is the profile author's input: the dry-run answers 2, so the real call
+        #: does too — still with the rows, and still after giving the lease back.
+        profile = self.fleet.profile_with_charter("{{NOT_A_KEY}}")
+        base = ["dispatch", "--profile", str(profile), "--title", "says what", "--cap", "9", "--porcelain"]
+        dry, _, dry_err = self.fleet.run(base + ["--dry-run"])
+        code, out, err = self.fleet.run(base)
+        self.assertEqual(dry, EXIT_BAD_INPUT, dry_err)
+        self.assertEqual(code, dry, err)
+        rows = kv(out)
+        self.assertTrue(rows.get("error", "").startswith("BadInput:"), out)
+        self.assertEqual(rows.get("step"), "render", out)
+        self.assertEqual(rows.get("instant"), "(none created)", out)
+        self.assertEqual(rows.get("record"), "(none written)", out)
+        self.assertIsNone(self.fleet.pool.lease("ws1"))
+
     def test_human_output_carries_the_same_rows(self):
         self.seed_fails()
         code, out, err = self.fleet.run(["dispatch", "--profile", str(self.fleet.profile()),
