@@ -5415,8 +5415,9 @@ def _do_verify(ctx: Ctx, parsed: Parsed) -> int:
         detail=(f"examined {len(recipes)} recipe(s) from "
                 f"{', '.join(document.name for document in documents if document.is_file()) or 'nothing'}; "
                 f"{len(executed)} executed, {len(recipes) - len(executed)} refused or unexecuted; "
-                f"{unexamined} indented shell fence(s) read as prose and not examined (a fence indented 4+ "
-                f"spaces sits inside a container the reader does not model — OI-4); "
+                f"{unexamined} indented shell fence(s) read as prose and not examined (a shell fence behind a "
+                f"container the reader does not model — 4+ spaces, a tab, spaces then a tab, a > blockquote or a "
+                f"list marker — OI-4; the count is an upper bound); "
                 f"sandbox {sandbox} (left in place for inspection)")))
     _emit(ctx, "verify", rows)
     return _code_of(rows)
