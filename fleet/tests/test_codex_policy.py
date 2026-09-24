@@ -100,6 +100,29 @@ class WorktreeSlotTests(unittest.TestCase):
         (root_wt / '.git').write_text('gitdir: /elsewhere\n')             # the slot itself is a worktree
         self.assertEqual(linked_worktrees(root_wt), (str(root_wt),))
 
+    def test_an_uninspectable_child_fails_closed_never_crashes(self):
+        """RV-52 (closure 3). A child directory the check cannot search raised PermissionError out of dispatch, revive
+        and resume. The refusal path must never crash: what cannot be inspected is refused (fail closed)."""
+        slot = self.tmp / 'slot'
+        (slot / 'locked').mkdir(parents=True)
+        (slot / 'locked').chmod(0)
+        self.addCleanup((slot / 'locked').chmod, 0o700)
+        self.assertEqual(linked_worktrees(slot), (str(slot / 'locked'),))
+        f = Fleet()
+        self.addCleanup(shutil.rmtree, f.tmp)
+        locked = f.pool.slot_path('ws1') / 'locked'
+        locked.mkdir()
+        locked.chmod(0)
+        self.addCleanup(locked.chmod, 0o700)
+        for extra in (['--dry-run'], []):
+            with self.subTest(extra=extra):
+                code, out, err = self.dispatch(f, 'codex', *extra)
+                self.assertEqual(code, 4, out + err)
+                self.assertNotIn('Traceback', err)
+                self.assertEqual(f.store.all(), [])
+        code, out, err = self.dispatch(f, 'claude', '--dry-run')
+        self.assertEqual(code, 0, out + err)                           # claude is never asked
+
     def dispatch(self, f, runtime, *extra):
         from fleet.runtime_config import write_runtime
         write_runtime(f.home, runtime)
