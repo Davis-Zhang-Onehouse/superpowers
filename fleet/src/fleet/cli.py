@@ -1620,8 +1620,12 @@ def _sender_identity(parsed: Parsed, environ=None) -> str:
     `FLEET_INSTANT` (`runtime_launch.prepare`), so a coordinator messaging from its pane is named by the
     folder the roadmap knows it as; else the login user. Never a pid: a pid is meaningless to a later reader."""
     environ = os.environ if environ is None else environ
-    if parsed.get("by"):
-        return parsed.get("by")
+    if parsed.get("by") is not None:
+        by = parsed.get("by").strip()
+        if not by:
+            #: RV-49 (FB-16's shape): a sender that is nothing but whitespace is not a sender.
+            raise BadInput("--by must name the sender; an empty or whitespace-only value is refused")
+        return by
     own = environ.get("FLEET_INSTANT") or environ.get("INSTANT") or ""
     if own:
         return Path(own).name
