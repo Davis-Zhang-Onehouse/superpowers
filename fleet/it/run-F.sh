@@ -510,7 +510,7 @@ f8_bad=0; f8_hang=0; f8_pairs=0; : > "$OUT/F8-per-flag.txt"
 while IFS=$'\t' read -r v f; do
   [ -n "$v" ] || continue
   f8_pairs=$((f8_pairs+1))
-  timeout 5 python3 -m fleet.cli "$v" "$f" > /dev/null 2> "$OUT/F8.stderr"; rc=$?
+  timeout 5 "$IT_FLEET" "$v" "$f" > /dev/null 2> "$OUT/F8.stderr"; rc=$?
   diag=$(grep -c 'needs a value' "$OUT/F8.stderr")
   printf '%-18s %-18s rc=%-4s diag=%s\n' "$v" "$f" "$rc" "$diag" >> "$OUT/F8-per-flag.txt"
   [ "$rc" = 124 ] && f8_hang=$((f8_hang+1))

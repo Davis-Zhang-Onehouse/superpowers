@@ -140,8 +140,10 @@ cmd_cap()   { check_name "$1"; ptmux capture-pane -p -t "=$1:"; }
 
 cmd_guard() {
   check_name "$1"
+  # Through the harness's wrapper executable (B18), resolved beside this script: this control does not
+  # source lib.sh, so it cannot read $IT_FLEET.
   FLEET_TMUX_SOCKET="$PROBE_SOCKET" PYTHONPATH="$REPO/fleet/src" \
-    python3 -m fleet.cli pane-guard --pane "$1" >/dev/null 2>&1
+    "$(dirname "${BASH_SOURCE[0]}")/it-fleet" pane-guard --pane "$1" >/dev/null 2>&1
   local rc=$?
   echo "$rc"
   return "$rc"

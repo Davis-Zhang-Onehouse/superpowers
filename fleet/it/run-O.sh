@@ -49,7 +49,7 @@ else
   mkdir -p "$O7I/a/b"
   ln -s ../.. "$O7I/a/b/up"
   # `timeout` returns 124 on expiry. Anything else — 0, or a clean refusal — is a terminating lint.
-  timeout 30 env PYTHONPATH="$INSTANT/src" python3 -m fleet.cli lint --instant "$O7I" --porcelain \
+  timeout 30 env PYTHONPATH="$INSTANT/src" "$IT_FLEET" lint --instant "$O7I" --porcelain \
     > "$OUT/O7-lint.tsv" 2>"$OUT/O7-lint.err"
   o7_rc=$?
   o7_rows="$(grep -c . "$OUT/O7-lint.tsv" 2>/dev/null || echo 0)"

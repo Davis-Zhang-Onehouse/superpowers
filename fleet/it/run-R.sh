@@ -49,7 +49,7 @@ UNMARKED="$RHOME/unmarked"; mkdir -p "$UNMARKED"
 r_fleet() {                        # r_fleet <cwd> <args...>
   local cwd="$1"; shift
   ( cd "$cwd" && env -u FLEET_HOME -u FLEET_INSTANTS -u FLEET_TMUX_SOCKET -u FLEET_ROOT \
-      HOME="$RHOME" PYTHONPATH="$INSTANT/src" python3 -m fleet.cli "$@" )
+      HOME="$RHOME" PYTHONPATH="$INSTANT/src" "$IT_FLEET" "$@" )
 }
 py() { env PYTHONPATH="$INSTANT/src" python3 - "$@"; }
 
@@ -262,7 +262,7 @@ fi
 # ==================================================================================================
 R6B="$EV/r6b-store"; rm -rf "$R6B"; mkdir -p "$R6B"
 ( cd "$R1/ws1" && env -u FLEET_INSTANTS -u FLEET_TMUX_SOCKET -u FLEET_ROOT HOME="$RHOME" \
-    FLEET_HOME="$R6B" PYTHONPATH="$INSTANT/src" python3 -m fleet.cli \
+    FLEET_HOME="$R6B" PYTHONPATH="$INSTANT/src" "$IT_FLEET" \
     init --name r6bstray --optype append ) > "$OUT/R6b.out" 2>&1
 r6b_rc=$?
 cat "$OUT/R6b.out"
@@ -289,7 +289,7 @@ fi
 R7S="$OUT/r7store"; mkdir -p "$R7S/records"
 r_fleet "$UNMARKED" board --home "$R7S" --porcelain > "$OUT/R7-flag.out" 2>&1;  r7_flag_rc=$?
 ( cd "$UNMARKED" && env -u FLEET_INSTANTS -u FLEET_TMUX_SOCKET -u FLEET_ROOT HOME="$RHOME" \
-    FLEET_HOME="$R7S" PYTHONPATH="$INSTANT/src" python3 -m fleet.cli board --porcelain ) \
+    FLEET_HOME="$R7S" PYTHONPATH="$INSTANT/src" "$IT_FLEET" board --porcelain ) \
     > "$OUT/R7-env.out" 2>&1; r7_env_rc=$?
 # And the store each one actually chose, from the stderr line G2 prints.
 r_fleet "$UNMARKED" board --home "$R7S" > "$OUT/R7-flag-src.out" 2>&1

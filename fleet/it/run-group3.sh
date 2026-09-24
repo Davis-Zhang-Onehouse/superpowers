@@ -256,7 +256,7 @@ g3_spawn() {                    # g3_spawn <tag> <verb...>   -> G3_PID
   local tag="$1"; shift
   (
     exec 8<"$G3_GO"                                  # blocks until the parent opens the write end
-    exec python3 -m fleet.cli "$@" > "$CD/$tag.out" 2>&1
+    exec "$IT_FLEET" "$@" > "$CD/$tag.out" 2>&1
   ) &
   G3_PID=$!
 }
@@ -338,7 +338,7 @@ e1_ten_dispatchers_three_slots() {
           "Refused: Another operation holds $FLEET_HOME/.runtime-admission.lock; retry when it finishes" \
           "$CD/w$k.out"; then
         lock_timeouts=$((lock_timeouts+1))
-        python3 -m fleet.cli dispatch --profile "$P_WORKER" --title "e1 i$i w$k" \
+        "$IT_FLEET" dispatch --profile "$P_WORKER" --title "e1 i$i w$k" \
           --base 00000000 --cap 10 > "$CD/retry-w$k.out" 2>&1
         rc=$?
         printf '%s\t%s\n' "$k" "$rc" >> "$CD/retry-rc.tsv"
@@ -455,7 +455,7 @@ e4_board_never_tears() {
     (
       exec 8<"$G3_GO"
       for r in $(seq 1 "$reads"); do
-        python3 -m fleet.cli board --porcelain > "$CD/b$i-$r.out" 2> "$CD/b$i-$r.err"
+        "$IT_FLEET" board --porcelain > "$CD/b$i-$r.out" 2> "$CD/b$i-$r.err"
         printf '%s\n' "$?" >> "$CD/b$i.rc"
       done
     ) &
