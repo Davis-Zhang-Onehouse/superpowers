@@ -182,7 +182,8 @@ IT_ENV_UNNAMED=(-u FLEET_HOME -u FLEET_INSTANTS -u FLEET_ROOT -u FLEET_INSTANT -
 # A PREDECESSOR guardian on the same socket is retired first (found in review): a second run of the same
 # section started inside the 2 s poll window after the first runner exited — a scripted back-to-back rerun —
 # would otherwise create the server the old guardian is about to kill. The guardian's pid is kept per socket
-# under $IT_ROOT, and only a pid that is still a guardian of this socket (its argv names it) is signalled.
+# under $IT_ROOT/.guardians/, and only a pid that is still a guardian of this socket (its argv names it) is
+# signalled.
 #
 # /proc/<pid>/stat field 22 is starttime; the parenthesised comm (field 2) may contain spaces, so it is
 # stripped first and starttime is then field 20 of what remains, and the state is field 1 — a zombie (`Z`)
@@ -191,9 +192,10 @@ it_guard_server() {       # it_guard_server <runner-pid> <socket>
   local pid="$1" sock="$2" start pidfile old
   start="$(sed 's/^.*) //' "/proc/$pid/stat" 2>/dev/null | awk '{print $20}')"
   [ -n "$start" ] || return 0
-  pidfile="$IT_ROOT/.guardian-$sock.pid"
+  pidfile="$IT_ROOT/.guardians/$sock.pid"        # a subdirectory of fleet/it: generated, git-ignored
+  mkdir -p "$IT_ROOT/.guardians"
   old="$(cat "$pidfile" 2>/dev/null)"
-  if [ -n "$old" ] && tr '\0' ' ' < "/proc/$old/cmdline" 2>/dev/null | grep -qF -- "it-guardian $sock "; then
+  if [ -n "$old" ] && tr '\0' ' ' 2>/dev/null < "/proc/$old/cmdline" | grep -qF -- "it-guardian $sock "; then
     kill "$old" 2>/dev/null
   fi
   setsid bash -c '
