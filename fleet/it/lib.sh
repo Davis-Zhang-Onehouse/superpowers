@@ -168,6 +168,31 @@ export DUMMY
 # shellcheck disable=SC2034  # used by run-A.sh after lib.sh is sourced
 IT_ENV_UNNAMED=(-u FLEET_HOME -u FLEET_INSTANTS -u FLEET_ROOT -u FLEET_INSTANT -u FLEET_RELEASES)
 
+# THE GUARDIAN (FB-73). Every runner tears its private server down in an EXIT trap, and a shell that is
+# SIGKILLed — which is what stopping the wrapping shell tree does — runs no trap: `itfleet-M` was found
+# alive with 6 sessions and no owner. So the teardown is also owned by a process OUTSIDE the runner's
+# process group: a `setsid` shell that waits for THIS runner's pid to go (checked by its /proc start
+# time, never by name — a recycled pid must not keep the server alive) and then kills the server on this
+# section's socket, the one server this runner created. After a clean EXIT trap it finds nothing and exits.
+# Not a reap-by-name at entry: sockets are per uid, not per slot, so an `itfleet-F` found alive at start
+# may be a peer slot's live run (w2itharness ISSUES I-1).
+#
+# /proc/<pid>/stat field 22 is starttime; the parenthesised comm (field 2) may contain spaces, so it is
+# stripped first and starttime is then field 20 of what remains. Verified on this box.
+it_guard_server() {       # it_guard_server <runner-pid> <socket>
+  local pid="$1" sock="$2" start
+  start="$(sed 's/^.*) //' "/proc/$pid/stat" 2>/dev/null | awk '{print $20}')"
+  [ -n "$start" ] || return 0
+  setsid bash -c '
+    pid="$1"; sock="$2"; start="$3"
+    while [ -r "/proc/$pid/stat" ] && [ "$(sed "s/^.*) //" "/proc/$pid/stat" 2>/dev/null | awk "{print \$20}")" = "$start" ]; do
+      sleep 2
+    done
+    tmux -L "$sock" kill-server 2>/dev/null
+  ' _ "$pid" "$sock" "$start" </dev/null >/dev/null 2>&1 &
+  disown 2>/dev/null || true
+}
+
 it_section() {            # it_section <name> -> own FLEET_HOME, own slots, own tmux prefix, own tmux SERVER
   SECTION="$1"
   export FLEET_HOME="$IT_ROOT/$SECTION/home"
@@ -180,6 +205,7 @@ it_section() {            # it_section <name> -> own FLEET_HOME, own slots, own 
   # matches, and defence in depth costs nothing here.
   IT_TMUX_SOCKET="itfleet-$SECTION"
   export FLEET_TMUX_SOCKET="$IT_TMUX_SOCKET"
+  it_guard_server "$$" "$IT_TMUX_SOCKET"     # FB-73: outlives this runner, kills only this server
   # SANDBOXED BY CONSTRUCTION, and this line is the whole point of the fix. `it_section` already gave the
   # section its own store, its own slots and its own tmux SERVER; the instants directory was the one shared
   # resource it left to the caller's environment. FIFTEEN runners remembered to export it and SIX did not —
