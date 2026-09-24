@@ -265,6 +265,22 @@ class ReverifyCase(unittest.TestCase):
         self.assertEqual(rows["B1"], "this-run:B")
         self.assertEqual(rows["F2b"], "carried-over")
 
+    def test_it_results_copy_marks_by_row_content_not_by_id(self):
+        """A run that stopped before run-all's merge leaves the committed baseline as the merged file: a row
+        whose id is in this run's register but whose content is the baseline's was not produced now."""
+        from fleet.release_verify import Verify
+
+        def merge_never_happened(command, where):
+            if "run-all.sh" in command and where:
+                it = pathlib.Path(where) / "fleet" / "it"
+                (it / "RESULTS.tsv").write_text("case\tverdict\tevidence\tnote\nB1\tPASS\tev\tthe committed baseline\n")
+                (it / "RESULTS-closeout-B.tsv").write_text("case\tverdict\tevidence\tnote\nB1\tFAIL\tev\tthis run\n")
+
+        rel, v = self._export()
+        Verify(rel, v, self.Runner(watcher=merge_never_happened), repo=self.FakeRepo(rel.dir_for(v))).run()
+        lines = (self._evidence(rel, v) / "it-RESULTS.tsv").read_text().splitlines()
+        self.assertEqual(lines[1].split("\t")[4], "carried-over")
+
     def test_a_second_verify_preserves_the_first_attempts_verdict_and_artefacts(self):
         """`RI-9`, end to end. This is the case release 0.3.3 needed and did not have."""
         from fleet.release_verify import Verify
