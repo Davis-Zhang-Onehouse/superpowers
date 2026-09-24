@@ -89,6 +89,37 @@ class CodexSkillsTests(unittest.TestCase):
         self.assertEqual(vis.missing, CORE_SKILLS)
         self.assertEqual(code, 1)
 
+    @unittest.skipIf(hasattr(os, 'geteuid') and os.geteuid() == 0, 'root writes a mode-000 directory anyway')
+    def test_an_unreadable_codex_home_is_refused_not_a_traceback_and_dry_run_agrees(self):
+        """RV-27: the install and dry-run path met EACCES with raising calls (traceback, exit 1) while --dry-run said
+        would-create. Both now refuse (4), and --check says the link cannot be read rather than that it is absent."""
+        self.home.chmod(0)
+        try:
+            install = self.main(*self.args())
+            dry = self.main(*self.args('--dry-run'))
+            check = self.main(*self.args('--check'))
+        finally:
+            self.home.chmod(0o755)
+        self.assertEqual(install[0], 4, install)
+        self.assertNotIn('Traceback', install[1] + install[2])
+        self.assertEqual(dry[0], 4, dry)
+        self.assertEqual(check[0], 1, check)
+        self.assertIn('cannot be read', check[1] + check[2])
+
+    @unittest.skipIf(hasattr(os, 'geteuid') and os.geteuid() == 0, 'root writes a mode-555 directory anyway')
+    def test_an_unwritable_skills_directory_is_refused_and_dry_run_agrees(self):
+        (self.home / 'skills').mkdir()
+        (self.home / 'skills').chmod(0o555)
+        try:
+            install = self.main(*self.args())
+            dry = self.main(*self.args('--dry-run'))
+        finally:
+            (self.home / 'skills').chmod(0o755)
+        self.assertEqual(install[0], 4, install)
+        self.assertNotIn('Traceback', install[1] + install[2])
+        self.assertEqual(dry[0], 4, dry)
+        self.assertFalse(os.path.lexists(self.link))
+
     def test_a_file_where_the_skills_directory_goes_is_refused(self):
         (self.home / 'skills').write_text('not a directory')
         before = _tree(self.home)
