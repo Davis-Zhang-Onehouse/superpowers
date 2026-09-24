@@ -607,7 +607,7 @@ def _workers(ctx, aside=None, by_effort=True) -> list:
         aside.extend(s for s in same_base if s not in recorded)
     if not ctx.claim:
         return recorded
-    return recorded + _claims_ahead(ctx, recorded, by_effort=by_effort)
+    return recorded + _claims_ahead(ctx, recorded, by_effort=by_effort, aside=aside)
 
 
 def _recorded_instant(subject) -> str:
@@ -640,7 +640,7 @@ def _in_this_effort(ctx, instant: str) -> bool:
         return True
 
 
-def _claims_ahead(ctx, recorded: list, by_effort=True) -> list:
+def _claims_ahead(ctx, recorded: list, by_effort=True, aside=None) -> list:
     """The won-but-unrecorded claims of this effort that rank BEFORE this caller's own.
 
     Three things make this the right population, and each one is a way of getting it wrong:
@@ -667,6 +667,8 @@ def _claims_ahead(ctx, recorded: list, by_effort=True) -> list:
             continue
         #: `V23-D`: the same base string in another instants directory is another effort's claim.
         if by_effort and not _in_this_effort(ctx, lease.child_instant or ""):
+            if aside is not None and lease.base_instant and lease.todo_id not in known:
+                aside.append(_claim_subject(lease))     # RV-C4: said, not silently dropped
             continue
         if not lease.base_instant or lease.todo_id in known:
             continue
