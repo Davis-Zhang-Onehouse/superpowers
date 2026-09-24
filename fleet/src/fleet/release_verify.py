@@ -552,6 +552,11 @@ class Verify:
         `this-run:<runner>` when it appears in one of this run's `RESULTS-closeout-*.tsv` registers, and
         `carried-over` otherwise, so the file can be filtered instead of distrusted. The tracked
         `RESULTS.tsv` keeps its four columns: three readers parse it.
+
+        Matched by the WHOLE ROW, not by case id (found in review): `_run_it` writes this copy even when
+        `run-all.sh` stopped before its merge (a source-pin `exit 3`, a killed run), and then the merged
+        file is still the committed baseline — a row whose id is in a register but whose content is not
+        was NOT produced by this run.
         """
         it_dir = copy_root / IT_SCRIPT[0] / IT_SCRIPT[1]
         origin = {}
@@ -559,13 +564,13 @@ class Verify:
             runner = path.stem.replace("RESULTS-closeout-", "")
             for line in path.read_text(errors="replace").splitlines()[1:]:
                 if line.strip():
-                    origin.setdefault(line.split("\t")[0], f"this-run:{runner}")
+                    origin.setdefault(line.rstrip("\n"), f"this-run:{runner}")
         out = []
         for i, line in enumerate(merged.read_text(errors="replace").splitlines()):
             if i == 0:
                 out.append(line + "\torigin")
             elif line.strip():
-                out.append(line + "\t" + origin.get(line.split("\t")[0], "carried-over"))
+                out.append(line + "\t" + origin.get(line, "carried-over"))
         return "\n".join(out) + "\n"
 
     @staticmethod
