@@ -61,6 +61,31 @@ class TestFences(unittest.TestCase):
         self.assertEqual([r.raw for r in fenced(text)], ["ls", "Phase: X", "plain"])
         self.assertEqual([r.raw for r in fenced(text, ("bash", "sh"))], ["ls"])
 
+    def test_fenced_accepts_a_single_language_as_a_string(self):
+        text = "```bash\nls\n```\n```sh\npwd\n```\n"
+        self.assertEqual([r.raw for r in fenced(text, "bash")], ["ls"])
+
+    def test_a_backtick_opener_whose_info_string_holds_a_backtick_is_not_a_fence(self):
+        rows = lines("``` `x` ```\nnext\n")
+        self.assertEqual([r.enclosure for r in rows], [PROSE, PROSE])
+
+    def test_a_tilde_fence_closes_on_a_longer_run_and_a_closer_may_carry_trailing_spaces(self):
+        self.assertEqual([r.enclosure for r in lines("~~~\nx\n~~~~\nafter\n")], [FENCE, FENCE, FENCE, PROSE])
+        self.assertEqual([r.enclosure for r in lines("```\nx\n```   \nafter\n")], [FENCE, FENCE, FENCE, PROSE])
+
+    def test_a_fence_indented_four_spaces_is_prose_to_this_reader(self):
+        """The stated limit: containers (a list item, a blockquote) are not modelled, so a fence inside
+        one is read as CommonMark reads it outside its container — an indented code block, i.e. prose
+        here. A quotation written that way is still seen by the gates (ISSUES: routed)."""
+        rows = lines("1. step\n    ```bash\n    cat /abs/x\n    ```\n")
+        self.assertEqual([r.enclosure for r in rows], [PROSE] * 4)
+
+    def test_line_numbers_follow_newlines_only(self):
+        """`str.splitlines` also breaks on a form feed and friends; an editor and `grep -n` do not, and
+        the numbers this reader reports are the ones a reader looks up."""
+        self.assertEqual([r.number for r in lines("a\x0cb\nc")], [1, 2])
+        self.assertEqual([r.raw for r in lines("a\r\nb\r\n")], ["a", "b"])
+
 
 class TestComments(unittest.TestCase):
 
@@ -95,6 +120,42 @@ class TestComments(unittest.TestCase):
     def test_an_unclosed_comment_runs_to_end_of_file(self):
         rows = lines("<!-- open\nstill\n")
         self.assertEqual([r.enclosure for r in rows], [COMMENT, COMMENT])
+
+    def test_an_unclosed_inline_opener_is_literal_text(self):
+        """RV (Task 1): a mid-line `<!--` with no `-->` on its line used to turn the REST OF THE FILE into
+        COMMENT, so every later pointer vanished from the gate and every later near-miss from the lint.
+        CommonMark: an inline comment must close on its line; only a comment that starts a line spans."""
+        rows = lines("Wrap it in <!-- like this.\nRead /abs/instant/evidence/INDEX.md\n")
+        self.assertEqual([r.enclosure for r in rows], [PROSE, PROSE])
+        self.assertIn("<!--", rows[0].text)
+        self.assertIn("/abs/instant/evidence/INDEX.md", rows[1].text)
+
+    def test_a_comment_opener_inside_a_code_span_is_literal(self):
+        rows = lines("Wrap it in `<!--` like this.\n\nRead /abs/instant/x\nPhase: X\n")
+        self.assertEqual([r.enclosure for r in rows], [PROSE, PROSE, PROSE, PROSE])
+        self.assertEqual(rows[0].text, "Wrap it in `<!--` like this.")
+
+    def test_a_double_backtick_span_holding_a_single_backtick_and_an_opener_is_literal(self):
+        (row,) = lines("use `` ` <!-- `` here <!-- gone -->!\n")
+        self.assertEqual(row.text, "use `` ` <!-- `` here !")
+
+    def test_an_inline_comment_may_contain_backticks(self):
+        (row,) = lines("a <!-- `x` --> b\n")
+        self.assertEqual(row.text, "a  b")
+
+    def test_the_empty_comment_forms_close_on_their_own_dashes(self):
+        rows = lines("x <!--> y\nz\n<!--->\nw\n")
+        self.assertEqual([r.enclosure for r in rows], [PROSE, PROSE, COMMENT, PROSE])
+        self.assertEqual(rows[0].text, "x  y")
+
+    def test_a_block_comment_closes_on_the_first_line_containing_the_closer(self):
+        rows = lines("<!-- a\n b --> tail <!-- c --> more\nnext\n")
+        self.assertEqual([r.enclosure for r in rows], [COMMENT, PROSE, PROSE])
+        self.assertEqual(rows[1].text, " tail  more")
+
+    def test_a_fence_may_open_right_after_a_block_comment_closes(self):
+        rows = lines("<!-- a\n-->\n```\nx\n```\n")
+        self.assertEqual([r.enclosure for r in rows], [COMMENT, COMMENT, FENCE, FENCE, FENCE])
 
 
 class TestProse(unittest.TestCase):
