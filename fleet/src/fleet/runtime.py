@@ -204,10 +204,29 @@ def _observe_codex(rows: list[str], visible: list[str]) -> PaneObservation:
                 return PaneObservation("unknown")
             content.append(_undim(_cells(row)))
     draft = "\n".join(content).strip() or None
-    # Only a spinner row immediately above the current input proves a live turn.
-    before = [row for row in visible[max(0, prompt - 3):prompt] if row]
-    busy = bool(before and re.fullmatch(r"[◦•] .+\(.*esc to interrupt\)", before[-1]))
-    return PaneObservation("busy" if busy else "queued" if draft else "idle", draft)
+    return PaneObservation("busy" if _codex_spinner_above(rows, prompt) else "queued" if draft else "idle", draft)
+
+
+#: v23-k (FB-113). codex 0.156's live-turn row, measured (`it/fixtures/runtime/codex-busy-bgterm-0156.frame`,
+#: `codex-waiting-bgterm-0156.frame`): the spinner glyph, a status, the elapsed time and the interrupt hint in one paren
+#: group — `• Working (8s • esc to interrupt)`, `◦ Waiting for background terminal (35s • esc to interrupt)` — then, while
+#: an exec session is open (every tool turn: even a foreground command runs as one), ` · 1 background terminal running ·
+#: /ps to view…`, cut with `…` at the pane edge. Matched from the row START, with the elapsed time in the paren, so an
+#: agent's prose quoting the hint is not a spinner; the tail after the paren is allowed, never required.
+_CODEX_SPINNER = re.compile(r"[◦•] \S[^()]*\((?:\d+h )?(?:\d+m )?\d+s • esc to interrupt\)(?: · .*)?")
+
+
+def _codex_spinner_above(rows: list[str], prompt: int) -> bool:
+    """Whether the current input sits under codex's live-turn row. Walks UP from the caret over blank rows and INDENTED
+    detail rows — `  └ sleep 41` under "Waiting for background terminal" is one — and asks only of the first other row.
+    Any unindented row (the agent's answer, a finished `• Ran …`) ends the walk, so a spinner in scrollback is not a turn.
+    Bounded by the input window, like every other codex predicate."""
+    for index in range(prompt - 1, max(-1, prompt - 1 - PROMPT_TAIL_LINES), -1):
+        text = plain(rows[index])
+        if not text.strip() or text.startswith("  "):
+            continue
+        return bool(_CODEX_SPINNER.fullmatch(text.strip()))
+    return False
 
 
 def _codex_caret_row(row: str) -> bool:

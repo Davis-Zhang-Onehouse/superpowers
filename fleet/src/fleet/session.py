@@ -69,6 +69,20 @@ class LiveSession:
     #: known, and an agent that cannot be read is not proof of emptiness. Raising instead blinded every read
     #: verb for as long as that process lived.
     unreadable: bool = False
+    #: v23-k (FB-113). Another inventoried agent sits between this process and its pane root: it is that agent's CHILD,
+    #: not the pane's agent. The hermetic suite and `fleet peers` run the real `claude agents --json`, so a codex
+    #: worker's pane briefly holds a genuine claude, and `board` read it as "live runtime claude differs from record
+    #: runtime codex". The row is kept — it is a real process holding a real cwd — and only the readers that ask WHICH
+    #: RUNTIME OWNS THE PANE skip it (`outer`). Default False: a hand-built row is the pane's own agent, as before.
+    nested: bool = False
+
+
+def outer(sessions, name: str) -> list:
+    """The inventory rows that are `name`'s own agent — attributed to it and not nested under another agent.
+
+    Every "is this pane the runtime its record says" question reads these and nothing else (v23-k): a claude that a
+    codex worker started is not a claude pane."""
+    return [item for item in sessions if item.name == name and not getattr(item, "nested", False)]
 
 
 @dataclass
@@ -630,7 +644,25 @@ def default_probes(process_name: str = "claude", tmux_socket=_FROM_ENV, *,
                 if not recognizes_process(runtime, comm, executable, argv):
                     continue
                 out.append(LiveSession(pid=pid, cwd=Path(cwd), name=pane_of(pid, owners), runtime=runtime))
+        agents = {item.pid for item in out}
+        for item in out:
+            item.nested = nested_under(item.pid, agents, owners)
         return out
+
+    def nested_under(pid: int, agents: set, owners: dict) -> bool:
+        """v23-k. Whether an inventoried agent is an ancestor of `pid` BELOW `pid`'s own pane root (the pane root
+        itself counts: a codex that a claude pane started is nested). A pane root is never nested, whoever started
+        its server. Bounded like `pane_of`, through the same world-readable `stat`."""
+        if pid in owners:
+            return False
+        walker, hops = parent_of(pid), 0
+        while walker > 1 and hops < 32:
+            if walker in agents:
+                return True
+            if walker in owners:
+                return False
+            walker, hops = parent_of(walker), hops + 1
+        return False
 
     # Every `-t` below is EXACT (`FI-23`). `new-session -s` is not a target and needs no marker: it
     # NAMES the session being created rather than resolving an existing one.

@@ -206,7 +206,11 @@ def reconcile(store, pool, sessions, instants_dir: Path, idle_after_s: int = 180
     # --- pass 1: PROCESS-FIRST. Start from what is running, whatever the records say. -------------
     #: RV-25. Readable rows first (a stable sort, so their own order is kept): when one record's pane holds both, the
     #: process whose binary and cwd were read speaks for the record — not whichever pid `pgrep` happened to list first.
-    for sess in sorted(live_sessions, key=lambda s: bool(getattr(s, "unreadable", False))):
+    #: v23-k: and the pane's OWN agent before any agent it started (`LiveSession.nested`). `pgrep` lists claude before
+    #: codex, so a codex worker running `claude agents --json` was spoken for by that child — BLOCKED as a mismatch —
+    #: and a claude record whose pane agent is codex was spoken for by a claude child and read RUNNING.
+    for sess in sorted(live_sessions, key=lambda s: (bool(getattr(s, "nested", False)),
+                                                     bool(getattr(s, "unreadable", False)))):
         rec = record_by_tmux.get(sess.name) if sess.name else None
         if rec is not None:
             if rec.todo_id in seen_records:
