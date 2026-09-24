@@ -100,6 +100,25 @@ class GitRootsTests(unittest.TestCase):
         git('init', '-q', '.', cwd=self.slot)
         self.assertEqual(git_writable_dirs(self.slot, default_git()), ())
 
+    def test_slot_contents_a_worker_can_plant_choose_no_root(self):
+        """RV-29. The slot is writable by the worker, and roots are re-derived at every revive and dispatch, so nothing
+        a worker can create there may name a root: a symlink to someone else's worktree, or a `.git` file pointing at
+        another repository or at another worktree's git dir. Git's own back-link (`<git dir>/gitdir` naming this
+        `.git`) is the proof a worktree is really this one, and only the owning repository can write it."""
+        other = self.tmp / 'other'
+        other.mkdir()
+        git('init', '-q', '.', cwd=other)
+        git('commit', '-q', '--allow-empty', '-m', 'i', cwd=other)
+        git('worktree', 'add', '-q', '--detach', str(self.tmp / 'elsewhere' / 'wt'), cwd=other)
+        (self.slot / 'link').symlink_to(self.tmp / 'elsewhere' / 'wt', target_is_directory=True)
+        (self.slot / 'planted-repo').mkdir()
+        (self.slot / 'planted-repo' / '.git').write_text(f'gitdir: {other / ".git"}\n')
+        (self.slot / 'planted-wt').mkdir()
+        (self.slot / 'planted-wt' / '.git').write_text(f'gitdir: {other / ".git" / "worktrees" / "wt"}\n')
+        self.assertEqual(git_writable_dirs(self.slot, default_git()), ())
+        git('worktree', 'add', '-q', '--detach', str(self.slot / 'mine'), cwd=self.main)    # the neighbour still counts
+        self.assertEqual(sorted(git_writable_dirs(self.slot, default_git())), sorted(worktree_roots(self.main, 'mine')))
+
     def test_no_repo_and_a_failing_git_add_nothing(self):
         self.assertEqual(git_writable_dirs(self.slot, default_git()), ())
         git('worktree', 'add', '-q', '--detach', str(self.slot / 'wt'), cwd=self.main)
