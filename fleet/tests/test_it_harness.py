@@ -283,5 +283,58 @@ class StdinImmunity(unittest.TestCase):
         self.assertIn("<<'PY' | sort", text)
 
 
+class ServerGuardian(unittest.TestCase):
+    """FB-73. A runner's EXIT trap cannot run when the shell tree is SIGKILLed (what TaskStop does); its
+    private server must still go away. Private socket only; the default server is never touched. RED:
+    evidence/01-red/fb73-kill9-base.txt (the server still up 10 s after kill -9)."""
+
+    def setUp(self):
+        if shutil.which("tmux") is None:
+            self.skipTest("tmux is not on PATH, so the guardian cannot be exercised here")
+        self.tmp = pathlib.Path(tempfile.mkdtemp(prefix="it-harness-"))
+        self.addCleanup(shutil.rmtree, self.tmp, True)
+        self.it = harness_copy(self.tmp)
+        self.section = f"selftest{os.getpid()}g"
+        self.socket = f"itfleet-{self.section}"
+        self.addCleanup(subprocess.run, ["tmux", "-L", self.socket, "kill-server"], capture_output=True)
+
+    def server_up(self):
+        return subprocess.run(["tmux", "-L", self.socket, "ls"], capture_output=True).returncode == 0
+
+    def start_runner(self):
+        started = self.tmp / "started"
+        script = (f'. "{self.it}/lib.sh"\nit_section {self.section} >/dev/null 2>&1\n'
+                  f'it_tmux new-session -d -s {self.socket}-victim "sleep 300"\n'
+                  f'touch "{started}"\nsleep 300 & echo $! > "{self.tmp}/sleep.pid"; wait\n')
+        (self.tmp / "runner.sh").write_text(script)
+        p = subprocess.Popen(["bash", str(self.tmp / "runner.sh")], cwd=self.tmp, env=clean_env(),
+                             stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+        self.addCleanup(lambda: (p.kill(), p.wait()))
+        self.addCleanup(lambda: subprocess.run(
+            ["bash", "-c", f'kill "$(cat "{self.tmp}/sleep.pid" 2>/dev/null)" 2>/dev/null; true']))
+        for _ in range(100):
+            if started.exists():
+                break
+            time.sleep(0.1)
+        self.assertTrue(started.exists(), "runner did not reach its section")
+        return p
+
+    def test_server_is_reaped_after_the_runner_is_sigkilled(self):
+        p = self.start_runner()
+        self.assertTrue(self.server_up())
+        p.kill()
+        p.wait()
+        for _ in range(100):          # the guardian polls every 2 s
+            if not self.server_up():
+                break
+            time.sleep(0.1)
+        self.assertFalse(self.server_up(), "private server survived its runner's SIGKILL")
+
+    def test_server_is_not_reaped_while_the_runner_lives(self):
+        self.start_runner()
+        time.sleep(5)
+        self.assertTrue(self.server_up())
+
+
 if __name__ == "__main__":
     unittest.main()
