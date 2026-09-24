@@ -9,7 +9,12 @@
 # this one is fine" while a rule says what makes ANY delete fine and can still fire.
 #
 # Four mutations, each on a `cp -r` copy, each target asserted **present-and-unique** before injection, and
-# every copy asserted GREEN before it is mutated — a killer verified against a red baseline proves nothing.
+# every copy asserted byte-identical to the package the baseline just proved GREEN before it is mutated — a
+# killer verified against a red baseline proves nothing. The mutations, their anchors and the rule that reads
+# each outcome live in `m9_mutations.py`, which the hermetic `tests/test_m9_mutations.py` also imports.
+#
+# `FB-108`: a mutation that did not APPLY is `FAIL … NOT-APPLIED`, and its copy is never audited. It used to be
+# audited anyway, pass as the un-mutated package it was, and read as SURVIVED.
 #
 #   M1  a second assignment putting the target under $HOME          -> SURVIVED-then-KILLED (see below)
 #   M2  a delete of an absolute string literal                             -> killed
@@ -40,8 +45,11 @@ mkdir -p "$EV"
 SECTION=M9mut
 it_assert_isolation M9mut-enter
 
-# The audit under test, extracted from the runner that owns it so this script cannot drift from it.
-python3 - "$IT_ROOT/run-group5.sh" "$EV/m9.py" <<'PY'
+# The audit under test, extracted from the runner that owns it so this script cannot drift from it. The old
+# copy is removed first and the extraction's exit status is checked: `m9.py` persists in `$EV` between runs,
+# so an extraction that failed silently used to audit every mutant with a stale rule.
+rm -f "$EV/m9.py"
+if ! python3 - "$IT_ROOT/run-group5.sh" "$EV/m9.py" <<'PY'
 import pathlib, sys
 src = pathlib.Path(sys.argv[1]).read_text()
 start = src.index('cat > "$PY_DIR/m9.py" <<')
@@ -50,6 +58,11 @@ end = src.index('\nPY\n', body)
 pathlib.Path(sys.argv[2]).write_text(src[body:end] + '\n')
 print(f"extracted the M9 audit: {len(src[body:end].splitlines())} lines")
 PY
+then
+  it_fail M9-mut-baseline "fleet/it/run-group5.sh" \
+    "could not extract the M9 audit from run-group5.sh, so there is no rule to mutate against"
+  exit 1
+fi
 
 run_audit() {                 # run_audit <instant-root> <logfile>  -> exit code of the audit
   INSTANT="$1" PYTHONPATH="$1/src" python3 "$EV/m9.py" > "$2" 2>&1
@@ -67,6 +80,8 @@ else
 fi
 
 # --- the four mutations ---------------------------------------------------------------------------
+M9MUT="$IT_ROOT/m9_mutations.py"
+declare -A APPLIED=()
 for n in 1 2 3 4; do
   rm -rf "$EV/mut$n"; mkdir -p "$EV/mut$n"; cp -r "$INSTANT/src" "$EV/mut$n/"
   #: `tests/` as well as `src/`, since `II-3`: the audit imports OUTWARD_CALL_SITES from
@@ -79,53 +94,29 @@ for n in 1 2 3 4; do
   #: the extracted audit and against the real package, and not against a mutant tree; the case that
   #: exists to notice a kill arriving for the wrong reason is what noticed.
   cp -r "$INSTANT/tests" "$EV/mut$n/"
+  #: The copy IS the package the baseline just proved green, byte for byte, before anything is injected.
+  if ! diff -rq "$INSTANT/src" "$EV/mut$n/src" > "$EV/mut$n.inject" 2>&1; then
+    echo "  NOT APPLIED — M$n: the copy differs from the package the baseline audited; nothing injected" \
+      >> "$EV/mut$n.inject"
+    cat "$EV/mut$n.inject"
+    continue
+  fi
+  #: One process per mutation, its exit status checked, and the mutated file compared with the original.
+  #: APPLIED is set only when the injection says so AND the bytes on disk changed. A single heredoc for all
+  #: four is what let M2's failed assert abort M3 and M4 unnoticed (FB-108).
+  rel="$(python3 "$M9MUT" rel "$n")"
+  if python3 "$M9MUT" inject "$EV/mut$n" "$n" >> "$EV/mut$n.inject" 2>&1 \
+     && ! cmp -s "$INSTANT/$rel" "$EV/mut$n/$rel"; then
+    APPLIED[$n]=1
+  fi
+  cat "$EV/mut$n.inject"
 done
 
-python3 - "$EV" <<'PY'
-import pathlib, sys
-EV = pathlib.Path(sys.argv[1])
-
-def inject(rel, old, new, label):
-    path = EV / rel
-    text = path.read_text()
-    count = text.count(old)
-    #: present-and-unique, asserted. A mutation applied twice, or not at all, makes the kill unattributable —
-    #: and a `cp -r` copy is exactly where that goes unnoticed.
-    assert count == 1, f"{label}: anchor appears {count} times, not once"
-    path.write_text(text.replace(old, new))
-    print(f"  {label}: injected")
-
-inject("mut1/src/fleet/pool.py", "        record.unlink()",
-       "        record = Path.home() / 'victim.json'\n        record.unlink()",
-       "M1 a second assignment putting the target under $HOME")
-inject("mut2/src/fleet/atomic.py", "            os.unlink(tmp)",
-       "            os.unlink('/var/tmp/whatever')",
-       "M2 a delete of an absolute literal")
-inject("mut3/src/fleet/store.py", "\nSCHEMA_VERSION = 1",
-       "\ndef _sneaky_cleanup(victim):\n    victim.unlink()\n\n\nSCHEMA_VERSION = 1",
-       "M3 a brand-new undeclared delete site")
-inject("mut4/src/fleet/pool.py", "        record.unlink()",
-       "        import os as _o\n        record = Path(_o.environ['HOME']) / 'x.json'\n"
-       "        record.unlink()",
-       "M4 a target read out of the environment")
-PY
-
-#: What each mutation must be caught BY. A kill for the wrong reason is not a kill: a copy that fails to
-#: import also exits non-zero, and an early version of this check "killed" all four that way while none of
-#: the mutations had actually been applied.
-#: M2's expected reason is NOT "derived neither from the store root", which is what I first predicted and
-#: what this check then rejected as a kill for the wrong reason. `os.unlink('/var/tmp/whatever')` passes a
-#: string literal, so there is no local name to trace and the audit takes its *unverifiable* branch instead:
-#: "deletes something this audit could not name". That is a legitimate kill and arguably the stronger one —
-#: the audit refuses to pass a delete it cannot attribute at all, rather than reasoning about it. The
-#: expectation was wrong, not the rule, and the distinction only surfaced because this table demands a
-#: reason rather than accepting any non-zero exit.
-declare -A WHY=(
-  [1]="derived neither from the store root"
-  [2]="could not name"
-  [3]="UNDECLARED DELETE SITE"
-  [4]="derived neither from the store root"
-)
+#: What each mutation must be caught BY is its `why` in m9_mutations.py, and `classify` there is the only
+#: place an outcome becomes a verdict. A kill for the wrong reason is not a kill: a copy that fails to import
+#: also exits non-zero, and an early version of this check "killed" all four that way while none of the
+#: mutations had actually been applied. M2's expected reason ("could not name") and why it is not the
+#: unrooted one are written down beside its entry there.
 declare -A WHAT=(
   [1]="a second assignment putting the delete target under \$HOME. Reported SURVIVED-then-KILLED (FI-28's convention): it survived the first rule, which accepted a name if ANY of its assignments looked rooted, and forced the rule to require EVERY assignment to be safe"
   # The backticks below are ESCAPED, deliberately. Unescaped, bash reads them as a command substitution
@@ -139,17 +130,33 @@ declare -A WHAT=(
   [4]="a delete target read out of os.environ['HOME']"
 )
 
+
 for n in 1 2 3 4; do
-  if run_audit "$EV/mut$n" "$EV/mut$n.out"; then
-    it_fail "M9-mut-$n" "fleet/it/M9-mutation/mut$n.out" \
-      "SURVIVED: ${WHAT[$n]} — the rule did not fire, so it is decoration on this shape"
-  elif grep -q "${WHY[$n]}" "$EV/mut$n.out"; then
-    it_pass "M9-mut-$n" "fleet/it/M9-mutation/mut$n.out" \
-      "KILLED by the named check (${WHY[$n]}): ${WHAT[$n]}"
+  why="$(python3 "$M9MUT" why "$n")"
+  if [ -n "${APPLIED[$n]:-}" ]; then
+    run_audit "$EV/mut$n" "$EV/mut$n.out"; audit_rc=$?
+    read -r verdict kind < <(python3 "$M9MUT" classify "$n" 1 "$audit_rc" "$EV/mut$n.out")
   else
-    it_fail "M9-mut-$n" "fleet/it/M9-mutation/mut$n.out" \
-      "died for the WRONG reason — a kill that is really an import failure proves nothing: $(grep -m1 -E 'Error' "$EV/mut$n.out" | cut -c1-200)"
+    #: Never audited: an un-mutated copy passes, and that pass is no verdict on the rule (FB-108).
+    read -r verdict kind < <(python3 "$M9MUT" classify "$n" 0 - -)
   fi
+  case "$kind" in
+    KILLED)
+      it_pass "M9-mut-$n" "fleet/it/M9-mutation/mut$n.out" \
+        "KILLED by the named check ($why): ${WHAT[$n]}" ;;
+    SURVIVED)
+      it_fail "M9-mut-$n" "fleet/it/M9-mutation/mut$n.out" \
+        "SURVIVED: ${WHAT[$n]} — the mutation WAS applied (the mutant file differs from the original) and the rule did not fire, so it is decoration on this shape" ;;
+    WRONG-REASON)
+      it_fail "M9-mut-$n" "fleet/it/M9-mutation/mut$n.out" \
+        "died for the WRONG reason — a kill that is really an import failure proves nothing: $(grep -m1 -E 'Error' "$EV/mut$n.out" | cut -c1-200)" ;;
+    NOT-APPLIED)
+      it_fail "M9-mut-$n" "fleet/it/M9-mutation/mut$n.inject" \
+        "NOT-APPLIED: the mutation was never written into its copy, so the audit was not run on it — neither a kill nor a survival, a harness defect: $(grep -m1 'NOT APPLIED' "$EV/mut$n.inject" | cut -c1-200)" ;;
+    *)
+      it_fail "M9-mut-$n" "fleet/it/M9-mutation/mut$n.inject" \
+        "no verdict: m9_mutations.py classify printed '${verdict:-} ${kind:-}'" ;;
+  esac
 done
 
 it_assert_isolation M9mut-leave
