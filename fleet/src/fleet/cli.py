@@ -5346,7 +5346,9 @@ def _sandbox_env(sandbox: Path) -> dict:
 #: spaces, a tab, spaces then a tab, a `>` blockquote, a list marker (OI-4). A fence at 0–3 spaces is a fence
 #: to the reader and never reaches this pattern, so any prose line that is fence-shaped after a run of
 #: spaces, tabs and container markers is one `recipes_of` cannot see, and "examined 0 recipe(s)" would read
-#: as success; `verify` counts them and says so (RV-31, RV-37).
+#: as success; `verify` counts them and says so (RV-31, RV-37). The count is an UPPER BOUND: a fence-shaped
+#: line that is example text inside an indented or blockquoted non-shell block is prose to the reader too
+#: and is counted, which over-states and never under-states what went unexamined (RV-47).
 _INDENTED_SHELL_FENCE = re.compile(
     r"^[ \t>]*(?:(?:\d+[.)]|[-*+])[ \t]+[ \t>]*)?(?:`{3,}|~{3,})[ \t]*(?:" + "|".join(_RECIPE_LANGS) + r")(?=\s|$)",
     re.IGNORECASE)
