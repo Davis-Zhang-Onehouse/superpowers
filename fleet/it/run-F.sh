@@ -310,7 +310,8 @@ f9_zero=0
   #: `--want 1`: `compaction-status` exits EXIT_ATTENTION (1) while a compaction is inflight — and F9's whole
   #: point is that freezeMaker IS inflight — so 1 is the code that says the verb ran and reported the freeze.
   #: Found in the final review, not in a §F run: the runs were behind a release gate.
-  it_zero_delta --want 1 F9-zero-delta fleet compaction-status --porcelain )
+  it_zero_delta --want 1 F9-zero-delta fleet compaction-status --porcelain
+  exit "${IT_FAILED:-0}" ) || IT_FAILED=1   # a FAIL written inside the subshell must reach the runner's exit status (found in review)
 grep -qP '^F9-zero-delta\tPASS\t' "$RESULTS" && f9_zero=1
 if [ "$f9_reports" = 1 ] && [ "$f9_zero" = 1 ]; then
   it_pass F9 "fleet/it/F/out/F9-status.tsv" \
