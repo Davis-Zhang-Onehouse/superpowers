@@ -74,13 +74,18 @@ def writable_dirs(environ, extra=()) -> tuple:
 
 
 def git_writable_dirs(workspace, git) -> tuple:
-    """The git common dir of every repository at the slot root or one level below it.
+    """What a LINKED WORKTREE at the slot root or one level below must write to commit: its common dir's `objects`,
+    `refs` and `logs`, and its own per-worktree git dir (index, HEAD). Nothing else.
 
-    Measured (codex-cli 0.156.1): workspace-write makes `<root>/.git` read-only at the TOP of each writable root, so a
-    slot that is itself a repo cannot commit, and a LINKED WORKTREE — ws5's shape, whose common dir is the shared
-    checkout's `.git` — fails with `index.lock: Read-only file system`. Adding the common dir itself fixes both, and
-    adding its parent does not. A clone nested in the slot needed nothing, and adding its `.git` costs nothing.
-    `git` is the injected `(args, cwd) -> (rc, stdout)` seam (`workspace.default_git`); a failing git adds nothing."""
+    Measured (codex-cli 0.156.1, evidence/01-settle/settle-roots-push.txt): workspace-write makes `<root>/.git`
+    read-only at the TOP of each writable root, so a linked worktree — ws5's shape, whose common dir is the shared
+    checkout's `.git` — cannot commit (`index.lock: Read-only file system`). With these four roots a detached commit,
+    a branch create, a commit on the branch and a fetch all work. Adding the whole common dir ALSO made `hooks/` and
+    `config` writable (RV-28): a sandboxed worker could plant code that the next unsandboxed git run in any worktree of
+    that repository executes. A nested clone commits inside the cwd already and needs nothing. A slot that is itself a
+    repo would need its top-level `.git`, which codex protects for that same reason; it is not a fleet shape and gets
+    nothing. `git` is the injected `(args, cwd) -> (rc, stdout)` seam (`workspace.default_git`); a failing git adds
+    nothing."""
     slot = Path(workspace)
     found = []
     try:
@@ -88,11 +93,15 @@ def git_writable_dirs(workspace, git) -> tuple:
     except OSError:
         return ()
     for candidate in candidates:
-        if not (candidate / '.git').exists():
+        if not (candidate / '.git').is_file():              # a directory `.git` is a clone or the slot itself
             continue
-        code, out = git(['rev-parse', '--path-format=absolute', '--git-common-dir'], candidate)
-        if code == 0 and out.strip():
-            found.append(str(Path(out.strip()).resolve()))
+        code, out = git(['rev-parse', '--path-format=absolute', '--git-dir', '--git-common-dir'], candidate)
+        lines = out.split('\n') if code == 0 else []
+        if len(lines) < 2 or not lines[0].strip() or not lines[1].strip():
+            continue
+        own, common = Path(lines[0].strip()).resolve(), Path(lines[1].strip()).resolve()
+        found += [str(common / name) for name in ('objects', 'refs', 'logs') if (common / name).is_dir()]
+        found.append(str(own))
     return tuple(dict.fromkeys(found))
 
 

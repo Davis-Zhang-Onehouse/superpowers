@@ -5,7 +5,8 @@ A private store, a private itfleet-CXP- tmux server and a private CODEX_HOME (th
 copied read-only, so "no policy on the argv" means exactly what a production worker inherits: on-request). The slot is
 the ws5 shape: a LINKED WORKTREE of a repository outside the slot. The seed asks the worker to run one probe script,
 which:
-  - commits in the slot repo (git writes the common dir, outside the slot);
+  - commits in the slot repo (git writes the shared repository's objects and refs, outside the slot);
+  - cannot write that repository's hooks or working tree (RV-28);
   - writes into FLEET_INSTANTS;
   - does a network operation: a read-only `git ls-remote` of the fork over ssh (never a push);
   - writes OUTSIDE every writable root, which the sandbox must DENY (not prompt, not allow).
@@ -147,6 +148,9 @@ if git -C {slot / 'repo'} -c user.email=it@fleet -c user.name=it commit -q --all
 if echo "written by the codex worker" > "$FLEET_INSTANTS/cxp-instants-write-$n.txt"; then
   echo "instants-write:OK"; else echo "instants-write:FAIL"; fi
 if timeout 30 git ls-remote {FORK} HEAD >/dev/null 2>&1; then echo "network:OK"; else echo "network:FAIL"; fi
+#: RV-28: the shared repository's hooks and working tree stay out of reach, even though its objects and refs are writable.
+if touch {main}/.git/hooks/cxp-hook-$n 2>/dev/null; then echo "hooks-write:ALLOWED"; else echo "hooks-write:DENIED"; fi
+if touch {main}/cxp-shared-tree-$n 2>/dev/null; then echo "shared-tree-write:ALLOWED"; else echo "shared-tree-write:DENIED"; fi
 err=$(touch {outside}/cxp-outside-$n 2>&1)
 if [ -e {outside}/cxp-outside-$n ]; then echo "outside-write:ALLOWED"; else echo "outside-write:DENIED $err"; fi
 echo "end $n"
@@ -279,12 +283,14 @@ def run_probe(record, n, tag):
 def assert_green(outcome, n):
     assert outcome['kind'] == 'finished', outcome
     lines = outcome['result']
-    for needle in ('commit:OK', 'instants-write:OK', 'network:OK', 'outside-write:DENIED'):
+    for needle in ('commit:OK', 'instants-write:OK', 'network:OK', 'outside-write:DENIED', 'hooks-write:DENIED',
+                   'shared-tree-write:DENIED'):
         assert needle in lines, (needle, lines)
     assert 'Read-only file system' in lines, lines          # denied BY THE SANDBOX, not by permissions or a prompt
     assert f'cxp probe {n}' in git('log', '--format=%s', '-3', cwd=slot / 'repo'), 'the commit is not in the repo'
     assert (root / 'instants' / f'cxp-instants-write-{n}.txt').exists()
     assert not (outside / f'cxp-outside-{n}').exists()
+    assert not (main / '.git' / 'hooks' / f'cxp-hook-{n}').exists() and not (main / f'cxp-shared-tree-{n}').exists()
     #: No dialog, ever; and no unrecognised frame once the worker has started working. A LEADING 14 is codex's own
     #: startup frame ("model: loading", before the seed is submitted), seen identically at the base.
     codes = outcome['guard_codes']

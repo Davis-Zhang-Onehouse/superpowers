@@ -63,35 +63,47 @@ def git(*args, cwd):
                    capture_output=True)
 
 
+def worktree_roots(main, name):
+    """RV-28. What a linked worktree must write to commit, fetch and branch, measured on codex-cli 0.156.1
+    (evidence/01-settle/settle-roots-push.txt, R2), and nothing else: never the common dir itself, whose hooks/
+    and config would let a sandboxed worker plant code the next unsandboxed git run executes (R1: both ALLOWED)."""
+    common = (main / '.git').resolve()
+    return [str(common / 'objects'), str(common / 'refs'), str(common / 'logs'), str(common / 'worktrees' / name)]
+
+
 class GitRootsTests(unittest.TestCase):
     def setUp(self):
         self.tmp = Path(tempfile.mkdtemp(prefix='fb110 '))
         self.addCleanup(shutil.rmtree, self.tmp)
+        self.main, self.slot = self.tmp / 'main', self.tmp / 'slot'
+        self.main.mkdir()
+        self.slot.mkdir()
+        git('init', '-q', '.', cwd=self.main)
+        git('commit', '-q', '--allow-empty', '-m', 'i', cwd=self.main)
 
-    def test_a_linked_worktree_adds_its_common_dir_and_a_nested_clone_adds_its_own(self):
-        main, slot = self.tmp / 'main', self.tmp / 'slot'
-        main.mkdir()
-        slot.mkdir()
-        git('init', '-q', '.', cwd=main)
-        git('commit', '-q', '--allow-empty', '-m', 'i', cwd=main)
-        git('worktree', 'add', '-q', '--detach', str(slot / 'wt'), cwd=main)
-        (slot / 'clone').mkdir()
-        git('init', '-q', '.', cwd=slot / 'clone')
-        (slot / 'plain').mkdir()
-        (slot / 'deeper' / 'repo').mkdir(parents=True)
-        git('init', '-q', '.', cwd=slot / 'deeper' / 'repo')           # two levels down: not a slot repo
-        got = git_writable_dirs(slot, default_git())
-        self.assertEqual(sorted(got), sorted([str((main / '.git').resolve()), str((slot / 'clone' / '.git').resolve())]))
+    def test_a_linked_worktree_adds_only_what_a_commit_writes_and_never_hooks_or_config(self):
+        git('worktree', 'add', '-q', '--detach', str(self.slot / 'wt'), cwd=self.main)
+        (self.slot / 'clone').mkdir()
+        git('init', '-q', '.', cwd=self.slot / 'clone')                 # nested clone: commits inside the cwd already
+        (self.slot / 'plain').mkdir()
+        (self.slot / 'deeper' / 'repo').mkdir(parents=True)
+        git('init', '-q', '.', cwd=self.slot / 'deeper' / 'repo')       # two levels down: not a slot repo
+        got = git_writable_dirs(self.slot, default_git())
+        self.assertEqual(sorted(got), sorted(worktree_roots(self.main, 'wt')))
+        common = str((self.main / '.git').resolve())
+        self.assertNotIn(common, got)
+        self.assertFalse(any(root.endswith(('/hooks', '/config')) for root in got), got)
 
-    def test_a_slot_that_is_itself_a_repo_adds_its_own_git_dir(self):
-        git('init', '-q', '.', cwd=self.tmp)
-        self.assertEqual(git_writable_dirs(self.tmp, default_git()), (str((self.tmp / '.git').resolve()),))
+    def test_a_slot_that_is_itself_a_repo_or_a_clone_adds_nothing(self):
+        """Its `.git` sits in the cwd: codex protects a TOP-level `.git` for the same hooks reason, and a slot that is
+        itself a repo is not a fleet shape today (ws5 is a worktree, ws8-10 hold nested clones)."""
+        git('init', '-q', '.', cwd=self.slot)
+        self.assertEqual(git_writable_dirs(self.slot, default_git()), ())
 
     def test_no_repo_and_a_failing_git_add_nothing(self):
-        self.assertEqual(git_writable_dirs(self.tmp, default_git()), ())
-        (self.tmp / 'r').mkdir()
-        (self.tmp / 'r' / '.git').mkdir()
-        self.assertEqual(git_writable_dirs(self.tmp, lambda args, cwd: (128, '')), ())
+        self.assertEqual(git_writable_dirs(self.slot, default_git()), ())
+        git('worktree', 'add', '-q', '--detach', str(self.slot / 'wt'), cwd=self.main)
+        self.assertEqual(git_writable_dirs(self.slot, lambda args, cwd: (128, '')), ())
 
 
 class PrepareTests(unittest.TestCase):
@@ -172,7 +184,7 @@ class VisibilityTests(unittest.TestCase):
 
 
 class DispatchRootsTests(unittest.TestCase):
-    def test_a_codex_dispatch_into_a_worktree_slot_hands_the_common_dir_to_the_launcher(self):
+    def test_a_codex_dispatch_into_a_worktree_slot_hands_the_worktree_roots_to_the_launcher(self):
         from fleet.runtime_config import write_runtime
         f = Fleet()
         self.addCleanup(shutil.rmtree, f.tmp)
@@ -186,11 +198,13 @@ class DispatchRootsTests(unittest.TestCase):
         write_runtime(f.home, 'codex')
         code, out, err = f.run(['dispatch', '--profile', str(f.profile()), '--title', 'codex task', '--slot', 'ws1'])
         self.assertEqual(code, 0, err)
-        common = str((main / '.git').resolve())
         record = f.store.all()[0]
         launcher = (Path(record.child_instant) / '.fleet/launch-worker.sh').read_text()
-        self.assertIn('--add-dir ' + common, launcher)
-        self.assertIn(common, [line for line in out.splitlines() if 'codex_policy' in line][0])
+        row = [line for line in out.splitlines() if 'codex_policy' in line][0]
+        for root in worktree_roots(main, 'repo'):
+            self.assertIn('--add-dir ' + root, launcher)
+            self.assertIn(root, row)
+        self.assertNotIn('--add-dir ' + str((main / '.git').resolve()) + ' ', launcher)
 
 
 class ReviveTests(unittest.TestCase):
@@ -207,7 +221,6 @@ class ReviveTests(unittest.TestCase):
         git('init', '-q', '.', cwd=main)
         git('commit', '-q', '--allow-empty', '-m', 'i', cwd=main)
         git('worktree', 'add', '-q', '--detach', str(Path(fixture.record.golden) / 'repo'), cwd=main)
-        common = str((main / '.git').resolve())
         args = fixture.args()
         code, out, err = fixture.f.run(args + ['--dry-run'])
         self.assertEqual(code, 0, err)
@@ -220,7 +233,9 @@ class ReviveTests(unittest.TestCase):
         text = (Path(fixture.record.child_instant) / '.fleet/resume-worker.sh').read_text()
         self.assertIn('resume -a never -s workspace-write -c sandbox_workspace_write.network_access=true', text)
         self.assertIn(REVIVE_ID, text)
-        self.assertIn('--add-dir ' + common, text)
+        for root in worktree_roots(main, 'repo'):
+            self.assertIn('--add-dir ' + root, text)
+        self.assertNotIn('--add-dir ' + str((main / '.git').resolve()) + ' ', text)
 
 
 class DialogRowTests(unittest.TestCase):
