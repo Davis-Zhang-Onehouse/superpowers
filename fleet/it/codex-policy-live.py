@@ -413,16 +413,22 @@ if ESCALATE:
     #: reason, commands will be rejected", so the model cannot even ASK (while at the base the same seed produced a
     #: `require_escalated` request and a prompt). What must hold is that the write was attempted, the sandbox refused it,
     #: and nothing prompted.
+    #: Whether the model then TRIES the write without escalation (it got 'Read-only file system' at 44319c8a) or DECLINES it
+    #: (it said the escalation 'conflicts with this environment's permission policy' at 7ff8c846 and 9405a25a) is the model's
+    #: choice, not a product property, so neither is required. What discriminates from CXP-RED-ESC (same seed: a
+    #: require_escalated request and an approval prompt) holds either way: no request, no dialog, no keystroke, no file.
     assert facts['never_instruction'], 'the session was not told approval=never'
-    assert facts['escalated_writes'], 'the worker never attempted the out-of-roots write, so the refusal was not exercised'
+    assert not facts['escalation_requests'], facts['escalation_requests']
     assert all('Read-only file system' in write['output'] for write in facts['escalated_writes']), facts['escalated_writes']
+    verdict['escalated_write_attempted'] = bool(facts['escalated_writes'])
     assert not (outside / 'cxp-escalated').exists(), 'an escalated write outside the roots was ALLOWED'
     verdict['escalated_write_absent'] = True
     tmux('kill-session', '-t', '=' + record.tmux)
     fleet('abort', '--instant', record.child_instant, '--reason', 'CXP green-escalate finished', codes=(0, 1, 2, 4))
     (evidence / 'verdict.json').write_text(json.dumps(verdict, indent=2, default=str) + '\n')
     (codex_home / 'auth.json').unlink()
-    print('PASS CXP green-escalate: the escalation request was refused with no prompt and no keystroke')
+    print('PASS CXP green-escalate: asked to escalate an out-of-roots write, the worker could not request it; no dialog, '
+          'no keystroke, no file')
     sys.exit(0)
 
 # --- (2) kill and revive: the resumed session has the same policy, still with no keystroke -------------------
