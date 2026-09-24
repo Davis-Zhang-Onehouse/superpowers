@@ -1,8 +1,8 @@
 """FB-110 (D-45): every codex worker fleet launches or resumes runs with the operator's policy — approval=never, inside the
 workspace-write sandbox, network on — from ONE place, and never with danger-full-access. Measured on codex-cli 0.156.1
 (`codex exec` in a private CODEX_HOME, FB-110): `codex` and `codex resume` both take `-a`, `-s`, `-c` and `--add-dir`;
-the sandbox makes `<root>/.git` read-only at the top of each writable root, so a linked-worktree slot can commit only with
-its common dir's objects, refs and logs and its own git dir added (never the whole common dir); without GH_TOKEN `gh` acts as whatever account ~/.config/gh names.
+the sandbox makes `<root>/.git` read-only at the top of each writable root, and a linked-worktree slot's repository lies outside
+the slot, so codex runs only in CLONE slots and refuses a worktree slot (operator decision D-51); without GH_TOKEN `gh` acts as whatever account ~/.config/gh names.
 """
 import json
 import os
