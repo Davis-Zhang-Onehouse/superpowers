@@ -74,6 +74,27 @@ class CodexSkillsTests(unittest.TestCase):
         self.assertFalse(vis.ok)
         self.assertEqual(vis.found, {})
 
+    @unittest.skipIf(hasattr(os, 'geteuid') and os.geteuid() == 0, 'root reads a mode-000 directory anyway')
+    def test_an_unreadable_codex_home_is_reported_not_raised(self):
+        (self.home / 'skills').mkdir()
+        (self.home / 'plugins').mkdir()
+        self.home.chmod(0)
+        try:
+            vis = codex_skills.visible_skills(self.home)
+            code = self.main(*self.args('--check'))[0]
+        finally:
+            self.home.chmod(0o755)
+        self.assertEqual(vis.found, {})
+        self.assertEqual(vis.missing, CORE_SKILLS)
+        self.assertEqual(code, 1)
+
+    def test_a_file_where_the_skills_directory_goes_is_refused(self):
+        (self.home / 'skills').write_text('not a directory')
+        before = _tree(self.home)
+        self.assertEqual(self.main(*self.args())[0], 4)
+        self.assertEqual(self.main(*self.args('--dry-run'))[0], 4)
+        self.assertEqual(_tree(self.home), before)
+
     # 2
     def test_dry_run_writes_nothing(self):
         before = _tree(self.home)

@@ -90,7 +90,9 @@ def expected_target(releases) -> Path:
 
 def _scan(top: Path, depth: int, skip=()) -> dict:
     found = {}
-    if not top.is_dir():
+    #: `os.path.isdir`, not `Path.is_dir`: on 3.10 the latter re-raises EACCES, and an unreadable home must read
+    #: as "sees nothing", not as a traceback.
+    if not os.path.isdir(top):
         return found
     base = len(top.parts)
     for dirpath, dirnames, filenames in os.walk(top, followlinks=True, onerror=lambda _exc: None):
@@ -111,7 +113,7 @@ def visible_skills(codex_home) -> Visibility:
     found.update(_scan(home / 'skills', _SKILLS_DEPTH, skip=(_SYSTEM_DIR,)))
     link = link_path(home)
     try:
-        target = os.readlink(link) if link.is_symlink() else ''
+        target = os.readlink(link) if os.path.islink(link) else ''
     except OSError:
         target = ''
     return Visibility(str(home), found, tuple(name for name in CORE_SKILLS if name not in found), target)
@@ -122,22 +124,25 @@ def follows_current(codex_home, releases) -> tuple:
     where `<X>` is itself a symlink that resolves to where `<releases>/current` does. A link to
     `fleet-vN/skills` resolves fine today and is still wrong: the next deploy leaves it behind."""
     link = link_path(codex_home)
-    if not link.is_symlink():
-        what = 'is a real directory or file' if link.exists() else 'does not exist'
+    if not os.path.islink(link):
+        what = 'is a real directory or file' if os.path.exists(link) else 'does not exist'
         return False, f'{link} {what}; codex sees no link to {expected_target(releases)}'
-    raw = os.readlink(link)
+    try:
+        raw = os.readlink(link)
+    except OSError as exc:
+        return False, f'{link} cannot be read: {exc}'
     target = Path(raw) if os.path.isabs(raw) else link.parent / raw
     current = Path(releases) / 'current'
     if target.name != 'skills':
         return False, f'{link} -> {raw} does not name a release\'s skills directory'
-    if not target.parent.is_symlink():
+    if not os.path.islink(target.parent):
         return False, (f'{link} -> {raw} is pinned to one release: {target.parent.name} is not the `current` '
                        f'symlink, so the next deploy leaves codex behind')
     if os.path.realpath(target.parent) != os.path.realpath(current):
         return False, (f'{link} -> {raw} follows {target.parent}, which resolves to '
                        f'{os.path.realpath(target.parent)}, not to {current} '
                        f'({os.path.realpath(current)})')
-    if not target.is_dir():
+    if not os.path.isdir(target):
         return False, f'{link} -> {raw} does not resolve to a directory'
     return True, f'{link} -> {raw} follows {current} (today {os.path.realpath(current)})'
 
@@ -159,7 +164,7 @@ def load_instruction(vis: Visibility) -> str:
 def _ours(link: Path) -> bool:
     """A link this installer may repoint: it resolves to a superpowers skills tree. Anything else at that
     path belongs to someone else, and is refused rather than overwritten."""
-    return link.is_symlink() and (link / 'using-superpowers' / 'SKILL.md').is_file()
+    return os.path.islink(link) and os.path.isfile(link / 'using-superpowers' / 'SKILL.md')
 
 
 def _emit(state: str, detail: str, stream=None) -> None:
@@ -205,24 +210,28 @@ def main(argv=None) -> int:
         return _check(home, releases)
 
     link, target = link_path(home), expected_target(releases)
-    if not target.is_dir():
+    if not os.path.isdir(target):
         _emit('refused', f'{target} is not a directory: this release area has no deployed `current` with '
                          f'skills to link to. Nothing was written.', sys.stderr)
         return EXIT_REFUSED
     if follows_current(home, releases)[0]:
         _emit('ok', f'{link} already follows {target}; nothing to do')
         return _check(home, releases) if not args.dry_run else EXIT_OK
-    if link.is_symlink() and not _ours(link):
+    if os.path.islink(link) and not _ours(link):
         _emit('refused', f'{link} -> {os.readlink(link)} is a link this installer did not write (it does not '
                          f'resolve to a superpowers skills tree). Left untouched; remove it yourself if it '
                          f'should go.', sys.stderr)
         return EXIT_REFUSED
-    if link.exists() and not link.is_symlink():
+    if os.path.exists(link) and not os.path.islink(link):
         _emit('refused', f'{link} is a real directory or file. Left untouched: this installer only ever writes '
                          f'or repoints its own symlink.', sys.stderr)
         return EXIT_REFUSED
 
-    action = 'repoint' if link.is_symlink() else 'create'
+    if os.path.exists(link.parent) and not os.path.isdir(link.parent):
+        _emit('refused', f'{link.parent} exists and is not a directory, so no skills link can live under it. Left '
+                         f'untouched.', sys.stderr)
+        return EXIT_REFUSED
+    action = 'repoint' if os.path.islink(link) else 'create'
     if args.dry_run:
         _emit(f'would-{action}', f'{link} -> {target}')
         return EXIT_OK
