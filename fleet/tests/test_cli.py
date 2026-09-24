@@ -7232,3 +7232,17 @@ class TestSendKeepsARecord(CliCase):
         self.assertIn("recorded as uncertain-after-insertion in", err)
         [record] = messaging.read_sends(fleet.paths["closable"])
         self.assertEqual(("uncertain-after-insertion", ""), (record.outcome, record.confirmation))
+
+    def test_a_send_that_could_not_be_recorded_still_reports_its_delivery(self):
+        """RV-38. `fleet send` must never print a failure for a message it delivered."""
+        fleet = self.loaded()
+        sent = self.message(fleet)
+        log = fleet.paths["closable"] / ".fleet" / "sends.jsonl"
+        log.parent.mkdir(parents=True, exist_ok=True)
+        log.mkdir()      # a directory where the log should be: every append fails
+        code, out, err = fleet.run(["send", "--porcelain", "--id", fleet.ids["closable"], "--message-file", str(sent)])
+        self.assertEqual(EXIT_OK, code, err)
+        rows = dict(line.split("\t", 1) for line in out.splitlines())
+        self.assertEqual("submitted", rows["delivery"])
+        self.assertTrue(rows["record"].startswith("NOT RECORDED"), rows["record"])
+        self.assertIn("NOT RECORDED", err)
