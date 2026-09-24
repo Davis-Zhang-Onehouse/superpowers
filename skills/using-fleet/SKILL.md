@@ -218,8 +218,9 @@ single-line `[Pasted text #N]`, which states no length at all), and the record s
 
 **Every send that reached the pane is recorded (`B13`)** in the worker's `.fleet/sends.jsonl`: when, by whom
 (`--by`, else the sender's own `FLEET_INSTANT`), the message's sha256, size and first line, the outcome
-(`submitted`, or `uncertain-after-insertion` / `uncertain-after-enter`) and how it was confirmed. A refusal
-before the paste wrote nothing into the pane and is not a row. `fleet brief --instant <worker>` reads it
+(`submitted`; `uncertain-after-insertion` / `uncertain-after-enter` when the draft or its consumption could not
+be confirmed; plain `uncertain` when the paste or the Enter could not be issued at all, so the pane may hold
+nothing) and how it was confirmed. A refusal before the paste wrote nothing into the pane and is not a row. `fleet brief --instant <worker>` reads it
 back on its `messages` row, so "who wrote into this pane" has a subject to join against. `--dry-run`
 records nothing.
 
