@@ -93,21 +93,38 @@ PROBLEMS=()
 problem() { PROBLEMS+=("$1: $2"); printf '  %-12s %s\n' "PROBLEM" "$2"; }
 
 # refusal_line < verb-output -> the error's own sentence, then its route in parentheses, on one line.
-# `cli._report_error` prints `Refused: <sentence>` and THEN indented `blocker:` / `clears when:` / `clears who:`
+# `cli._report_error` prints `<Type>: <sentence>` and THEN indented `blocker:` / `clears when:` / `clears who:`
 # lines, so the last line of a refusal is its route, never its reason. Reporting the last line put
 # "clears who: the operator" in the plan and lost "Recorded runtime executable is unavailable" (PT2-I1).
+# The reason is the `<Type>: ` header nearest above the first route line, with any lines of a multi-line
+# message after it; the route is every route line, with a wrapped value's continuation kept. With no route,
+# the last `<Type>: ` line is the reason, so stdout that a pipe flushes after stderr is not mistaken for it.
 refusal_line() {
   awk '
-    /^  (blocker|clears when|clears who): / {
-      if (!inroute) { reason = last; route = "" }
-      inroute = 1; sub(/^  /, ""); route = route (route == "" ? "" : "; ") $0; next
-    }
-    NF { last = $0; inroute = 0 }
+    { line[NR] = $0 }
     END {
-      if (route == "") reason = last
-      if (reason == "") reason = "(no output)"
-      printf "%s%s", reason, (route == "" ? "" : " (" route ")")
-    }'
+      hdr = "^[A-Z][A-Za-z]*: "; rt = "^  (blocker|clears when|clears who): "
+      first = 0
+      for (i = 1; i <= NR; i++) if (line[i] ~ rt) { first = i; break }
+      head = 0
+      if (first) { for (i = first - 1; i >= 1; i--) if (line[i] ~ hdr) { head = i; break } }
+      else { for (i = NR; i >= 1; i--) if (line[i] ~ hdr) { head = i; break } }
+      if (!head) { for (i = NR; i >= 1; i--) if (line[i] != "") { head = i; break } }
+      if (!head) { printf "(no output)"; exit }
+      reason = line[head]; stop = first ? first : head + 1
+      for (i = head + 1; i < stop; i++) if (line[i] != "") reason = reason " " line[i]
+      route = ""; last = 0
+      if (first) {
+        for (i = NR; i >= first; i--) if (line[i] ~ rt) { last = i; break }
+        for (i = first; i <= last; i++) {
+          v = line[i]; if (v == "") continue
+          if (v ~ rt) { sub(/^  /, "", v); sep = (route == "") ? "" : "; "; route = route sep v }
+          else route = route " " v
+        }
+      }
+      printf "%s%s", reason, ((route == "") ? "" : " (" route ")")
+    }
+  '
 }
 
 # derive <todo-id> -> RT SESSION RSOCKET INSTANT SLOT CONFIG_DIR CONFIG_SOURCE SEED SESSION_ID MATCHES
