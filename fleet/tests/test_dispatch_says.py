@@ -290,6 +290,20 @@ class TestANonStartBeforeTheClaimKeepsItsCodeAndSaysSo(DispatchCase):
         self.assertIn("error", rows, out)
         self.assertEqual(rows.get("title_as_used"), "(none)", out)
 
+    def test_a_refusing_dry_run_and_its_real_call_print_the_same_refused_rows(self):
+        #: RV-C7. The WIP cap refuses both: one caller comparing them must read one answer, not two shapes.
+        code, out, err = self.dispatch("--slot", "ws1", title="holder")
+        self.assertEqual(code, EXIT_OK, err)
+        answers = []
+        for extra in (("--dry-run",), ()):
+            code, out, err = self.fleet.run(["dispatch", "--profile", str(self.fleet.profile()), "--title",
+                                             "says what", "--cap", "1", "--porcelain", *extra])
+            self.assertEqual(code, EXIT_REFUSED, err)
+            rows = kv(out)
+            answers.append({key: rows.get(key) for key in ("refused", "clears_when", "clears_who")})
+        self.assertTrue(answers[1]["refused"].startswith("Refused: "), answers)
+        self.assertEqual(answers[0], answers[1])
+
     def test_every_row_value_is_one_line(self):
         #: A refusal is a paragraph; as a FIELD it must stay one line, or `cut -f2` reads the wrong row.
         code, out, err = self.dispatch("--slot", "wsNope")
