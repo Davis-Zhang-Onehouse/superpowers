@@ -1615,18 +1615,53 @@ def _message_target(ctx, parsed):
     return record, layer
 
 
+def _sender_identity(parsed: Parsed, environ=None) -> str:
+    """Who is sending. `--by` when given; else the sender's OWN instant — every dispatched session exports
+    `FLEET_INSTANT` (`runtime_launch.prepare`), so a coordinator messaging from its pane is named by the
+    folder the roadmap knows it as; else the login user. Never a pid: a pid is meaningless to a later reader."""
+    environ = os.environ if environ is None else environ
+    if parsed.get("by"):
+        return parsed.get("by")
+    own = environ.get("FLEET_INSTANT") or environ.get("INSTANT") or ""
+    if own:
+        return Path(own).name
+    return environ.get("USER") or environ.get("LOGNAME") or "(unknown)"
+
+
 def _do_send(ctx: Ctx, parsed: Parsed) -> int:
-    text = Path(parsed.get('message-file')).read_text()
+    source = Path(parsed.get('message-file'))
+    text = source.read_text()
     messaging.validate_message(text)
     record, layer = _message_target(ctx, parsed)
+    child = _child_of(ctx, record)
+    sha = messaging.digest(text)
     if ctx.dry_run:
         if layer.observe(record.tmux).state != 'idle':
             raise messaging.not_idle(record)
-        result = 'would-submit'
-    else:
-        result = messaging.send(ctx.home, layer, record, text,
-                                validate=lambda: _message_target(ctx, parsed))
-    _emit(ctx, 'send', [('todo_id', record.todo_id), ('delivery', result)])
+        _emit(ctx, 'send', [('todo_id', record.todo_id), ('delivery', 'would-submit'), ('sha256', sha),
+                            ('record', 'dry-run: nothing recorded')])
+        return EXIT_OK
+    written = {}
+
+    def recorder(outcome, confirmation):
+        #: B13. Written for EVERY attempt that touched the pane, before the error (if any) propagates, so a
+        #: paste that could not be confirmed is on the record beside the sends that were.
+        written['path'] = messaging.record_send(child, messaging.SendRecord(
+            at=ctx.now(), by=_sender_identity(parsed), todo_id=record.todo_id, tmux=record.tmux,
+            runtime=record.runtime, message_file=str(source.resolve()), sha256=sha, chars=len(text),
+            lines=len(text.splitlines()),
+            head=messaging.head_of(text), outcome=outcome, confirmation=confirmation))
+        written['outcome'], written['confirmation'] = outcome, confirmation
+
+    try:
+        outcome, confirmation = messaging.send(ctx.home, layer, record, text,
+                                               validate=lambda: _message_target(ctx, parsed), recorder=recorder)
+    except FleetError:
+        if written:
+            print(f"recorded as {written['outcome']} in {written['path']}", file=ctx.err)
+        raise
+    _emit(ctx, 'send', [('todo_id', record.todo_id), ('delivery', outcome), ('confirmation', confirmation),
+                        ('sha256', sha), ('record', str(written.get('path', '')))])
     return EXIT_OK
 
 
@@ -4882,6 +4917,30 @@ def _do_brief(ctx: Ctx, parsed: Parsed) -> int:
                     detail=("; ".join(outstanding) if outstanding
                             else "nothing outstanding that this verb can see")))
 
+    #: B13. What was written INTO this worker's pane, so "who wrote into this box" has a subject. Read
+    #: through `messaging.read_sends`, the one reader of the log `fleet send` appends to.
+    try:
+        sends = messaging.read_sends(child)
+    except BadInput as exc:
+        rows.append(Row(kind="messages", subject=child.name, severity=VIOLATION,
+                        detail=f"the send log could not be read: {exc}",
+                        clears_when=exc.clears_when or "", clears_who=exc.clears_who or ""))
+    else:
+        if sends:
+            last = sends[-1]
+            submitted = sum(1 for item in sends if item.outcome == messaging.SUBMITTED)
+            rows.append(Row(kind="messages", subject=child.name, severity=INFO,
+                            detail=(f"{len(sends)} message(s) recorded into pane {last.tmux or '(none)'} "
+                                    f"({submitted} submitted, {len(sends) - submitted} uncertain); last at {last.at} "
+                                    f"by {last.by}: {last.outcome}"
+                                    + (f" (confirmed by {last.confirmation})" if last.confirmation else "")
+                                    + f", sha256 {last.sha256[:8]}, {last.lines} line(s): {last.head!r}; "
+                                    f"log {messaging.sends_path(child)}")))
+        else:
+            rows.append(Row(kind="messages", subject=child.name, severity=INFO,
+                            detail=(f"no `fleet send` has been recorded into this pane (the seed is not a send; "
+                                    f"see `fleet seed-check`); log would be {messaging.sends_path(child)}")))
+
     rows.append(Row(kind=POPULATION, subject=child.name, severity=INFO,
                     detail=(f"{len(rows)} orientation row(s) for {child}; read-only, and every field is "
                             f"read through the same API the enforcing verb uses")))
@@ -6145,6 +6204,8 @@ VERBS = {spec.name: spec for spec in (
     _verb('send', _do_send, False, 'send one message through observed tmux delivery', (
         Flag('--id', True, required=True, help='open worker record'),
         Flag('--message-file', True, required=True, help='UTF-8 file containing the literal message'),
+        Flag('--by', True, help='who is sending, for the send record (default: the sender\'s own FLEET_INSTANT, '
+                                'else the login user)'),
     )),
     _verb('runtime', _do_runtime, False, 'read or change the fleet runtime between completed runs', (
         Flag('--set', True, help='claude or codex; each CLI uses its configured model'),

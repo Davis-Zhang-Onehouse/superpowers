@@ -203,10 +203,24 @@ fleet send --id "$ID" --message-file "$MESSAGE_FILE" --dry-run
 fleet send --id "$ID" --message-file "$MESSAGE_FILE"
 ```
 
-The command locks that pane, checks its ownership and empty idle input, pastes once, observes the exact
-draft, sends Enter once, and observes consumption. Busy, queued, modal and unfamiliar panes refuse.
+The command locks that pane, checks its ownership and empty idle input, pastes once, observes the draft,
+sends Enter once, and observes consumption. Busy, queued, modal and unfamiliar panes refuse.
 If delivery becomes uncertain, inspect the pane; do not retry automatically, clear a human's draft,
 or send an extra Enter. Immediate text-plus-Enter can lose the Enter on a real TUI (`FI-15`).
+
+**Multi-line messages are delivered whole (`FB-27`).** Both TUIs replace a large paste with a count summary —
+Claude Code draws `[Pasted text #N +M lines]` for four or more lines, codex `[Pasted Content C chars]` above
+about a thousand characters — and the verb confirms that summary against the message (M = its newlines,
+C = its characters) before the one Enter. The text is in the box behind the placeholder; a placeholder whose
+counts disagree is somebody else's paste and is never submitted. `send` prints `confirmation` as `draft`
+(the text was read back) or `placeholder` (the counts agreed), and the record says which.
+
+**Every send that reached the pane is recorded (`B13`)** in the worker's `.fleet/sends.jsonl`: when, by whom
+(`--by`, else the sender's own `FLEET_INSTANT`), the message's sha256, size and first line, the outcome
+(`submitted`, or `uncertain-after-insertion` / `uncertain-after-enter`) and how it was confirmed. A refusal
+before the paste wrote nothing into the pane and is not a row. `fleet brief --instant <worker>` reads it
+back on its `messages` row, so "who wrote into this pane" has a subject to join against. `--dry-run`
+records nothing.
 
 `fleet peers` reports runtime and address transport in human output. Use `fleet send` for owned tmux
 workers. A native messaging API is usable only when the current harness exposes it and peer discovery

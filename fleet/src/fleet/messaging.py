@@ -1,8 +1,29 @@
-"""One literal insertion and one observed submission; ambiguous delivery is never retried."""
+"""One literal insertion and one observed submission; ambiguous delivery is never retried — and every
+attempt that reached the pane is written down (B13)."""
+import hashlib
+import json
 import time
+from dataclasses import asdict, dataclass
+from pathlib import Path
+from typing import Optional
 
 from fleet.errors import BadInput, FleetError, Refused
+from fleet.runtime import paste_placeholder
 from fleet.runtime_config import pane_lock
+
+#: `.fleet/sends.jsonl` in the WORKER's instant: one JSON object per line per attempt that touched the pane.
+SENDS = "sends.jsonl"
+SEND_SCHEMA_VERSION = 1
+#: The outcomes a send can end in once it has pasted. A refusal BEFORE the paste is not one of these: it
+#: wrote nothing into the pane, and the record is a record of what was written there.
+SUBMITTED = "submitted"
+UNCERTAIN_AFTER_INSERTION = "uncertain-after-insertion"
+UNCERTAIN_AFTER_ENTER = "uncertain-after-enter"
+UNCERTAIN = "uncertain"
+#: HOW the draft was confirmed before Enter: the TEXT was read back (`draft`), or the TUI's count-summary
+#: placeholder agreed with the message (`placeholder`, FB-27) — a weaker confirmation, and said so.
+CONFIRMED_BY_DRAFT = "draft"
+CONFIRMED_BY_PLACEHOLDER = "placeholder"
 
 
 def validate_message(text):
@@ -29,25 +50,121 @@ def _squash(text) -> str:
     return " ".join(str(text or "").split())
 
 
+def confirms(runtime, draft, text) -> Optional[str]:
+    """How the observed `draft` confirms that `text` is what the box holds, or None when it does not.
+
+    Two shapes confirm (FB-27). The draft IS the text, modulo the whitespace a TUI rearranges — the strong
+    one. Or the draft is the TUI's paste PLACEHOLDER and every count it states is the count of `text`:
+    Claude Code shows `[Pasted text #N +M lines]` for 4+ lines (M = newlines), codex `[Pasted Content C
+    chars]` above ~1000 characters — measured, `runtime.paste_placeholder`. A placeholder whose counts
+    disagree is somebody else's paste, or a concatenation, and confirms nothing.
+    """
+    if draft and _squash(draft) == _squash(text):
+        return CONFIRMED_BY_DRAFT
+    placeholder = paste_placeholder(runtime, draft)
+    if placeholder is not None and placeholder.describes(text):
+        return CONFIRMED_BY_PLACEHOLDER
+    return None
+
+
+def digest(text: str) -> str:
+    return hashlib.sha256(text.encode("utf-8")).hexdigest()
+
+
+@dataclass(frozen=True)
+class SendRecord:
+    """What an actor wrote into a worker's pane, and what became of it. B13: before this, `fleet send`
+    wrote nothing down, so "who wrote into this pane" and "claimed sends vs received prompts" had no subject
+    to join. The message itself is identified by digest and located by path; its first line is kept so a
+    reader can tell records apart without opening files."""
+    at: str
+    by: str
+    todo_id: str
+    tmux: str
+    runtime: str
+    message_file: str
+    sha256: str
+    chars: int
+    lines: int
+    head: str
+    outcome: str
+    confirmation: str
+    schema_version: int = SEND_SCHEMA_VERSION
+
+
+def sends_path(instant) -> Path:
+    return Path(instant) / ".fleet" / SENDS
+
+
+def head_of(text: str, width: int = 80) -> str:
+    first = text.strip().splitlines()[0] if text.strip() else ""
+    return first if len(first) <= width else first[:width - 1] + "…"
+
+
+def record_send(instant, record: SendRecord) -> Path:
+    """Append `record` to the worker's send log. Append-only: a send is an event, and two sends are two."""
+    target = sends_path(instant)
+    target.parent.mkdir(parents=True, exist_ok=True)
+    with target.open("a", encoding="utf-8") as handle:
+        handle.write(json.dumps(asdict(record), ensure_ascii=False) + "\n")
+    return target
+
+
+def read_sends(instant) -> list:
+    """Every recorded send, oldest first; `[]` when nothing was recorded. A malformed line is REFUSED, not
+    skipped, for `seedcheck.read_delivery`'s reason: 'unreadable' and 'absent' mean opposite things."""
+    target = sends_path(instant)
+    if not target.is_file():
+        return []
+    rows = []
+    for number, line in enumerate(target.read_text(encoding="utf-8").splitlines(), 1):
+        if not line.strip():
+            continue
+        try:
+            data = json.loads(line)
+        except ValueError as exc:
+            raise BadInput(f"{target} line {number} is not JSON ({exc}); refusing to interpret the send log.",
+                           clears_when=f"the line is repaired or removed", clears_who="the coordinator") from exc
+        if not isinstance(data, dict) or data.get("schema_version") != SEND_SCHEMA_VERSION:
+            raise BadInput(f"{target} line {number} has schema_version={data.get('schema_version') if isinstance(data, dict) else None!r}, "
+                           f"this build knows {SEND_SCHEMA_VERSION}. Refusing to interpret it (FD-1).",
+                           clears_when="the line is repaired or removed", clears_who="the coordinator")
+        known = set(SendRecord.__dataclass_fields__)
+        if set(data) - known or known - set(data):
+            raise BadInput(f"{target} line {number} does not carry exactly the send-record keys; refusing to interpret it.",
+                           clears_when="the line is repaired or removed", clears_who="the coordinator")
+        rows.append(SendRecord(**data))
+    return rows
+
+
 def send(home, sessions, record, text, *, timeout_s=10.0, clock=time.monotonic,
-         sleep=time.sleep, validate=None):
+         sleep=time.sleep, validate=None, recorder=None):
+    """-> `(outcome, confirmation)`; `outcome` is `SUBMITTED` on success, and every other outcome is raised
+    as the `FleetError` it always was. `recorder(outcome, confirmation)` is called ONCE for every attempt
+    that reached the pane, success or not, before the error propagates — a send that pasted and then could
+    not confirm is exactly the record a later reader needs."""
     validate_message(text)
+    runtime = getattr(sessions, "runtime", "claude")
     with pane_lock(home, sessions.socket, record.tmux):
         if validate:
             validate()
         if sessions.observe(record.tmux).state != 'idle':
             raise not_idle(record)
+        outcome, confirmation = UNCERTAIN, ""
         try:
             sessions.send_literal(record.tmux, text)
             deadline = clock() + timeout_s
             while True:
                 observation = sessions.observe(record.tmux)
-                if observation.state == 'queued' and _squash(observation.draft) == _squash(text):
-                    break
+                if observation.state == 'queued':
+                    confirmation = confirms(runtime, observation.draft, text) or ""
+                    if confirmation:
+                        break
                 # A TUI redraw can temporarily omit its prompt/footer. Observe
                 # through the existing deadline; never insert again or submit
                 # until the exact draft is visible.
                 if observation.state not in ('idle', 'queued', 'unknown') or clock() >= deadline:
+                    outcome = UNCERTAIN_AFTER_INSERTION
                     raise FleetError('Delivery uncertain after insertion; inspect the draft before retrying')
                 sleep(0.02)
             sessions.submit(record.tmux)
@@ -55,11 +172,16 @@ def send(home, sessions, record, text, *, timeout_s=10.0, clock=time.monotonic,
             while True:
                 observation = sessions.observe(record.tmux)
                 if observation.state in ('busy', 'idle') and not observation.draft:
-                    return 'submitted'
+                    outcome = SUBMITTED
+                    return outcome, confirmation
                 if observation.state == 'dialog' or clock() >= deadline:
+                    outcome = UNCERTAIN_AFTER_ENTER
                     raise FleetError('Delivery uncertain after Enter; inspect the worker before retrying')
                 sleep(0.02)
         except FleetError:
             raise
         except Exception as exc:
             raise FleetError(f'Delivery uncertain; inspect the worker before retrying: {exc}') from exc
+        finally:
+            if recorder is not None:
+                recorder(outcome, confirmation)

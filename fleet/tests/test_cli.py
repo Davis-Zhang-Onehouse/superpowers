@@ -44,6 +44,7 @@ from fleet import (EXIT_ATTENTION, EXIT_BAD_INPUT, EXIT_CODES, EXIT_NO_CAPACITY,
                    EXIT_REFUSED)
 from fleet.runtime import LaunchSettings
 from fleet import cli
+from fleet import messaging
 from fleet import render
 from tests import FLEET_ENV, hermetic_environment
 from fleet import seedcheck
@@ -7151,3 +7152,83 @@ class TestDisownFindsItsOpenHolderAcrossTheRename(CliCase):
                                     "--disown", "--reason", "owner is long gone"])
 
         self.assertEqual(EXIT_OK, code, err)
+
+
+class TestSendKeepsARecord(CliCase):
+    """B13. `_do_send` wrote nothing, so "who wrote into this pane" and "claimed sends vs received prompts"
+    had no subject to join — only the SEED had a delivery record. Every attempt that reaches the pane now
+    lands in the worker's `.fleet/sends.jsonl`, and `brief` reads it back."""
+
+    def message(self, fleet, text="hello there\n"):
+        path = fleet.tmp / "msg.txt"
+        path.write_text(text)
+        return path
+
+    def test_a_submitted_send_is_recorded_with_its_digest_and_read_back_by_brief(self):
+        import hashlib
+        fleet = self.loaded()
+        sent = self.message(fleet)
+        code, out, err = fleet.run(["send", "--porcelain", "--id", fleet.ids["closable"],
+                                    "--message-file", str(sent), "--by", "the coordinator"])
+        self.assertEqual(EXIT_OK, code, err)
+        rows = dict(line.split("\t", 1) for line in out.splitlines())
+        self.assertEqual("submitted", rows["delivery"])
+        self.assertEqual("draft", rows["confirmation"])
+        log = fleet.paths["closable"] / ".fleet" / "sends.jsonl"
+        self.assertEqual(str(log), rows["record"])
+        self.assertTrue(log.is_file(), "the send left no record")
+        [record] = messaging.read_sends(fleet.paths["closable"])
+        self.assertEqual(("the coordinator", fleet.ids["closable"], "dt-closable", "claude", "submitted", "draft"),
+                         (record.by, record.todo_id, record.tmux, record.runtime, record.outcome, record.confirmation))
+        self.assertEqual(hashlib.sha256(sent.read_text().encode()).hexdigest(), record.sha256)
+        self.assertEqual((12, 1, "hello there"), (record.chars, record.lines, record.head))
+        self.assertEqual(str(sent.resolve()), record.message_file)
+        self.assertEqual(NOW, record.at)
+        code, out, err = fleet.run(["brief", "--porcelain", "--instant", str(fleet.paths["closable"])])
+        self.assertEqual(EXIT_OK, code, err)
+        messages = [line for line in out.splitlines() if line.startswith("messages\t")]
+        self.assertEqual(1, len(messages), out)
+        self.assertIn("1 message(s) recorded", messages[0])
+        self.assertIn("by the coordinator: submitted (confirmed by draft)", messages[0])
+        self.assertIn(record.sha256[:8], messages[0])
+
+    def test_the_sender_defaults_to_its_own_instant_then_the_user(self):
+        fleet = self.loaded()
+        sent = self.message(fleet)
+        with mock.patch.dict(os.environ, {"FLEET_INSTANT": "/x/y/00000000-01010101-inflight-append-coord"}):
+            code, _, err = fleet.run(["send", "--id", fleet.ids["closable"], "--message-file", str(sent)])
+        self.assertEqual(EXIT_OK, code, err)
+        self.assertEqual("00000000-01010101-inflight-append-coord",
+                         messaging.read_sends(fleet.paths["closable"])[-1].by)
+
+    def test_a_dry_run_and_a_refused_send_record_nothing(self):
+        fleet = self.loaded()
+        sent = self.message(fleet)
+        code, out, err = fleet.run(["send", "--dry-run", "--porcelain", "--id", fleet.ids["closable"],
+                                    "--message-file", str(sent)])
+        self.assertEqual(EXIT_OK, code, err)
+        self.assertIn("nothing recorded", out)
+        self.assertFalse((fleet.paths["closable"] / ".fleet" / "sends.jsonl").exists())
+        #: `solo`'s pane is BUSY_PANE: refused before anything is typed, so nothing to record.
+        code, _, err = fleet.run(["send", "--id", fleet.ids["solo"], "--message-file", str(sent)])
+        self.assertEqual(EXIT_REFUSED, code, err)
+        self.assertFalse((fleet.paths["solo"] / ".fleet" / "sends.jsonl").exists())
+        code, out, err = fleet.run(["brief", "--porcelain", "--instant", str(fleet.paths["closable"])])
+        self.assertEqual(EXIT_OK, code, err)
+        self.assertIn("no `fleet send` has been recorded", out)
+
+    def test_an_uncertain_send_is_recorded_as_such_and_named_in_the_error(self):
+        """A paste that could not be confirmed is exactly the record a later reader needs."""
+        fleet = self.loaded()
+        sent = self.message(fleet)
+        #: The fixture's `send_literal` draws whatever was typed; make the paste land in a pane that then
+        #: shows an operator dialog — a state the confirmation loop gives up on at once, so the case costs
+        #: no wall-clock and ends as `uncertain-after-insertion`.
+        fleet.sessions.probes = dataclasses.replace(
+            fleet.sessions.probes, send_literal=lambda name, text: fleet.panes.update({name: DIALOG_PANE}))
+        code, out, err = fleet.run(["send", "--id", fleet.ids["closable"], "--message-file", str(sent)])
+        self.assertEqual(EXIT_ATTENTION, code, out)
+        self.assertIn("uncertain after insertion", err)
+        self.assertIn("recorded as uncertain-after-insertion in", err)
+        [record] = messaging.read_sends(fleet.paths["closable"])
+        self.assertEqual(("uncertain-after-insertion", ""), (record.outcome, record.confirmation))
