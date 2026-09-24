@@ -196,6 +196,20 @@ class CodexSkillsTests(unittest.TestCase):
         self.assertEqual(code, 0, out + err)
         self.assertEqual(os.readlink(self.link), str(self.rel / 'current' / 'skills'))
 
+    def test_a_live_link_to_a_dev_checkouts_skills_is_refused_not_repointed(self):
+        """RV-30: a link the operator made on purpose to a superpowers DEV checkout resolves to a superpowers tree, but its
+        target is not the installer's shape (<releases>/current/skills or <releases>/fleet-vN/skills). Refused, untouched."""
+        dev = self.tmp / 'dev-checkout' / 'skills'
+        for name in CORE_SKILLS:
+            (dev / name).mkdir(parents=True)
+            (dev / name / 'SKILL.md').write_text('dev')
+        self.link.parent.mkdir(parents=True)
+        self.link.symlink_to(dev)
+        before = _tree(self.home)
+        self.assertEqual(self.main(*self.args())[0], 4)
+        self.assertEqual(self.main(*self.args('--dry-run'))[0], 4)
+        self.assertEqual(_tree(self.home), before)
+
     def test_a_live_link_to_another_tools_current_skills_is_still_foreign(self):
         """Re-review residual: only a DANGLING `.../current/skills` or `.../fleet-vN/skills` pin is ours by shape."""
         other = self.tmp / 'othertool' / 'current' / 'skills'
