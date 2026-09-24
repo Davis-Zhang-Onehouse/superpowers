@@ -898,5 +898,20 @@ class TestTheCapIsPerEffort(GuardCase):
             self.assertIn(folder, verdict.reason)
 
 
+    def test_another_efforts_symlink_loop_cannot_crash_this_efforts_cap(self):
+        # RV-C3. `Path.resolve` raises RuntimeError on a symlink loop (Python 3.10). Another effort's filesystem layout
+        # must not be able to crash this effort's dispatch or dry-run: an unplaceable path counts, as before.
+        fleet = self.fleet(slots=2)
+        loop = fleet.tmp / "loop"
+        loop.symlink_to("loop")
+        fleet.store.write(Record(
+            todo_id="loopy-07309996", child_instant=str(loop / "00000000-07309996-inflight-append-loopy"),
+            base_instant=OURS, slot="", tmux="dt-loopy", profile="/p/worker", golden="/ws0", lineage_base="",
+            title="loopy", dispatched_at="2026-07-30T03:12:00Z", launched_at="2026-07-30T03:13:00Z"))
+        verdict = WipCap().evaluate(fleet.ctx(cap=1))
+        self.assertFalse(verdict.allowed, "an unplaceable record was dropped rather than counted")
+        self.assertIn("loopy", verdict.reason)
+
+
 if __name__ == "__main__":
     unittest.main()
