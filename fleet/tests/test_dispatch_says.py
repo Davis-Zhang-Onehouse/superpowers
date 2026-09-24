@@ -79,11 +79,15 @@ class TestAFailureAfterTheClaimIsNotStarted(DispatchCase):
         self.assertTrue(rows.get("error", "").startswith("BadInput: tmux refused to start 'dt-saysWhat'"), out)
         self.assertEqual(rows.get("step"), "tmux new-session", out)
         child = str(self.fleet.instants / next(p.name for p in self.fleet.instants.iterdir()))
-        self.assertEqual(rows.get("instant"), f"{child} (left in place; no verb deletes outward state)", out)
-        self.assertTrue(rows.get("todo_id", "").startswith("saysWhat-"), out)
-        self.assertIn("PENDING-LAUNCH", rows.get("record", ""), out)
-        self.assertIn("fleet abort", rows.get("record", ""), out)
-        self.assertTrue(rows.get("lease", "").startswith("given back"), out)
+        #: RV-C6. Bare values under keys a success never prints: a reader that cds into `instant` after a
+        #: success, or treats `todo_id` as "it started", must not match a non-start.
+        self.assertEqual(rows.get("left_instant"), child, out)
+        self.assertTrue(rows.get("left_todo_id", "").startswith("saysWhat-"), out)
+        self.assertEqual(rows.get("left_record"), "pending-launch", out)
+        self.assertEqual(rows.get("left_lease"), "given-back", out)
+        self.assertIn("fleet abort --instant", rows.get("remedy", ""), out)
+        for success_key in ("instant", "todo_id", "record", "lease", "launched_at"):
+            self.assertNotIn(success_key, rows, out)
         self.assertEqual(rows.get("title_as_used"), "saysWhat", out)
         #: stderr keeps the human paragraph; only the data stream was missing.
         self.assertIn("dispatch rolled back", err)
@@ -97,7 +101,7 @@ class TestAFailureAfterTheClaimIsNotStarted(DispatchCase):
         self.assertTrue(rows.get("error", "").startswith("FleetError: Seed delivery to dt-saysWhat is not verified"),
                         out)
         self.assertEqual(rows.get("step"), "seed delivery", out)
-        self.assertTrue(rows.get("lease", "").startswith("given back"), out)
+        self.assertEqual(rows.get("left_lease"), "given-back", out)
 
     def test_an_unexpected_exception_in_the_launch_is_a_row_and_not_a_traceback(self):
         self.start_raises(RuntimeError("the probe fell over"))
@@ -117,7 +121,8 @@ class TestAFailureAfterTheClaimIsNotStarted(DispatchCase):
         code, out, err = self.dispatch()
         self.assertEqual(code, NOT_STARTED, err)
         rows = kv(out)
-        self.assertTrue(rows.get("lease", "").startswith("retained"), out)
+        self.assertEqual(rows.get("left_lease"), "retained", out)
+        self.assertIn("still observable", rows.get("remedy", ""), out)
         self.assertIsNotNone(self.fleet.pool.lease("ws1"))
 
     def test_a_render_failure_keeps_the_code_its_dry_run_gives(self):
@@ -132,8 +137,8 @@ class TestAFailureAfterTheClaimIsNotStarted(DispatchCase):
         rows = kv(out)
         self.assertTrue(rows.get("error", "").startswith("BadInput:"), out)
         self.assertEqual(rows.get("step"), "render", out)
-        self.assertEqual(rows.get("instant"), "(none created)", out)
-        self.assertEqual(rows.get("record"), "(none written)", out)
+        self.assertEqual(rows.get("left_instant"), "(none)", out)
+        self.assertEqual(rows.get("left_record"), "none", out)
         self.assertIsNone(self.fleet.pool.lease("ws1"))
 
     def test_a_refusal_at_a_step_the_dry_run_asks_is_a_refused_row(self):

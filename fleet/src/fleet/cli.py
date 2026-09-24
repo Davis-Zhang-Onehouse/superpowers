@@ -2225,7 +2225,7 @@ def _do_dispatch(ctx: Ctx, parsed: Parsed) -> int:
         stranded_note = (f" A RECORD for todo {todo_id!r} was already written and is left in place: it reads "
                          f"PENDING-LAUNCH and counts against the WIP cap until it is resolved. Clear it with "
                          f"`fleet abort --instant {child} --reason <why>`." if stranded else "")
-        def not_started(lease_state):
+        def not_started(lease_state, lease_why):
             """V23-B. The answer, whatever surfaced: exit 5 and rows naming the step and what was left —
             except at the two steps the DRY-RUN also asks (the slot's launch settings and the render), where
             the cause's own code is kept, so a real call answers with the code its dry-run gave (`run-D.sh`
@@ -2233,13 +2233,20 @@ def _do_dispatch(ctx: Ctx, parsed: Parsed) -> int:
             answer = NotStarted(
                 f"dispatch did not start: the launch failed at {step!r} after the lease on {lease.slot!r} was "
                 f"claimed, and was rolled back: {type(launch_error).__name__}: {launch_error}",
-                rows=[("step", step), ("todo_id", todo_id),
-                      ("instant", f"{child} (left in place; no verb deletes outward state)" if child.exists()
-                       else "(none created)"),
-                      ("record", f"{todo_id} left PENDING-LAUNCH; it counts against the WIP cap until "
-                                 f"`fleet abort --instant {child} --reason <why>` resolves it" if stranded
-                       else "(none written)"),
-                      ("lease", lease_state)],
+                #: RV-C6. Bare values, under keys a success never prints — a reader that treats `todo_id`
+                #: as "it started" or cds into `instant` must not match a non-start. The prose is `remedy`.
+                rows=[("step", step), ("left_todo_id", todo_id),
+                      ("left_instant", str(child) if child.exists() else "(none)"),
+                      ("left_record", "pending-launch" if stranded else "none"),
+                      ("left_lease", lease_state),
+                      ("remedy", " ".join(filter(None, (
+                          f"The lease on {lease.slot!r} {lease_why}.",
+                          f"{child} is left in place (no verb deletes outward state)." if child.exists()
+                          else "",
+                          f"Record {todo_id!r} reads PENDING-LAUNCH and counts against the WIP cap until "
+                          f"`fleet abort --instant {child} --reason <why>` resolves it." if stranded else "",
+                          "Re-run once the cause in the error row is cleared.")))),
+                      ],
                 clears_when=getattr(launch_error, "clears_when", None),
                 clears_who=getattr(launch_error, "clears_who", None))
             if step in DRY_RUN_ASKED_STEPS and isinstance(launch_error, FleetError):
@@ -2250,14 +2257,14 @@ def _do_dispatch(ctx: Ctx, parsed: Parsed) -> int:
             if ctx.sessions.alive(tmux):
                 print(f"dispatch needs attention: {tmux} is still observable; lease {lease.slot} retained."
                       + stranded_note, file=ctx.err)
-                raise not_started(f"retained on {lease.slot!r}: {tmux} is still observable after the kill, "
-                                  f"so a process may still hold the slot") from launch_error
+                raise not_started("retained", f"is retained: {tmux} is still observable after the kill, so "
+                                              f"a process may still hold the slot") from launch_error
         try:
             ctx.pool.release(lease.slot, force=False)
         except FleetError as release_error:
             print(f"dispatch failed: {launch_error}; cleanup retained lease {lease.slot}", file=ctx.err)
-            raise not_started(f"retained on {lease.slot!r}: the release was refused "
-                              f"({release_error})") from launch_error
+            raise not_started("retained", f"is retained: the release was refused "
+                                          f"({release_error})") from launch_error
         # `SI-21` applied to the roadmap: a rollback must not strand state it created. If the claim landed
         # and something after it failed, the milestone would read as owned by an instant that is being
         # rolled back — so it is given back here, and the failure to give it back is reported rather than
@@ -2283,7 +2290,7 @@ def _do_dispatch(ctx: Ctx, parsed: Parsed) -> int:
         print(f"dispatch rolled back: the lease on {lease.slot!r} was given back. Anything already "
               f"written under {child} is left in place and named here rather than removed — no verb "
               f"deletes outward state." + stranded_note, file=ctx.err)
-        raise not_started(f"given back ({lease.slot!r} is free again)") from launch_error
+        raise not_started("given-back", "was given back") from launch_error
     _emit(ctx, "dispatch", [("todo_id", todo_id), ("instant", str(child)), ("slot", lease.slot),
                             ("tmux", tmux), *_title_rows(title), ("watched_source", source.base),
                             ("milestone", milestone_id or "(none)"),
