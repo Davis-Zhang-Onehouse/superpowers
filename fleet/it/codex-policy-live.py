@@ -28,6 +28,7 @@ import time
 repo = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(repo / 'fleet/src'))
 from fleet.runtime import plain  # noqa: E402
+from fleet.runtime_launch import CODEX_POLICY  # noqa: E402
 from fleet.store import Store  # noqa: E402
 
 root = Path(os.environ['RT_ATTEMPT']).resolve()
@@ -321,7 +322,8 @@ def assert_green(outcome, n):
     assert 14 not in codes[1:] and (not codes or codes[0] in (14, 11, 0)), codes
 
 
-POLICY = ['-a', 'never', '-s', 'workspace-write', '-c', 'sandbox_workspace_write.network_access=true']
+#: RV-31: the argv check reads the product's own constant, so every element (including the update-check key) is asserted.
+POLICY = list(CODEX_POLICY)
 
 
 def argv_has_policy(argv):
