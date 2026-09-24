@@ -124,9 +124,16 @@ def follows_current(codex_home, releases) -> tuple:
     where `<X>` is itself a symlink that resolves to where `<releases>/current` does. A link to
     `fleet-vN/skills` resolves fine today and is still wrong: the next deploy leaves it behind."""
     link = link_path(codex_home)
+    try:
+        os.lstat(link)
+    except FileNotFoundError:
+        return False, f'{link} does not exist; codex sees no link to {expected_target(releases)}'
+    except OSError as exc:
+        #: RV-27: an unreadable home is not an absent link; saying "does not exist" sends the operator to an install that
+        #: cannot write there either.
+        return False, f'{link} cannot be read ({exc.strerror}); nothing about the link can be established'
     if not os.path.islink(link):
-        what = 'is a real directory or file' if os.path.exists(link) else 'does not exist'
-        return False, f'{link} {what}; codex sees no link to {expected_target(releases)}'
+        return False, f'{link} is a real directory or file; codex sees no link to {expected_target(releases)}'
     try:
         raw = os.readlink(link)
     except OSError as exc:
@@ -201,6 +208,15 @@ def _check(home: Path, releases: Path) -> int:
     return EXIT_OK if ok and vis.ok else EXIT_FAILED
 
 
+def _unwritable(directory: Path) -> str:
+    """The first path that stops this user writing `directory`: the directory itself when it exists, else the nearest existing
+    ancestor it would be created under. '' when nothing does."""
+    probe = directory
+    while not os.path.lexists(probe) and probe != probe.parent:
+        probe = probe.parent
+    return '' if os.access(probe, os.W_OK | os.X_OK) else str(probe)
+
+
 def _dry_run_verdict(target: Path, absent: list) -> int:
     if absent:
         _emit('would-fail', f'{target} has no {", ".join(absent)}: the link would follow a release that lacks core '
@@ -263,12 +279,22 @@ def main(argv=None) -> int:
         _emit('refused', f'{link.parent} exists and is not a directory, so no skills link can live under it. Left '
                          f'untouched.', sys.stderr)
         return EXIT_REFUSED
+    blocked = _unwritable(link.parent)
+    if blocked:
+        #: RV-27: asked before the dry run answers, so --dry-run refuses exactly where the real run would.
+        _emit('refused', f'{blocked} is not writable (or not searchable) by this user, so the link cannot be written. '
+                         f'Nothing was written.', sys.stderr)
+        return EXIT_REFUSED
     action = 'repoint' if os.path.islink(link) else 'create'
     if args.dry_run:
         _emit(f'would-{action}', f'{link} -> {target}')
         return _dry_run_verdict(target, absent)
     #: The one atomic publish in this package (`FI-20`): a reader sees the old link or the new one, never none.
-    atomic_symlink(str(target), link)
+    try:
+        atomic_symlink(str(target), link)
+    except OSError as exc:
+        _emit('refused', f'{link} could not be written ({exc.strerror}). Nothing was published.', sys.stderr)
+        return EXIT_REFUSED
     _emit(f'{action}d', f'{link} -> {target}')
     return _check(home, releases)
 
