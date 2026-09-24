@@ -132,23 +132,31 @@ send_teardown() {     # close + harvest the worker; never leaves the pane behind
   #: The slot lives OUTSIDE the checkout (see send_setup); nothing else removes it.
   case "${SLOT:-}" in */send-fixture-slot-*) rm -rf "$SLOT" ;; esac
 }
-record_check() {      # record_check <child instant> <expected count> <expected outcome regex> -> prints diagnostics, rc 0/1
-  python3 - "$1" "$2" "$3" <<'PY'
+record_check() {      # record_check <child instant> <expected count> <outcome regex> [confirmations, comma-joined, one per row]
+  #: RV-21. The CONFIRMATION per row is asserted, not only the outcome: a green SEND-2 that does not say
+  #: `placeholder` is also consistent with some other way of delivering the message — the "alarm stopped
+  #: firing" shape — and the first (killed) GREEN attempt PASSed SEND-2 with "placeholder seen: 0".
+  python3 - "$1" "$2" "$3" "${4:-}" <<'PY'
 import hashlib, json, pathlib, re, sys
-child, want_n, want_outcome = pathlib.Path(sys.argv[1]), int(sys.argv[2]), sys.argv[3]
+child, want_n, want_outcome, want_conf = pathlib.Path(sys.argv[1]), int(sys.argv[2]), sys.argv[3], sys.argv[4]
 path = child / '.fleet' / 'sends.jsonl'
 if not path.is_file():
     print(f'ABSENT {path}'); sys.exit(1)
 rows = [json.loads(line) for line in path.read_text().splitlines() if line.strip()]
 print(f'{len(rows)} row(s) in {path}')
 ok = len(rows) == want_n
-for row in rows:
+confirmations = want_conf.split(',') if want_conf else []
+if confirmations and len(confirmations) != want_n:
+    print(f'HARNESS ERROR: {len(confirmations)} expected confirmation(s) for {want_n} row(s)'); ok = False
+for index, row in enumerate(rows):
     print(json.dumps(row, sort_keys=True))
     for key in ('at', 'by', 'todo_id', 'tmux', 'runtime', 'sha256', 'chars', 'lines', 'head', 'outcome', 'confirmation', 'schema_version'):
         if key not in row:
             print(f'MISSING key {key}'); ok = False
     if not re.fullmatch(want_outcome, str(row.get('outcome'))):
         print(f'OUTCOME {row.get("outcome")!r} does not match {want_outcome!r}'); ok = False
+    if index < len(confirmations) and row.get('confirmation') != confirmations[index]:
+        print(f'CONFIRMATION row {index + 1}: {row.get("confirmation")!r}, wanted {confirmations[index]!r}'); ok = False
     src = row.get('message_file')
     if src and pathlib.Path(src).is_file():
         digest = hashlib.sha256(pathlib.Path(src).read_text().encode()).hexdigest()
@@ -214,11 +222,11 @@ else
 fi
 
 # ---- SEND-3: the record ------------------------------------------------------------------------------
-record_check "$W" 2 'submitted' > "$OUT/SEND-3-record.txt" 2>&1; s3=$?
+record_check "$W" 2 'submitted' 'draft,placeholder' > "$OUT/SEND-3-record.txt" 2>&1; s3=$?
 fleet brief --instant "$W" --porcelain > "$OUT/SEND-3-brief.out" 2>&1
 s3_brief=0; awk -F'\t' '$1=="messages"' "$OUT/SEND-3-brief.out" | grep -q 'submitted' && s3_brief=1
 if [ "$s3" = 0 ] && [ "$s3_brief" = 1 ]; then
-  it_pass SEND-3 "fleet/it/SEND/out/SEND-3-record.txt" "both sends are RECORDED in the worker's .fleet/sends.jsonl — sender, time, pane, sha256 of the message (re-derived from the file and matching), chars/lines/head and outcome=submitted — and \`fleet brief --instant <worker>\` reads them back on its 'messages' row (B13: before the fix \`_do_send\` wrote nothing, so 'who wrote into this pane' had no subject)"
+  it_pass SEND-3 "fleet/it/SEND/out/SEND-3-record.txt" "both sends are RECORDED in the worker's .fleet/sends.jsonl — sender, time, pane, sha256 of the message (re-derived from the file and matching), chars/lines/head, outcome=submitted and HOW each was confirmed (SEND-1 by the draft read back, SEND-2 by the paste placeholder's count — so the FB-27 branch is what submitted the five lines) — and \`fleet brief --instant <worker>\` reads them back on its 'messages' row (B13: before the fix \`_do_send\` wrote nothing, so 'who wrote into this pane' had no subject)"
 else
   it_fail SEND-3 "fleet/it/SEND/out/SEND-3-record.txt" "the send record is missing or wrong: record_rc=$s3 brief_row=$s3_brief — $(head -2 "$OUT/SEND-3-record.txt" | tr '\n' ' ')"
 fi
@@ -233,7 +241,7 @@ else
   it_fail SEND-4 "fleet/it/SEND/out/SEND-4-send.out" "a pane holding a draft was not refused cleanly: rc=$s4 draft_intact=$s4_kept"
 fi
 send_clear_box
-if record_check "$W" 2 'submitted' > "$OUT/SEND-5-record.txt" 2>&1; then
+if record_check "$W" 2 'submitted' 'draft,placeholder' > "$OUT/SEND-5-record.txt" 2>&1; then
   it_pass SEND-5 "fleet/it/SEND/out/SEND-5-record.txt" "the refused send added NO row: the log records what was written into the pane, and a refusal before the paste wrote nothing"
 else
   it_fail SEND-5 "fleet/it/SEND/out/SEND-5-record.txt" "the send log changed on a refused send: $(head -1 "$OUT/SEND-5-record.txt")"
@@ -296,8 +304,8 @@ else
   it_fail SENDC-3 "fleet/it/SENDC/out/SENDC-3-send.out" "the over-length codex send was not submitted: rc=$c3 idle_after=$c3_idle placeholder=$c3_placeholder — $(tr '\n' ' ' < "$OUT/SENDC-3-send.out" | cut -c1-200)"
 fi
 if [ "$c3" != 0 ]; then send_clear_box; fi
-if record_check "$W" 3 'submitted' > "$OUT/SENDC-4-record.txt" 2>&1; then
-  it_pass SENDC-4 "fleet/it/SENDC/out/SENDC-4-record.txt" "all three codex sends are recorded in the worker's .fleet/sends.jsonl as submitted, with the sender, time, sha256 (re-derived and matching) and how each was confirmed"
+if record_check "$W" 3 'submitted' 'draft,draft,placeholder' > "$OUT/SENDC-4-record.txt" 2>&1; then
+  it_pass SENDC-4 "fleet/it/SENDC/out/SENDC-4-record.txt" "all three codex sends are recorded in the worker's .fleet/sends.jsonl as submitted, with the sender, time, sha256 (re-derived and matching) and how each was confirmed — the one-line and eight-line sends by the draft read back, the over-length one by codex's '[Pasted Content C chars]' placeholder"
 else
   it_fail SENDC-4 "fleet/it/SENDC/out/SENDC-4-record.txt" "codex sends were not all recorded as submitted: $(head -2 "$OUT/SENDC-4-record.txt" | tr '\n' ' ')"
 fi
