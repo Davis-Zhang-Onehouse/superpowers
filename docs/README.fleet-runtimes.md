@@ -95,7 +95,9 @@ only the sandbox. Verbs whose cli.py reach includes a process or pane probe (`bo
 `dispatch`) cannot see host processes when a codex worker runs them (static map in the FB-110 instant,
 evidence/01-settle/census-verbs.txt). The verbs a fix worker reports and finishes with (`brief`, `propose`, `review`,
 `park`, `complete`, `base-check`) reach none. Whether coordinator, stack or release instants may run on codex under
-this limit is an operator decision that has not been made yet (raised as ISSUES I-4 of the FB-110 instant). tmux works inside the sandbox only because the network is on. `FLEET_CODEX_BIN` and `FLEET_CLAUDE_BIN` can name the actual executable; do not point them at
+this limit is an operator decision that has not been made yet (raised as ISSUES I-4 of the FB-110 instant). tmux works inside the sandbox only because the network is on.
+
+`FLEET_CODEX_BIN` and `FLEET_CLAUDE_BIN` can name the actual executable; do not point them at
 a seed-delivery shim. Claude's existing `REAL_CLAUDE` override
 remains supported. Executable, configuration directory and runtime are recorded for recovery; credentials
 are never copied into fleet records or launchers.
