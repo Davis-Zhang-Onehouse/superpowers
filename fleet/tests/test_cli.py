@@ -4965,6 +4965,42 @@ class TestCompleteRefusesBrokenPointers(CliCase):
 
         self.assertEqual(EXIT_OK, code, err)
 
+    def test_complete_ignores_its_own_folder_quoted_in_a_fenced_block(self):
+        """B19 / i25. A HANDOFF whose ONLY absolute self-reference is a QUOTATION — the coordinator's
+        dispatch command kept verbatim in a ```bash block — used to refuse `complete` (rc=4). A fence is an
+        enclosure: what is inside it is quoted, not cited."""
+        env = self.ready_to_complete()
+        (env.instant / "HANDOFF.md").write_text(
+            "## Provenance\n\n```bash\n"
+            f"fleet dispatch --title claimant   # created {env.instant}\n"
+            "```\n\nSee `evidence/INDEX.md`.\n")
+
+        code, out, err = env.fleet.run(["complete", "--instant", str(env.instant)])
+
+        self.assertEqual(EXIT_OK, code, f"a fenced quotation was read as a live pointer: {err}")
+
+    def test_complete_ignores_its_own_folder_inside_an_html_comment(self):
+        env = self.ready_to_complete()
+        (env.instant / "HANDOFF.md").write_text(
+            f"<!-- archival: created as {env.instant}/ -->\n\n"
+            f"See `evidence/INDEX.md` <!-- was {env.instant}/evidence/INDEX.md -->.\n")
+
+        code, out, err = env.fleet.run(["complete", "--instant", str(env.instant)])
+
+        self.assertEqual(EXIT_OK, code, f"a comment was read as a live pointer: {err}")
+
+    def test_complete_still_refuses_an_inline_code_pointer(self):
+        """Inline code is NOT an enclosure for this gate: a code span is how a live pointer is written."""
+        env = self.ready_to_complete()
+        (env.instant / "HANDOFF.md").write_text(
+            f"## Resume\n\nRead `{env.instant}/evidence/INDEX.md` first.\n")
+
+        code, out, err = env.fleet.run(["complete", "--instant", str(env.instant)])
+
+        self.assertEqual(EXIT_REFUSED, code)
+        self.assertIn("HANDOFF.md:3", err)
+        self.assertTrue(env.instant.exists())
+
     def test_complete_allows_the_mandated_session_log_row_with_a_bare_folder_name(self):
         """`maintain-workspace` SKILL.md:131 mandates a session-log row — `date | workspace | resume cmd |
         did what` — and the `workspace` cell is the bare folder name, not a path. Matching that bare name
@@ -5533,6 +5569,33 @@ class TestTheNearMissRuleReadsShapeAndRetraction(CliCase):
         code, out, err = self._lint(fleet, "## Phase: AWAITING-CI")
 
         self.assertNotIn(cli.NEAR_MISS, out)
+
+    def test_a_fenced_declaration_is_a_quotation_not_a_near_miss(self):
+        """B19 / i25. `Phase: AWAITING-CI` inside a ```markdown block introduced by "what NOT to do" was
+        a violation. The only escape was the _RETRACTION keyword list — the shape i25 calls wrong."""
+        fleet = self.loaded()
+        code, out, err = self._lint(fleet, "Do NOT write it as prose; this is what NOT to do:\n\n"
+                                           "```markdown\nPhase: AWAITING-CI\n```\n\nUse `fleet declare`.")
+        self.assertNotIn(cli.NEAR_MISS, out, f"a fenced quotation was flagged: {out}")
+        self.assertIn("0 declaration-shaped line(s) found", out)
+
+    def test_a_declaration_inside_an_html_comment_is_not_a_near_miss(self):
+        fleet = self.loaded()
+        code, out, err = self._lint(fleet, "<!-- the brief said: Phase: AWAITING-CI -->\n\nstill working.")
+        self.assertNotIn(cli.NEAR_MISS, out, f"a comment was flagged: {out}")
+
+    def test_a_retraction_written_inside_a_comment_still_exempts_the_line(self):
+        """i25: enclosures are skipped WHILE exemption tokens inside comments are still read. The rule
+        matches the shape on the comment-stripped text and the retraction on the RAW line."""
+        fleet = self.loaded()
+        code, out, err = self._lint(fleet, "Phase: AWAITING-CI <!-- retracted 09-23, declare.json cleared -->")
+        self.assertNotIn(cli.NEAR_MISS, out, f"a retraction inside a comment did not exempt: {out}")
+
+    def test_the_backticked_shape_still_fires(self):
+        """Inline code is prose to this rule (IT G3/G4 pin the backticked rendering)."""
+        fleet = self.loaded()
+        code, out, err = self._lint(fleet, "`Phase: AWAITING-CI`")
+        self.assertIn(cli.NEAR_MISS, out)
 
 
 class TestAwaitingCiRequiresALiveWatcher(CliCase):
