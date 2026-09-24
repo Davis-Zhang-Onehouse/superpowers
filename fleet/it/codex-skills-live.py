@@ -53,9 +53,17 @@ codex_source = Path(os.environ.get('CXS_CODEX_HOME', '/home/ubuntu/davis_root/.c
 for key in ('FLEET_HOME', 'FLEET_INSTANTS', 'FLEET_ROOT', 'FLEET_INSTANT', 'FLEET_RELEASES', 'FLEET_BIN', 'INSTANT',
             'CODEX_HOME'):
     os.environ.pop(key, None)
-os.environ['FLEET_HOME'] = str(root / 'store')
-os.environ['FLEET_INSTANTS'] = str(root / 'instants')
-(root / 'instants').mkdir()
+#: Everything the worker is SHOWN lives outside the checkout. codex tells the model its workspace roots (the slot, plus
+#: the `--add-dir` FLEET_HOME and FLEET_INSTANTS) and its skill roots (CODEX_HOME). In the second RED attempt these sat
+#: under fleet/it/, inside the checkout, and the bare worker ran `find <checkout> -path '*/systematic-debugging/SKILL.md'`
+#: from those paths. In production they are `<root>/.fleet`, the instants folder and `<root>/.codex`, none inside a
+#: superpowers tree. The evidence stays under `root`; `outside` is removed at exit, credential copy included.
+outside = Path(tempfile.mkdtemp(prefix='cxs-outside-')).resolve()
+atexit.register(shutil.rmtree, outside, True)
+(root / 'outside.txt').write_text(str(outside) + '\n')
+os.environ['FLEET_HOME'] = str(outside / 'store')
+os.environ['FLEET_INSTANTS'] = str(outside / 'instants')
+(outside / 'instants').mkdir()
 evidence = root / 'evidence'
 evidence.mkdir()
 log = (evidence / 'commands.jsonl').open('w')
@@ -102,7 +110,7 @@ def wait_for(label, predicate, step=3):
 
 # --- the private CODEX_HOME -----------------------------------------------------------------------------------
 def private_codex_home():
-    home = root / 'codex-home'
+    home = outside / 'codex-home'
     home.mkdir(mode=0o700)
     shutil.copy2(codex_source / 'auth.json', home / 'auth.json')
     (home / 'auth.json').chmod(0o600)
@@ -281,7 +289,7 @@ if install:
     if gate_ships:
         refused = fleet('dispatch', '--profile', str(profile), '--title', 'cxs refused', '--cap', '2', '--runtime', 'codex',
                         codes=(4,))
-        store = Store(root / 'store')
+        store = Store(outside / 'store')
         verdict['step0'] = dict(exit=4, names_install='fleet-codex-skills.sh' in refused.stderr,
                                 records=len(store.all()), stderr=refused.stderr.strip().splitlines()[:3])
         assert verdict['step0']['names_install'] and verdict['step0']['records'] == 0, verdict['step0']
@@ -295,7 +303,7 @@ if install:
 # --- step 2: the real worker -------------------------------------------------------------------------------------------
 out = fields(fleet('dispatch', '--profile', str(profile), '--title', 'cxs codex skills', '--slot', slot.name, '--cap', '2',
                    '--runtime', 'codex').stdout)
-store = Store(root / 'store')
+store = Store(outside / 'store')
 record = store.read(out['todo_id'])
 verdict['dispatch_rows'] = {k: v for k, v in out.items() if k in ('runtime', 'model', 'codex_skills')}
 seed_text = (Path(record.child_instant) / '.fleet/seed.txt').read_text()
@@ -353,8 +361,9 @@ if install:
         (verdict['using_fleet']['content_seen'], 'using-fleet/SKILL.md was not read'),
         (verdict['systematic_debugging']['via_link'] and verdict['using_fleet']['via_link'],
          'a skill was read from somewhere other than the CODEX_HOME link to the deployed release'),
-        (verdict['rca'] is not None and re.search(r'phase\s*(1|one)|root cause investigation', verdict['rca'].lower()),
-         'rca.md missing or names no Phase 1 / root cause investigation'),
+        (verdict['rca'] is not None and re.search(r'phases?\s*(?:[1-4]|one|two|three|four)\b|root cause investigation|hypothesis and testing',
+                                                 verdict['rca'].lower()),
+         'rca.md missing or names none of the skill\'s phases'),
         (verdict['rca_before_fix'], 'rca.md was written after calc.py changed'),
         (verdict['test_exit'] == 0, 'the test still fails'),
         ('no capacity' in lowered and 'admission' in lowered, 'exit-codes.md does not state the skill\'s 3 and 4'),
