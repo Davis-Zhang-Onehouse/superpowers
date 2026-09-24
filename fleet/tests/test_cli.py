@@ -1589,6 +1589,12 @@ class TestCadence(CliCase):
                 self.assertNotIn(str(foreign), err)
                 self.assertNotIn(cli.CADENCE_PREFIX, out)
 
+        # Both efforts are overdue now: an explicit foreign target must still exclude OURS.
+        data = json.loads(fleet.harvest.path.read_text())
+        for source in data["sources"]:
+            source["last_run"] = LONG_AGO
+        fleet.harvest.path.write_text(json.dumps(data))
+
         for verb, args in (("roadmap", ["--instant", str(foreign)]),
                            ("dispatch", ["--dry-run", "--profile", str(fleet.profile()),
                                          "--title", "foreign child", "--base", FRESH_BASE_DIGITS,
