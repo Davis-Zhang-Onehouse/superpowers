@@ -83,13 +83,21 @@ guard.wip-cap  allow: 0 of 1 active-dev slot(s) in use. examined 0 subject(s) of
 ```
 
 That row names the count, the cap, the population examined, who is counted and who is excluded. It is the
-answer. The population is **this effort's**: records of your `--base` whose instant lives in your
-`FLEET_INSTANTS`. One store serves every effort on the root and base strings repeat (`00000000` is every
-effort's root base), so same-base records of another instants directory are reported as `set aside` and
-never counted. Each counted holder carries `[folder: yes|no, session: yes|no, age: …]`. A holder with
-`folder: no, session: no` is a phantom of your own effort — a record nothing is working on — so reap or
-harvest it; raising `--cap` to get past it makes the cap decorative. The guard's own cost note says it is free and safe to ask before every dispatch and safe to ask
+answer. The guard's own cost note says it is free and safe to ask before every dispatch and safe to ask
 twice, so there is no reason to ask anything else.
+
+The population is **this effort's**: records of your `--base` whose instant lives in your `FLEET_INSTANTS`.
+One store serves every effort on the root and base strings repeat (`00000000` is every effort's root base),
+so same-base records of another instants directory are reported as `set aside` and never counted. Keep
+`FLEET_INSTANTS` absolute: a relative one cannot place anything, and the guard falls back to counting every
+record of the base. Each counted holder is named with three facts:
+
+```
+guard.wip-cap  refuse: the WIP cap is 1 and 1 active-dev subject(s) hold it: 00000000-08080738-inflight-append-i11old [folder: no, session: no, age: 47d14h]. examined 3 subject(s) of 00000000 in /work/effortA/instants; 1 counted, 2 excluded (…); set aside 12 subject(s) of base 00000000 whose instant lives in another instants directory — another effort's, which never holds this cap
+```
+
+A holder with `folder: no, session: no` is a phantom of your own effort, a record nothing is working on:
+reap or harvest it. Raising `--cap` to get past it makes the cap decorative.
 
 **Do not carry a formula.** The tempting one — *me, plus the workers already running, plus this one* — is
 a remembered number with arithmetic on top, and it is **wrong in at least one ordinary case**: the cap
