@@ -242,6 +242,29 @@ class ReverifyCase(unittest.TestCase):
     def _evidence(self, rel, v):
         return rel.dir_for(v) / META_DIR / "evidence"
 
+    def test_it_results_copy_marks_carried_over_rows(self):
+        """FB-81: the merged register keeps rows for sections this gate did not run; the evidence copy must
+        say which rows THIS run produced and which it inherited."""
+        from fleet.release_verify import Verify
+
+        def stale_beside_fresh(command, where):
+            if "run-all.sh" in command and where:
+                it = pathlib.Path(where) / "fleet" / "it"
+                (it / "RESULTS.tsv").write_text(
+                    "case\tverdict\tevidence\tnote\n"
+                    "F2b\tPASS\tev\tstale from an earlier run\n"
+                    "B1\tPASS\tev\tfresh\n")
+                (it / "RESULTS-closeout-B.tsv").write_text(
+                    "case\tverdict\tevidence\tnote\nB1\tPASS\tev\tfresh\n")
+
+        rel, v = self._export()
+        Verify(rel, v, self.Runner(watcher=stale_beside_fresh), repo=self.FakeRepo(rel.dir_for(v))).run()
+        lines = (self._evidence(rel, v) / "it-RESULTS.tsv").read_text().splitlines()
+        self.assertEqual(lines[0], "case\tverdict\tevidence\tnote\torigin")
+        rows = {l.split("\t")[0]: l.split("\t")[4] for l in lines[1:]}
+        self.assertEqual(rows["B1"], "this-run:B")
+        self.assertEqual(rows["F2b"], "carried-over")
+
     def test_a_second_verify_preserves_the_first_attempts_verdict_and_artefacts(self):
         """`RI-9`, end to end. This is the case release 0.3.3 needed and did not have."""
         from fleet.release_verify import Verify
