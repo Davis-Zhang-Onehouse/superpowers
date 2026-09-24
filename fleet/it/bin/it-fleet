@@ -1,5 +1,7 @@
 #!/usr/bin/env bash
-# it-fleet — the IT harness's ONLY route to the product, as an EXECUTABLE.
+# it-fleet — the IT harness's route to the product as a SUBPROCESS, as an EXECUTABLE. (A few cases call
+# `fleet.cli.main([...])` in-process for a hermetic probe; those are not subprocess sites and the lint below
+# does not cover them.)
 #
 # `lib.sh`'s `fleet()` used to be the only writer of `$IT_ASKED_NAMES`, the register that lets the isolation
 # classifier charge an instant that appears in a live tree to the section that asked for it. It was a bash

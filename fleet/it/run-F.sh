@@ -152,9 +152,8 @@ f2b_rc=$?
 #: `FB-75`. At the default cap of 1, W2 from F2 alone refuses every later dispatch, so "the dispatch is
 #: still refused" was true for a reason unrelated to W1 — a control that cannot fail. The refusal names
 #: every holder (`guards.py`, `held`), so the assertion is on WHO holds the cap: W1 must be in the list.
-#: Measured: the real product names `capholder, secondc`; a product that wrongly frees an unbacked
-#: declaration names `secondc` only, and this case now fails on it (w2itharness evidence/01-red and
-#: 03-green, sectionF-mutant-*).
+#: Measured at the base: the real product names `capholder, secondc`; a product that wrongly frees an
+#: unbacked declaration names `secondc` only (w2itharness evidence/01-red/sectionF-{real,mutant}-base).
 #: `[^.]*`, not `.*`: the held list ends at the first full stop, and the SAME line then prints the
 #: population — which names the EXCLUDED subjects too, so a greedy match found `capholder` on the mutant
 #: ("… hold it: …-secondc. examined 2 subject(s) …; 1 counted, 1 excluded (…-capholder (RUNNING))").
@@ -308,7 +307,10 @@ if [ -n "$COMPACT" ] && grep -qi 'freezemaker' "$OUT/F9-status.tsv"; then f9_rep
 # `it_zero_delta` reads FLEET_HOME from the environment, so it is pointed at F9's store for this one call.
 f9_zero=0
 ( export FLEET_HOME="$F9_HOME" FLEET_INSTANTS="$F9_INSTANTS"
-  it_zero_delta F9-zero-delta fleet compaction-status --porcelain )
+  #: `--want 1`: `compaction-status` exits EXIT_ATTENTION (1) while a compaction is inflight — and F9's whole
+  #: point is that freezeMaker IS inflight — so 1 is the code that says the verb ran and reported the freeze.
+  #: Found in the final review, not in a §F run: the runs were behind a release gate.
+  it_zero_delta --want 1 F9-zero-delta fleet compaction-status --porcelain )
 grep -qP '^F9-zero-delta\tPASS\t' "$RESULTS" && f9_zero=1
 if [ "$f9_reports" = 1 ] && [ "$f9_zero" = 1 ]; then
   it_pass F9 "fleet/it/F/out/F9-status.tsv" \
@@ -554,7 +556,7 @@ it_zero_delta F10-roadmap          fleet roadmap --instant "$W1" --porcelain
 it_zero_delta F10-brief            fleet brief --instant "$W1" --porcelain
 #: `--want 4`: by here F2's W2 holds the cap and W1's declaration is restored, so the dry run is REFUSED by
 #: the cap — it still evaluates every gate and writes nothing, which is the property. The code is asserted,
-#: not assumed: a wrong one fails this row red (w2itharness evidence/03-green, the §F run on the fix).
+#: not assumed: a wrong one fails this row red.
 it_zero_delta --want 4 F10-dispatch-dryrun fleet dispatch --profile "$OUT/profile" --title f10probe \
                                      --base 00000000 --optype append --dry-run
 for c in F10-compaction-status F10-board F10-leases F10-status F10-lint F10-roadmap F10-brief \

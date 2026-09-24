@@ -143,7 +143,7 @@ cmd_guard() {
   # Through the harness's wrapper executable (B18), resolved beside this script: this control does not
   # source lib.sh, so it cannot read $IT_FLEET.
   FLEET_TMUX_SOCKET="$PROBE_SOCKET" PYTHONPATH="$REPO/fleet/src" \
-    "$(dirname "${BASH_SOURCE[0]}")/it-fleet" pane-guard --pane "$1" >/dev/null 2>&1
+    "$HERE/it-fleet" pane-guard --pane "$1" >/dev/null 2>&1
   local rc=$?
   echo "$rc"
   return "$rc"

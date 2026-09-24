@@ -54,6 +54,16 @@ class MutationExtractor(unittest.TestCase):
         self.assertNotIn("src.index(", text)
         self.assertIn("M9-mut-inject", text)
 
+    def test_the_unreached_helper_is_defined_before_every_use_and_every_abort_uses_it(self):
+        """An abort must leave SKIP rows for the cases it never reached; a helper called before its definition
+        is `command not found` and writes none (found in the final review)."""
+        text = (IT / "run-m9-mutation.sh").read_text()
+        defined = text.index("m9_unreached() {")
+        uses = [m.start() for m in re.finditer(r"^\s*m9_unreached ", text, re.M)]
+        self.assertGreaterEqual(len(uses), 3, "extract-refused, baseline-red and inject-failed aborts")
+        self.assertTrue(all(u > defined for u in uses), "m9_unreached is used before it is defined")
+        self.assertEqual(text.count("\n  exit 1\n"), 3, "three abort paths, each preceded by m9_unreached")
+
     def test_every_injection_anchor_is_unique_in_the_base_tree(self):
         """The anchors in run-m9-mutation.sh's inject() calls must each occur once in the file they target —
         M2's bare `os.unlink(tmp)` occurred three times in atomic.py since RV-18/RV-36 (ISSUES I-2)."""

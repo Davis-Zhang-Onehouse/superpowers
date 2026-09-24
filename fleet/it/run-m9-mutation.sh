@@ -45,6 +45,14 @@ mkdir -p "$EV"
 SECTION=M9mut
 it_assert_isolation M9mut-enter
 
+# An abort must not leave the previous run's PASS rows standing for the cases it never reached: the merge
+# keeps any row no fresh row replaces, which is how "M9-mut-3 PASS" stayed in the register while the mutant
+# was never injected (I-2). Each unreached case gets a SKIP row that names why.
+m9_unreached() {              # m9_unreached <reason> <case...>
+  local why="$1"; shift
+  local c; for c in "$@"; do it_skip "$c" "fleet/it/M9-mutation" "NOT REACHED: $why, so this case was not measured on this run"; done
+}
+
 # The audit under test, extracted from the runner that owns it so this script cannot drift from it. The old
 # copy is removed first: `m9.py` persists in `$EV` between runs, so an extraction that failed silently used to
 # audit every mutant with a stale rule (FB-108). The extractor asserts it took the ONE block bearing the anchor
@@ -62,14 +70,6 @@ else
   exit 1
 fi
 
-# An abort must not leave the previous run's PASS rows standing for the cases it never reached: the merge
-# keeps any row no fresh row replaces, which is how "M9-mut-3 PASS" stayed in the register while the mutant
-# was never injected (I-2). Each unreached case gets a SKIP row that names why.
-m9_unreached() {              # m9_unreached <reason> <case...>
-  local why="$1"; shift
-  local c; for c in "$@"; do it_skip "$c" "fleet/it/M9-mutation" "NOT REACHED: $why, so this case was not measured on this run"; done
-}
-
 run_audit() {                 # run_audit <instant-root> <logfile>  -> exit code of the audit
   INSTANT="$1" PYTHONPATH="$1/src" python3 "$EV/m9.py" > "$2" 2>&1
 }
@@ -81,6 +81,7 @@ if run_audit "$INSTANT" "$EV/real.out"; then
 else
   it_fail M9-mut-baseline "fleet/it/M9-mutation/real.out" \
     "the audit does not pass on the unmutated package, so no kill below means anything: $(grep -m1 -E 'AssertionError|Error' "$EV/real.out" | cut -c1-200)"
+  m9_unreached "the baseline audit is red" M9-mut-inject M9-mut-1 M9-mut-2 M9-mut-3 M9-mut-4
   echo "baseline is red — refusing to report mutation results" >&2
   exit 1
 fi
