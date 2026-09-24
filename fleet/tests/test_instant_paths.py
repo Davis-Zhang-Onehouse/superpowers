@@ -110,3 +110,12 @@ class TestInstantPaths(CliCase):
         code, out, err = fleet.run(['roadmap', '--instant', bad])
         self.assertEqual(code, 2)
         self.assertIn(str((Path.cwd() / bad).resolve()), err)
+
+    def test_missing_path_refusal_explains_both_relative_forms(self):
+        fleet = self.loaded()
+        for operand in ('./missing-instant', 'missing-instant'):
+            with self.subTest(operand=operand):
+                code, out, err = fleet.run(['roadmap', '--instant', operand])
+                self.assertEqual(code, 2)
+                self.assertIn('relative path from the current directory', err)
+                self.assertIn('bare name from the instants directory', err)
