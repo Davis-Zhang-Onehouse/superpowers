@@ -59,6 +59,14 @@ bash "$REPO/scripts/fleet-codex-skills.sh" --codex-home <root>/.codex --releases
 Postflight's assertion 6 checks the link on every root that has a `.codex`. A missing link or one pinned to a
 single `fleet-vX` is a MISMATCH that prints this command. A root with no `.codex` is a SKIP. The first deploy
 that ships this check reads MISMATCH until the install has run; that is the correct reading, not a failed deploy.
+Nothing in the chain rolls back on it (`release-rollback` is always a deliberate call). Do not roll back for an
+assertion-6-only MISMATCH: run the install and re-run postflight.
+
+**Mind the refusal window.** From the deploy that first ships the dispatch refusal until the install runs,
+every `fleet dispatch --runtime codex` on that root exits 4 ("cannot see the superpowers skills"). Run the
+install as part of the deploy step, before postflight, so the window is seconds rather than however long it
+takes someone to read the MISMATCH. `--override "<reason>"` launches a codex worker without skills in the
+meantime.
 
 ## Do the suites need to run?
 
