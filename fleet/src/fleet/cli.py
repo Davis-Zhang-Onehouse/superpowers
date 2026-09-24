@@ -1730,6 +1730,7 @@ def _do_revive(ctx: Ctx, parsed: Parsed) -> int:
         raise Refused('A live agent still holds this workspace; inspect it before revival',
                       clears_when=f'no live agent has {lease.path} as its cwd (`fleet board` names it)',
                       clears_who='the operator')
+    _refuse_codex_worktree_slot(record.runtime, lease.path, 'revive')
     if not record.runtime_executable or not record.runtime_config_dir:
         if ctx.launch_settings is None:
             raise BadInput('Legacy recovery requires an explicit launch configuration resolver')
@@ -2010,6 +2011,7 @@ def _do_dispatch(ctx: Ctx, parsed: Parsed) -> int:
                             "workspace is enrolled (`fleet enroll --slot <path>`)",
                 clears_who="the base owning a stale lease, or the operator")
         settings = _dispatch_settings(ctx, choice, ctx.pool.slot_path(candidate_slot))
+        _refuse_codex_worktree_slot(settings.runtime, ctx.pool.slot_path(candidate_slot), 'dispatch')
         skills = _codex_skills_gate(ctx, settings, parsed)
 
     if ctx.dry_run and all(verdict.allowed for verdict in verdicts):
@@ -2057,6 +2059,7 @@ def _do_dispatch(ctx: Ctx, parsed: Parsed) -> int:
     try:
         if lease.slot != candidate_slot:
             settings = _dispatch_settings(ctx, choice, lease.path)
+            _refuse_codex_worktree_slot(settings.runtime, lease.path, 'dispatch')    # inside the try: rolled back
         #: `F3`/`I-24c`. Extends the SAME shared context the dry-run path above validated, with the four
         #: keys only a won claim can supply — see `_dispatch_render_context` for why this may not be a
         #: second, hand-written dict.
@@ -2254,6 +2257,21 @@ def _choice_rows(choice) -> list:
     return [("runtime", f"{choice.runtime} ({runtime_from})"), ("model", model)]
 
 
+def _refuse_codex_worktree_slot(runtime, slot_path, verb) -> None:
+    """D-51 (FB-110). A codex worker runs only in a CLONE slot: in a linked-worktree slot it could commit only through git
+    roots derived from state it can touch, and review forged every such rule. Asked before anything is claimed, and on
+    dry-runs too."""
+    if runtime != 'codex' or not slot_path:
+        return
+    found = runtime_launch.linked_worktrees(slot_path)
+    if found:
+        raise Refused(f"{verb}: a codex worker cannot run in {slot_path}: {', '.join(found)} is a linked git worktree "
+                      f"(its repository is outside the slot, so the sandboxed worker could not commit)",
+                      clears_when="the codex worker goes to a clone-shaped slot (each repository a full clone with its own "
+                                  "`.git` directory, like ws8–ws10), or this work runs on claude (`--runtime claude`)",
+                      clears_who="the coordinator")
+
+
 def _codex_policy_rows(runtime, environ) -> list:
     """FB-110. The effective codex policy, from the same functions the launcher uses. Nothing is recorded: the policy is
     a constant and the roots are derived at every launch, so an older binary still reads the record (pt2's rule)."""
@@ -2277,6 +2295,8 @@ def _do_resume(ctx: Ctx, parsed: Parsed) -> int:
     *"Not every door that can dispatch should refuse. The test is whether refusing blocks a recovery path,
     and for resume it does"* — refusing a resume is its own outage, which is the alarm that blocks the fix.
     Idempotent: resuming twice updates one record rather than claiming a second slot.
+    One exception, by operator decision D-51 (FB-110): a codex instant is not adopted into a linked-worktree slot,
+    where its sandbox could not commit (`_refuse_codex_worktree_slot`).
     """
     child = _instant(ctx, parsed)
     name = InstantName.parse(child.name)
@@ -2311,6 +2331,9 @@ def _do_resume(ctx: Ctx, parsed: Parsed) -> int:
         refusal = ctx.pool.claim_refusal(asked_slot)
         if refusal is not None:
             raise refusal
+    #: D-51. The one admission question resume does ask: a codex instant is not adopted into a linked-worktree slot.
+    if asked_slot:
+        _refuse_codex_worktree_slot(expected, ctx.pool.slot_path(asked_slot), 'resume')
     if ctx.dry_run:
         rows = [("dry-run", "nothing was adopted, claimed or written"),
                 ("instant", str(child)), ("todo_id", todo_id),
