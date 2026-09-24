@@ -104,10 +104,16 @@ for n in 1 2 3 4; do
   #: One process per mutation, its exit status checked, and the mutated file compared with the original.
   #: APPLIED is set only when the injection says so AND the bytes on disk changed. A single heredoc for all
   #: four is what let M2's failed assert abort M3 and M4 unnoticed (FB-108).
+  #: `cmp` exits 1 for "differ" and 2 for an error (a missing file, an empty `rel`); only 1 counts.
   rel="$(python3 "$M9MUT" rel "$n")"
-  if python3 "$M9MUT" inject "$EV/mut$n" "$n" >> "$EV/mut$n.inject" 2>&1 \
-     && ! cmp -s "$INSTANT/$rel" "$EV/mut$n/$rel"; then
-    APPLIED[$n]=1
+  [ -n "$rel" ] || echo "  NOT APPLIED — M$n: m9_mutations.py named no file to mutate" >> "$EV/mut$n.inject"
+  if [ -n "$rel" ] && python3 "$M9MUT" inject "$EV/mut$n" "$n" >> "$EV/mut$n.inject" 2>&1; then
+    cmp -s "$INSTANT/$rel" "$EV/mut$n/$rel"; cmp_rc=$?
+    if [ "$cmp_rc" -eq 1 ]; then
+      APPLIED[$n]=1
+    else
+      echo "  NOT APPLIED — M$n: cmp of $rel against the original exited $cmp_rc, not 1 (differ)" >> "$EV/mut$n.inject"
+    fi
   fi
   cat "$EV/mut$n.inject"
 done
@@ -146,7 +152,7 @@ for n in 1 2 3 4; do
         "KILLED by the named check ($why): ${WHAT[$n]}" ;;
     SURVIVED)
       it_fail "M9-mut-$n" "fleet/it/M9-mutation/mut$n.out" \
-        "SURVIVED: ${WHAT[$n]} — the mutation WAS applied (the mutant file differs from the original) and the rule did not fire, so it is decoration on this shape" ;;
+        "SURVIVED: ${WHAT[$n]} — the mutation WAS applied (inject verified the write and cmp found the mutant differs from the original) and the rule did not fire, so it is decoration on this shape" ;;
     WRONG-REASON)
       it_fail "M9-mut-$n" "fleet/it/M9-mutation/mut$n.out" \
         "died for the WRONG reason — a kill that is really an import failure proves nothing: $(grep -m1 -E 'Error' "$EV/mut$n.out" | cut -c1-200)" ;;
