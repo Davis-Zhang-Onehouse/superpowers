@@ -114,17 +114,30 @@ def read_sends(instant) -> list:
     """Every recorded send, oldest first; `[]` when nothing was recorded. A malformed line is REFUSED, not
     skipped, for `seedcheck.read_delivery`'s reason: 'unreadable' and 'absent' mean opposite things."""
     target = sends_path(instant)
-    if not target.is_file():
+    reroute = dict(clears_when="the line is repaired or removed", clears_who="the coordinator")
+    if not target.exists():
         return []
+    if not target.is_file():
+        #: Something is there that is not a log. Absent means "nobody recorded a send"; this is not that.
+        raise BadInput(f"{target} exists but is not a file; refusing to interpret the send log.",
+                       clears_when="the entry is removed", clears_who="the coordinator")
+    #: RV-39 (an FB-74 member). Bytes, decoded PER LINE under the same refusal: a torn append that split a
+    #: multibyte sequence raised UnicodeDecodeError past `brief`'s `except BadInput` and took the whole
+    #: briefing down, and so did an OSError from an unreadable log.
+    try:
+        raw = target.read_bytes()
+    except OSError as exc:
+        raise BadInput(f"{target} could not be read ({exc.strerror or exc}); refusing to interpret the send log.",
+                       **reroute) from exc
     rows = []
-    for number, line in enumerate(target.read_text(encoding="utf-8").splitlines(), 1):
-        if not line.strip():
+    for number, chunk in enumerate(raw.splitlines(), 1):
+        if not chunk.strip():
             continue
         try:
-            data = json.loads(line)
-        except ValueError as exc:
-            raise BadInput(f"{target} line {number} is not JSON ({exc}); refusing to interpret the send log.",
-                           clears_when=f"the line is repaired or removed", clears_who="the coordinator") from exc
+            data = json.loads(chunk.decode("utf-8"))
+        except (ValueError, UnicodeDecodeError) as exc:
+            raise BadInput(f"{target} line {number} is not UTF-8 JSON ({exc}); refusing to interpret the send log.",
+                           **reroute) from exc
         if not isinstance(data, dict) or data.get("schema_version") != SEND_SCHEMA_VERSION:
             raise BadInput(f"{target} line {number} has schema_version={data.get('schema_version') if isinstance(data, dict) else None!r}, "
                            f"this build knows {SEND_SCHEMA_VERSION}. Refusing to interpret it (FD-1).",
@@ -132,7 +145,15 @@ def read_sends(instant) -> list:
         known = set(SendRecord.__dataclass_fields__)
         if set(data) - known or known - set(data):
             raise BadInput(f"{target} line {number} does not carry exactly the send-record keys; refusing to interpret it.",
-                           clears_when="the line is repaired or removed", clears_who="the coordinator")
+                           **reroute)
+        #: The TYPES too: a line with the right keys and `"sha256": 5` passed here and crashed `brief` at
+        #: `sha256[:8]`. `bool` is an int to Python and is refused for the int fields on purpose.
+        for name, spec in SendRecord.__dataclass_fields__.items():
+            value = data[name]
+            wanted = spec.type if isinstance(spec.type, type) else {"str": str, "int": int}[spec.type]
+            if not isinstance(value, wanted) or isinstance(value, bool):
+                raise BadInput(f"{target} line {number} field {name!r} is {type(value).__name__}, not "
+                               f"{wanted.__name__}; refusing to interpret it.", **reroute)
         rows.append(SendRecord(**data))
     return rows
 

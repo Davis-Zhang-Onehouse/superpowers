@@ -7246,3 +7246,21 @@ class TestSendKeepsARecord(CliCase):
         self.assertEqual("submitted", rows["delivery"])
         self.assertTrue(rows["record"].startswith("NOT RECORDED"), rows["record"])
         self.assertIn("NOT RECORDED", err)
+
+    def test_brief_reports_a_malformed_send_log_as_a_violation_row(self):
+        """RV-39. One bad line must not take the whole briefing down."""
+        fleet = self.loaded()
+        log = fleet.paths["closable"] / ".fleet" / "sends.jsonl"
+        log.parent.mkdir(parents=True, exist_ok=True)
+        for bad in (b'{ not json\n', b'{"torn": "\xe2\x80', json.dumps({
+                "at": "x", "by": "y", "todo_id": "t", "tmux": "dt", "runtime": "claude", "message_file": "/m",
+                "sha256": 5, "chars": 1, "lines": 1, "head": "h", "outcome": "submitted", "confirmation": "draft",
+                "schema_version": 1}).encode() + b"\n"):
+            with self.subTest(bad=bad[:12]):
+                log.write_bytes(bad)
+                code, out, err = fleet.run(["brief", "--porcelain", "--instant", str(fleet.paths["closable"])])
+                self.assertEqual(EXIT_OK, code, err)
+                messages = [line for line in out.splitlines() if line.startswith("messages\t")]
+                self.assertEqual(1, len(messages), out)
+                self.assertIn("\tviolation\t", messages[0])
+                self.assertIn("could not be read", messages[0])
