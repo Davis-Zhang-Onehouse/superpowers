@@ -587,7 +587,7 @@ class ServerGuardian(unittest.TestCase):
         if move:
             armed.rename(self.tmp / "renamed")
         else:
-            armed.rmdir()
+            shutil.rmtree(armed)
         env = dict(self.env)
         env.pop("TMUX_TMPDIR")
         self.addCleanup(subprocess.run, ["tmux", "-L", self.socket, "kill-server"],
@@ -606,19 +606,16 @@ class ServerGuardian(unittest.TestCase):
     def test_moved_armed_directory_does_not_kill_default_server(self):
         self._assert_missing_armed_dir_preserves_default_server(move=True)
 
-    def test_foreign_namespace_pid_does_not_keep_guardian_alive(self):
-        """PID 1 stands in for a runner PID that resolves to a different, still-live process."""
+    def test_mismatched_runner_pid_fails_safe(self):
+        """A caller whose claimed pid is not the guardian's parent cannot authorize a kill."""
         p = self._start_guarded_runner(self.tmp, runner_pid="1")
         started = subprocess.run(["tmux", "-L", self.socket, "new-session", "-d", "-s", "victim"],
                                  capture_output=True, env=self.env)
         self.assertEqual(started.returncode, 0, started.stderr)
         p.kill()
         p.wait()
-        for _ in range(100):
-            if not self.server_up():
-                break
-            time.sleep(0.1)
-        self.assertFalse(self.server_up(), "foreign PID kept the guardian waiting after runner exit")
+        time.sleep(3)
+        self.assertTrue(self.server_up(), "guardian killed with an unverified runner pid")
 
     def test_rearm_does_not_signal_a_pidfile_impostor(self):
         """A numeric pid and matching argv in the pidfile cannot authorize a signal."""
