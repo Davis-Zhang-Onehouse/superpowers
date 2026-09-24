@@ -83,9 +83,6 @@ class RuntimeTests(unittest.TestCase):
                 self.assertFalse(recognizes_process('codex', comm, exe, argv))
 
 
-if __name__ == '__main__':
-    unittest.main()
-
     def test_paste_placeholders_are_recognised_with_their_counts(self):
         """FB-27. The shapes are MEASURED (w1sendrecords, evidence/02-rca): Claude Code 2.1.281 draws
         `[Pasted text #N +M lines]` for a paste of 4+ lines (M = newlines; no suffix without one) and codex
@@ -93,8 +90,9 @@ if __name__ == '__main__':
         claude = paste_placeholder('claude', '[Pasted text #1 +3 lines]')
         self.assertEqual(3, claude.newlines)
         self.assertTrue(claude.describes('a\nb\nc\nd'))
-        self.assertTrue(claude.describes('a\nb\nc\n\n'), 'M counts newlines, a trailing one included')
-        self.assertFalse(claude.describes('a\nb\nc'))
+        self.assertTrue(claude.describes('a\nb\nc\n'), 'M counts newlines, a trailing one included')
+        self.assertFalse(claude.describes('a\nb\nc'), 'two newlines is not three')
+        self.assertFalse(claude.describes('a\nb\nc\n\n'), 'four newlines is not three')
         self.assertEqual(0, paste_placeholder('claude', '[Pasted text #5]').newlines)
         self.assertTrue(paste_placeholder('claude', '[Pasted text #5]').describes('x' * 1200))
         codex = paste_placeholder('codex', '[Pasted Content 1014 chars]')
@@ -131,3 +129,7 @@ if __name__ == '__main__':
                                      "\x1b[1m›\x1b[0m \x1b[2mAsk Codex to do anything\x1b[0m", "",
                                      "gpt-6-sol medium · ~/project"])
         self.assertEqual('idle', observe('codex', prose_then_idle).state)
+
+
+if __name__ == '__main__':
+    unittest.main()
