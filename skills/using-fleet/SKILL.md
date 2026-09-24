@@ -176,7 +176,8 @@ ignores the profile fields silently and has no such rows, so a missing `runtime`
 other; do not switch the box to get one.
 A codex worker runs with NO approval prompts inside the workspace-write sandbox, network on (FB-110, D-45):
 `dispatch`/`revive` print a `codex_policy` row with the argv and the writable roots, and `brief` repeats it. A codex
-worker's own `pgrep`/`/proc` see only its sandbox, so keep coordinator, stack and release instants on claude
+worker's own `pgrep`/`/proc` see only its sandbox, so every verb that attributes a process to a pane (`board`,
+`pane-guard`, `close`, `harvest`, `reap`, `declare`'s pane check) is blind when it runs them; keep coordinator, stack and release instants on claude
 (docs/README.fleet-runtimes.md).
 
 ### Selecting the box's default runtime
