@@ -1,6 +1,7 @@
 """B25: the mutation runner's extractor takes the ONE anchored block or refuses, and every injection anchor
 is unique in the tree it targets. RED: the w2itharness instant's evidence/01-red/b25-decoy-*-base.txt (a
 1-line decoy certified as the audit; mutants 3/4 SURVIVED without being injected)."""
+import importlib.util
 import pathlib
 import re
 import shutil
@@ -60,21 +61,28 @@ class MutationExtractor(unittest.TestCase):
         text = (IT / "run-m9-mutation.sh").read_text()
         defined = text.index("m9_unreached() {")
         uses = [m.start() for m in re.finditer(r"^\s*m9_unreached ", text, re.M)]
-        self.assertGreaterEqual(len(uses), 3, "extract-refused, baseline-red and inject-failed aborts")
+        #: Two aborts since the 0.6.9 stack: extract-refused and baseline-red. A failed injection no longer aborts —
+        #: FB-108's per-mutation loop writes a NOT-APPLIED row for it, and M9-mut-inject judges the set.
+        self.assertGreaterEqual(len(uses), 2, "extract-refused and baseline-red aborts")
         self.assertTrue(all(u > defined for u in uses), "m9_unreached is used before it is defined")
-        self.assertEqual(text.count("\n  exit 1\n"), 3, "three abort paths")
-        self.assertEqual(len(uses), 3, "one m9_unreached call per abort path")
+        self.assertEqual(text.count("\n  exit 1\n"), 2, "two abort paths")
+        self.assertEqual(len(uses), 2, "one m9_unreached call per abort path")
+        self.assertIn("NOT-APPLIED)", text, "an injection that did not apply is judged per mutation, not aborted")
 
     def test_every_injection_anchor_is_unique_in_the_base_tree(self):
-        """The anchors in run-m9-mutation.sh's inject() calls must each occur once in the file they target —
-        M2's bare `os.unlink(tmp)` occurred three times in atomic.py since RV-18/RV-36 (ISSUES I-2)."""
+        """The anchors the runner injects must each occur once in the file they target — M2's bare
+        `os.unlink(tmp)` occurred three times in atomic.py since RV-18/RV-36 (ISSUES I-2). Since the 0.6.9 stack
+        the anchors live in fleet/it/m9_mutations.py (FB-108), which the runner reads for every injection."""
         text = (IT / "run-m9-mutation.sh").read_text()
-        calls = re.findall(r'inject\("mut\d/src/fleet/(\w+\.py)",\s*("(?:[^"\\]|\\.)*")', text)
-        self.assertEqual(len(calls), 4, calls)
-        for rel, quoted in calls:
-            anchor = eval(quoted)  # a python string literal, from our own runner
-            n = (REPO / "fleet" / "src" / "fleet" / rel).read_text().count(anchor)
-            self.assertEqual(n, 1, f"{rel}: anchor {anchor!r} occurs {n} times")
+        self.assertIn('M9MUT="$IT_ROOT/m9_mutations.py"', text)
+        self.assertNotRegex(text, r'inject\("mut\d/', "an inline injection bypasses m9_mutations.py's anchors")
+        spec = importlib.util.spec_from_file_location("m9_mutations", IT / "m9_mutations.py")
+        m9 = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(m9)
+        self.assertEqual(sorted(m9.MUTATIONS), [1, 2, 3, 4])
+        for n, m in m9.MUTATIONS.items():
+            count = (REPO / "fleet" / m["rel"]).read_text().count(m["old"])
+            self.assertEqual(count, 1, f"{m['rel']}: M{n} anchor {m['old']!r} occurs {count} times")
 
 
 class MergeResults(unittest.TestCase):
