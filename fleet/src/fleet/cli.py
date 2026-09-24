@@ -7058,14 +7058,25 @@ def _cadence(ctx: Ctx, parsed: Parsed) -> list:
     target = Path(named) if named else Path(ctx.instants_dir)
     if named and not target.is_absolute():
         target = Path(ctx.instants_dir) / target
+    unscoped = False
     if not named:
         cwd = Path.cwd()
-        try:
-            InstantName.parse(cwd.name)
-        except FleetError:
-            pass
-        else:
-            target = cwd
+        nearest = None
+        for candidate in (cwd, *cwd.parents):
+            try:
+                InstantName.parse(candidate.name)
+            except FleetError:
+                continue
+            nearest = candidate
+            break
+        instants_named = instants_were_named(parsed, os.environ)
+        if nearest is not None and (not instants_named or nearest == cwd or
+                                    nearest.parent.resolve() == target.resolve()):
+            target = nearest
+        elif not instants_named:
+            # A derived store/instants path may not be the caller's effort tree.
+            # Preserve the alarm when no reliable effort can be selected.
+            unscoped = True
     try:
         InstantName.parse(target.name)
     except FleetError:
@@ -7077,12 +7088,13 @@ def _cadence(ctx: Ctx, parsed: Parsed) -> list:
     seen = set()
     for source in overdue:
         register = Path(source.issues_path)
-        if not register.is_absolute() or register.parent.parent.resolve() != effort_dir:
+        if not register.is_absolute() or (not unscoped and register.parent.parent.resolve() != effort_dir):
             continue
+        source_effort = register.parent.parent.resolve()
         # The source spellings can also straddle an instant's state rename.
         # An instant's stable key omits that state while retaining its effort.
         try:
-            key = (effort_dir, InstantName.parse(register.parent.name).stable_key())
+            key = (source_effort, InstantName.parse(register.parent.name).stable_key())
         except FleetError:
             key = register.resolve()
         if key in seen:
