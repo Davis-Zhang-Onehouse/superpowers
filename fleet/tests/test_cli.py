@@ -1729,6 +1729,9 @@ class TestVerify(CliCase):
         path = fleet.paths["readyWorker"] / "RUNBOOK.md"
         path.write_text("```bash\necho one \\\n```\n```bash\necho two\n```\n")
         self.assertEqual([r.command for r in cli.recipes_of(path)], ["echo two"])
+        #: The reset relies on EVERY fence being numbered, filtered-out ones included.
+        path.write_text("```bash\necho one \\\n```\n```markdown\nnot a recipe\n```\n```bash\necho two\n```\n")
+        self.assertEqual([r.command for r in cli.recipes_of(path)], ["echo two"])
 
     def test_recipes_keep_their_opening_line_number(self):
         fleet = self.loaded()
@@ -5135,6 +5138,31 @@ class TestCompleteRefusesBrokenPointers(CliCase):
         self.assertIn("HANDOFF.md:3", err)
         self.assertTrue(env.instant.exists())
 
+    def test_a_refused_pointer_after_a_fence_keeps_its_real_line_number(self):
+        """The reader skips lines; the number reported must still be the file's own."""
+        env = self.ready_to_complete()
+        (env.instant / "HANDOFF.md").write_text(
+            "# H\n\n```bash\necho quoted\n```\n\n## Resume\n"
+            f"Read `{env.instant}/evidence/INDEX.md` first.\n")
+
+        code, out, err = env.fleet.run(["complete", "--instant", str(env.instant)])
+
+        self.assertEqual(EXIT_REFUSED, code)
+        self.assertIn("HANDOFF.md:8", err)
+
+    def test_an_unclosed_fence_hides_what_follows_and_that_is_the_accepted_reading(self):
+        """A fence nobody closes runs to end of file (CommonMark), so a pointer written after it is not
+        seen and `complete` proceeds. Stated here as the accepted cost: the file RENDERS that way too, and
+        the reader's grammar is the renderer's, not a stricter private one."""
+        env = self.ready_to_complete()
+        (env.instant / "HANDOFF.md").write_text(
+            "```bash\nfleet dispatch --title claimant\n\n"
+            f"Read `{env.instant}/evidence/INDEX.md`\n")
+
+        code, out, err = env.fleet.run(["complete", "--instant", str(env.instant)])
+
+        self.assertEqual(EXIT_OK, code, err)
+
     def test_complete_allows_the_mandated_session_log_row_with_a_bare_folder_name(self):
         """`maintain-workspace` SKILL.md:131 mandates a session-log row — `date | workspace | resume cmd |
         did what` — and the `workspace` cell is the bare folder name, not a path. Matching that bare name
@@ -5730,6 +5758,29 @@ class TestTheNearMissRuleReadsShapeAndRetraction(CliCase):
         fleet = self.loaded()
         code, out, err = self._lint(fleet, "`Phase: AWAITING-CI`")
         self.assertIn(cli.NEAR_MISS, out)
+
+    def test_a_declaration_inside_a_multi_line_block_comment_is_not_a_near_miss(self):
+        """The comment shape that WAS red at the base: the line `Phase: AWAITING-CI` sits between `<!--`
+        and `-->` on its own line, so the base's line-by-line scan matched it as prose."""
+        fleet = self.loaded()
+        code, out, err = self._lint(fleet, "<!--\nPhase: AWAITING-CI\n-->\n\nstill working.")
+        self.assertNotIn(cli.NEAR_MISS, out, f"a block comment's content was flagged: {out}")
+
+    def test_a_declaration_with_a_trailing_non_retracting_comment_still_fires(self):
+        """The partner of the retraction-in-comment case: a comment that retracts nothing exempts nothing."""
+        fleet = self.loaded()
+        code, out, err = self._lint(fleet, "Phase: AWAITING-CI <!-- see the brief -->")
+        self.assertIn(cli.NEAR_MISS, out)
+
+    def test_a_declaration_after_a_leading_comment_fires_at_its_real_line(self):
+        """New and correct: `<!-- note --> Phase: AWAITING-CI` is a live declaration in prose. The base
+        never saw it (its regex refused a leading `<`); the comment-stripped text starts with the shape.
+        Placed after a fence so the reported line number is checked past skipped lines too."""
+        fleet = self.loaded()
+        code, out, err = self._lint(fleet, "```markdown\nPhase: X\n```\n<!-- note --> Phase: AWAITING-CI")
+        rows = [line.split("\t") for line in out.splitlines() if line.startswith(cli.NEAR_MISS)]
+        self.assertEqual(1, len(rows), out)
+        self.assertTrue(rows[0][1].endswith("HANDOFF.md:6"), rows[0][1])
 
 
 class TestAwaitingCiRequiresALiveWatcher(CliCase):

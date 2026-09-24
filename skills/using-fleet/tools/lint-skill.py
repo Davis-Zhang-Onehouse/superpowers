@@ -119,9 +119,12 @@ def code_regions(text: str, src: pathlib.Path = DEFAULT_FLEET_SRC) -> list:
 
     Read through `fleet.markdown` — the ONE enclosure-aware reader (B19) — instead of a private
     ```…``` regex: a ~~~ fence is a fence, a comment's contents are not prose, and the grammar this lint
-    applies is the grammar `fleet complete`, `fleet lint` and `fleet verify` apply.
+    applies is the grammar `fleet complete`, `fleet lint` and `fleet verify` apply. One narrowing comes
+    with it: a fence indented inside a list item or behind `> ` is prose to that reader (containers are
+    not modelled), so a verb named only in such a fence is not seen by V1. No fleet skill writes one today.
     """
-    _on_path(src)
+    if "fleet" not in sys.modules:
+        _on_path(src)                 # never ahead of a package `main` already put on the path (FLEET_SRC)
     from fleet.markdown import FENCE, PROSE, lines as md_lines   # noqa: E402 - after the path is set
     blocks, prose_text = {}, []
     for line in md_lines(text):

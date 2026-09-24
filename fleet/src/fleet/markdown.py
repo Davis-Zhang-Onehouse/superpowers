@@ -16,8 +16,10 @@ Grammar (CommonMark, the subset that matters here):
     to the end of the file.
   * `<!--` … `-->` is a comment. One that STARTS a line (after at most 3 spaces) is an HTML block and
     spans lines until the first line containing `-->` (so an archival note can run on). One that starts
-    mid-line must close on that line, or it is literal text — CommonMark's rule, and the safe one: a
-    worker writing "wrap it in `<!--`" must not turn the rest of the document into a comment (RV, Task 1).
+    mid-line must close on that line, or it is literal text. That is STRICTER than CommonMark, which lets
+    an inline comment run on within its paragraph; the strict reading errs towards the gates SEEING a
+    line, and it is what keeps a worker's "wrap it in `<!--`" from turning the rest of the document into
+    a comment (RV, Task 1).
     A `<!--` inside a code span is literal. `<!-->` and `<!--->` are complete, empty comments. Inside a
     fence a comment opener is literal; inside a comment a fence opener is literal.
   * containers are not modelled: a fence indented 4+ spaces (inside a list item) or behind `> ` is prose

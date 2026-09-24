@@ -79,6 +79,15 @@ class TestFences(unittest.TestCase):
         here. A quotation written that way is still seen by the gates (ISSUES: routed)."""
         rows = lines("1. step\n    ```bash\n    cat /abs/x\n    ```\n")
         self.assertEqual([r.enclosure for r in rows], [PROSE] * 4)
+        rows = lines("> ```bash\n> cat /abs/x\n> ```\n")
+        self.assertEqual([r.enclosure for r in rows], [PROSE] * 3)
+
+    def test_a_blockquoted_comment_opener_does_not_swallow_what_follows(self):
+        """The reviewer's second shape: `> <!-- quoted` inside a blockquoted fence is a mid-line opener to
+        this reader (the `> ` is not modelled), so it is literal and the live line after it stays prose."""
+        rows = lines("> ```bash\n> <!-- quoted\n> ```\nlive /abs/p\n")
+        self.assertEqual([r.enclosure for r in rows], [PROSE] * 4)
+        self.assertIn("/abs/p", rows[3].text)
 
     def test_line_numbers_follow_newlines_only(self):
         """`str.splitlines` also breaks on a form feed and friends; an editor and `grep -n` do not, and
