@@ -14,7 +14,8 @@ examples, and therefore the commands most likely to be copied and run — comple
 name the file they came from. V2 pools the whole skill: a citation in `SKILL.md` covers a claim made in a
 reference, because a reference is part of the skill and not a separate document.
 
-Exit 0 = clean, 1 = findings, 2 = bad input.
+Exit 0 = clean, 1 = findings, 2 = bad input (a package or results file this lint cannot read is bad input,
+never a finding: every such path prints one line to stderr and exits 2).
 
 Why code spans only: a whole-document match for `fleet <word>` fires on ordinary prose — "fleet refuses it",
 "fleet state is authoritative" — and a lint that reports its own author's sentences gets switched off. This
@@ -96,16 +97,18 @@ def verbs_from(src: pathlib.Path) -> set:
     try:
         from fleet.cli import VERBS
     except Exception as exc:                       # noqa: BLE001 - reported, never guessed around
-        raise SystemExit(f"lint-skill: cannot import fleet.cli from {src} ({exc}). "
-                         f"Set FLEET_SRC if the package has moved.")
+        print(f"lint-skill: cannot import fleet.cli from {src} ({exc}). Set FLEET_SRC if the package has "
+              f"moved.", file=sys.stderr)
+        raise SystemExit(2)                        # bad input, never "findings" (RV-42)
     return set(VERBS)
 
 
 def passing_cases(results: pathlib.Path) -> set:
     if not results.is_file():
-        raise SystemExit(f"lint-skill: no results file at {results}. This lint cannot check a citation "
-                         f"without it, and passing anyway would make an uncited claim indistinguishable "
-                         f"from a verified one.")
+        print(f"lint-skill: no results file at {results}. This lint cannot check a citation without it, "
+              f"and passing anyway would make an uncited claim indistinguishable from a verified one.",
+              file=sys.stderr)
+        raise SystemExit(2)                        # bad input, never "findings" (RV-42)
     out = set()
     for line in results.read_text().splitlines()[1:]:
         parts = line.split("\t")
