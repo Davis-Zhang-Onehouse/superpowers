@@ -123,8 +123,12 @@ def git_writable_dirs(workspace, git) -> tuple:
                 continue
         except (OSError, ValueError):
             continue
-        found += [str(common / name) for name in ('objects', 'refs', 'logs') if (common / name).is_dir()]
-        found.append(str(own))
+        #: RV-38 (closure 1): `is_dir()` follows symlinks, so each root is resolved and must be a real directory directly
+        #: inside the common dir. A symlink that leads anywhere else is dropped, never added.
+        for root in (common / 'objects', common / 'refs', common / 'logs', own):
+            if root.is_symlink() or not root.is_dir() or root.resolve().parent not in (common, common / 'worktrees'):
+                continue
+            found.append(str(root.resolve()))
     return tuple(dict.fromkeys(found))
 
 

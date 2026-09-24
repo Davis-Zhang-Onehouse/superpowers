@@ -141,6 +141,20 @@ class GitRootsTests(unittest.TestCase):
             (self.slot / 'x' / sub).mkdir(parents=True)
         self.assertEqual(git_writable_dirs(self.slot, default_git()), ())
 
+    def test_a_symlinked_root_is_never_added(self):
+        """RV-38 (closure 1). `is_dir()` follows symlinks, so `<common>/logs -> /anywhere` would have made /anywhere a
+        root. Every root is resolved, and one that is a symlink or leaves the common dir is dropped."""
+        git('worktree', 'add', '-q', '--detach', str(self.slot / 'wt'), cwd=self.main)
+        elsewhere = self.tmp / 'elsewhere'
+        elsewhere.mkdir()
+        logs = self.main / '.git' / 'logs'
+        shutil.rmtree(logs)
+        logs.symlink_to(elsewhere, target_is_directory=True)
+        got = git_writable_dirs(self.slot, default_git())
+        self.assertNotIn(str(elsewhere.resolve()), got)
+        self.assertNotIn(str(logs), got)
+        self.assertEqual(sorted(got), sorted(r for r in worktree_roots(self.main, 'wt') if not r.endswith('/logs')))
+
     def test_a_rewritten_commondir_does_not_move_the_roots(self):
         """RV-37. `<common>/worktrees/<name>` is itself a writable root, so its `commondir` file is the worker's to
         rewrite; roots re-derived at the next revive must not follow it to another repository."""
