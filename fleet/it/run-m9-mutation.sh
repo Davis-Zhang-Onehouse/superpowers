@@ -53,13 +53,22 @@ it_assert_isolation M9mut-enter
 # anchors is a FAIL here.
 rm -f "$EV/m9.py"
 if python3 "$IT_ROOT/bin/extract-m9.py" "$IT_ROOT/run-group5.sh" "$EV/m9.py" > "$EV/extract.out" 2>&1; then
-  it_pass M9-mut-extract "fleet/it/M9-mutation/extract.out" "$(cat "$EV/extract.out")"
+  it_pass M9-mut-extract "fleet/it/M9-mutation/extract.out" "$(tr '\n' ' ' < "$EV/extract.out")"
 else
   it_fail M9-mut-extract "fleet/it/M9-mutation/extract.out" "the extractor refused: $(tr '\n' ' ' < "$EV/extract.out" | cut -c1-240)"
+  m9_unreached "no audit was extracted" M9-mut-baseline M9-mut-inject M9-mut-1 M9-mut-2 M9-mut-3 M9-mut-4
   it_assert_isolation M9mut-leave
   echo "no audit was extracted — refusing to report mutation results" >&2
   exit 1
 fi
+
+# An abort must not leave the previous run's PASS rows standing for the cases it never reached: the merge
+# keeps any row no fresh row replaces, which is how "M9-mut-3 PASS" stayed in the register while the mutant
+# was never injected (I-2). Each unreached case gets a SKIP row that names why.
+m9_unreached() {              # m9_unreached <reason> <case...>
+  local why="$1"; shift
+  local c; for c in "$@"; do it_skip "$c" "fleet/it/M9-mutation" "NOT REACHED: $why, so this case was not measured on this run"; done
+}
 
 run_audit() {                 # run_audit <instant-root> <logfile>  -> exit code of the audit
   INSTANT="$1" PYTHONPATH="$1/src" python3 "$EV/m9.py" > "$2" 2>&1

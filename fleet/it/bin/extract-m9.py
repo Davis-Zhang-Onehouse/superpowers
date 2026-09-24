@@ -4,8 +4,9 @@
 The runner used to do this inline with `src.index(anchor)`: the FIRST match, with no cardinality check, while
 its own `inject()` twenty lines below asserted present-and-unique. A decoy heredoc bearing the anchor above the
 real one made the runner certify the decoy as the audit under test (B25, the fleet analogue of i5v2). The
-anchor and its terminator are asserted to occur exactly once; anything else is a refusal (exit 2), never a
-guess, and nothing is written.
+anchor is asserted to occur exactly once and the block ends at the first terminator after it; anything else —
+two anchors, none, no terminator, an unreadable caller — is a refusal (exit 2), never a guess, and nothing is
+written.
 
 usage: extract-m9.py <run-group5.sh> <out.py>   -> exit 0 and the audit at <out.py>, or exit 2 and nothing.
 """
@@ -38,7 +39,11 @@ def main(argv):
     if len(argv) != 3:
         refuse(__doc__)
     caller, out = pathlib.Path(argv[1]), pathlib.Path(argv[2])
-    text = extract(caller.read_text())
+    try:
+        src = caller.read_text()
+    except OSError as exc:
+        refuse(f"cannot read the caller {caller}: {exc}")
+    text = extract(src)
     out.write_text(text)
     print(f"extracted the M9 audit: {len(text.splitlines())} lines, from the one block anchored at {ANCHOR!r}")
 
