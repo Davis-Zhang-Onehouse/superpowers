@@ -261,6 +261,11 @@ class RowOwnership(unittest.TestCase):
         movers = [p.name for p in sorted(IT.glob("run-*.sh")) if "it_move_tmux_tmpdir" in p.read_text(errors="replace")]
         self.assertEqual(movers, ["run-B.sh", "run-C.sh", "run-D.sh", "run-group3.sh"])
 
+    def test_f9s_subshell_propagates_its_failure(self):
+        """F9-zero-delta is written inside `( … )`; a FAIL there (or an OWN- row) must reach IT_FAILED."""
+        text = (IT / "run-F.sh").read_text()
+        self.assertRegex(text, r'F9-zero-delta fleet compaction-status --porcelain\n\s*exit "\$\{IT_FAILED:-0\}" \) \|\| IT_FAILED=1')
+
     def test_group5_claims_its_coverage_rows(self):
         """Found by the plan's pre-flight scan: run-group5.sh writes L7-coverage and M5-coverage."""
         text = (IT / "run-group5.sh").read_text()
