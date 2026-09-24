@@ -1896,6 +1896,10 @@ class TestUnvouchedReason(unittest.TestCase):
             "file -C -m m": "file -C",
             "file --compile -m m": "compile",
             "file -z x": "file -z",
+            #: RV-30 — a long option LONGER than the blocked name (--uncompress-noreport is -Z's long form)
+            "file --uncompress-noreport h.zst": "uncompress",
+            "file --uncompress-n h.zst": "uncompress",
+            "sort --output-something=/x y": "output",
             "file --uncompress x": "uncompress",
             "diff -l a b": "diff -l",
             "diff --paginate a b": "paginate",
