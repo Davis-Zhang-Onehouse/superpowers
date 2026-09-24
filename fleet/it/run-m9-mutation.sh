@@ -94,8 +94,11 @@ for n in 1 2 3 4; do
   #: the extracted audit and against the real package, and not against a mutant tree; the case that
   #: exists to notice a kill arriving for the wrong reason is what noticed.
   cp -r "$INSTANT/tests" "$EV/mut$n/"
-  #: The copy IS the package the baseline just proved green, byte for byte, before anything is injected.
-  if ! diff -rq "$INSTANT/src" "$EV/mut$n/src" > "$EV/mut$n.inject" 2>&1; then
+  #: The copy IS the package the baseline just proved green, byte for byte, before anything is injected —
+  #: `tests/` as well as `src/`, since the audit imports from `tests/test_cli.py`: a partial `tests/` copy
+  #: would otherwise surface as a kill for the wrong reason rather than as the copy failure it is (RV-21).
+  if ! { diff -rq "$INSTANT/src" "$EV/mut$n/src" && diff -rq "$INSTANT/tests" "$EV/mut$n/tests"; } \
+       > "$EV/mut$n.inject" 2>&1; then
     echo "  NOT APPLIED — M$n: the copy differs from the package the baseline audited; nothing injected" \
       >> "$EV/mut$n.inject"
     cat "$EV/mut$n.inject"
