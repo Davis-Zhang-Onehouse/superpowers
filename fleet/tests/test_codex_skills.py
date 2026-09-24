@@ -251,6 +251,16 @@ class CodexSkillsTests(unittest.TestCase):
         self.assertIn('current', out + err)
         self.assertFalse(self.link.exists() or self.link.is_symlink())
 
+    def test_a_codex_home_that_does_not_exist_is_refused_not_created(self):
+        """RV-29: --codex-home is required so a wrong guess never writes into someone else's config; a TYPO must not quietly
+        create a new config tree and report ok either."""
+        typo = self.tmp / 'nowhere' / '.codx'
+        for extra in ((), ('--dry-run',)):
+            code, out, err = self.main('--codex-home', str(typo), '--releases', str(self.rel), *extra)
+            self.assertEqual(code, 4, out + err)
+            self.assertIn('does not exist', out + err)
+        self.assertFalse(os.path.lexists(self.tmp / 'nowhere'))
+
     # 8
     def test_codex_home_is_required(self):
         self.assertEqual(self.main('--releases', str(self.rel))[0], 2)
