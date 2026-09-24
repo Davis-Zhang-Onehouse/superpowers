@@ -149,13 +149,16 @@ nothing was claimed for them.
 
 **Every dispatch says what it did on STDOUT, including one that started nothing.** A non-start prints a
 `refused` row (exit 3/4) or an `error` row (exit 1/2/5), with `clears_when`/`clears_who` when the answer has
-them. After a claim it also prints `step`, `todo_id`, `instant`, `record` and `lease`, naming where it stopped
-and what it left. Stderr still carries the paragraph for a human. Every dispatch, `--dry-run` included, prints
+them. That includes a flag the parser refuses. After a claim it also prints `step` plus bare `left_todo_id`,
+`left_instant`, `left_record` (`pending-launch`/`launched`/`none`/`unknown`) and `left_lease`
+(`given-back`/`retained`), and a `remedy` sentence. A non-start never prints the success keys `todo_id` or
+`instant`, so their presence means a worker started. Stderr still carries the paragraph for a human. Every dispatch, `--dry-run` included, prints
 `title_as_used`: the name the verb actually used. `--title` is rewritten into one dashless camelCase field, so
 `gdwsites-09240324` is used as `gdwsites09240324`. When the name differs from `--title`, a `title_rewritten`
 row says so. Read `title_as_used` / `todo_id` / `instant` from the output. Never derive the child from the
 title you passed. A wrapper must also keep the exit status: `fleet dispatch … | grep` discards it, and a
-dispatch killed by a signal prints nothing at all.
+dispatch killed by a signal prints nothing at all. An interrupt (SIGINT) during the launch rolls back and
+stays an interrupt, with no row.
 
 `fleet pane-guard` has its own codes because it is a contract for an external monitor: `0` safe, `10`
 queued-text, `11` mid-turn, `12` not-claude, `13` unknown-pane, `14` indeterminate, `15` awaiting-operator.
