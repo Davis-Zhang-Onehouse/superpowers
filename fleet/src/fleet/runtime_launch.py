@@ -69,68 +69,13 @@ def codex_policy_summary(writable_dirs=()) -> str:
             f'(argv: {" ".join(CODEX_POLICY)})')
 
 
-def writable_dirs(environ, extra=()) -> tuple:
+def writable_dirs(environ) -> tuple:
     """The codex writable roots beyond the slot (the sandbox cwd): the store and the instants directory — the worker
-    writes its own instant and its coordinator's proposals there — and `extra`, the slot's git dirs."""
-    base = tuple(str(Path(environ[key]).resolve()) for key in ('FLEET_HOME', 'FLEET_INSTANTS') if environ.get(key))
-    return tuple(dict.fromkeys((*base, *map(str, extra))))
-
-
-def git_writable_dirs(workspace, git) -> tuple:
-    """What a LINKED WORKTREE at the slot root or one level below must write to commit: its common dir's `objects`,
-    `refs` and `logs`, and its own per-worktree git dir (index, HEAD). Nothing else.
-
-    Measured (codex-cli 0.156.1, `codex exec` in a private CODEX_HOME, FB-110): workspace-write makes `<root>/.git`
-    read-only at the TOP of each writable root, so a linked worktree — ws5's shape, whose common dir is the shared
-    checkout's `.git` — cannot commit (`index.lock: Read-only file system`). With these four roots a detached commit,
-    a branch create, a commit on the branch and a fetch all work. Adding the whole common dir ALSO made `hooks/` and
-    `config` writable (RV-28): a sandboxed worker could plant code that the next unsandboxed git run in any worktree of
-    that repository executes. A nested clone commits inside the cwd already and needs nothing. A slot that is itself a
-    repo would need its top-level `.git`, which codex protects for that same reason; it is not a fleet shape and gets
-    nothing. `git` is the injected `(args, cwd) -> (rc, stdout)` seam (`workspace.default_git`); a failing git adds
-    nothing."""
-    slot = Path(workspace)
-    found = []
-    try:
-        #: RV-29: the slot is the worker's own writable tree and these roots are re-derived at every revive, so a
-        #: symlink a worker planted must not reach someone else's repository.
-        candidates = [slot, *sorted(child for child in slot.iterdir() if child.is_dir() and not child.is_symlink())]
-    except OSError:
-        return ()
-    for candidate in candidates:
-        dotgit = candidate / '.git'
-        if dotgit.is_symlink() or not dotgit.is_file():    # a directory `.git` is a clone or the slot itself
-            continue
-        code, out = git(['rev-parse', '--path-format=absolute', '--git-dir'], candidate)
-        if code != 0 or not out.strip():
-            continue
-        own = Path(out.strip().splitlines()[0]).resolve()
-        #: RV-37: never ask git for the common dir. It reads `<own>/commondir`, and `<own>` is a writable root, so the
-        #: worker could point it at any repository before its next revive. A linked worktree's git dir is
-        #: `<common>/worktrees/<name>` by construction, and that shape is all the common dir is taken from.
-        if own.parent.name != 'worktrees':
-            continue
-        common = own.parent.parent
-        #: RV-29 (closure 1): the slot is the worker's to write, so a git dir, back-link included, forged inside it
-        #: proves nothing. The repository whose back-link counts lives outside the slot, and a worktree whose repository
-        #: is inside the slot writes it within the cwd anyway.
-        if common == slot.resolve() or slot.resolve() in common.parents:
-            continue
-        #: RV-29: a `.git` FILE is the worker's to write, so it proves nothing. Git's back-link — `<own>/gitdir`, written
-        #: by `git worktree add` in the owning repository — must name this very `.git`. For a repository the worker cannot
-        #: write, it cannot forge that; its OWN worktree dir is a root, so rewriting it only breaks its own roots.
-        try:
-            if Path((own / 'gitdir').read_text().strip()).resolve() != dotgit.resolve():
-                continue
-        except (OSError, ValueError):
-            continue
-        #: RV-38 (closure 1): `is_dir()` follows symlinks, so each root is resolved and must be a real directory directly
-        #: inside the common dir. A symlink that leads anywhere else is dropped, never added.
-        for root in (common / 'objects', common / 'refs', common / 'logs', own):
-            if root.is_symlink() or not root.is_dir() or root.resolve().parent not in (common, common / 'worktrees'):
-                continue
-            found.append(str(root.resolve()))
-    return tuple(dict.fromkeys(found))
+    writes its own instant and its coordinator's proposals there. Nothing else, and nothing derived from the slot's
+    contents (D-51: every rule that derived git roots from state the worker can touch was forged in review, so a
+    codex worker runs only in a CLONE slot, whose repositories commit inside the cwd)."""
+    return tuple(dict.fromkeys(str(Path(environ[key]).resolve()) for key in ('FLEET_HOME', 'FLEET_INSTANTS')
+                               if environ.get(key)))
 
 
 def launch_argv(settings: LaunchSettings, prompt: str, writable_dirs=()) -> list[str]:
@@ -185,10 +130,9 @@ def resolve_settings(runtime, slot, environ, which, runner) -> LaunchSettings:
     return LaunchSettings(runtime, executable, str(Path(config).resolve()))
 
 
-def prepare(settings, record, seed_path, environ, *, session_id=None, extra_writable=()) -> Path:
-    """`extra_writable`: further codex roots, the slot's git dirs (`git_writable_dirs`); claude ignores them."""
+def prepare(settings, record, seed_path, environ, *, session_id=None) -> Path:
     child = Path(record.child_instant)
-    writable = writable_dirs(environ, extra_writable)
+    writable = writable_dirs(environ)
     env = {key: environ[key] for key in ('FLEET_HOME', 'FLEET_INSTANTS', 'PATH') if environ.get(key)}
     env.update(FLEET_ROOT=record.root, FLEET_TMUX_SOCKET=record.tmux_socket,
                INSTANT=str(child), FLEET_INSTANT=str(child), FLEET_BIN=fleet_executable())
