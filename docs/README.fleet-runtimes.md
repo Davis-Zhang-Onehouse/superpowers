@@ -93,10 +93,10 @@ Known limit (measured on 0.156.1): the sandbox runs each command in its own PID 
 only the sandbox. The 22 verbs whose cli.py reach includes a process or pane probe cannot see host processes when a
 codex worker runs them: `abort`, `apply`, `board`, `close`, `compaction-status`, `declare` (its pane check),
 `dispatch`, `harvest`, `pane-guard`, `peers`, `reap`, `reconcile`, `release-cut`, `release-deploy`,
-`release-rollback`, `release-verify`, `resume`, `revive`, `runtime`, `seed-check`, `send` and `status` (static map in the FB-110 instant,
-evidence/01-settle/census-verbs.txt). The verbs a fix worker reports and finishes with (`brief`, `propose`, `review`,
+`release-rollback`, `release-verify`, `resume`, `revive`, `runtime`, `seed-check`, `send` and `status` (a static walk of each
+`_do_<verb>` handler's calls in `fleet/src/fleet/cli.py`, taken when this paragraph was written). The verbs a fix worker reports and finishes with (`brief`, `propose`, `review`,
 `park`, `complete`, `base-check`) reach none. Whether coordinator, stack or release instants may run on codex under
-this limit is an operator decision that has not been made yet (raised as ISSUES I-4 of the FB-110 instant). tmux works inside the sandbox only because the network is on.
+this limit is an operator decision that has not been made yet (raised with the FB-110 delivery). tmux works inside the sandbox only because the network is on.
 
 `FLEET_CODEX_BIN` and `FLEET_CLAUDE_BIN` can name the actual executable; do not point them at
 a seed-delivery shim. Claude's existing `REAL_CLAUDE` override
