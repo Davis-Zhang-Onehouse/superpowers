@@ -5267,12 +5267,15 @@ def _segments(tokens: list):
 
 
 def _long_option_hits(word: str, names) -> str:
-    """The blocked long option `word` selects, by getopt's rule (an exact name or a prefix of it), or `""`."""
+    """The blocked long option `word` selects, or `""`. Matched in BOTH directions: getopt selects a blocked
+    name from any unambiguous prefix of it (`--out` → `--output`), and a blocked name is itself the prefix
+    of its own longer aliases and variants (`--uncompress` → `--uncompress-noreport`, the long form of the
+    refused `-Z`; RV-30). A false refusal of an unrelated option sharing the prefix is the accepted cost."""
     if not word.startswith("--"):
         return ""
     given = word[2:].split("=", 1)[0]
     for name in names:
-        if given and name.startswith(given):
+        if given and (name.startswith(given) or given.startswith(name)):
             return name
     return ""
 
