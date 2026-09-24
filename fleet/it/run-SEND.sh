@@ -144,6 +144,9 @@ send_teardown() {     # close + harvest the worker; never leaves the pane behind
   it_tmux kill-server 2>/dev/null
   #: The slot lives OUTSIDE the checkout (see send_setup); nothing else removes it.
   case "${SLOT:-}" in */send-fixture-slot-*) rm -rf "$SLOT" ;; esac
+  #: RV-43 / FB-102: the private codex home holds a COPY of a credential; it must not outlive the run in a
+  #: slot that will be re-leased.
+  case "${CODEX_HOME:-}" in */codex-home) rm -rf "$CODEX_HOME" ;; esac
 }
 record_check() {      # record_check <child instant> <expected count> <outcome regex> [confirmations, comma-joined, one per row]
   #: RV-21. The CONFIRMATION per row is asserted, not only the outcome: a green SEND-2 that does not say
