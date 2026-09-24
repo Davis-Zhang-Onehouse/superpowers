@@ -175,9 +175,18 @@ def _observe_codex(rows: list[str], visible: list[str]) -> PaneObservation:
         return PaneObservation("unknown")
     prompt = None
     for index in range(max(0, len(rows) - PROMPT_TAIL_LINES), len(rows) - 1):
-        cells = _trim(_cells(rows[index]))
-        if (cells and cells[0] == ("›", False)
-                and re.match(r"\s*\x1b\[(?:0;)?1m›", rows[index])):
+        if _codex_caret_row(rows[index]):
+            prompt = index
+    if prompt is None:
+        #: FB-27 (codex). An inline draft of 7+ lines puts the caret ABOVE the window while its continuation
+        #: rows fill it — measured, `codex-tall-draft.frame`. Walk up from the footer through CONTIGUOUS
+        #: continuation rows (two-space indented, or blank — the same rows the content loop below accepts)
+        #: and take the BOLD caret directly above them; any other row ends the walk, so scrollback prose
+        #: above an empty box is still `unknown`, and a submitted prompt's dim caret never qualifies.
+        index = len(rows) - 2
+        while index >= 0 and (not plain(rows[index]).strip() or plain(rows[index]).startswith("  ")):
+            index -= 1
+        if index >= 0 and _codex_caret_row(rows[index]):
             prompt = index
     if prompt is None:
         return PaneObservation("unknown")
@@ -192,6 +201,11 @@ def _observe_codex(rows: list[str], visible: list[str]) -> PaneObservation:
     before = [row for row in visible[max(0, prompt - 3):prompt] if row]
     busy = bool(before and re.fullmatch(r"[◦•] .+\(.*esc to interrupt\)", before[-1]))
     return PaneObservation("busy" if busy else "queued" if draft else "idle", draft)
+
+
+def _codex_caret_row(row: str) -> bool:
+    cells = _trim(_cells(row))
+    return bool(cells and cells[0] == ("›", False) and re.match(r"\s*\x1b\[(?:0;)?1m›", row))
 
 #: How much of the pane is "now", counted UP FROM THE LAST NON-BLANK ROW. A caret above this window is
 #: scrollback, not a queued message. Counted from the last non-blank row rather than from the last raw
@@ -511,5 +525,56 @@ def claude_watchers(pane_text: str) -> str:
             continue
         return ", ".join(match.group(0) for match in _WATCHER_MARKER.finditer(plain_row))
     return ""
+
+# --- paste placeholders (FB-27) ----------------------------------------------------------------------
+#: What each TUI draws INSTEAD of a large bracketed paste. Measured on Claude Code 2.1.281 and codex 0.156.1
+#: (w1sendrecords instant, `evidence/02-rca/*/summary.tsv`), through fleet's own `send_literal`:
+#:  - Claude Code: a paste of 4+ lines, or of more than ~800 characters, renders as `[Pasted text #N +M lines]`
+#:    where M is the number of NEWLINES in the paste (a 5-line message ending in a newline reads `+5 lines`)
+#:    and the ` +M lines` suffix is absent when there is no newline; N is a per-session paste counter.
+#:  - codex: a paste of more than ~1000 characters renders as `[Pasted Content C chars]`, C counted in
+#:    characters (a 1014-char non-ASCII message, 1516 bytes, read `1014 chars`). Its line count is not shown.
+#: Below the thresholds both TUIs draw the text itself and `observe` returns it as the draft.
+#:
+#: The placeholder is the TUI's own count-summary of the paste it HOLDS, so a send can confirm its message
+#: against it — weaker than reading the text back, and recorded as such (`messaging.SendRecord.confirmation`).
+#: Nothing here decides thresholds: a placeholder is recognised wherever it appears, and a draft that is neither
+#: the text nor a count-consistent placeholder is never submitted.
+_CLAUDE_PASTE = re.compile(r"^\[Pasted text #(\d+)(?: \+(\d+) lines)?\]$")
+_CODEX_PASTE = re.compile(r"^\[Pasted Content (\d+) chars\]$")
+
+
+@dataclass(frozen=True)
+class PastePlaceholder:
+    """A TUI's summary of a paste it holds: the counts it states, `None` where it states nothing."""
+    runtime: RuntimeName
+    newlines: Optional[int] = None
+    chars: Optional[int] = None
+
+    def describes(self, text: str) -> bool:
+        """Whether every count the TUI stated is the count of `text`. A placeholder stating nothing that
+        can be checked (neither) describes nothing: it is never a confirmation."""
+        checks = []
+        if self.newlines is not None:
+            checks.append(self.newlines == text.count("\n"))
+        if self.chars is not None:
+            checks.append(self.chars == len(text))
+        return bool(checks) and all(checks)
+
+
+def paste_placeholder(runtime: RuntimeName, draft) -> Optional[PastePlaceholder]:
+    """The placeholder `draft` is, or None when the draft is text (or nothing)."""
+    validate_runtime(runtime)
+    if not draft or "\n" in draft.strip():
+        return None
+    body = " ".join(draft.split())
+    if runtime == "claude":
+        match = _CLAUDE_PASTE.match(body)
+        if match:
+            return PastePlaceholder("claude", newlines=int(match.group(2) or 0))
+        return None
+    match = _CODEX_PASTE.match(body)
+    return PastePlaceholder("codex", chars=int(match.group(1))) if match else None
+
 
 # --- control -----------------------------------------------------------------------------

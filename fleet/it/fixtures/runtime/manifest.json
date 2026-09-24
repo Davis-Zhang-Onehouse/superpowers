@@ -97,5 +97,41 @@
     "columns": 100,
     "rows": 35,
     "evidence": "../../../../docs/superpowers/specs/evidence/coordinator-dispatch/commands.jsonl line 22 — the directory-trust screen a fresh Codex shows in an untrusted slot, captured on the coordinator-dispatch probe socket; the harness answered it with Enter on line 23"
+  },
+  {
+    "runtime": "claude",
+    "cli_version": "2.1.281",
+    "state": "queued",
+    "frame": "claude-paste-placeholder.frame",
+    "columns": 180,
+    "rows": 45,
+    "evidence": "w1sendrecords instant, evidence/02-rca/claude-probe/round2/4lines.frame — a FOUR-line bracketed paste (fleet's own `send_literal`) drawn as `[Pasted text #1 +3 lines]` with `paste again to expand`; M = newlines in the paste (FB-27)"
+  },
+  {
+    "runtime": "claude",
+    "cli_version": "2.1.281",
+    "state": "queued",
+    "frame": "claude-paste-placeholder-nolines.frame",
+    "columns": 180,
+    "rows": 45,
+    "evidence": "w1sendrecords instant, evidence/02-rca/claude-probe/round2/1line-1200chars.frame — a 1209-character ONE-line paste drawn as `[Pasted text #5]`: no `+M lines` suffix without a newline (FB-27)"
+  },
+  {
+    "runtime": "codex",
+    "cli_version": "0.156.1",
+    "state": "queued",
+    "frame": "codex-paste-placeholder.frame",
+    "columns": 180,
+    "rows": 45,
+    "evidence": "w1sendrecords instant, evidence/02-rca/codex-probe/1line-1100.frame — a 1091-character paste drawn as `[Pasted Content 1091 chars]`; C counts characters (FB-27)"
+  },
+  {
+    "runtime": "codex",
+    "cli_version": "0.156.1",
+    "state": "queued",
+    "frame": "codex-tall-draft.frame",
+    "columns": 180,
+    "rows": 45,
+    "evidence": "w1sendrecords instant, evidence/02-rca/codex-probe/round2/7lines.frame — SEVEN lines pasted and drawn INLINE: the bold › caret sits above the 8-row tail window while its continuation rows fill it; the base observer answered `unknown` for a box holding the whole message (FB-27, codex)"
   }
 ]

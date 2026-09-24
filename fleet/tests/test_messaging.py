@@ -3,8 +3,9 @@ import tempfile
 import unittest
 from types import SimpleNamespace
 
-from fleet.errors import FleetError, Refused
-from fleet.messaging import send
+from fleet.errors import BadInput, FleetError, Refused
+from fleet.messaging import (CONFIRMED_BY_DRAFT, CONFIRMED_BY_PLACEHOLDER, SUBMITTED, UNCERTAIN_AFTER_ENTER,
+                             UNCERTAIN_AFTER_INSERTION, SendRecord, read_sends, record_send, send, sends_path)
 from fleet.runtime import PaneObservation
 
 
@@ -21,7 +22,7 @@ class MessagingTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as directory:
             layer, events = self.fixture([PaneObservation('idle'), PaneObservation('queued','hello'), PaneObservation('busy')])
             result=send(Path(directory),layer,SimpleNamespace(tmux='worker'),'hello')
-            self.assertEqual(result,'submitted')
+            self.assertEqual(result,(SUBMITTED, CONFIRMED_BY_DRAFT))
             self.assertEqual(events,[('literal','hello'),('submit',None)])
 
     def test_a_soft_wrapped_draft_is_the_same_message(self):
@@ -32,7 +33,7 @@ class MessagingTests(unittest.TestCase):
             wrapped = 'please re-run the failing suite and paste the first\nassertion that fails'
             layer, events = self.fixture([PaneObservation('idle'), PaneObservation('queued', wrapped),
                                           PaneObservation('busy')])
-            self.assertEqual(send(Path(directory), layer, SimpleNamespace(tmux='worker'), text), 'submitted')
+            self.assertEqual(send(Path(directory), layer, SimpleNamespace(tmux='worker'), text), (SUBMITTED, CONFIRMED_BY_DRAFT))
             self.assertEqual(events, [('literal', text), ('submit', None)])
             layer, events = self.fixture([PaneObservation('idle'), PaneObservation('queued', 'please re-run it')])
             with self.assertRaises(FleetError):
@@ -54,7 +55,7 @@ class MessagingTests(unittest.TestCase):
                 PaneObservation('busy')])
             result = send(Path(directory), layer, SimpleNamespace(tmux='worker'), 'hello',
                           sleep=lambda _: None)
-            self.assertEqual(result, 'submitted')
+            self.assertEqual(result, (SUBMITTED, CONFIRMED_BY_DRAFT))
             self.assertEqual(events, [('literal', 'hello'), ('submit', None)])
 
     def test_competing_draft_and_failed_capture_never_retry(self):
@@ -79,3 +80,105 @@ class MessagingTests(unittest.TestCase):
                 with self.assertRaises(FleetError):
                     send(Path(directory),layer,SimpleNamespace(tmux='worker'),text)
             self.assertEqual(events,[])
+
+    # ---- FB-27: a paste the TUI shows as a placeholder ----------------------------------------------
+
+    def runtime_fixture(self, runtime, states):
+        layer, events = self.fixture(states)
+        layer.runtime = runtime
+        return layer, events
+
+    def test_a_multiline_message_confirmed_by_the_paste_placeholder_is_submitted(self):
+        """Measured on Claude Code 2.1.281: a paste of 4+ lines renders as `[Pasted text #N +M lines]`
+        (M = newlines) and codex 0.156.1 shows `[Pasted Content C chars]` above ~1000 characters. Before
+        the fix `send` waited for the draft to equal the text, timed out, and left the paste unsubmitted
+        (FB-27, every multi-line coordinator send)."""
+        text = 'Reply OK.\nsecond line\nthird line\nfourth line\nfifth line'
+        for runtime, placeholder in (('claude', '[Pasted text #3 +4 lines]'),
+                                     ('codex', f'[Pasted Content {len(text)} chars]')):
+            with self.subTest(runtime=runtime), tempfile.TemporaryDirectory() as directory:
+                layer, events = self.runtime_fixture(runtime, [
+                    PaneObservation('idle'), PaneObservation('queued', placeholder), PaneObservation('busy')])
+                outcome, confirmation = send(Path(directory), layer, SimpleNamespace(tmux='worker'), text,
+                                             sleep=lambda _: None)
+                self.assertEqual((SUBMITTED, CONFIRMED_BY_PLACEHOLDER), (outcome, confirmation))
+                self.assertEqual(events, [('literal', text), ('submit', None)])
+
+    def test_the_exact_draft_is_still_the_strong_confirmation(self):
+        with tempfile.TemporaryDirectory() as directory:
+            layer, events = self.runtime_fixture('claude', [
+                PaneObservation('idle'), PaneObservation('queued', 'hello'), PaneObservation('busy')])
+            self.assertEqual((SUBMITTED, CONFIRMED_BY_DRAFT),
+                             send(Path(directory), layer, SimpleNamespace(tmux='worker'), 'hello'))
+
+    def test_a_placeholder_whose_counts_disagree_is_never_submitted(self):
+        """Somebody else's paste, or ours concatenated onto a draft: the counts are not the message's, so
+        Enter is never sent and the send is uncertain — the FB-27 fix must not become a blind submit."""
+        text = 'Reply OK.\nsecond line\nthird line\nfourth line\nfifth line'
+        for runtime, placeholder in (('claude', '[Pasted text #1 +9 lines]'),
+                                     ('claude', '[Pasted text #1]'),
+                                     ('codex', '[Pasted Content 9999 chars]'),
+                                     ('codex', '[Pasted text #1 +4 lines]'),      # the other TUI's shape
+                                     ('claude', '[Pasted Content 55 chars]')):
+            with self.subTest(runtime=runtime, placeholder=placeholder), tempfile.TemporaryDirectory() as directory:
+                layer, events = self.runtime_fixture(runtime, [PaneObservation('idle'),
+                                                               PaneObservation('queued', placeholder)])
+                with self.assertRaisesRegex(FleetError, 'uncertain after insertion'):
+                    send(Path(directory), layer, SimpleNamespace(tmux='worker'), text, timeout_s=0)
+                self.assertEqual(events, [('literal', text)])
+
+    def test_a_placeholder_already_in_the_box_refuses_before_typing(self):
+        """The guarded-messaging rule survives: a box holding somebody's unsubmitted paste is a draft."""
+        with tempfile.TemporaryDirectory() as directory:
+            layer, events = self.runtime_fixture('claude', [PaneObservation('queued', '[Pasted text #1 +4 lines]')])
+            with self.assertRaises(Refused):
+                send(Path(directory), layer, SimpleNamespace(tmux='worker'), 'a\nb\nc\nd\ne')
+            self.assertEqual(events, [])
+
+    # ---- B13: every attempt that reached the pane is recorded --------------------------------------
+
+    def test_every_attempt_that_touched_the_pane_reaches_the_recorder_once(self):
+        cases = [
+            ('submitted', [PaneObservation('idle'), PaneObservation('queued', 'hello'), PaneObservation('busy')],
+             (SUBMITTED, CONFIRMED_BY_DRAFT)),
+            ('uncertain after insertion', [PaneObservation('idle'), PaneObservation('queued', 'other')],
+             (UNCERTAIN_AFTER_INSERTION, '')),
+            ('uncertain after Enter', [PaneObservation('idle'), PaneObservation('queued', 'hello'),
+                                       PaneObservation('unknown')],
+             (UNCERTAIN_AFTER_ENTER, CONFIRMED_BY_DRAFT)),
+        ]
+        for label, states, want in cases:
+            with self.subTest(label=label), tempfile.TemporaryDirectory() as directory:
+                layer, _ = self.runtime_fixture('claude', states)
+                recorded = []
+                try:
+                    send(Path(directory), layer, SimpleNamespace(tmux='worker'), 'hello', timeout_s=0,
+                         recorder=lambda outcome, confirmation: recorded.append((outcome, confirmation)))
+                except FleetError:
+                    pass
+                self.assertEqual([want], recorded)
+
+    def test_a_refusal_before_the_paste_records_nothing(self):
+        with tempfile.TemporaryDirectory() as directory:
+            layer, _ = self.runtime_fixture('claude', [PaneObservation('busy')])
+            recorded = []
+            with self.assertRaises(Refused):
+                send(Path(directory), layer, SimpleNamespace(tmux='worker'), 'hello',
+                     recorder=lambda *args: recorded.append(args))
+            self.assertEqual([], recorded)
+
+    def test_send_records_round_trip_and_a_malformed_log_is_refused(self):
+        with tempfile.TemporaryDirectory() as directory:
+            instant = Path(directory) / 'inst'
+            self.assertEqual([], read_sends(instant))
+            first = SendRecord(at='2026-09-24T00:00:00Z', by='coord', todo_id='w-1', tmux='dt-w', runtime='claude',
+                               message_file='/tmp/m.txt', sha256='ab' * 32, chars=5, lines=1, head='hello',
+                               outcome=SUBMITTED, confirmation=CONFIRMED_BY_DRAFT)
+            second = SendRecord(**{**first.__dict__, 'outcome': UNCERTAIN_AFTER_INSERTION, 'confirmation': ''})
+            record_send(instant, first)
+            record_send(instant, second)
+            self.assertEqual([first, second], read_sends(instant))
+            with sends_path(instant).open('a') as handle:
+                handle.write('{ not json\n')
+            with self.assertRaises(BadInput):
+                read_sends(instant)
