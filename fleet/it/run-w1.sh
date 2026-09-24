@@ -316,15 +316,17 @@ mkdir -p "$OUT/w1-11"
       "the twin: an instant appearing in a live tree under a name this section NEVER asked for is a NOTE and not a FAIL, so W1-11's alarm discriminates rather than firing on any change at all"
   fi
 
-  # W1-13's verdict. The mark must appear on EXACTLY two rows (W1-11's and this one), so that W1-13's
-  # FAIL cannot be W1-11's row read twice — the same reason W1-11 requires the mark and not just FAIL.
-  if grep -q '^ISOLATION-W1-13-bypass	FAIL' "$OUT/w1-11/negative-control.tsv" \
-     && [ "$(grep -c "$IT_INSTANTS_FAIL_MARK" "$OUT/w1-11/negative-control.tsv")" = 2 ]; then
+  # W1-13's verdict. The instants baseline does NOT advance on a FAIL (the alarm keeps firing until the
+  # folder is cleared), so W1-11's `l7probe` is still in W1-13's delta and W1-13 would FAIL-with-the-mark
+  # on pre-fix code too — the row must name the BYPASS folder itself, which only appears in `ours` when
+  # the bypass-shaped call was recorded. Found in review; the first draft passed on the base tree.
+  if grep -P '^ISOLATION-W1-13-bypass\tFAIL\t.*l7bypass' "$OUT/w1-11/negative-control.tsv" >/dev/null \
+     && grep -qF "$IT_INSTANTS_FAIL_MARK" <(grep -P '^ISOLATION-W1-13-bypass\t' "$OUT/w1-11/negative-control.tsv"); then
     it_pass W1-13 "fleet/it/W1/out/w1-11/negative-control.tsv" \
       "a stray minted through the wrapper EXECUTABLE behind \`timeout\` — the shape 30 harness sites use, which no bash function can be reached from — is charged to this section like W1-11's. The register has one writer again (bin/it-fleet), so a call the harness makes the way it actually makes them is attributed"
   else
     it_fail W1-13 "fleet/it/W1/out/w1-11/negative-control.tsv" \
-      "the bypass-shaped mint was NOT charged to this section: $(grep '^ISOLATION-W1-13' "$OUT/w1-11/negative-control.tsv" | cut -f1,2,4 | cut -c1-200)"
+      "the bypass-shaped mint was NOT charged to this section (its row must be FAIL, carry the instants mark AND name the l7bypass folder — W1-11's l7probe is still in the delta and does not count): $(grep '^ISOLATION-W1-13' "$OUT/w1-11/negative-control.tsv" | cut -f1,2,4 | cut -c1-240)"
   fi
 )
 rm -rf "$W11_LIVE"

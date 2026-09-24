@@ -57,25 +57,39 @@ class WrapperExecutable(unittest.TestCase):
         script = f"""
         . "{self.it}/lib.sh"
         export IT_ASKED_NAMES="{reg}"; : > "$IT_ASKED_NAMES"
-        timeout 30 "$IT_FLEET" init --name viaTimeout --dry-run >/dev/null 2>&1
-        env -u FLEET_HOME "$IT_FLEET" dispatch --title viaEnv --dry-run >/dev/null 2>&1
-        ( exec "$IT_FLEET" milestone --title viaExec ) >/dev/null 2>&1
-        fleet init --name viaFunction >/dev/null 2>&1
-        "$IT_FLEET" board --porcelain >/dev/null 2>&1
+        timeout 30 "$IT_FLEET" init --home "{self.tmp}/store" --name viaTimeout --dry-run >/dev/null 2>&1
+        env -u FLEET_HOME "$IT_FLEET" dispatch --home "{self.tmp}/store" --title viaEnv --dry-run >/dev/null 2>&1
+        ( exec "$IT_FLEET" milestone --home "{self.tmp}/store" --title viaExec ) >/dev/null 2>&1
+        fleet init --home "{self.tmp}/store" --name viaFunction --dry-run >/dev/null 2>&1
+        "$IT_FLEET" board --home "{self.tmp}/store" --porcelain >/dev/null 2>&1
         """
         run_bash(script, self.tmp)
         self.assertEqual(reg.read_text().split(), ["viaTimeout", "viaEnv", "viaExec", "viaFunction"])
 
+    def _direct_and_wrapped(self, *argv):
+        """(direct, wrapped): the product run as `python3 -m fleet.cli`, and through the wrapper, same argv,
+        same environment. Byte-equal streams and an equal code are the pass-through contract."""
+        env = {"PYTHONPATH": str(REPO / "fleet" / "src")}
+        direct = subprocess.run(["python3", "-m", "fleet.cli", *argv], cwd=self.tmp, env=clean_env(env),
+                                stdin=subprocess.DEVNULL, capture_output=True, text=True)
+        wrapped = subprocess.run([str(self.it / "bin" / "it-fleet"), *argv], cwd=self.tmp, env=clean_env(env),
+                                 stdin=subprocess.DEVNULL, capture_output=True, text=True)
+        return direct, wrapped
+
     def test_it_fleet_passes_argv_streams_and_exit_code_through(self):
-        out = run_bash(f'. "{self.it}/lib.sh"; "$IT_FLEET" notaverb --porcelain; echo "rc=$?"', self.tmp)
-        self.assertIn("rc=2", out.stdout)
-        out = run_bash(f'. "{self.it}/lib.sh"; "$IT_FLEET" init --help >/dev/null; echo "rc=$?"', self.tmp)
-        self.assertIn("rc=0", out.stdout)
+        for argv in (["notaverb", "--porcelain"], ["init", "--help"], ["board", "--porcelain"]):
+            direct, wrapped = self._direct_and_wrapped(*argv)
+            self.assertEqual((wrapped.returncode, wrapped.stdout, wrapped.stderr),
+                             (direct.returncode, direct.stdout, direct.stderr), argv)
+        self.assertEqual(self._direct_and_wrapped("notaverb", "--porcelain")[0].returncode, 2)
+        self.assertEqual(self._direct_and_wrapped("init", "--help")[0].returncode, 0)
 
     def test_it_fleet_is_a_no_op_recorder_without_a_register(self):
-        out = run_bash(f'. "{self.it}/lib.sh"; unset IT_ASKED_NAMES; '
-                       f'"$IT_FLEET" init --name nobody --dry-run >/dev/null 2>&1; echo rc=$?', self.tmp)
-        self.assertRegex(out.stdout, r"rc=\d")
+        direct, wrapped = self._direct_and_wrapped("init", "--name", "nobody", "--dry-run")
+        self.assertNotIn("unbound variable", wrapped.stderr)
+        self.assertNotIn("it-fleet", wrapped.stderr)
+        self.assertEqual((wrapped.returncode, wrapped.stdout, wrapped.stderr),
+                         (direct.returncode, direct.stdout, direct.stderr))
 
     def test_it_fleet_supplies_pythonpath_when_the_caller_stripped_it(self):
         out = run_bash(f'. "{self.it}/lib.sh"; env -u PYTHONPATH "$IT_FLEET" init --help >/dev/null; echo "rc=$?"',
