@@ -5,6 +5,7 @@ cwd with every FLEET_* destination unset. Nothing here reads or writes the live 
 server or the tracked RESULTS.tsv. Each class names the defect it pins and the RED it was written against
 (the w2itharness instant's evidence/01-red/).
 """
+import atexit
 import os
 import pathlib
 import re
@@ -17,8 +18,14 @@ import unittest
 REPO = pathlib.Path(__file__).resolve().parents[2]
 IT = REPO / "fleet" / "it"
 FLEET_DESTINATIONS = ("FLEET_HOME", "FLEET_INSTANTS", "FLEET_ROOT", "FLEET_INSTANT", "FLEET_RELEASES",
+                      "FLEET_TMUX_SOCKET",              # the product's `-L`: inherited, it names the operator's server
                       "IT_ASKED_NAMES", "IT_RESULTS",   # an IT section runs this suite (M13)
                       "TMUX", "TMUX_PANE")              # a bare `tmux` inside a pane follows $TMUX, not TMUX_TMPDIR
+#: One private tmux directory per test process: every tmux socket any subprocess of this module resolves —
+#: the "default" server and any -L one — lives here, never under /tmp/tmux-<uid> where the operator's do.
+#: (`tempfile.gettempdir()` would be /tmp, which IS tmux's default — found in review.)
+PRIVATE_TMUX_DIR = tempfile.mkdtemp(prefix="it-harness-tmux-")
+atexit.register(shutil.rmtree, PRIVATE_TMUX_DIR, True)
 
 
 def harness_copy(tmp: pathlib.Path) -> pathlib.Path:
@@ -37,7 +44,7 @@ def clean_env(extra=None, home=None) -> dict:
     HOME for callers that reach it_section, whose isolation check lists $HOME/.fleet/instants and hashes
     $HOME/.claude-* files — read-only, and still not this suite's to read."""
     env = {k: v for k, v in os.environ.items() if k not in FLEET_DESTINATIONS}
-    env.setdefault("TMUX_TMPDIR", tempfile.gettempdir())
+    env["TMUX_TMPDIR"] = PRIVATE_TMUX_DIR
     if home is not None:
         env["HOME"] = str(home)
     env.update(extra or {})
@@ -51,7 +58,7 @@ def run_bash(script: str, cwd: pathlib.Path, env=None, stdin=subprocess.DEVNULL,
 
 class WrapperExecutable(unittest.TestCase):
     """B18. The wrapper must be reachable from the harness's own idioms — `timeout`, `env -u`, `exec` — which
-    cannot invoke a bash function, and it must be the ONLY route to the product. RED:
+    cannot invoke a bash function, and it must be the harness's one SUBPROCESS route to the product. RED:
     evidence/01-red/b18-classifier-bypass-base.txt (a bypassed mint charged to the operator, PASS) beside
     b18-classifier-wrapped-base.txt (the same mint through the wrapper, FAIL)."""
 
@@ -267,6 +274,16 @@ class ZeroDelta(unittest.TestCase):
 
     def row(self, case):
         return next(l.split("\t") for l in self.results.read_text().splitlines()[1:] if l.startswith(case + "\t"))
+
+    def test_no_subprocess_of_this_module_names_an_operator_tmux_socket(self):
+        """clean_env: no FLEET_TMUX_SOCKET, no $TMUX, and TMUX_TMPDIR is this module's private dir — so the
+        product's `-L <socket>` and any bare tmux resolve under it (found in review: the inherited
+        FLEET_TMUX_SOCKET steered `board` at the operator's server)."""
+        env = clean_env()
+        self.assertNotIn("FLEET_TMUX_SOCKET", env)
+        self.assertNotIn("TMUX", env)
+        self.assertEqual(env["TMUX_TMPDIR"], PRIVATE_TMUX_DIR)
+        self.assertNotEqual(PRIVATE_TMUX_DIR, tempfile.gettempdir())
 
     def test_the_default_tmux_server_these_tests_read_is_private(self):
         """it_section's isolation check runs a bare `tmux ls`. Under this class's env that must be an empty

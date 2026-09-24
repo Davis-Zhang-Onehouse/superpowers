@@ -62,7 +62,8 @@ class MutationExtractor(unittest.TestCase):
         uses = [m.start() for m in re.finditer(r"^\s*m9_unreached ", text, re.M)]
         self.assertGreaterEqual(len(uses), 3, "extract-refused, baseline-red and inject-failed aborts")
         self.assertTrue(all(u > defined for u in uses), "m9_unreached is used before it is defined")
-        self.assertEqual(text.count("\n  exit 1\n"), 3, "three abort paths, each preceded by m9_unreached")
+        self.assertEqual(text.count("\n  exit 1\n"), 3, "three abort paths")
+        self.assertEqual(len(uses), 3, "one m9_unreached call per abort path")
 
     def test_every_injection_anchor_is_unique_in_the_base_tree(self):
         """The anchors in run-m9-mutation.sh's inject() calls must each occur once in the file they target —
