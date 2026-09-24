@@ -12,6 +12,10 @@ EXIT_ATTENTION = 1
 EXIT_BAD_INPUT = 2
 EXIT_NO_CAPACITY = 3
 EXIT_REFUSED = 4
+#: `dispatch` only, and deliberately NOT in the base registry below: `cli.DISPATCH_CODES` registers it for that
+#: one verb, the way FD-10 registers pane-guard's codes. It means "a launch was attempted after admission and
+#: rolled back" (V23-B), which no other verb can say.
+EXIT_NOT_STARTED = 5
 
 # The ONE registry. A verb returning a code absent from here fails the suite (NFR2-8): a tick that
 # branches on an exit code must be told when a new one appears.

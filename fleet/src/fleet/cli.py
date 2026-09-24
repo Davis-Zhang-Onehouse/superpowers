@@ -59,18 +59,20 @@ import re
 import shlex
 import sys
 import tempfile
+import types
 from dataclasses import dataclass, field
 from dataclasses import fields as dataclass_fields
 from contextlib import nullcontext
 from pathlib import Path
 from typing import Callable
 
-from fleet import EXIT_ATTENTION, EXIT_BAD_INPUT, EXIT_CODES, EXIT_OK, EXIT_REFUSED, __version__
+from fleet import (EXIT_ATTENTION, EXIT_BAD_INPUT, EXIT_CODES, EXIT_NOT_STARTED, EXIT_OK, EXIT_REFUSED,
+                   __version__)
 from fleet import guards, layout, peers as peers_mod, render, seedcheck
 from fleet.atomic import atomic_symlink, atomic_write
-from fleet.errors import BadInput, FleetError, InstantNameError, NoCapacity, Refused
+from fleet.errors import BadInput, FleetError, InstantNameError, NoCapacity, NotStarted, Refused
 from fleet.harvest import DEFAULT_MAX_AGE_S, REGISTER_NAME, Harvest
-from fleet.identity import ROOT_BASE, InstantName, resolve, same_instant
+from fleet.identity import ROOT_BASE, InstantName, camel, resolve, same_instant
 from fleet.layout import INFO, VIOLATION
 from fleet.markdown import fenced, prose
 from fleet.pool import Pool, ReapReport
@@ -239,9 +241,17 @@ PANE_GUARD_CODES = {
     PANE_AWAITING_OPERATOR: "awaiting-operator",
 }
 
+#: V23-B. `dispatch`'s one extension, registered for that verb alone like FD-10's pane-guard codes: the launch
+#: was attempted AFTER admission (lease claimed, gates passed under the claim) and a step failed and was rolled
+#: back. Before it, that answer borrowed the surfacing exception's code — a tmux refusal exited 2, the code for
+#: a caller's typo, and an unverified seed exited 1 — so a caller could not tell "rolled back" from "refused"
+#: from "you typed it wrong". `3`/`4` keep meaning what they meant: nothing was claimed.
+DISPATCH_NOT_STARTED = EXIT_NOT_STARTED
+DISPATCH_CODES = {DISPATCH_NOT_STARTED: "not-started"}
+
 #: Every code any verb in this package may return, base registry first.
 EXIT_CODES_ALL = {**EXIT_CODES, **{code: name for code, name in PANE_GUARD_CODES.items()
-                                   if code not in EXIT_CODES}}
+                                   if code not in EXIT_CODES}, **DISPATCH_CODES}
 
 PANE_GUARD = "pane-guard"
 
@@ -250,6 +260,8 @@ def registered_codes(verb: str) -> frozenset:
     """The codes `verb` is permitted to return. A verb returning anything else fails the suite (§9)."""
     if verb == PANE_GUARD:
         return frozenset(PANE_GUARD_CODES) | {EXIT_BAD_INPUT}
+    if verb == "dispatch":
+        return frozenset(EXIT_CODES) | frozenset(DISPATCH_CODES)
     return frozenset(EXIT_CODES)
 
 
@@ -1785,6 +1797,43 @@ def _do_revive(ctx: Ctx, parsed: Parsed) -> int:
     return EXIT_OK
 
 
+def _title_rows(title) -> list:
+    """V23-B (v2-19/v3-01). The name this dispatch actually uses, on EVERY dispatch — real, dry-run, and one
+    that did not start. `identity.camel` rewrites the title into the dashless name field, and the name reached
+    the output only inside the `todo_id`/`instant`/`tmux` values: `--title gdwsites-09240324` became
+    `gdwsites09240324`, and a wrapper that globbed for the dashed folder reported NO CHILD for a running worker.
+    Printed rather than refused: the rewrite is deterministic and every spaced title in use depends on it."""
+    used = camel(title or "")
+    rows = [("title_as_used", used)]
+    if used != title:
+        rows.append(("title_rewritten",
+                     f"--title {title!r} is used as {used!r}: an instant name is one dashless camelCase field "
+                     f"(every run of characters outside A-Z a-z 0-9 is a word break, and case is folded), so "
+                     f"the todo id is {used}-<MMDDHHMM>, the session dt-{used} and the folder "
+                     f"<base>-<MMDDHHMM>-inflight-<optype>-{used}. Read these rows; do not derive the name "
+                     f"from --title"))
+    return rows
+
+
+def _dispatch_non_start_rows(exc: BaseException, parsed) -> list:
+    """V23-B (v2-05/v2-14). The STDOUT answer of a dispatch that started no worker. Every such dispatch used to
+    write nothing to stdout, only a paragraph to stderr, so a `--porcelain 2>/dev/null` reader got zero bytes
+    and a wrapper filtering the merged text printed nothing. `refused` is the kind for a rule or capacity
+    answer (exit 3/4, nothing claimed), `error` for everything else (exit 1/2, or 5 after a claim). Stderr
+    keeps its paragraph."""
+    kind = "refused" if isinstance(exc, (Refused, NoCapacity)) else "error"
+    #: A `NotStarted` row names its CAUSE — the tmux refusal, the unverified seed — since the `step` row
+    #: already says it was rolled back, and the cause is the part a reader acts on.
+    cause = exc.__cause__ if isinstance(exc, NotStarted) and exc.__cause__ is not None else exc
+    rows = [(kind, _one_line(f"{type(cause).__name__}: {cause}"))]
+    for field, attribute in (("clears_when", "clears_when"), ("clears_who", "clears_who")):
+        value = getattr(exc, attribute, None)
+        if value:
+            rows.append((field, _one_line(value)))
+    rows += [(field, _one_line(value)) for field, value in getattr(exc, "rows", ())]
+    return rows + _title_rows(parsed.get("title"))
+
+
 def _dispatch_collision(ctx: Ctx, base, optype, title):
     """-> (name, child, todo_id, tmux) for this dispatch, or the `SI-20` collision refusal. Read-only, and
     asked by the dry-run as well as the real call (`B10` sweep)."""
@@ -2036,7 +2085,13 @@ def _do_dispatch(ctx: Ctx, parsed: Parsed) -> int:
             if refusal is not None:
                 raise refusal
     if ctx.dry_run:
+        code = _guard_code(ctx, verdicts, gctx)
         rows = [("dry-run", "every gate evaluated; nothing was claimed, created or started")]
+        if code != EXIT_OK:
+            #: V23-B: a refusing dry-run names its answer in one row too, not only inside `guard.*` rows.
+            refusing = next(verdict for verdict in verdicts if not verdict.allowed)
+            rows.append(("refused", _one_line(f"guard {refusing.guard}: {refusing.reason}")))
+        rows += _title_rows(title)
         rows += [("coordinator", str(coordinator) if coordinator else
                   "(none — the child will have no origin.json and `propose` will stay LOCAL)"),
                  ("milestone", milestone_id or "(none — this dispatch is not about a roadmap row)"),
@@ -2050,7 +2105,7 @@ def _do_dispatch(ctx: Ctx, parsed: Parsed) -> int:
                   "(none — the seed is exactly what the profile renders)")]
         rows += _verdict_kv(verdicts)
         _emit(ctx, "dispatch", rows)
-        return _guard_code(ctx, verdicts, gctx)
+        return code
 
     guards.enforce_all(gctx, "dispatch")
     assert settings is not None
@@ -2069,10 +2124,13 @@ def _do_dispatch(ctx: Ctx, parsed: Parsed) -> int:
     except BaseException:
         ctx.pool.release(lease.slot, force=True)
         raise
+    #: V23-B. The launch step in progress, named in the `step` row when it fails.
+    step = "slot settings"
     try:
         if lease.slot != candidate_slot:
             settings = _dispatch_settings(ctx, choice, lease.path)
             _refuse_codex_worktree_slot(settings.runtime, lease.path, 'dispatch')    # inside the try: rolled back
+        step = "render"
         #: `F3`/`I-24c`. Extends the SAME shared context the dry-run path above validated, with the four
         #: keys only a won claim can supply — see `_dispatch_render_context` for why this may not be a
         #: second, hand-written dict.
@@ -2110,10 +2168,12 @@ def _do_dispatch(ctx: Ctx, parsed: Parsed) -> int:
         # This is what the prebuilt native artifacts were built from, and the only way to answer later
         # whether the source has moved out from under them. `dispatch` performs no checkout: mechanism B is
         # the gate on a claim of done, not repositioning, so this verb stays read-only against git.
+        step = "lineage probe"
         if lineage:
             workspace_probe = Workspace(ctx.home, git=ctx.git)
             observed = workspace_probe.base_check(lease.path, lineage)
             record.golden_base = ",".join(f"{c.repo}={c.actual}" for c in observed if c.actual)
+        step = "instant tree"
         layout.bootstrap(child, name)
         (child / "CHARTER.md").write_text(rendered["charter"])
         seed = child / ".fleet" / "seed.txt"
@@ -2125,23 +2185,30 @@ def _do_dispatch(ctx: Ctx, parsed: Parsed) -> int:
         if coordinator is not None:
             origin_mod.write(child, Origin(coordinator=str(coordinator), dispatched_at=ctx.now(),
                                            milestone=milestone_id))
+        step = "build-cache isolation"
         workspace.isolate_build_cache(lease.path)
+        step = "record"
         # The registry's WRITER: the base is registered and THEN the record is written, one call, in that
         # order. A record whose effort nobody watches is `OBS-68` — invisible because unlisted.
         source = ctx.harvest.record_dispatch(ctx.store, record)
         launch_env = dict(ctx.launch_environment or {}, FLEET_HOME=str(ctx.home),
                           FLEET_INSTANTS=str(ctx.instants_dir))
+        step = "launcher"
         launcher = runtime_launch.prepare(settings, record, seed, launch_env)
+        step = "tmux new-session"
         ctx.sessions.start(tmux, lease.path, shlex.join(['bash', str(launcher)]))
         started = True
+        step = "seed delivery"
         seed_verdict = _verify_seed_delivery(ctx, tmux, rendered["seed"], runtime=settings.runtime)
         if seed_verdict is None or not seed_verdict.ok:
             #: The record stays as `record_dispatch` wrote it (PENDING-LAUNCH); the rollback below names it
             #: and the remedy. `gate_verdict` is a GUARD NAME `harvest` reads, never a free-text note.
             raise FleetError(f"Seed delivery to {tmux} is not verified: "
                              + (seed_verdict.detail if seed_verdict else 'pane process unobservable'))
+        step = "launch record"
         record.launched_at = ctx.now()
         ctx.store.write(record)
+        step = "milestone claim"
         # The claim is the LAST mutation, so every earlier failure leaves the roadmap untouched and there is
         # nothing to compensate for. It is still inside the try, because losing the claim race here must
         # roll the dispatch back rather than leave a worker running on a milestone somebody else owns.
@@ -2153,17 +2220,33 @@ def _do_dispatch(ctx: Ctx, parsed: Parsed) -> int:
         stranded_note = (f" A RECORD for todo {todo_id!r} was already written and is left in place: it reads "
                          f"PENDING-LAUNCH and counts against the WIP cap until it is resolved. Clear it with "
                          f"`fleet abort --instant {child} --reason <why>`." if stranded else "")
+        def not_started(lease_state):
+            """V23-B. The answer, whatever surfaced: exit 5 and rows naming the step and what was left."""
+            return NotStarted(
+                f"dispatch did not start: the launch failed at {step!r} after the lease on {lease.slot!r} was "
+                f"claimed, and was rolled back: {type(launch_error).__name__}: {launch_error}",
+                rows=[("step", step), ("todo_id", todo_id),
+                      ("instant", f"{child} (left in place; no verb deletes outward state)" if child.exists()
+                       else "(none created)"),
+                      ("record", f"{todo_id} left PENDING-LAUNCH; it counts against the WIP cap until "
+                                 f"`fleet abort --instant {child} --reason <why>` resolves it" if stranded
+                       else "(none written)"),
+                      ("lease", lease_state)],
+                clears_when=getattr(launch_error, "clears_when", None),
+                clears_who=getattr(launch_error, "clears_who", None))
         if started:
             ctx.sessions.kill(tmux)
             if ctx.sessions.alive(tmux):
                 print(f"dispatch needs attention: {tmux} is still observable; lease {lease.slot} retained."
                       + stranded_note, file=ctx.err)
-                raise
+                raise not_started(f"retained on {lease.slot!r}: {tmux} is still observable after the kill, "
+                                  f"so a process may still hold the slot") from launch_error
         try:
             ctx.pool.release(lease.slot, force=False)
-        except FleetError:
+        except FleetError as release_error:
             print(f"dispatch failed: {launch_error}; cleanup retained lease {lease.slot}", file=ctx.err)
-            raise
+            raise not_started(f"retained on {lease.slot!r}: the release was refused "
+                              f"({release_error})") from launch_error
         # `SI-21` applied to the roadmap: a rollback must not strand state it created. If the claim landed
         # and something after it failed, the milestone would read as owned by an instant that is being
         # rolled back — so it is given back here, and the failure to give it back is reported rather than
@@ -2189,9 +2272,9 @@ def _do_dispatch(ctx: Ctx, parsed: Parsed) -> int:
         print(f"dispatch rolled back: the lease on {lease.slot!r} was given back. Anything already "
               f"written under {child} is left in place and named here rather than removed — no verb "
               f"deletes outward state." + stranded_note, file=ctx.err)
-        raise
+        raise not_started(f"given back ({lease.slot!r} is free again)") from launch_error
     _emit(ctx, "dispatch", [("todo_id", todo_id), ("instant", str(child)), ("slot", lease.slot),
-                            ("tmux", tmux), ("watched_source", source.base),
+                            ("tmux", tmux), *_title_rows(title), ("watched_source", source.base),
                             ("milestone", milestone_id or "(none)"),
                             ("override_reason", record.override_reason or "(none — no rule was overridden)"),
                             ("lineage_base", record.lineage_base or "(none)"),
@@ -6648,7 +6731,8 @@ VERBS = {spec.name: spec for spec in (
     )),
     _verb("dispatch", _do_dispatch, False, "evaluate every gate, then dispatch one worker", (
         Flag("--profile", True, True, "the profile directory; its kind is DECLARED in profile.json"),
-        Flag("--title", True, True, "the worker's title; becomes the instantName"),
+        Flag("--title", True, True, "the worker's title; becomes the instantName, rewritten to one dashless "
+                                         "camelCase field — the `title_as_used` row prints the name used"),
         #: S4 / I-24b. Deliberately asymmetric with --from/--profile/--instant below, which take paths:
         #: a base is a stable KEY, but an instant's own folder is renamed at every state transition, so
         #: a path stored as a base would go stale the moment the base instant finished (Task 2 of this
@@ -7152,6 +7236,9 @@ def main(argv: list, *, stdout=None, stderr=None, context=None) -> int:
         ctx = (default_context if context is None else context)(parsed, out, err)
     except FleetError as exc:
         _report_error(exc, err)
+        if verb == "dispatch":
+            _emit(types.SimpleNamespace(porcelain=parsed.on("porcelain"), out=out), verb,
+                  _dispatch_non_start_rows(exc, parsed))
         return exc.exit_code
 
     if parsed.get("max-age") is not None:
@@ -7188,6 +7275,10 @@ def main(argv: list, *, stdout=None, stderr=None, context=None) -> int:
     except FleetError as exc:
         _report_error(exc, err)
         code = exc.exit_code
+        if verb == "dispatch":
+            #: V23-B. Here and not in `_do_dispatch`: the admission-lock refusal is raised by the `with`
+            #: above, around the handler, and it is a non-start like any other.
+            _emit(ctx, verb, _dispatch_non_start_rows(exc, parsed))
     except OSError as exc:
         # `SI-22`. A real filesystem failure — `PermissionError` on an unreadable slot, `FileExistsError` on
         # a path a concurrent actor created — is not a `FleetError`, so it used to escape `main` entirely:
@@ -7205,6 +7296,8 @@ def main(argv: list, *, stdout=None, stderr=None, context=None) -> int:
               f"said so. Check the path named above — its permissions, whether it already exists, and "
               f"whether another actor created it.", file=err)
         code = EXIT_ATTENTION
+        if verb == "dispatch":
+            _emit(ctx, verb, _dispatch_non_start_rows(exc, parsed))
     return code
 
 

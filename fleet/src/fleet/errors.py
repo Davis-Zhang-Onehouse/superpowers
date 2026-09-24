@@ -1,7 +1,7 @@
 """The exception hierarchy. Each maps to exactly one registered exit code, so a caller can tell a refusal
 (4) from bad input (2) from a full pool (3) — the distinction OI-3 showed a test cannot make when two
 mechanisms produce one non-zero class."""
-from fleet import EXIT_ATTENTION, EXIT_BAD_INPUT, EXIT_NO_CAPACITY, EXIT_REFUSED
+from fleet import EXIT_ATTENTION, EXIT_BAD_INPUT, EXIT_NO_CAPACITY, EXIT_NOT_STARTED, EXIT_REFUSED
 
 
 class FleetError(Exception):
@@ -31,6 +31,22 @@ class Refused(FleetError):
     'not yours to clear' is a state and not a failure (RI-31)."""
 
     exit_code = EXIT_REFUSED
+
+
+class NotStarted(FleetError):
+    """`dispatch` claimed a slot, passed its gates under the claim, began the launch — and a step failed and
+    was rolled back (V23-B). Whatever exception surfaced is the CAUSE; this is the answer, with its own code,
+    because a tmux refusal after the claim used to exit 2 (the caller-typo code) and a launcher that died
+    before reading its seed exited 1, so no caller could tell "rolled back" from "you typed it wrong".
+
+    `rows` are the (field, value) pairs `cli.main` writes to stdout: the step that failed and what the
+    rollback left behind (todo, instant, record, lease)."""
+
+    exit_code = EXIT_NOT_STARTED
+
+    def __init__(self, message="", *, rows=(), clears_when=None, clears_who=None):
+        super().__init__(message, clears_when=clears_when, clears_who=clears_who)
+        self.rows = list(rows)
 
 
 class AmbiguousId(BadInput):
