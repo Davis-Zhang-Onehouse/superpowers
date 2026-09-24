@@ -977,6 +977,11 @@ def _resolve_instant(ctx: Ctx, raw) -> Path:
     # the same folder as their absolute spelling in every verb using this helper.
     path = Path(raw).resolve()
     found = resolve(path)
+    if found is None and os.sep not in str(raw) and str(raw) not in (".", ".."):
+        # A bare instant name is the historical shorthand for a child of the instants directory.
+        # Keep cwd precedence when a real instant of that name is present there.
+        path = (ctx.instants_dir / raw).resolve()
+        found = resolve(path)
     if found is None:
         #: `B11` (NEW-3). A record that still names the path is the one case with a door that runs: every
         #: `--instant` verb resolves the folder first, and `close --id` does not.

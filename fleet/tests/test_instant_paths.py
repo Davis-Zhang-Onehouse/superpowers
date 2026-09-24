@@ -8,6 +8,19 @@ from tests.test_cli import CliCase
 
 
 class TestInstantPaths(CliCase):
+    def test_bare_name_reaches_instants_dir_from_unrelated_cwd(self):
+        fleet = self.loaded()
+        target = fleet.paths['readyWorker']
+        previous = Path.cwd()
+        try:
+            os.chdir(fleet.tmp)
+            code, out, err = fleet.run(['milestone', '--instant', target.name,
+                                        '--id', 'bare-name', '--title', 'Bare name', '--dry-run'])
+        finally:
+            os.chdir(previous)
+        self.assertEqual(code, 0, err)
+        self.assertIn('bare-name', out)
+
     def test_dot_reaches_the_current_instant_for_milestone(self):
         fleet = self.loaded()
         target = fleet.paths['readyWorker']
@@ -70,7 +83,7 @@ class TestInstantPaths(CliCase):
 
     def test_refusal_names_resolved_bad_path(self):
         fleet = self.loaded()
-        bad = 'not-an-instant'
+        bad = './not-an-instant'
         code, out, err = fleet.run(['roadmap', '--instant', bad])
         self.assertEqual(code, 2)
         self.assertIn(str((Path.cwd() / bad).resolve()), err)
