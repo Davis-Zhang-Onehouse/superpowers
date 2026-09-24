@@ -243,6 +243,15 @@ class RowOwnership(unittest.TestCase):
         for case in ("B5", "B6", "B7", "ISOLATION-B-enter"):
             self.assertRegex(case, rx)
 
+    def test_every_runner_that_moves_its_tmux_directory_re_arms_the_guardian(self):
+        """A bare `export TMUX_TMPDIR=` in a runner leaves the guardian on the wrong directory."""
+        bare = [f"{p.name}:{n}" for p in sorted(IT.glob("run-*.sh"))
+                for n, line in enumerate(p.read_text(errors="replace").splitlines(), 1)
+                if re.match(r"^\s*export TMUX_TMPDIR=", line)]
+        self.assertEqual(bare, [])
+        movers = [p.name for p in sorted(IT.glob("run-*.sh")) if "it_move_tmux_tmpdir" in p.read_text(errors="replace")]
+        self.assertEqual(movers, ["run-B.sh", "run-C.sh", "run-D.sh", "run-group3.sh"])
+
     def test_group5_claims_its_coverage_rows(self):
         """Found by the plan's pre-flight scan: run-group5.sh writes L7-coverage and M5-coverage."""
         text = (IT / "run-group5.sh").read_text()
@@ -430,6 +439,41 @@ class ServerGuardian(unittest.TestCase):
         self.start_runner()
         time.sleep(5)
         self.assertTrue(self.server_up())
+
+    def test_server_moved_by_the_runner_is_still_reaped(self):
+        """§B/§C/§D/group3 move their tmux directory AFTER it_section (through it_move_tmux_tmpdir); the
+        guardian must reap the server where the runner put it, not a same-named one under the directory
+        it inherited (found in review)."""
+        moved = self.tmp / "moved"
+        moved.mkdir()
+        started = self.tmp / "started"
+        script = (f'. "{self.it}/lib.sh"\nit_section {self.section} >/dev/null 2>&1\n'
+                  f'it_move_tmux_tmpdir "{moved}"\n'
+                  f'it_tmux new-session -d -s {self.socket}-victim "sleep 300"\n'
+                  f'touch "{started}"\nsleep 300 & echo $! > "{self.tmp}/sleep.pid"; wait\n')
+        (self.tmp / "runner.sh").write_text(script)
+        p = subprocess.Popen(["bash", str(self.tmp / "runner.sh")], cwd=self.tmp, env=self.env,
+                             stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+        self.addCleanup(lambda: (p.kill(), p.wait()))
+        self.addCleanup(lambda: subprocess.run(
+            ["bash", "-c", f'kill "$(cat "{self.tmp}/sleep.pid" 2>/dev/null)" 2>/dev/null; true']))
+        moved_env = dict(self.env, TMUX_TMPDIR=str(moved))
+        self.addCleanup(subprocess.run, ["tmux", "-L", self.socket, "kill-server"], capture_output=True, env=moved_env)
+        for _ in range(100):
+            if started.exists():
+                break
+            time.sleep(0.1)
+        self.assertTrue(started.exists())
+        up = lambda: subprocess.run(["tmux", "-L", self.socket, "ls"], capture_output=True, env=moved_env).returncode == 0
+        self.assertTrue(up(), "the moved server did not start")
+        time.sleep(3)                 # one guardian poll, so it has read the runner's new TMUX_TMPDIR
+        p.kill()
+        p.wait()
+        for _ in range(100):
+            if not up():
+                break
+            time.sleep(0.1)
+        self.assertFalse(up(), "the server under the runner's own TMUX_TMPDIR survived its runner's SIGKILL")
 
     def test_a_back_to_back_rerun_keeps_its_server(self):
         """The first runner's guardian is inside its 2 s poll window when the second runner of the same

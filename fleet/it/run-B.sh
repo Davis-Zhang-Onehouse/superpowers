@@ -93,7 +93,7 @@ b_enter() {
   #: The pid SET, not the count. A count cannot separate "this section launched one" from "another
   #: operator's session forked mid-run", and only the first is §B's. See `it_classify_claude_delta`.
   B_CLAUDE_BEFORE="$(it_claude_pids)"
-  export TMUX_TMPDIR="$B_SOCK"
+  it_move_tmux_tmpdir "$B_SOCK"                      # export + re-arm the guardian on this directory (FB-73)
   export PATH="$B_HERE/bin:$PATH"                    # the `claude` stub, never the real binary
   printf '%s\n' "$B_TMUX_BEFORE" > "$OUT/live-tmux-before.txt"
   printf '%s\n' "$B_CLAUDE_BEFORE" > "$OUT/claude-count-before.txt"

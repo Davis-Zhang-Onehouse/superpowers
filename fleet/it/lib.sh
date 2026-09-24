@@ -185,6 +185,13 @@ IT_ENV_UNNAMED=(-u FLEET_HOME -u FLEET_INSTANTS -u FLEET_ROOT -u FLEET_INSTANT -
 # under $IT_ROOT/.guardians/, and only a pid that is still a guardian of this socket (its argv names it) is
 # signalled.
 #
+# THE SERVER IS FOUND WHERE THE RUNNER PUT IT (found in review): four runners export their own TMUX_TMPDIR
+# after it_section (`run-B/C/D.sh`, `run-group3.sh` for §E/§K), so a kill by `-L name` under the directory the
+# guardian inherited would miss the server they created and reach a same-named one elsewhere. The guardian
+# kills by the explicit socket PATH `<dir>/tmux-<uid>/<name>` with the directory current when it was ARMED,
+# and a runner that moves its servers re-arms it through `it_move_tmux_tmpdir` below (a process's
+# /proc/<pid>/environ is its exec-time environment, so the guardian cannot follow an export by itself).
+#
 # /proc/<pid>/stat field 22 is starttime; the parenthesised comm (field 2) may contain spaces, so it is
 # stripped first and starttime is then field 20 of what remains, and the state is field 1 — a zombie (`Z`)
 # holds nothing and counts as gone. Verified on this box.
@@ -199,17 +206,26 @@ it_guard_server() {       # it_guard_server <runner-pid> <socket>
     kill "$old" 2>/dev/null
   fi
   setsid bash -c '
-    pid="$2"; sock="$3"; start="$4"
+    pid="$2"; sock="$3"; start="$4"; dir="$5"
     alive() {
       local f; f="$(sed "s/^.*) //" "/proc/$pid/stat" 2>/dev/null)" || return 1
       [ -n "$f" ] && [ "$(printf "%s" "$f" | awk "{print \$20}")" = "$start" ] \
         && [ "$(printf "%s" "$f" | awk "{print \$1}")" != Z ]
     }
     while alive; do sleep 2; done
-    tmux -L "$sock" kill-server 2>/dev/null
-  ' it-guardian "$sock" "$pid" "$sock" "$start" </dev/null >/dev/null 2>&1 &
+    tmux -S "$dir/tmux-$(id -u)/$sock" kill-server 2>/dev/null
+  ' it-guardian "$sock" "$pid" "$sock" "$start" "${TMUX_TMPDIR:-/tmp}" </dev/null >/dev/null 2>&1 &
   printf '%s\n' "$!" > "$pidfile"
   disown 2>/dev/null || true
+}
+
+# `it_move_tmux_tmpdir <dir>`: export TMUX_TMPDIR and re-arm this section's guardian on the server that
+# directory now holds. The four runners that relocate their tmux directory call this instead of a bare
+# `export`, so the guardian never guards a directory the runner has left.
+it_move_tmux_tmpdir() {   # it_move_tmux_tmpdir <dir>
+  export TMUX_TMPDIR="$1"
+  [ -n "${IT_TMUX_SOCKET:-}" ] && it_guard_server "$$" "$IT_TMUX_SOCKET"
+  return 0
 }
 
 it_section() {            # it_section <name> -> own FLEET_HOME, own slots, own tmux prefix, own tmux SERVER

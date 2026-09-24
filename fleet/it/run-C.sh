@@ -112,7 +112,7 @@ c_enter() {
   C_TMUX_BEFORE="$(c_live_tmux)"                             # the LIVE server, deliberately
   #: The pid SET, not the count: only an addition whose cwd is inside this instant is §C's.
   C_CLAUDE_BEFORE="$(it_claude_pids)"
-  export TMUX_TMPDIR="$C_SOCK"
+  it_move_tmux_tmpdir "$C_SOCK"                              # export + re-arm the guardian (FB-73)
   #: Defence in depth only: nothing in §C launches `claude` (no dispatch here is expected to succeed, so
   #: `sessions.start` is never reached). If one ever were, the stub is a real process that is not claude
   #: and `exec sleep`s, so `pgrep -x claude` stays comparable.
