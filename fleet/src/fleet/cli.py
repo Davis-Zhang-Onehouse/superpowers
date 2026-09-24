@@ -7276,7 +7276,10 @@ def main(argv: list, *, stdout=None, stderr=None, context=None) -> int:
             #: RV-C3. Refused by the parser, so there is no `parsed` — the two facts a stdout reader needs
             #: are read off the raw argv: whether it asked for porcelain, and which title it passed.
             args = argv[1:]
-            titles = [args[i + 1] for i, arg in enumerate(args[:-1]) if arg == "--title"]
+            #: RV-C9. A declared flag after `--title` is the parser's refusal, not a title nobody used.
+            declared = {flag.name for flag in spec.flags}
+            titles = [args[i + 1] for i, arg in enumerate(args[:-1])
+                      if arg == "--title" and args[i + 1] not in declared]
             rows = [("error", _one_line(f"{type(exc).__name__}: {exc}"))]
             rows += _title_rows(titles[-1]) if titles else [("title_as_used", "(none)")]
             _emit(types.SimpleNamespace(porcelain="--porcelain" in args, out=out), verb, rows)
