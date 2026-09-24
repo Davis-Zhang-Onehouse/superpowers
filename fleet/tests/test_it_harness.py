@@ -107,15 +107,29 @@ class WrapperExecutable(unittest.TestCase):
         self.assertEqual((wrapped.returncode, wrapped.stdout, wrapped.stderr),
                          (direct.returncode, direct.stdout, direct.stderr))
 
+    def test_the_lint_tokens_catch_the_split_and_joined_forms(self):
+        """The shapes closure 1 showed slipping past a literal match."""
+        for line in ('cmd = [sys.executable, "-m","fleet.cli", verb]', "cmd = [sys.executable, '-m', 'fleet.cli']",
+                     "subprocess.run([str(repo / 'bin/fleet'), *args])", 'subprocess.run([str(repo / "bin" / "fleet")])',
+                     'timeout 60 python3 -m fleet.cli init', '"$REPO/bin/fleet" board'):
+            self.assertTrue(self.MODULE_FORM.search(line) or self.LAUNCHER_FORM.search(line), line)
+        for line in ("from fleet.cli import VERBS", "exec python3 -m fleet_cli_stub", 'printf "editing src/fleet/cli.py"'):
+            self.assertFalse(self.MODULE_FORM.search(line) or self.LAUNCHER_FORM.search(line), line)
+
     def test_it_fleet_supplies_pythonpath_when_the_caller_stripped_it(self):
         out = run_bash(f'. "{self.it}/lib.sh"; env -u PYTHONPATH "$IT_FLEET" init --help >/dev/null; echo "rc=$?"',
                        self.tmp)
         self.assertIn("rc=0", out.stdout)
 
-    #: The shapes a product subprocess takes in this harness. The launcher form (`bin/fleet`) is checked in
-    #: the python files only: run-Q.sh is the section that tests the launcher itself, and its verbs cannot
-    #: mint. A line whose first non-blank character is `#` is a comment (run-C.sh carries two).
-    BYPASS_SHAPES = {".sh": ("python3 -m fleet.cli",), ".py": ('"-m", "fleet.cli"', "'-m', 'fleet.cli'", "bin/fleet")}
+    #: The shapes a product subprocess takes in this harness, as TOKENS (found in closure: literals let mixed
+    #: quotes and `"bin" / "fleet"` slip through): the module form `-m fleet.cli` however it is quoted or
+    #: split, and the launcher `bin/fleet` however the path is joined. run-Q.sh is exempt BY NAME for the
+    #: launcher form only: it is the section that tests the launcher itself, and its verbs cannot mint. An
+    #: in-process `from fleet.cli import …` is not a subprocess and is not matched. A line whose first
+    #: non-blank character is `#` is a comment (run-C.sh carries two).
+    MODULE_FORM = re.compile(r"""-m['"]?\s*,?\s*['"]?\s*fleet\.cli""")
+    LAUNCHER_FORM = re.compile(r"""\bbin['"]?\s*/\s*['"]?fleet\b""")
+    LAUNCHER_EXEMPT = {"run-Q.sh"}
 
     def test_no_direct_python_m_fleet_cli_outside_the_wrapper(self):
         """The lint: every product subprocess in the harness goes through bin/it-fleet — the shell form
@@ -127,11 +141,10 @@ class WrapperExecutable(unittest.TestCase):
         for path in files:
             if path.name == "it-fleet":
                 continue
-            shapes = self.BYPASS_SHAPES[".py"] if path.suffix == ".py" else self.BYPASS_SHAPES[".sh"]
-            if path.suffix == ".sh":
-                shapes = shapes + self.BYPASS_SHAPES[".py"][:2]     # python embedded in a runner via a heredoc
             for n, line in enumerate(path.read_text(errors="replace").splitlines(), 1):
-                if any(s in line for s in shapes) and not line.lstrip().startswith("#"):
+                if line.lstrip().startswith("#"):
+                    continue
+                if self.MODULE_FORM.search(line) or (path.name not in self.LAUNCHER_EXEMPT and self.LAUNCHER_FORM.search(line)):
                     hits.append(f"{path.relative_to(REPO)}:{n}")
         self.assertEqual(hits, [], "direct sites bypass the attribution register (B18): " + ", ".join(hits))
 
@@ -488,7 +501,7 @@ class ServerGuardian(unittest.TestCase):
         self.assertTrue(started.exists())
         up = lambda: subprocess.run(["tmux", "-L", self.socket, "ls"], capture_output=True, env=moved_env).returncode == 0
         self.assertTrue(up(), "the moved server did not start")
-        time.sleep(3)                 # one guardian poll, so it has read the runner's new TMUX_TMPDIR
+        time.sleep(3)                 # the guardian re-armed by it_move_tmux_tmpdir has started polling
         p.kill()
         p.wait()
         for _ in range(100):
