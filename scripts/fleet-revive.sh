@@ -28,10 +28,11 @@
 # the WHOLE seed is the worker's; a `subagents/` file is never a candidate; several matches choose the one
 # last written to and print all of them; two records resolving to one transcript refuse the run.
 #
-# ANY PRE-FLIGHT PROBLEM REFUSES THE WHOLE RUN (rc 2, nothing started): a record on the other runtime, a
-# recorded abort, a seed no transcript received, or a `fleet revive --dry-run` refusal. `fleet revive` is the
-# only actor — every lock and check it performs (runtime match, held lease, unoccupied pane and workspace,
-# transcript-vs-workspace, verified resume) applies unchanged.
+# ANY PRE-FLIGHT PROBLEM REFUSES THE WHOLE RUN (rc 2, nothing started): a recorded abort, a seed no
+# transcript received, or a `fleet revive --dry-run` refusal. `fleet revive` is the only actor — every lock and
+# check it performs (held lease, unoccupied pane and workspace, transcript-vs-workspace, verified resume)
+# applies unchanged. Each record revives under ITS OWN runtime and model (pt2: both are chosen per dispatch and
+# recorded); the fleet selection is only the default for new dispatches and is printed for reference.
 set -uo pipefail
 
 HERE="$(cd "$(dirname "$(readlink -f "$0")")" && pwd)"
@@ -107,13 +108,11 @@ derive() {
   SESSION="$(field "$status" evidence.tmux)"
   RSOCKET="$(field "$status" evidence.tmux_socket)"
   INSTANT="$(field "$status" evidence.instant)"
-  note "runtime"  "$RT   (fleet selection: $SELECTION)"
+  MODEL="$(field "$status" evidence.runtime_model)"
+  note "runtime"  "$RT${MODEL:+ model $MODEL}   (the record's own; fleet selection: $SELECTION)"
   note "session"  "$SESSION on tmux server ${RSOCKET:-"(record names none; fleet asks $SOCKET)"}"
   note "instant"  "$INSTANT"
 
-  if [ "$RT" != "$SELECTION" ]; then
-    problem "$id" "the record ran on $RT and the fleet is set to $SELECTION; fleet revive refuses this too. \`fleet runtime\` shows the selection; change it back (or harvest the record) rather than reviving across runtimes"
-  fi
   case "$INSTANT" in *" (missing)") problem "$id" "the instant folder is missing: ${INSTANT% (missing)}"; return ;; esac
   [ -d "$INSTANT" ] || { problem "$id" "instant $INSTANT is not a directory"; return; }
   if [ -f "$INSTANT/.fleet/abort.json" ]; then

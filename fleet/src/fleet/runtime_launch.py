@@ -7,7 +7,7 @@ import uuid
 
 from fleet.atomic import atomic_write
 from fleet.errors import BadInput, Refused
-from fleet.runtime import LaunchSettings, validate_runtime
+from fleet.runtime import LaunchSettings, validate_model, validate_runtime
 
 
 def fleet_executable() -> str:
@@ -21,6 +21,14 @@ def seed_cli_header() -> str:
             'Login shells may put an older fleet installation first on PATH.\n\n')
 
 
+def model_args(settings: LaunchSettings) -> list[str]:
+    """pt2. The model on the argv — `claude --model <m>`, `codex -m <m>` (both verified against the CLIs' own
+    `--help`, and `codex resume` takes `-m` too) — or nothing, which leaves the CLI's configured model."""
+    if not settings.model:
+        return []
+    return ['--model' if settings.runtime == 'claude' else '-m', validate_model(settings.model)]
+
+
 def launch_argv(settings: LaunchSettings, prompt: str, writable_dirs=()) -> list[str]:
     validate_runtime(settings.runtime)
     args = [settings.executable]
@@ -29,7 +37,7 @@ def launch_argv(settings: LaunchSettings, prompt: str, writable_dirs=()) -> list
     else:
         for directory in writable_dirs:
             args += ['--add-dir', str(directory)]
-    return args + ['--', prompt]
+    return args + model_args(settings) + ['--', prompt]
 
 
 def resume_argv(settings: LaunchSettings, session_id: str, writable_dirs=()) -> list[str]:
@@ -40,11 +48,11 @@ def resume_argv(settings: LaunchSettings, session_id: str, writable_dirs=()) -> 
     except (ValueError, AttributeError, TypeError) as exc:
         raise BadInput('Resume requires an explicit session UUID') from exc
     if settings.runtime == 'claude':
-        return [settings.executable, '--permission-mode', 'auto', '--resume', session_id]
+        return [settings.executable, '--permission-mode', 'auto', *model_args(settings), '--resume', session_id]
     args = [settings.executable, 'resume']
     for directory in writable_dirs:
         args += ['--add-dir', str(directory)]
-    return args + ['--', session_id]
+    return args + model_args(settings) + ['--', session_id]
 
 
 def resolve_settings(runtime, slot, environ, which, runner) -> LaunchSettings:

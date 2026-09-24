@@ -1,7 +1,28 @@
 # Fleet runtimes
 
-One fleet uses one CLI runtime. Claude is the default for an existing store. Model choice remains in
-that CLI's normal configuration; fleet does not translate model names or mix runtimes within a run.
+The box's saved runtime (`fleet runtime`) is the DEFAULT CLI for a dispatch; Claude is the default for an
+existing store. Each dispatch may choose its own runtime and model instead, so one fleet can run claude and codex
+workers side by side:
+
+```bash
+fleet dispatch --profile "$P" --title "$T" --runtime codex                          # codex's default model
+fleet dispatch --profile "$P" --title "$T" --runtime claude --model claude-fable-5-1
+```
+
+Resolution: runtime = `--runtime` > the profile's `"runtime"` (profile.json) > `fleet runtime`; model = `--model`
+> the profile's `"model"` (applied only when the profile's `"runtime"` is the one chosen; a profile `"model"`
+without a `"runtime"` is refused) > none. A fleet older than the release carrying these fields ignores a profile's
+`"runtime"`/`"model"` silently and dispatches on the box runtime, so check `fleet dispatch --dry-run`'s `runtime` row. No model means no model flag on the argv, so the CLI uses its own
+configured model — the launch is then byte-identical to the one before these flags existed. A model reaches the
+worker as `claude --model <m>` or `codex -m <m>` (also on `codex resume`); fleet never edits a slot's
+`.claude/settings*.json` or `CODEX_HOME/config.toml`, and does not translate model names. The chosen runtime and
+model are recorded (`runtime`, `runtime_model`): `board` shows them in its `runtime` column, `brief` in a `runtime`
+row, `revive` relaunches the same pair and `resume` adopts under the record's runtime regardless of the box.
+A record carrying a model is an unknown field to an older fleet binary, and that binary then refuses the WHOLE store
+(everything that enumerates records, which is most of the surface — `board`, `status`, `brief`, `seed-check`,
+`dispatch`, `harvest`, `milestone`, `reap`, `runtime`, …), not just that record. Once any
+`--model` dispatch exists in a store, do not operate on it with, or roll back to, a fleet older than the release that
+introduced `runtime_model`. Default dispatches write no such field and stay readable.
 Run these commands from the updated checkout. `fleet-env.sh` normally selects the root's deployed
 release, so the next line selects this checkout's CLI for this shell.
 
@@ -30,7 +51,7 @@ normal shell:
 fleet runtime --set claude
 ```
 
-A switch refuses while a record `resume` or `revive` could still act on (an `-inflight-` folder, or an open
+`fleet runtime --set` changes only that default. A switch still refuses while a record `resume` or `revive` could still act on (an `-inflight-` folder, or an open
 record holding its lease or session), a held/interrupted lease, or a live in-scope agent remains. Each blocker
 names the verb that clears it. A crashed worker still owns unfinished work: recover it, or deliberately
 `fleet abort` it. An aborted record, or one closed after it completed, no longer blocks. Do not delete store
@@ -86,10 +107,10 @@ is supported for the captured layouts; large or unfamiliar editor layouts can be
 `revive` requires the original lease and an unoccupied pane/workspace. It validates the explicit UUID
 against a transcript in the recorded configuration and the original workspace. It never selects the
 newest transcript or starts fresh as a fallback. Revival verifies the exact native resume argument;
-`seed-check` may still be unverifiable for a resumed session. `scripts/fleet-revive.sh plan|revive`, run from
-inside a fleet root, finds every `DEAD` record on that root's board, derives the transcript from the record's
-seed, refuses the whole run when a record's runtime differs from the fleet selection, and calls `fleet revive`
-for each (see `skills/reviving-dead-panes`). `fleet resume` still means adoption.
+`seed-check` may still be unverifiable for a resumed session. Revival follows the record's runtime and model,
+never the fleet selection. `scripts/fleet-revive.sh plan|revive`, run from inside a fleet root, finds every
+`DEAD` record on that root's board, derives the transcript from the record's seed, and calls `fleet revive` for
+each under its own runtime (see `skills/reviving-dead-panes`). `fleet resume` still means adoption.
 
 Codex has no verified background CI wake mechanism in this integration. `awaiting-ci` is refused even
 with a watcher attestation, and that worker continues to consume capacity. Claude's watcher contract
@@ -102,7 +123,14 @@ for the measured revisions, integration results and remaining evaluation limits 
 
 ## Repeating validation
 
-`bash fleet/it/run-runtime.sh --stubs` tests dispatch and switch-back using attributed stand-ins.
+`bash fleet/it/run-runtime.sh --stubs` tests dispatch and switch-back using attributed stand-ins (RT1) and the
+per-dispatch runtime/model choice on a claude box (RT2). `bash fleet/it/run-runtime.sh --choice-live` spends two
+real trivial model turns to prove the same on the native CLIs: a claude worker on `claude-fable-5-1` and a codex
+worker on codex's default model, both dispatched onto a box set to claude, each killed and revived. Codex runs in a
+private `CODEX_HOME` inside the attempt directory: the credential is copied in and removed when the run exits, the
+source configuration's top-level settings are copied so "no `-m`" still means that root's configured model, and the
+checkout is pre-trusted there. `RTC_CODEX_HOME` names the source (default `/home/ubuntu/davis_root/.codex`) and is only
+read. The harness never answers a folder-trust screen, because the answer persists into the CLI's configuration.
 For real model coverage, point `RT_LIVE_CONFIG` at a private, authenticated configuration where the
 native plugin is installed, then explicitly select the runtime:
 
