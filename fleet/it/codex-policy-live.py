@@ -28,7 +28,10 @@ import time
 repo = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(repo / 'fleet/src'))
 from fleet.runtime import plain  # noqa: E402
-from fleet.runtime_launch import CODEX_POLICY  # noqa: E402
+try:
+    from fleet.runtime_launch import CODEX_POLICY  # noqa: E402
+except ImportError:                                  # the base tree (CXP-RED*) has no policy at all
+    CODEX_POLICY = None
 from fleet.store import Store  # noqa: E402
 
 root = Path(os.environ['RT_ATTEMPT']).resolve()
@@ -323,10 +326,12 @@ def assert_green(outcome, n):
 
 
 #: RV-31: the argv check reads the product's own constant, so every element (including the update-check key) is asserted.
-POLICY = list(CODEX_POLICY)
+POLICY = list(CODEX_POLICY) if CODEX_POLICY else None
 
 
 def argv_has_policy(argv):
+    if POLICY is None:
+        return False
     joined = ' '.join(argv)
     return all(' '.join(POLICY[i:i + 2]) in joined for i in range(0, len(POLICY), 2))
 
