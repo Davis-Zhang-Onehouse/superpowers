@@ -175,7 +175,9 @@ record: `board` shows a `runtime` column (`codex`, `claude/claude-fable-5-1`), `
 ignores the profile fields silently and has no such rows, so a missing `runtime` row means the choice was not made. A codex worker on a claude box is admitted like any
 other; do not switch the box to get one.
 A codex worker runs with NO approval prompts inside the workspace-write sandbox, network on (FB-110, D-45):
-`dispatch`/`revive` print a `codex_policy` row with the argv and the writable roots, and `brief` repeats it. A codex
+`dispatch`/`revive` print a `codex_policy` row with the argv and the writable roots, and `brief` repeats it. Codex
+workers run only in clone-shaped slots: `dispatch --runtime codex` into a linked-worktree slot (ws5's shape) is refused
+with exit 4, dry-run too, so pick a clone slot with `--slot` (ws8–ws10) or run that work on claude. A codex
 worker's own `pgrep`/`/proc` see only its sandbox, so the verbs that probe processes or panes (22 of them, listed in
 docs/README.fleet-runtimes.md: among them `board`, `pane-guard`, `close`, `harvest`, `reap`, `seed-check` and the
 `release-*` verbs) are blind when it runs them. Which roles may run on codex under that limit is an operator decision still pending
