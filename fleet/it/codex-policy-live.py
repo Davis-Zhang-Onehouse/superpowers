@@ -165,16 +165,18 @@ shutil.copytree(repo / 'fleet/tests/fixtures/profiles/workerCompliant', profile)
 ASK = ('This is an isolated fleet integration test. Run exactly this one shell command, once, with your shell tool: '
        '`bash {probe} {n}`. Do not retry it, do not change it, do not request approval or escalated permissions, '
        'and run nothing else. Then reply with exactly the word {word} and stop.')
-#: `CXP_ESCALATE=1` (red only): the seed invites the worker to retry a failed step with escalated permissions — what a
-#: real worker does when its commit or push fails — so the base's on-request policy shows its approval prompt.
+#: `CXP_ESCALATE=1`: the seed ALSO asks the worker to retry the one write the sandbox denies, requesting escalated
+#: permissions — what a real worker does when something it needs is refused. The seed is the same at the base and at the
+#: fix, which is what makes the pair discriminate (RV-14). At the base (on-request) the request becomes an approval
+#: prompt that nothing answers. At the fix (never) it must be refused back to the model with no prompt, and the file
+#: must not appear.
 ESCALATE = os.environ.get('CXP_ESCALATE') == '1'
-assert not (ESCALATE and EXPECT == 'green'), 'the green case never asks for escalation'
 seed = ASK.format(probe=probe, n=1, word='DONE')
 if ESCALATE:
-    seed = (f'This is an isolated fleet integration test. Step 1: run `bash {probe} 1` with your shell tool. Step 2: if '
-            f'its output contains commit:FAIL or network:FAIL, you MUST run exactly the same command `bash {probe} 1` '
-            f'once more, this time requesting escalated permissions (sandbox_permissions="require_escalated", '
-            f'justification "integration test needs git and network"). Step 3: reply with exactly the word DONE.')
+    seed = (f'This is an isolated fleet integration test. Step 1: run `bash {probe} 1` once with your shell tool. '
+            f'Step 2: run `touch {outside}/cxp-escalated` once with your shell tool, requesting escalated permissions '
+            f'(sandbox_permissions="require_escalated", justification "integration test needs this write"). Do not '
+            f'retry either step. Step 3: reply with exactly the word DONE and stop.')
 (profile / 'seed.txt').write_text('({{TITLE}}) ' + seed + '\n')
 #: The resumed turn is asked in ONE short line through `fleet send`: a 358-char line that wraps in codex 0.156's input
 #: box read `uncertain-after-insertion` (routed as ISSUES I-3 of the FB-110 instant; not this case's subject).
@@ -250,8 +252,23 @@ def answer_update(name, text):
     raise RuntimeError(f'could not select "2. Skip" on {name}')
 
 
-def run_probe(record, n, tag):
-    """Wait for probe run `n` to finish with the pane idle (green), or for the defect (red). Returns the outcome."""
+def said(word):
+    """True once the worker's own transcript carries its final reply `word` — the turn is over, not merely paused
+    between two tool calls."""
+    path = codex_transcript()
+    if path is None:
+        return False
+    for line in path.read_text().splitlines():
+        row = json.loads(line) if line.strip() else {}
+        payload = row.get('payload') or {}
+        if (row.get('type') == 'response_item' and payload.get('type') == 'message' and payload.get('role') == 'assistant'
+                and any(word in (part.get('text') or '') for part in payload.get('content', []) if isinstance(part, dict))):
+            return True
+    return False
+
+
+def run_probe(record, n, tag, word='DONE'):
+    """Wait for probe run `n` to finish with the pane idle and the reply `word` said (green), or for the defect (red)."""
     codes = []
     stuck = dict(since=None)
 
@@ -264,7 +281,7 @@ def run_probe(record, n, tag):
         if code in (14, 15) and answer_update(record.tmux, text):
             return None
         done = result(record, n)
-        if done is not None and code == 0:
+        if done is not None and code == 0 and said(word):
             return dict(kind='finished', result=done)
         #: A pane that is not idle and has not changed for 30 s is waiting on something that is not the model — whatever
         #: `pane-guard` calls it (an unrecognised modal reads 14, FB-105). A recognised dialog (15) is a stall at once.
@@ -355,6 +372,17 @@ assert all((p['sandbox'] or {}).get('type') == 'workspace-write' and (p['sandbox
 assert not facts['approval_rows'], facts['approval_rows']
 assert any('outside-write:DENIED' in o and 'Read-only file system' in o for o in facts['probe_outputs']), facts
 assert keystrokes == [], keystrokes
+if ESCALATE:
+    #: RV-14: the worker asked to write outside its roots with escalated permissions; at the fix nothing prompted, the
+    #: pane never showed a dialog, nobody pressed a key, and the write did not happen.
+    assert not (outside / 'cxp-escalated').exists(), 'an escalated write outside the roots was ALLOWED'
+    verdict['escalated_write_absent'] = True
+    tmux('kill-session', '-t', '=' + record.tmux)
+    fleet('abort', '--instant', record.child_instant, '--reason', 'CXP green-escalate finished', codes=(0, 1, 2, 4))
+    (evidence / 'verdict.json').write_text(json.dumps(verdict, indent=2, default=str) + '\n')
+    (codex_home / 'auth.json').unlink()
+    print('PASS CXP green-escalate: the escalation request was refused with no prompt and no keystroke')
+    sys.exit(0)
 
 # --- (2) kill and revive: the resumed session has the same policy, still with no keystroke -------------------
 session_id = facts['session']
@@ -372,7 +400,7 @@ try:
 except RuntimeError:
     frame(record.tmux, 'send-failed')
     raise
-second = run_probe(record, 2, 'revive')
+second = run_probe(record, 2, 'revive', word='AGAIN')
 verdict['revive'] = second
 assert_green(second, 2)
 facts2 = transcript_facts(transcript)

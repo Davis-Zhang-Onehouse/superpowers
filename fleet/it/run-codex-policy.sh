@@ -3,14 +3,16 @@
 # the workspace-write sandbox with network on. Opt-in (it spends model tokens and reads the root's codex credential).
 #   run-codex-policy.sh            the fix: asserts GREEN (CXP1)
 #   run-codex-policy.sh --red      the base: asserts the defect is observed (CXP-RED)
-#   run-codex-policy.sh --red-escalate   the base, worker invited to escalate: asserts it stalls at a dialog (CXP-RED-ESC)
+#   run-codex-policy.sh --red-escalate   the base, worker asked to escalate one denied write: stalls at a dialog (CXP-RED-ESC)
+#   run-codex-policy.sh --green-escalate the fix, same seed: refused with no prompt, no keystroke, no write (CXP2)
 set -uo pipefail
 IT_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 case "${1:-}" in
   '') expect=green case_id=CXP1 ;;
   --red) expect=red case_id=CXP-RED ;;
   --red-escalate) expect=red case_id=CXP-RED-ESC; export CXP_ESCALATE=1 ;;
-  *) echo 'usage: run-codex-policy.sh [--red|--red-escalate]' >&2; exit 2 ;;
+  --green-escalate) expect=green case_id=CXP2; export CXP_ESCALATE=1 ;;
+  *) echo 'usage: run-codex-policy.sh [--red|--red-escalate|--green-escalate]' >&2; exit 2 ;;
 esac
 . "$IT_ROOT/lib.sh"
 IT_FAILED=0
