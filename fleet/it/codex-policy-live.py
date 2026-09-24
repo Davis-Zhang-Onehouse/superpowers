@@ -337,7 +337,10 @@ def argv_has_policy(argv):
                          text=True).stdout.strip(),
     codex=command(['codex', '--version']).stdout.strip(), socket=socket, root=str(root), expect=EXPECT,
     codex_home=str(codex_home), codex_source=str(codex_source),
-    codex_home_config=(codex_home / 'config.toml').read_text()), indent=2) + '\n')
+    #: RV-35: key NAMES only (the operator's values stay out of evidence); the effective policy is read from the
+    #: session transcript's turn_context instead.
+    codex_home_config_keys=[line.split('=', 1)[0].strip() for line in (codex_home / 'config.toml').read_text().splitlines()
+                            if '=' in line and not line.lstrip().startswith('#')]), indent=2) + '\n')
 
 # --- (1) dispatch a codex worker; it runs the probe with no keystroke ----------------------------------------
 out = fields(fleet('dispatch', '--profile', str(profile), '--title', 'cxp codex', '--slot', 'slot', '--cap', '1',
