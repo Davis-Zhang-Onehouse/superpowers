@@ -20,7 +20,7 @@ IT_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 . "$IT_ROOT/lib.sh"
 
 IT_FAILED=0
-it_own_cases 'F[0-9]+[a-z]?|ISOLATION-F-(enter|leave)'
+it_own_cases 'F[0-9]+[a-z]?(-[A-Za-z0-9-]+)?|ISOLATION-F-(enter|leave)'   # incl. F9-zero-delta and F10-<verb> (FB-37)
 
 it_section F
 OUT="$EV/out"; rm -rf "$OUT"; mkdir -p "$OUT"
