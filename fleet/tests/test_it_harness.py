@@ -17,7 +17,8 @@ import unittest
 REPO = pathlib.Path(__file__).resolve().parents[2]
 IT = REPO / "fleet" / "it"
 FLEET_DESTINATIONS = ("FLEET_HOME", "FLEET_INSTANTS", "FLEET_ROOT", "FLEET_INSTANT", "FLEET_RELEASES",
-                      "IT_ASKED_NAMES", "IT_RESULTS")   # the last two: an IT section runs this suite (M13)
+                      "IT_ASKED_NAMES", "IT_RESULTS",   # an IT section runs this suite (M13)
+                      "TMUX", "TMUX_PANE")              # a bare `tmux` inside a pane follows $TMUX, not TMUX_TMPDIR
 
 
 def harness_copy(tmp: pathlib.Path) -> pathlib.Path:
@@ -249,6 +250,17 @@ class ZeroDelta(unittest.TestCase):
 
     def row(self, case):
         return next(l.split("\t") for l in self.results.read_text().splitlines()[1:] if l.startswith(case + "\t"))
+
+    def test_the_default_tmux_server_these_tests_read_is_private(self):
+        """it_section's isolation check runs a bare `tmux ls`. Under this class's env that must be an empty
+        server of its own: TMUX_TMPDIR points into the tmp dir and $TMUX (which would override it inside a
+        pane) is stripped. Found in review: with $TMUX set, TMUX_TMPDIR alone still reached the live server."""
+        if shutil.which("tmux") is None:
+            self.skipTest("tmux is not on PATH")
+        out = subprocess.run(["tmux", "ls"], env=clean_env({"TMUX_TMPDIR": str(self.tmp)}),
+                             capture_output=True, text=True)
+        self.assertNotEqual(out.returncode, 0, f"a live server answered a bare tmux ls: {out.stdout[:200]}")
+        self.assertNotIn("TMUX", clean_env())
 
     def test_a_refused_read_fails_even_with_a_zero_delta(self):
         self.run_lib("it_zero_delta P-refused fleet status --id 00000000-00000000-inflight-append-nosuch --porcelain")
