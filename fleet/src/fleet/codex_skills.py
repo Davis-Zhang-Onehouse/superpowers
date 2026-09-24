@@ -111,6 +111,9 @@ def visible_skills(codex_home) -> Visibility:
     home = Path(codex_home)
     found = _scan(home / 'plugins' / 'cache', _PLUGIN_DEPTH)
     found.update(_scan(home / 'skills', _SKILLS_DEPTH, skip=(_SYSTEM_DIR,)))
+    #: RV-31: the installer's own link wins over any sibling tree under skills/, whatever sorts first, so skills_root (what
+    #: the seed and brief point the worker at) is the link that follows `current`.
+    found.update(_scan(link_path(home), _SKILLS_DEPTH - 1))
     link = link_path(home)
     try:
         target = os.readlink(link) if os.path.islink(link) else ''

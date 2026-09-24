@@ -301,6 +301,16 @@ class CodexSkillsTests(unittest.TestCase):
         self.assertTrue(vis.ok)
         self.assertEqual(vis.link_target, '')
 
+    def test_the_installers_link_wins_over_a_sibling_tree_and_is_the_skills_root(self):
+        """RV-31: `_scan` kept the first hit in sorted order, so a sibling `skills/old -> fleet-v1/skills` shadowed the link and
+        became the skills_root the seed and brief point the worker at."""
+        self.assertEqual(self.main(*self.args())[0], 0)
+        (self.home / 'skills' / 'old').symlink_to(self.rel / 'fleet-v1' / 'skills')
+        self.flip_current('fleet-v2')
+        vis = codex_skills.visible_skills(self.home)
+        self.assertEqual(vis.skills_root, str(self.link))
+        self.assertEqual(vis.found['systematic-debugging'], str(self.link / 'systematic-debugging' / 'SKILL.md'))
+
     # 10
     def test_codex_system_skills_do_not_count(self):
         skill = self.home / 'skills' / '.system' / 'systematic-debugging'
