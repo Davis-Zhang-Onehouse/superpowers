@@ -1636,6 +1636,9 @@ def _do_send(ctx: Ctx, parsed: Parsed) -> int:
     source = Path(parsed.get('message-file'))
     text = source.read_text()
     messaging.validate_message(text)
+    #: Resolved BEFORE the pane is touched: a refused `--by` inside the recorder would surface after the
+    #: paste, as "NOT RECORDED", for a message that had already been delivered (RV-49's first cut did).
+    sender = _sender_identity(parsed)
     record, layer = _message_target(ctx, parsed)
     child = _child_of(ctx, record)
     sha = messaging.digest(text)
@@ -1653,7 +1656,7 @@ def _do_send(ctx: Ctx, parsed: Parsed) -> int:
         #: B13. Written for EVERY attempt that touched the pane, before the error (if any) propagates, so a
         #: paste that could not be confirmed is on the record beside the sends that were.
         written['path'] = messaging.record_send(child, messaging.SendRecord(
-            at=ctx.now(), by=_sender_identity(parsed), todo_id=record.todo_id, tmux=record.tmux,
+            at=ctx.now(), by=sender, todo_id=record.todo_id, tmux=record.tmux,
             runtime=record.runtime, message_file=str(source.resolve()), sha256=sha, chars=len(text),
             lines=messaging.line_count(text),
             head=messaging.head_of(text), outcome=outcome, confirmation=confirmation))
