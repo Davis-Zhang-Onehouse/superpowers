@@ -188,7 +188,8 @@ IT_ENV_UNNAMED=(-u FLEET_HOME -u FLEET_INSTANTS -u FLEET_ROOT -u FLEET_INSTANT -
 # THE SERVER IS FOUND WHERE THE RUNNER PUT IT (found in review): four runners export their own TMUX_TMPDIR
 # after it_section (`run-B/C/D.sh`, `run-group3.sh` for §E/§K), so a kill by `-L name` under the directory the
 # guardian inherited would miss the server they created and reach a same-named one elsewhere. The guardian
-# kills by the explicit socket PATH `<dir>/tmux-<uid>/<name>` with the directory current when it was ARMED,
+# kills the socket `<dir>/tmux-<uid>/<name>` (as `TMUX_TMPDIR=<dir> tmux -L <name>`, the form run-A's A8a audit
+# recognises as private) with the directory current when it was ARMED,
 # and a runner that moves its servers re-arms it through `it_move_tmux_tmpdir` below (a process's
 # /proc/<pid>/environ is its exec-time environment, so the guardian cannot follow an export by itself).
 #
@@ -213,7 +214,7 @@ it_guard_server() {       # it_guard_server <runner-pid> <socket>
         && [ "$(printf "%s" "$f" | awk "{print \$1}")" != Z ]
     }
     while alive; do sleep 2; done
-    tmux -S "$dir/tmux-$(id -u)/$sock" kill-server 2>/dev/null
+    TMUX_TMPDIR="$dir" tmux -L "$sock" kill-server 2>/dev/null
   ' it-guardian "$sock" "$pid" "$sock" "$start" "${TMUX_TMPDIR:-/tmp}" </dev/null >/dev/null 2>&1 &
   printf '%s\n' "$!" > "$pidfile"
   disown 2>/dev/null || true
