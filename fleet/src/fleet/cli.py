@@ -2221,11 +2221,18 @@ def _do_dispatch(ctx: Ctx, parsed: Parsed) -> int:
             Roadmap(coordinator).claim(milestone_id, str(child))
             claimed_milestone = milestone_id
     except Exception as launch_error:
-        stored = next((r for r in ctx.store.all() if r.todo_id == todo_id), None)
+        #: RV-C4. The rollback's own reads may fail too, and must never replace the launch error: an
+        #: unreadable store makes the record's state UNKNOWN, said so, and the rollback carries on.
+        store_failure = ""
+        try:
+            stored = next((r for r in ctx.store.all() if r.todo_id == todo_id), None)
+        except (FleetError, OSError) as exc:
+            stored, store_failure = None, _one_line(f"{type(exc).__name__}: {exc}")
         stranded = stored is not None
         #: RV-C2. What the store HOLDS: past `launch record` the record carries `launched_at`, so a lost claim
         #: race rolls back a record that reads launched — calling it PENDING-LAUNCH would be a false row.
-        record_state = "none" if stored is None else ("launched" if stored.launched_at else "pending-launch")
+        record_state = ("unknown" if store_failure else "none" if stored is None
+                        else "launched" if stored.launched_at else "pending-launch")
         record_reads = "LAUNCHED (its worker was rolled back)" if record_state == "launched" else "PENDING-LAUNCH"
         stranded_note = (f" A RECORD for todo {todo_id!r} was already written and is left in place: it reads "
                          f"{record_reads} and counts against the WIP cap until it is resolved. Clear it with "
@@ -2250,6 +2257,9 @@ def _do_dispatch(ctx: Ctx, parsed: Parsed) -> int:
                           else "",
                           f"Record {todo_id!r} reads {record_reads} and counts against the WIP cap until "
                           f"`fleet abort --instant {child} --reason <why>` resolves it." if stranded else "",
+                          f"Whether record {todo_id!r} was written is unknown: the store could not be read "
+                          f"during the rollback ({store_failure}); `fleet board` shows it once the store "
+                          f"reads again." if store_failure else "",
                           "Re-run once the cause in the error row is cleared.")))),
                       ],
                 clears_when=getattr(launch_error, "clears_when", None),
@@ -2266,7 +2276,7 @@ def _do_dispatch(ctx: Ctx, parsed: Parsed) -> int:
                                               f"a process may still hold the slot") from launch_error
         try:
             ctx.pool.release(lease.slot, force=False)
-        except FleetError as release_error:
+        except (FleetError, OSError) as release_error:      # RV-C4: an OSError here must not mask the cause
             print(f"dispatch failed: {launch_error}; cleanup retained lease {lease.slot}", file=ctx.err)
             raise not_started("retained", f"is retained: the release was refused "
                                           f"({release_error})") from launch_error

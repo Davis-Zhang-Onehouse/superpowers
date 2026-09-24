@@ -163,6 +163,38 @@ class TestAFailureAfterTheClaimIsNotStarted(DispatchCase):
         self.assertEqual(rows.get("step"), "slot settings", out)
         self.assertEqual(rows.get("clears_who"), "the operator", out)
 
+    def test_a_rollback_whose_store_read_fails_still_answers_not_started(self):
+        #: RV-C4. The rollback's own reads must not replace the launch error: the store read failing inside
+        #: the rollback used to escape before the conversion, with no rows and the secondary error's code.
+        self.seed_fails()
+        original_all = self.fleet.store.all
+
+        def all_records():
+            if self.fleet.started:
+                raise FleetError("records/x.json is not valid JSON")
+            return original_all()
+        self.fleet.store.all = all_records
+        code, out, err = self.dispatch()
+        self.assertEqual(code, NOT_STARTED, err)
+        rows = kv(out)
+        self.assertTrue(rows.get("error", "").startswith("FleetError: Seed delivery"), out)
+        self.assertEqual(rows.get("left_record"), "unknown", out)
+        self.assertIn("records/x.json is not valid JSON", rows.get("remedy", ""), out)
+        self.assertEqual(rows.get("left_lease"), "given-back", out)
+
+    def test_a_release_that_raises_an_os_error_is_a_retained_lease_not_a_new_answer(self):
+        self.seed_fails()
+
+        def release(slot, force=False, **kw):
+            raise PermissionError(13, "Permission denied", "pool/leases/ws1")
+        self.fleet.pool.release = release
+        code, out, err = self.dispatch()
+        self.assertEqual(code, NOT_STARTED, err)
+        rows = kv(out)
+        self.assertTrue(rows.get("error", "").startswith("FleetError: Seed delivery"), out)
+        self.assertEqual(rows.get("left_lease"), "retained", out)
+        self.assertIn("Permission denied", rows.get("remedy", ""), out)
+
     def test_human_output_carries_the_same_rows(self):
         self.seed_fails()
         code, out, err = self.fleet.run(["dispatch", "--profile", str(self.fleet.profile()),
