@@ -50,7 +50,6 @@ _REPO = _HERE.parents[3]                      # lint-skill.py -> tools -> using-
 DEFAULT_FLEET_SRC = _REPO / "fleet" / "src"
 DEFAULT_RESULTS = _REPO / "fleet" / "it" / "RESULTS.tsv"
 
-FENCE = re.compile(r"```.*?```", re.S)
 SPAN = re.compile(r"`([^`\n]+)`")
 #: `fleet <verb>` as a COMMAND. The negative lookbehind excludes a path or module — `bin/fleet`,
 #: `.fleet/`, `fleet/src` — because a directory listing inside a fenced block is ordinary content in a
@@ -86,8 +85,14 @@ CLAIM = re.compile(r"^(?![ \t]*<!--).*\b(refuses|refused|refusing|refuse|rejects
 NOT_A_VERB_CONTEXT = ("/", ".", "_")
 
 
+def _on_path(src: pathlib.Path) -> None:
+    """Put the fleet package on sys.path ONCE, for `verbs_from` and for the markdown reader alike."""
+    if str(src) not in sys.path:
+        sys.path.insert(0, str(src))
+
+
 def verbs_from(src: pathlib.Path) -> set:
-    sys.path.insert(0, str(src))
+    _on_path(src)
     try:
         from fleet.cli import VERBS
     except Exception as exc:                       # noqa: BLE001 - reported, never guessed around
@@ -109,10 +114,23 @@ def passing_cases(results: pathlib.Path) -> set:
     return out
 
 
-def code_regions(text: str) -> list:
-    """Fenced blocks, plus inline spans from what is left after the fences are removed."""
-    regions = [m.group(0) for m in FENCE.finditer(text)]
-    regions += [m.group(1) for m in SPAN.finditer(FENCE.sub("", text))]
+def code_regions(text: str, src: pathlib.Path = DEFAULT_FLEET_SRC) -> list:
+    """Fenced blocks, plus inline spans from the prose left over.
+
+    Read through `fleet.markdown` — the ONE enclosure-aware reader (B19) — instead of a private
+    ```…``` regex: a ~~~ fence is a fence, a comment's contents are not prose, and the grammar this lint
+    applies is the grammar `fleet complete`, `fleet lint` and `fleet verify` apply.
+    """
+    _on_path(src)
+    from fleet.markdown import FENCE, PROSE, lines as md_lines   # noqa: E402 - after the path is set
+    blocks, prose_text = {}, []
+    for line in md_lines(text):
+        if line.enclosure == FENCE and not line.boundary:
+            blocks.setdefault(line.block, []).append(line.raw)
+        elif line.enclosure == PROSE:
+            prose_text.append(line.text)
+    regions = ["\n".join(blocks[key]) for key in sorted(blocks)]
+    regions += [m.group(1) for m in SPAN.finditer("\n".join(prose_text))]
     return regions
 
 
@@ -164,6 +182,7 @@ def main(argv: list) -> int:
     findings = []
 
     src = pathlib.Path(os.environ.get("FLEET_SRC") or DEFAULT_FLEET_SRC)
+    _on_path(src)                     # once, here: the verb table and the markdown reader come from the same package
     known = verbs_from(src)
     # V1 is per-file: an unregistered verb is a defect at a location, and a finding that does not say which
     # file it came from sends the reader hunting through the whole skill.
