@@ -131,7 +131,8 @@ RETRACT="$(g_init gretract)"      # G4
 PARKED="$(g_init gpark)"          # G5
 EMPTY="$(g_init gempty)"          # G6
 RENAME="$(g_init grename)"        # G7
-for d in "$DECLARED" "$PROSE" "$RETRACT" "$PARKED" "$EMPTY" "$RENAME"; do
+QUOTED="$(g_init gquoted)"        # G8
+for d in "$DECLARED" "$PROSE" "$RETRACT" "$PARKED" "$EMPTY" "$RENAME" "$QUOTED"; do
   [ -d "$d" ] || { echo "init produced no instant ($d); nothing below is a verdict" >&2; exit 2; }
 done
 
@@ -518,6 +519,56 @@ if [ "$g7_ok" = 1 ]; then
 else
   it_fail G7 "fleet/it/G/out/G7-rename.tsv" \
     "moved=$g7_moved stale(rc=$g7_stale_rc)='$g7_stale_read' new='$g7_new_read' want='$G7_WANT'; join(rc=$g7_status_rc) phase='$g7_join_phase' parked='$g7_join_park' folder='$g7_folder'; control rc=$g7_control_rc (want 2, a refusal)"
+fi
+
+# ==================================================================================================
+# G8 — A QUOTATION IS NEITHER A DECLARATION NOR A POINTER (B19 / i25).
+#      The same file, two readings. First: the instant's own absolute folder appears ONLY inside a ```bash
+#      block (the coordinator's dispatch command kept verbatim) and inside an HTML comment, and the
+#      literal RCF-9 line appears ONLY inside a ```markdown block introduced by "what NOT to do". `lint`
+#      must report 0 near-miss rows and `complete --dry-run` must answer would-rename (rc=0). Second, the
+#      negative control in the SAME file: the same two things written as prose fire again (1 row, rc=4).
+#      Before B19 the first reading refused rc=4 on the fenced and the commented line and lint exited 1.
+# ==================================================================================================
+mkdir -p "$QUOTED/evidence"
+printf '# INDEX\n\n- evidence/INDEX.md — this file\n' > "$QUOTED/evidence/INDEX.md"
+cat >> "$QUOTED/HANDOFF.md" <<EOF
+
+## Provenance (a QUOTATION, not a pointer)
+\`\`\`bash
+fleet dispatch --title gquoted   # created $QUOTED
+\`\`\`
+<!-- archival: created as $QUOTED/ ; the brief said $G_S1 -->
+Do NOT write the phase as prose; this is what NOT to do:
+\`\`\`markdown
+$G_S1
+\`\`\`
+EOF
+fleet review --instant "$QUOTED" --scope all --verdict READY \
+  --finding 'RV-1:Minor:applied:evidence/INDEX.md:baseline:none' --porcelain > "$OUT/G8-review.tsv" 2>&1
+fleet lint --instant "$QUOTED" --porcelain > "$OUT/G8-lint-quoted.tsv" 2>&1
+g8_lint_rc=$?
+g8_rows="$(g_near_miss_count "$OUT/G8-lint-quoted.tsv")"
+fleet complete --instant "$QUOTED" --dry-run --porcelain > "$OUT/G8-complete-quoted.tsv" 2>&1
+g8_complete_rc=$?
+# the negative control, same file: prose fires
+printf 'Read %s/evidence/INDEX.md first.\n%s\n' "$QUOTED" "$G_S1" >> "$QUOTED/HANDOFF.md"
+fleet lint --instant "$QUOTED" --porcelain > "$OUT/G8-lint-prose.tsv" 2>&1
+g8b_lint_rc=$?
+g8b_rows="$(g_near_miss_count "$OUT/G8-lint-prose.tsv")"
+fleet complete --instant "$QUOTED" --dry-run --porcelain > "$OUT/G8-complete-prose.tsv" 2>&1
+g8b_complete_rc=$?
+{ printf 'quoted only: lint rc=%s near-miss rows=%s; complete --dry-run rc=%s\n' "$g8_lint_rc" "$g8_rows" "$g8_complete_rc"
+  printf 'plus prose: lint rc=%s near-miss rows=%s; complete --dry-run rc=%s\n' "$g8b_lint_rc" "$g8b_rows" "$g8b_complete_rc"
+} > "$OUT/G8-quotation.tsv"
+cat "$OUT/G8-quotation.tsv"
+if [ "$g8_rows" = 0 ] && [ "$g8_lint_rc" = 0 ] && [ "$g8_complete_rc" = 0 ] \
+   && [ "$g8b_rows" = 1 ] && [ "$g8b_lint_rc" = 1 ] && [ "$g8b_complete_rc" = 4 ]; then
+  it_pass G8 "fleet/it/G/out/G8-quotation.tsv" \
+    "a HANDOFF.md whose only absolute self-reference sits inside a \`\`\`bash block and an HTML comment, and whose only '$G_S1' sits inside a \`\`\`markdown block, is $g8_rows near-miss row(s) (lint rc=$g8_lint_rc) and \`complete --dry-run\` answers would-rename (rc=$g8_complete_rc). NOT VACUOUS: the same two things appended as prose to the SAME file make lint report $g8b_rows row (rc=$g8b_lint_rc) and complete refuse (rc=$g8b_complete_rc). Both gates read prose through fleet.markdown; a quotation is not the thing quoted (B19)"
+else
+  it_fail G8 "fleet/it/G/out/G8-quotation.tsv" \
+    "quoted-only: lint rc=$g8_lint_rc rows=$g8_rows complete rc=$g8_complete_rc (want 0/0/0); with prose: lint rc=$g8b_lint_rc rows=$g8b_rows complete rc=$g8b_complete_rc (want 1/1/4)"
 fi
 
 it_assert_isolation G-leave
