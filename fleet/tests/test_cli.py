@@ -1802,14 +1802,16 @@ class TestVerify(CliCase):
         instant = fleet.paths["readyWorker"]
         (instant / "RUNBOOK.md").write_text(
             "# RUNBOOK\n\n1. step\n    ```bash\n    ls\n    ```\n2. step\n\t~~~sh\n\tpwd\n\t~~~\n"
-            "```markdown\n    ```bash\n    not counted, it is inside a fence\n    ```\n```\n")
+            "```markdown\n    ```bash\n    not counted, it is inside a fence\n    ```\n```\n"
+            #: RV-37: spaces THEN a tab, and a blockquoted fence — both fences to the base's regex, prose to the reader
+            "  \t```bash\n  \tls\n  \t```\n> ```zsh\n> pwd\n> ```\n")
 
         code, out, err = fleet.run(["verify", "--porcelain", "--instant", str(instant)])
 
         self.assertEqual(fleet.runner.commands(), [], "an indented fence's line was executed")
         population = [line for line in out.splitlines() if line.startswith("population\t")]
         self.assertTrue(population, out)
-        self.assertIn("2 indented shell fence(s) read as prose and not examined", population[0])
+        self.assertIn("4 indented shell fence(s) read as prose and not examined", population[0])
 
     def test_an_outward_shape_keeps_its_outward_reason(self):
         """The denylist is the FIRST line, not a removed one: `rm -rf` is still `outside-sandbox`."""
