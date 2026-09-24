@@ -96,8 +96,9 @@ problem() { PROBLEMS+=("$1: $2"); printf '  %-12s %s\n' "PROBLEM" "$2"; }
 # `cli._report_error` prints `<Type>: <sentence>` and THEN indented `blocker:` / `clears when:` / `clears who:`
 # lines, so the last line of a refusal is its route, never its reason. Reporting the last line put
 # "clears who: the operator" in the plan and lost "Recorded runtime executable is unavailable" (PT2-I1).
-# The reason is the `<Type>: ` header nearest above the first route line, with any lines of a multi-line
-# message after it; the route is every route line, with a wrapped value's continuation kept. With no route,
+# The reason is the FIRST `<Type>: ` line above the first route line, with every line of a multi-line
+# message after it (so a message line that merely looks like a header does not displace it); the route
+# is every route line, with a wrapped value's continuation kept. With no route,
 # the last `<Type>: ` line is the reason, so stdout that a pipe flushes after stderr is not mistaken for it.
 # With no `<Type>: ` line at all (a parse error, printed bare and followed by the verb's usage), the FIRST line
 # is the reason: the usage comes after it.
@@ -109,7 +110,7 @@ refusal_line() {
       first = 0
       for (i = 1; i <= NR; i++) if (line[i] ~ rt) { first = i; break }
       head = 0
-      if (first) { for (i = first - 1; i >= 1; i--) if (line[i] ~ hdr) { head = i; break } }
+      if (first) { for (i = 1; i < first; i++) if (line[i] ~ hdr) { head = i; break } }
       else { for (i = NR; i >= 1; i--) if (line[i] ~ hdr) { head = i; break } }
       if (!head) { for (i = 1; i <= NR; i++) if (line[i] != "") { head = i; break } }
       if (!head) { printf "(no output)"; exit }

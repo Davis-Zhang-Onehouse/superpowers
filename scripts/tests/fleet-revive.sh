@@ -365,6 +365,13 @@ try:
     check("refusal_line: a parse error (no Type header) is reported by its reason, not by the usage's last row",
           got.startswith("revive: '--bogus' is not a flag revive declares.") and 'awaiting-operator' not in got,
           got)
+    # RV-19: a message line that merely LOOKS like a header does not replace the error's own header.
+    got = refusal_line('Refused: the slot is held\nNote: the record names ws1\n  clears who: the operator\n')
+    check('refusal_line: a header-like line inside the message does not displace the Type header',
+          got == 'Refused: the slot is held Note: the record names ws1 (clears who: the operator)', got)
+    # Neighbour: a traceback (no route) is still reported by its exception line.
+    got = refusal_line('Traceback (most recent call last):\n  File "x", line 1, in <module>\nValueError: boom\n')
+    check('refusal_line: a traceback is reported by its exception line', got == 'ValueError: boom', got)
 finally:
     shutil.rmtree(home, ignore_errors=True)
 
