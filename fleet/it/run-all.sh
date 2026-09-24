@@ -163,39 +163,10 @@ fi
 # --- the merge, by the single writer -------------------------------------------------------------
 say ""
 say "=== merging into RESULTS.tsv (one writer) ==="
-python3 - "$IT_ROOT" all "${!RC[@]}" <<'PY' | tee -a "$LOG"
-import pathlib, sys
-root = pathlib.Path(sys.argv[1])
-main = root / "RESULTS.tsv"
-def rows(p):
-    return [l for l in p.read_text().splitlines()[1:] if l.strip()]
-header = main.read_text().splitlines()[0]
-fresh, owned = [], set()
-for name in sys.argv[2:]:
-    f = root / f"RESULTS-closeout-{name}.tsv"
-    if not f.is_file():
-        continue
-    for r in rows(f):
-        fresh.append(r); owned.add(r.split("\t")[0])
-# A section that RAN replaces its NOT-RUN row. Derived from the case ids present, never typed: a hand-kept
-# list of "which sections ran" is a second copy of the truth (SD-2).
-for sec in "ABCDEFGHIJKLMNOP":
-    if any(r.split("\t")[0].startswith(sec) and r.split("\t")[0][1:2].isdigit() for r in fresh):
-        owned.add(f"§{sec}")
-existing = rows(main)
-# An `OWN-<case>` FAIL row (lib.sh: a runner wrote a row its own regex did not claim) is that run's verdict on
-# its own regex; once the regex is fixed no runner owns the OWN- id, so it would otherwise be kept forever.
-kept = [r for r in existing if r.split("\t")[0] not in owned and not r.startswith("OWN-")]
-notrun = [r for r in kept if "\tNOT-RUN\t" in r]
-kept = [r for r in kept if "\tNOT-RUN\t" not in r]
-main.write_text("\n".join([header] + kept + fresh + notrun) + "\n")
-dupes = {}
-for r in (kept + fresh + notrun):
-    dupes[r.split("\t")[0]] = dupes.get(r.split("\t")[0], 0) + 1
-print(f"merged {len(fresh)} fresh row(s) for {len(owned)} owned id(s); {len(kept)} untouched; "
-      f"{len(notrun)} NOT-RUN")
-print("duplicate case ids:", sorted(k for k, v in dupes.items() if v > 1) or "none")
-PY
+# The merge lives in bin/merge-results.py (one writer, hermetically tested): a section that ran replaces its
+# rows and its NOT-RUN row; other sections' rows are kept; an OWN-<case> row is dropped only when its case
+# or its section was re-judged by THIS run.
+python3 "$IT_ROOT/bin/merge-results.py" "$IT_ROOT" all "${!RC[@]}" | tee -a "$LOG"
 
 say ""
 for v in PASS FAIL SKIP NOT-RUN; do
