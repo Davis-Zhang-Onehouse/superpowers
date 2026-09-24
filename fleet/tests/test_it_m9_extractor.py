@@ -79,3 +79,47 @@ class MutationExtractor(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class MergeResults(unittest.TestCase):
+    """run-all.sh's merge (bin/merge-results.py): sections that ran replace their rows; an OWN-<case> row is
+    dropped only when this run re-judged its case or its section (found in review: a default-roster run
+    used to erase a standalone §F's OWN-F… FAIL while the stale twin it flagged stayed)."""
+
+    def setUp(self):
+        self.tmp = pathlib.Path(tempfile.mkdtemp(prefix="it-merge-"))
+        self.addCleanup(shutil.rmtree, self.tmp, True)
+        (self.tmp / "RESULTS.tsv").write_text(
+            "case\tverdict\tevidence\tnote\n"
+            "B1\tPASS\t\told b1\nOWN-B1\tFAIL\t\tstale own\n"
+            "F1\tPASS\t\told f1\nF9-zero-delta\tPASS\t\tstale twin\nOWN-F9-zero-delta\tFAIL\t\tflagged\n"
+            "§F\tNOT-RUN\t\t\n")
+        (self.tmp / "RESULTS-closeout-B.tsv").write_text("case\tverdict\tevidence\tnote\nB1\tPASS\t\tnew b1\n")
+
+    def merge(self, *names):
+        r = subprocess.run(["python3", str(IT / "bin" / "merge-results.py"), str(self.tmp), *names],
+                           capture_output=True, text=True)
+        self.assertEqual(r.returncode, 0, r.stderr)
+        return {l.split("\t")[0]: l.split("\t")[3] for l in (self.tmp / "RESULTS.tsv").read_text().splitlines()[1:]}
+
+    def test_a_ran_section_replaces_its_rows_and_its_own_rows(self):
+        out = self.merge("B")
+        self.assertEqual(out["B1"], "new b1")
+        self.assertNotIn("OWN-B1", out)
+
+    def test_an_own_row_of_a_section_this_run_did_not_execute_is_kept(self):
+        out = self.merge("B")
+        self.assertIn("OWN-F9-zero-delta", out)
+        self.assertIn("F9-zero-delta", out)
+        self.assertIn("§F", out)
+
+    def test_a_ran_section_also_drops_its_not_run_row(self):
+        (self.tmp / "RESULTS-closeout-F.tsv").write_text("case\tverdict\tevidence\tnote\nF1\tPASS\t\tnew f1\n")
+        out = self.merge("B", "F")
+        self.assertNotIn("§F", out)
+        self.assertNotIn("OWN-F9-zero-delta", out)
+
+    def test_run_all_calls_the_module(self):
+        text = (IT / "run-all.sh").read_text()
+        self.assertIn('bin/merge-results.py" "$IT_ROOT" all', text)
+        self.assertNotIn("kept = [r for r in existing", text)
