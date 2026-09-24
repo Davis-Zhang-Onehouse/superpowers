@@ -101,11 +101,16 @@ def git_writable_dirs(workspace, git) -> tuple:
         dotgit = candidate / '.git'
         if dotgit.is_symlink() or not dotgit.is_file():    # a directory `.git` is a clone or the slot itself
             continue
-        code, out = git(['rev-parse', '--path-format=absolute', '--git-dir', '--git-common-dir'], candidate)
-        lines = out.split('\n') if code == 0 else []
-        if len(lines) < 2 or not lines[0].strip() or not lines[1].strip():
+        code, out = git(['rev-parse', '--path-format=absolute', '--git-dir'], candidate)
+        if code != 0 or not out.strip():
             continue
-        own, common = Path(lines[0].strip()).resolve(), Path(lines[1].strip()).resolve()
+        own = Path(out.strip().splitlines()[0]).resolve()
+        #: RV-37: never ask git for the common dir. It reads `<own>/commondir`, and `<own>` is a writable root, so the
+        #: worker could point it at any repository before its next revive. A linked worktree's git dir is
+        #: `<common>/worktrees/<name>` by construction, and that shape is all the common dir is taken from.
+        if own.parent.name != 'worktrees':
+            continue
+        common = own.parent.parent
         #: RV-29: a `.git` FILE is the worker's to write, so it proves nothing. Git's back-link — `<own>/gitdir`, written
         #: by `git worktree add` in the OWNING repository, outside the sandbox — must name this very `.git`.
         try:

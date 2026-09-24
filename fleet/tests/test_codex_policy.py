@@ -122,6 +122,17 @@ class GitRootsTests(unittest.TestCase):
         git('worktree', 'add', '-q', '--detach', str(self.slot / 'mine'), cwd=self.main)    # the neighbour still counts
         self.assertEqual(sorted(git_writable_dirs(self.slot, default_git())), sorted(worktree_roots(self.main, 'mine')))
 
+    def test_a_rewritten_commondir_does_not_move_the_roots(self):
+        """RV-37. `<common>/worktrees/<name>` is itself a writable root, so its `commondir` file is the worker's to
+        rewrite; roots re-derived at the next revive must not follow it to another repository."""
+        other = self.tmp / 'other'
+        other.mkdir()
+        git('init', '-q', '.', cwd=other)
+        git('worktree', 'add', '-q', '--detach', str(self.slot / 'wt'), cwd=self.main)
+        own = (self.main / '.git' / 'worktrees' / 'wt')
+        (own / 'commondir').write_text(str((other / '.git').resolve()) + '\n')
+        self.assertEqual(sorted(git_writable_dirs(self.slot, default_git())), sorted(worktree_roots(self.main, 'wt')))
+
     def test_no_repo_and_a_failing_git_add_nothing(self):
         self.assertEqual(git_writable_dirs(self.slot, default_git()), ())
         git('worktree', 'add', '-q', '--detach', str(self.slot / 'wt'), cwd=self.main)
