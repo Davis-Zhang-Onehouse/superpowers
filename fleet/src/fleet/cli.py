@@ -5128,9 +5128,10 @@ def _redirects_to(command: str, token: str) -> bool:
 #: for its read-only subcommands to run, and a RUNBOOK author controls the repository; D-7). `sort` and
 #: `date` are vouched with their writing/spawning options refused (`sort -o`, `--compress-program`;
 #: `date -s`), on EVERY argument: a `--` never ends the scan, because an option that takes a value consumes
-#: it (`sort --random-source -- -o …`). `fleet` is vouched for the verbs its own table marks read-only,
-#: minus the three that run things anyway. A recipe that needs one of the rest is the author's to run by
-#: hand; `verify` says so.
+#: it (`sort --random-source -- -o …`). `fleet` is NOT vouched (D-8): the verb table's `read_only` says
+#: nothing about `pane-guard --capture` writing a file or `release-status` spawning git in an author's
+#: checkout, and `--home`/`--root` reach a real store and a real tmux server the sandbox does not pin.
+#: A recipe that needs one of the rest is the author's to run by hand; `verify` says so.
 #:
 #: HOW THE RECIPE IS READ (DECISIONS D-6, D-7). Three review rounds each found an input a shlex-based reading
 #: split into fewer commands than bash runs — a mid-word `#`, a quoted operator, `'a'#`, a glued `|>`,
@@ -5149,9 +5150,9 @@ _VOUCHED_HEADS = frozenset({
     "test", "true", "false", "pwd", "jq",
 })
 #: Per-head options that write or spawn: the short letters, and the long names (getopt's prefix rule).
-_HEAD_OPTION_BLOCKLIST = {"sort": ("o", ("output", "compress-program")), "date": ("s", ("set",))}
-#: Read-only by the verb table, and yet they run things: the hermetic suite, every recipe, the IT suite.
-_FLEET_VERBS_THAT_RUN = frozenset({"selftest", "verify", "release-verify"})
+#: `sort -T` and `file -C` write where the author aims (temporary files; a compiled magic file).
+_HEAD_OPTION_BLOCKLIST = {"sort": ("oT", ("output", "compress-program", "temporary-directory")),
+                          "date": ("s", ("set",)), "file": ("C", ("compile",))}
 _OPAQUE_HEADS = frozenset({"eval", "exec", "source", "."})
 _SIMPLE_CHARS = frozenset("ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789_@%+=:,./-")
 _SIMPLE_OPS = ("||", "&&", "|", ";")
@@ -5277,8 +5278,10 @@ def _head_option_reason(head: str, args: list) -> str:
         hit = _long_option_hits(word, longs)
         if hit:
             return f"`{head} {word}` selects --{hit}, which writes or spawns beyond its arguments"
-        if letters and word.startswith("-") and not word.startswith("--") and any(c in word[1:] for c in letters):
-            return f"`{head} {word}` carries -{letters}, which writes or spawns beyond its arguments"
+        if letters and word.startswith("-") and not word.startswith("--"):
+            hit = next((c for c in letters if c in word[1:]), "")
+            if hit:
+                return f"`{head} {word}` carries -{hit}, which writes or spawns beyond its arguments"
     return ""
 
 
@@ -5309,20 +5312,16 @@ def unvouched_reason(command: str) -> str:
             return ("`git` is not a shape verify vouches for: a repository's config can name programs for "
                     "its read-only subcommands to run, and the recipe's author controls the repository")
         if head == "fleet":
-            verb = args[0] if args else ""
-            spec = VERBS.get(verb)
-            if spec is not None and spec.read_only and verb not in _FLEET_VERBS_THAT_RUN:
-                continue
-            return (f"`fleet {verb or '(no verb)'}` is not a read-only verb by the verb table (or is one "
-                    f"that runs things: {', '.join(sorted(_FLEET_VERBS_THAT_RUN))}); verify vouches for "
-                    f"read-only fleet verbs only")
+            return ("`fleet` is not a shape verify vouches for: a verb the table marks read-only can still "
+                    "write (`pane-guard --capture`) or spawn git in a checkout the author chose "
+                    "(`release-status`), and `--home`/`--root` reach a real store and tmux server the "
+                    "sandbox does not pin (D-8)")
         if head in _VOUCHED_HEADS:
             reason = _head_option_reason(head, args)
             if reason:
                 return reason
             continue
-        return (f"`{head}` is not a shape verify vouches for (read-and-print tools, read-only `fleet` "
-                f"verbs)")
+        return f"`{head}` is not a shape verify vouches for (read-and-print tools only: {', '.join(sorted(_VOUCHED_HEADS))})"
     return ""
 
 
@@ -5355,9 +5354,9 @@ def _do_verify(ctx: Ctx, parsed: Parsed) -> int:
                 detail=(f"{recipe.source}:{recipe.line} — refused BEFORE execution: {reason}. `verify` "
                         f"executes only what it can vouch for (B21: a denylist alone fails open, and three "
                         f"shapes it did not name were measured reaching the runner)."),
-                clears_when=("the recipe is rewritten in vouched shapes — read-and-print tools, read-only "
-                             "`fleet` verbs, plain words and quoted strings, no substitution, glob or "
-                             "expansion — or its author runs it by hand and records the output under evidence/"),
+                clears_when=("the recipe is rewritten in vouched shapes — read-and-print tools, plain words "
+                             "and quoted strings, no substitution, glob or expansion — or its author runs it "
+                             "by hand and records the output under evidence/"),
                 clears_who="the author of that document"))
             continue
         code, out, err = ctx.runner(recipe.command, cwd=sandbox, env=_sandbox_env(sandbox))
