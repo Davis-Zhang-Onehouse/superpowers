@@ -141,3 +141,12 @@ class TestInstantPaths(CliCase):
                 self.assertEqual(code, 2)
                 self.assertIn('relative path from the current directory', err)
                 self.assertIn('bare name from the instants directory', err)
+
+    def test_malformed_existing_folder_names_input_and_parsed_path(self):
+        fleet = self.loaded()
+        malformed = fleet.tmp / 'malformed-instant-folder'
+        malformed.mkdir()
+        code, out, err = fleet.run(['roadmap', '--instant', str(malformed)])
+        self.assertEqual(code, 2)
+        self.assertIn(f'resolved input {malformed}', err)
+        self.assertIn(f'parsed instant {malformed}', err)
