@@ -349,6 +349,21 @@ class TestTitleAsUsed(DispatchCase):
         self.assertIn("title_rewritten", rows, out)
 
 
+class TestTheRewriteRuleIsStatedWhole(unittest.TestCase):
+    """RV-C8. `identity.camel` has two rules beyond word breaks and case folding. A row naming the rule must
+    name the rule that fired."""
+
+    def test_a_digit_first_title_names_the_x_prefix(self):
+        rows = dict(cli._title_rows("9 lives"))
+        self.assertEqual(rows["title_as_used"], "x9Lives")
+        self.assertIn("prefixed with x", rows["title_rewritten"])
+
+    def test_a_title_with_no_letters_or_digits_names_todo(self):
+        rows = dict(cli._title_rows("---"))
+        self.assertEqual(rows["title_as_used"], "todo")
+        self.assertIn("no letters or digits becomes todo", rows["title_rewritten"])
+
+
 class TestTheNotStartedCodeIsRegisteredForDispatchOnly(unittest.TestCase):
     def test_registry(self):
         self.assertEqual(getattr(cli, "DISPATCH_NOT_STARTED", None), NOT_STARTED)

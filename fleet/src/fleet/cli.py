@@ -1811,7 +1811,9 @@ def _title_rows(title) -> list:
     if used != title:
         rows.append(("title_rewritten",
                      f"--title {title!r} is used as {used!r}: an instant name is one dashless camelCase field "
-                     f"(every run of characters outside A-Z a-z 0-9 is a word break, and case is folded), so "
+                     f"(every run of characters outside A-Z a-z 0-9 is a word break, case is folded, a name "
+                     f"that would not start with a letter is prefixed with x, and a title with no letters or "
+                     f"digits becomes todo), so "
                      f"the todo id is {used}-<MMDDHHMM>, the session dt-{used} and the folder "
                      f"<base>-<MMDDHHMM>-inflight-<optype>-{used}. Read these rows; do not derive the name "
                      f"from --title"))
