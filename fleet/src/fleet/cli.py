@@ -5225,17 +5225,18 @@ def _simple_tokens(text: str):
 
 
 def _redirect_reason(operator: str, target) -> str:
-    """Why a redirection may not run, or `""`. `2>&1` and `>&2` take no target. A read (`<`) needs a word.
-    A write's target must be an UNQUOTED plain relative path: no quote, no `..`, not absolute."""
+    """Why a redirection may not run, or `""`. `2>&1` and `>&2` take no target. Every other target — a
+    write's AND a read's — must be an UNQUOTED plain relative path: no quote, no `..`, not absolute. A
+    read is judged too because bash's `/dev/tcp/<host>/<port>` and `/dev/udp/…` are not files: `cat
+    < /dev/tcp/host/80` opens a network connection, the fetch class D-3 excludes by name (RV-29)."""
     if operator not in _SIMPLE_TARGETED:
         return ""
     if target is None or target[0] != "word":
         return f"the redirection {operator!r} has no target"
-    if operator not in _SIMPLE_WRITES:
-        return ""
     kind, raw, word = target
     if raw != word or not _PLAIN_TARGET.match(word) or word.startswith("/") or ".." in word.split("/"):
-        return f"it writes through {operator!r} to {raw}, which is not a plain relative path inside the sandbox"
+        direction = f"writes through {operator!r} to" if operator in _SIMPLE_WRITES else f"reads through {operator!r} from"
+        return f"it {direction} {raw}, which is not a plain relative path inside the sandbox"
     return ""
 
 
