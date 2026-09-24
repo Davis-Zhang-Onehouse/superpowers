@@ -1804,7 +1804,9 @@ class TestVerify(CliCase):
             "# RUNBOOK\n\n1. step\n    ```bash\n    ls\n    ```\n2. step\n\t~~~sh\n\tpwd\n\t~~~\n"
             "```markdown\n    ```bash\n    not counted, it is inside a fence\n    ```\n```\n"
             #: RV-37: spaces THEN a tab, and a blockquoted fence — both fences to the base's regex, prose to the reader
-            "  \t```bash\n  \tls\n  \t```\n> ```zsh\n> pwd\n> ```\n")
+            "  \t```bash\n  \tls\n  \t```\n> ```zsh\n> pwd\n> ```\n"
+            #: RV-38: a language that merely STARTS with a shell name is not a shell fence
+            "    ```sh-session\n    $ ls\n    ```\n")
 
         code, out, err = fleet.run(["verify", "--porcelain", "--instant", str(instant)])
 

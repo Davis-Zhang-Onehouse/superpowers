@@ -5348,7 +5348,7 @@ def _sandbox_env(sandbox: Path) -> dict:
 #: spaces, tabs and container markers is one `recipes_of` cannot see, and "examined 0 recipe(s)" would read
 #: as success; `verify` counts them and says so (RV-31, RV-37).
 _INDENTED_SHELL_FENCE = re.compile(
-    r"^[ \t>]*(?:(?:\d+[.)]|[-*+])[ \t]+[ \t>]*)?(?:`{3,}|~{3,})[ \t]*(?:" + "|".join(_RECIPE_LANGS) + r")\b",
+    r"^[ \t>]*(?:(?:\d+[.)]|[-*+])[ \t]+[ \t>]*)?(?:`{3,}|~{3,})[ \t]*(?:" + "|".join(_RECIPE_LANGS) + r")(?=\s|$)",
     re.IGNORECASE)
 
 
