@@ -33,7 +33,7 @@ IT_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 . "$IT_ROOT/lib.sh"
 
 IT_FAILED=0
-it_own_cases 'M9-mut-(baseline|1|2|3|4)|ISOLATION-M9mut-(enter|leave)'
+it_own_cases 'M9-mut-(baseline|extract|inject|1|2|3|4)|ISOLATION-M9mut-(enter|leave)'
 
 EV="$IT_ROOT/M9-mutation"
 mkdir -p "$EV"
@@ -46,21 +46,18 @@ SECTION=M9mut
 it_assert_isolation M9mut-enter
 
 # The audit under test, extracted from the runner that owns it so this script cannot drift from it. The old
-# copy is removed first and the extraction's exit status is checked: `m9.py` persists in `$EV` between runs,
-# so an extraction that failed silently used to audit every mutant with a stale rule.
+# copy is removed first: `m9.py` persists in `$EV` between runs, so an extraction that failed silently used to
+# audit every mutant with a stale rule (FB-108). The extractor asserts it took the ONE block bearing the anchor
+# (B25): the inline `src.index` it replaces took the FIRST match, and a decoy heredoc above the real block was
+# certified as the audit under test (w2itharness evidence/01-red/b25-decoy-decoy-base.txt). A caller with two
+# anchors is a FAIL here.
 rm -f "$EV/m9.py"
-if ! python3 - "$IT_ROOT/run-group5.sh" "$EV/m9.py" <<'PY'
-import pathlib, sys
-src = pathlib.Path(sys.argv[1]).read_text()
-start = src.index('cat > "$PY_DIR/m9.py" <<')
-body = src.index('\n', start) + 1
-end = src.index('\nPY\n', body)
-pathlib.Path(sys.argv[2]).write_text(src[body:end] + '\n')
-print(f"extracted the M9 audit: {len(src[body:end].splitlines())} lines")
-PY
-then
-  it_fail M9-mut-baseline "fleet/it/run-group5.sh" \
-    "could not extract the M9 audit from run-group5.sh, so there is no rule to mutate against"
+if python3 "$IT_ROOT/bin/extract-m9.py" "$IT_ROOT/run-group5.sh" "$EV/m9.py" > "$EV/extract.out" 2>&1; then
+  it_pass M9-mut-extract "fleet/it/M9-mutation/extract.out" "$(cat "$EV/extract.out")"
+else
+  it_fail M9-mut-extract "fleet/it/M9-mutation/extract.out" "the extractor refused: $(tr '\n' ' ' < "$EV/extract.out" | cut -c1-240)"
+  it_assert_isolation M9mut-leave
+  echo "no audit was extracted — refusing to report mutation results" >&2
   exit 1
 fi
 
@@ -120,6 +117,18 @@ for n in 1 2 3 4; do
   fi
   cat "$EV/mut$n.inject"
 done
+
+#: The injection is JUDGED (B25's second half, w2itharness ISSUES I-2): M9-mut-inject passes only when every
+#: mutation was applied. It does not abort the run — a mutation that did not apply still gets its own
+#: NOT-APPLIED row below (FB-108), which says more than a SKIP would.
+not_applied=""
+for n in 1 2 3 4; do [ -n "${APPLIED[$n]:-}" ] || not_applied="$not_applied M$n"; done
+if [ -z "$not_applied" ]; then
+  it_pass M9-mut-inject "fleet/it/M9-mutation" "all four mutations injected, each anchor present exactly once and each mutant differing from the original (mut1..4.inject)"
+else
+  it_fail M9-mut-inject "fleet/it/M9-mutation" \
+    "not applied:$not_applied — those copies are UNMUTATED; their rows below read NOT-APPLIED, never SURVIVED (see mut<n>.inject)"
+fi
 
 #: What each mutation must be caught BY is its `why` in m9_mutations.py, and `classify` there is the only
 #: place an outcome becomes a verdict. A kill for the wrong reason is not a kill: a copy that fails to import
