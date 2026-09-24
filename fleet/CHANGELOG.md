@@ -1,5 +1,96 @@
 # fleet — changelog
 
+## fleet/v0.6.9 — 2026-09-24T19:34:40Z
+Cut from 66acc21 on `stack/0.6.9` (upstream base snapshot/2026-09-22-152849). 83 commit(s) since fleet/v0.6.8.
+
+Every release ships the whole repository — all skills, `commands/`, `hooks/` and the plugin manifest, not only `fleet/`.
+Payload: fleet (46 files), skills (4 files), scripts (4 files), docs (2 files).
+Skills changed: releasing-fleet, reviving-dead-panes, using-fleet, using-superpowers.
+
+- ea9a0a7 fleet: codex_skills — what a CODEX_HOME can see of the superpowers skills, and a link that follows current (FB-111)
+- fb66c74 scripts: fleet-codex-skills.sh installs or verifies a root's codex skills link (FB-111)
+- dae7e3e fleet: codex_skills reports an unreadable CODEX_HOME as seeing nothing, and refuses a file where skills/ goes
+- ad10c2b fleet: refuse a codex dispatch whose CODEX_HOME cannot see the superpowers skills; tell codex workers how to load one (FB-111)
+- 194f125 release-postflight: assertion 6 verifies each root's codex skills link; docs and skills say how codex gets skills (FB-111)
+- 50db8cb fleet/it: CXS — a real codex worker, dispatched by fleet, finds, reads and follows the superpowers skills (FB-111)
+- 397ea1c fleet: final-review fixes for FB-111 — dangling pins, honest dry-run, an override seed that says "not installed"
+- 07d69c9 fleet: codex_skills repoints a pin by shape only when it dangles; CXS reads local_shell_call and open(...,'w') writes
+- 193a6f1 fleet/it: CXS shows the worker nothing inside the checkout; the RCA phase check accepts "Phases 1 and 2"
+- b9a3961 fleet: codex_skills refuses (4) an unreadable or unwritable CODEX_HOME, and its dry run agrees (RV-27)
+- 646b0dd fleet: the codex dispatch row and fleet brief say whether the skills follow the deployed current (RV-28)
+- 9a3190c skills/releasing-fleet: name the codex refusal window between deploy and install, and say an assertion-6 MISMATCH is not a rollback (RV-20)
+- 5e05e8c fleet: fleet-codex-skills.sh refuses a --codex-home that does not exist instead of creating it (RV-29)
+- b1a9ff8 fleet: codex_skills repoints only links with the installer's own shape, never an operator's link to a dev checkout (RV-30)
+- 52f8ec5 fleet: codex_skills prefers the installer's link over a sibling skills tree when naming skills_root (RV-31)
+- 5ce9ef6 fleet/it: CXS keeps a partial verdict and the transcript when a run fails (RV-32)
+- a99109a fleet/it: CXS's RCA check no longer accepts the generic phrase "root cause investigation" (RV-33)
+- 40244b6 fleet/it: CXS records the fleet revision it drove and whether its own driver was dirty (RV-17)
+- 93c1387 fleet/it: SENDC installs the superpowers skills link into its private CODEX_HOME (FB-111 gate)
+- fc3db2b fleet/it: the wrapper is an executable, so timeout/env/exec cannot bypass the attribution register (B18)
+- 5d4ffa3 fleet/it: every direct python3 -m fleet.cli site goes through bin/it-fleet; W1-13 proves a timeout-shaped mint is attributed (B18)
+- 75a43c1 fleet/it: ownership is checked when a row is written, and a section is rewritten in place (FB-37, FB-76)
+- ad813aa fleet tests: the repointed-register case expects the unclaimed row to survive
+- 0b904e3 fleet/it: it_zero_delta judges the exit code; F10-status reads the todo id it was refusing (FB-38)
+- d5749e9 fleet/it: F2b asserts that W1 is named as a holder of the cap, not only that a dispatch was refused (FB-75)
+- ffbe721 fleet/it: lib.sh gives every non-interactive runner /dev/null as stdin; J5 pipes its heredoc (FB-99)
+- eb30f18 fleet/it: a setsid guardian kills a section's private tmux server when its runner dies (FB-73)
+- 9bf42c3 fleet/it: the M9 extractor takes the one anchored block or refuses; a failed injection is a FAIL row (B25)
+- 8c05392 fleet: a release's it-RESULTS.tsv marks each row this-run:<runner> or carried-over (FB-81)
+- d137208 fleet docs: the harness's controls in bin/ and the register's two new invariants
+- 891c833 fleet/it: W1-13 must name the bypass folder in its own row; the wrapper tests compare streams byte for byte (B18, review)
+- d74201f fleet/it: the mutation runner leaves SKIP rows for cases an abort never reached; the extractor refuses an unreadable caller (B25, review)
+- b6285b6 fleet/it: F2b's holder match stops at the held list; the guardian retires its predecessor; rows insert after the last owned row (review)
+- e6f96ca fleet tests: the hermetic harness tests strip $TMUX so their bare tmux calls never reach the live server (review)
+- 943160a fleet/it: F9-zero-delta expects the inflight code; the M9 abort helper is defined before use; a targeted B5-B7 run owns all three rows (final review)
+- 26d19a9 fleet tests: every tmux socket a harness test touches lives in a private per-process directory (re-review)
+- 7529e19 fleet/it: the guardian kills by socket path and is re-armed where a runner moves its tmux directory (RV-34)
+- 4486e42 fleet/it: the python-side product calls go through the wrapper too, and the lint sees their shapes (RV-35)
+- 2ec62cc fleet/it: the register merge is a tested module, and an OWN- row is dropped only by the run that re-judged it (RV-36)
+- 60ffdd0 fleet: a release's it-RESULTS.tsv marks this-run by the whole row, not by case id (RV-37)
+- 155b85c fleet/it: F9's subshell hands its failure back to the runner (RV-38)
+- 61a9e74 fleet/it: the ownership regex reaches every awk reader through ENVIRON (RV-39)
+- d383cc5 fleet/it: the merge reads which sections ran from the runner names, never from row ids (RV-40)
+- 4e16838 fleet tests: the merge tests sit above the module main guard (RV-42)
+- 140f982 fleet tests: the bypass lint matches the module and launcher forms as tokens; run-Q.sh is exempt by name (RV-41, RV-43)
+- d24e9ee fleet/it: stack glue — w2's M9 runner tests read w4's m9_mutations.py and its two abort paths (0.6.9 stack)
+- 2db72ae fleet/it: stack glue — the runtime-choice and CXS drivers reach the product through bin/it-fleet (B18 lint, 0.6.9 stack)
+- e12716d fleet: launch and revive codex workers with approval=never inside workspace-write (FB-110)
+- b0fa5f3 fleet/it: CXP, a real codex worker proves the unattended policy (FB-110)
+- 3dddcbf docs, skills: the codex worker policy, its roots, and the sandbox's process blindness (FB-110)
+- ef03911 fleet: give a worktree slot's codex worker objects, refs, logs and its own git dir, never the common dir (RV-28)
+- 6611e07 fleet: slot contents a codex worker can plant no longer choose its writable roots (RV-29)
+- e685263 fleet/it: CXP2, the same escalation request at the base and at the fix (RV-14)
+- e2104ac fleet/it: detect the escalation REQUEST in the rollout, with a positive control (RV-30)
+- 5c3d087 fleet/it: CXP checks the argv against CODEX_POLICY itself (RV-31)
+- 0035ba5 fleet: the codex_policy row says the operator config can add writable roots (RV-33)
+- 4c5064a fleet/tests: pin the dispatch --dry-run codex_policy row (RV-36)
+- 4f30842 fleet: the 0.156 dialog-row comment cites its update-modal source instead of asserting it (RV-32)
+- 204356e skills/using-fleet: do not claim the codex update modal reads 15 (RV-18)
+- 52e3fb4 docs, skills: name every census-dependent verb a codex worker might run, declare included (RV-19)
+- 0036e9c docs, skills: state the census limit, not a role policy the operator has not ruled on (RV-24)
+- 6868105 docs: restore the paragraph break the FB-110 codex paragraph swallowed (noticed in receive pass 1)
+- d8451cc fleet/it: say in the CXP runner that the credential copy can rotate the source's refresh token (RV-34)
+- 9c50e12 fleet/it: CXP's environment.json records config key names, not the operator's values (RV-35)
+- 5365e97 fleet/it: CXP runs on the base tree again after RV-31's import (fix-introduced by 77ec7abc)
+- 4198aa3 fleet/it: CXP2 asserts the refused write, not an escalation request codex never offers (fix-introduced by 52752439/866b6c55)
+- 18b8cc5 fleet: take a worktree's common dir from its validated path, never from its writable commondir file (RV-37)
+- 4e7c642 fleet: a git dir forged inside the slot chooses no codex root (RV-29)
+- 4c3081d fleet: every codex git root is resolved, never a symlink, never outside the common dir (RV-38)
+- 17ee022 fleet: docstrings stop restating withdrawn claims (RV-41)
+- 88b3f46 docs, skills: list all 22 census-reaching verbs, release verbs included (RV-19)
+- 1eb625c docs: cite the census method, not a path inside the FB-110 instant (RV-43)
+- 5691f1a fleet: shipped comments describe the codex measurements instead of citing instant paths (RV-43)
+- 87dee57 fleet: codex workers get no derived git roots, only the store and the instants directory (RV-46, D-51)
+- 768a193 fleet: codex dispatch, revive and resume refuse a linked-worktree slot (RV-29, D-51)
+- 6cd2d1f fleet/it: CXP runs in a clone-shaped slot and first shows codex refusing a worktree slot (D-51)
+- e0cf08b docs, skills: codex workers run only in clone-shaped slots (D-51)
+- 077a40c fleet/it: a CXP run finishes on a stable idle pane, not on the model's reply word
+- 5affac9 fleet/it: CXP2 no longer requires the model to attempt the out-of-roots write
+- cdbc4c1 fleet/tests: the codex policy module docstring states D-51, not the removed git roots (RV-47)
+- d1a8434 fleet: the codex worktree-slot check fails closed instead of crashing (RV-52)
+- c4e5a09 fleet: the codex worktree-slot refusal names --slot <a clone slot> (RV-53)
+- 66acc21 fleet/it: stack glue — the CXP driver reaches the product through bin/it-fleet (B18 lint, 0.6.9 stack)
+
 ## fleet/v0.6.8 — 2026-09-24T05:16:15Z
 Cut from d7a0529 on `stack/0.6.8` (upstream base snapshot/2026-09-22-152849). 55 commit(s) since fleet/v0.6.7.
 
