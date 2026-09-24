@@ -70,7 +70,10 @@ class TestInstantPaths(CliCase):
         self.assertNotIn('not an instant on disk', err)
         self.assertIn('would record scope all', out)
 
-    def test_every_instant_verb_accepts_a_cwd_relative_path(self):
+    def test_every_instant_verb_smokes_a_cwd_relative_path(self):
+        # The output comparison proves path selection for verbs that print the subject.
+        # declare, park, unpark, apply, withdraw, complete and abort print no subject
+        # path on their normal fixture branch; for those seven this is smoke coverage.
         fleet = self.loaded()
         arguments = self.argv_for(fleet)
         for name, spec in cli.VERBS.items():
@@ -103,6 +106,25 @@ class TestInstantPaths(CliCase):
         argv = [*base, '--from', os.path.relpath(coordinator, Path.cwd())]
         code, out, err = fleet.run(argv)
         self.assertEqual((code, out, err), expected)
+
+    def test_propose_to_relative_path_reaches_the_destination_inbox(self):
+        fleet = self.loaded()
+        coordinator = fleet.paths['readyWorker']
+        proposer = fleet.paths['doomed']
+        previous = Path.cwd()
+        try:
+            os.chdir(proposer)
+            code, out, err = fleet.run(['propose', '--instant', str(proposer),
+                                        '--to', '../' + coordinator.name,
+                                        '--milestone', 'M1', '--status', 'running',
+                                        '--evidence', 'evidence/INDEX.md'])
+        finally:
+            os.chdir(previous)
+        self.assertEqual(code, 0, err)
+        mine = [p for p in Roadmap(coordinator).proposals() if p.milestone == 'M1'
+                and p.instant == str(proposer)]
+        self.assertEqual(len(mine), 1)
+        self.assertEqual(Roadmap(proposer).proposals(), [])
 
     def test_refusal_names_resolved_bad_path(self):
         fleet = self.loaded()
