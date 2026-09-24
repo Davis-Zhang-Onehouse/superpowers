@@ -177,7 +177,7 @@ other; do not switch the box to get one.
 A codex worker runs with NO approval prompts inside the workspace-write sandbox, network on (FB-110, D-45):
 `dispatch`/`revive` print a `codex_policy` row with the argv and the writable roots, and `brief` repeats it. A codex
 worker's own `pgrep`/`/proc` see only its sandbox, so every verb that attributes a process to a pane (`board`,
-`pane-guard`, `close`, `harvest`, `reap`, `declare`'s pane check) is blind when it runs them; keep coordinator, stack and release instants on claude
+`pane-guard`, `close`, `harvest`, `reap`, `declare`'s pane check) is blind when it runs them. Which roles may run on codex under that limit is an operator decision still pending
 (docs/README.fleet-runtimes.md).
 
 ### Selecting the box's default runtime
