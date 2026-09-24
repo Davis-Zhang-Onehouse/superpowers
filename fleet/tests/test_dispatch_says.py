@@ -21,7 +21,7 @@ from unittest import mock
 
 from fleet import EXIT_BAD_INPUT, EXIT_CODES, EXIT_NO_CAPACITY, EXIT_OK, EXIT_REFUSED
 from fleet import cli, seedcheck
-from fleet.errors import BadInput
+from fleet.errors import BadInput, Refused
 from tests.test_cli import Fleet
 
 #: Written as the NUMBER, so a base without the constant fails on the behaviour rather than on an import.
@@ -135,6 +135,26 @@ class TestAFailureAfterTheClaimIsNotStarted(DispatchCase):
         self.assertEqual(rows.get("instant"), "(none created)", out)
         self.assertEqual(rows.get("record"), "(none written)", out)
         self.assertIsNone(self.fleet.pool.lease("ws1"))
+
+    def test_a_refusal_at_a_step_the_dry_run_asks_is_a_refused_row(self):
+        #: RV-C1. The claim lands on a DIFFERENT slot than the candidate the gates judged, and that slot is
+        #: refused at `slot settings` (a codex linked-worktree slot). D-2 keeps the cause's exit 4, so the
+        #: row must be `refused` too: a wrapper branching on the row kind must not read a rule as a crash.
+        original_claim = self.fleet.pool.claim
+        self.fleet.pool.claim = lambda **kw: original_claim(**{**kw, "slot": "ws2"})
+
+        def refuse(runtime, path, verb):
+            if str(path).endswith("ws2"):
+                raise Refused("a codex worker cannot run in a linked-worktree slot",
+                              clears_when="another slot", clears_who="the operator")
+        with mock.patch.object(cli, "_refuse_codex_worktree_slot", refuse):
+            code, out, err = self.dispatch()
+        self.assertEqual(code, EXIT_REFUSED, err)
+        rows = kv(out)
+        self.assertTrue(rows.get("refused", "").startswith("Refused: a codex worker cannot run"), out)
+        self.assertNotIn("error", rows, out)
+        self.assertEqual(rows.get("step"), "slot settings", out)
+        self.assertEqual(rows.get("clears_who"), "the operator", out)
 
     def test_human_output_carries_the_same_rows(self):
         self.seed_fails()
