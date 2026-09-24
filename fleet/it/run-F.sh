@@ -534,11 +534,16 @@ f10_fail=0
 it_zero_delta F10-compaction-status fleet compaction-status --porcelain
 it_zero_delta F10-board            fleet board --porcelain
 it_zero_delta F10-leases           fleet leases --porcelain
-it_zero_delta F10-status           fleet status --id "$(basename "$W1")" --porcelain
+#: `FB-38`. The TODO ID, which `status` takes — `$(basename "$W1")` was the folder name, exit 2 before any
+#: read, and the zero delta over it was vacuously true for as long as the case existed.
+it_zero_delta F10-status           fleet status --id "$W1_ID" --porcelain
 it_zero_delta F10-lint             fleet lint --instant "$W1" --porcelain
 it_zero_delta F10-roadmap          fleet roadmap --instant "$W1" --porcelain
 it_zero_delta F10-brief            fleet brief --instant "$W1" --porcelain
-it_zero_delta F10-dispatch-dryrun  fleet dispatch --profile "$OUT/profile" --title f10probe \
+#: `--want 4`: by here F2's W2 holds the cap and W1's declaration is restored, so the dry run is REFUSED by
+#: the cap — it still evaluates every gate and writes nothing, which is the property. Measured, not
+#: assumed: w2itharness evidence/03-green/sectionF-real-fix.
+it_zero_delta --want 4 F10-dispatch-dryrun fleet dispatch --profile "$OUT/profile" --title f10probe \
                                      --base 00000000 --optype append --dry-run
 for c in F10-compaction-status F10-board F10-leases F10-status F10-lint F10-roadmap F10-brief \
          F10-dispatch-dryrun; do
