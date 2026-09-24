@@ -123,3 +123,21 @@ class MergeResults(unittest.TestCase):
         text = (IT / "run-all.sh").read_text()
         self.assertIn('bin/merge-results.py" "$IT_ROOT" all', text)
         self.assertNotIn("kept = [r for r in existing", text)
+
+    def test_an_m9mut_only_run_does_not_count_as_section_m(self):
+        """RV-40: run-m9-mutation's M9-mut-* rows begin with 'M' and a digit; only a runner NAMED as owning §M
+        (group5) may drop §M's OWN- and NOT-RUN rows."""
+        (self.tmp / "RESULTS.tsv").write_text(
+            "case\tverdict\tevidence\tnote\nM8-board\tPASS\t\tstale twin\nOWN-M8-board\tFAIL\t\tflagged\n"
+            "M9-mut-2\tPASS\t\told\n§M\tNOT-RUN\t\t\n")
+        (self.tmp / "RESULTS-closeout-m9mut.tsv").write_text("case\tverdict\tevidence\tnote\nM9-mut-2\tFAIL\t\tSURVIVED\n")
+        out = self.merge("m9mut")
+        self.assertEqual(out["M9-mut-2"], "SURVIVED")
+        self.assertIn("OWN-M8-board", out)
+        self.assertIn("M8-board", out)
+        self.assertIn("§M", out)
+        (self.tmp / "RESULTS-closeout-group5.tsv").write_text("case\tverdict\tevidence\tnote\nM1\tPASS\t\tnew m1\n")
+        out = self.merge("m9mut", "group5")
+        self.assertNotIn("OWN-M8-board", out)
+        self.assertNotIn("§M", out)
+

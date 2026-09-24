@@ -8,12 +8,20 @@ A section that RAN replaces its rows and its NOT-RUN row; rows of sections this 
 FAIL row (lib.sh: a runner wrote a row its own regex did not claim) is that runner's verdict on its regex; it is
 dropped only when the run that would re-judge it ran — its case is owned this time, or its section ran — so a
 default-roster run cannot erase a standalone §F's OWN-F… row while the stale twin it flagged stays (found in
-review). Prints the tallies run-all.sh logs. Extracted from run-all.sh so a hermetic test can drive it.
+review). WHICH SECTIONS RAN is read from the runner NAMES run-all.sh passes, through the table below — never
+inferred from row ids: run-m9-mutation's `M9-mut-*` rows and run-e9-leak's `E9-leak-*` rows begin with a section
+letter and a digit, and a letter heuristic counted them as §M and §E having run (RV-40, found in closure).
+Prints the tallies run-all.sh logs. Extracted from run-all.sh so a hermetic test can drive it.
 """
 import pathlib
 import sys
 
 SECTIONS = "ABCDEFGHIJKLMNOP"
+#: run-all.sh's runner NAME -> the section letter(s) whose rows that runner owns. A name absent here (m9mut,
+#: e9leak, w1, runtime, rmw, i7, TE, AT, RH, S, R, Q, LB, all) owns no lettered section, so its rows can never
+#: make a section count as having run.
+RUNNER_SECTIONS = {"A": "A", "B": "B", "C": "C", "D": "D", "E": "E", "K": "K", "F": "F", "G": "G", "H": "H",
+                   "I": "I", "J": "J", "O": "O", "P": "P", "group5": "LMN"}
 
 
 def rows(path: pathlib.Path) -> list:
@@ -35,10 +43,9 @@ def merge(root: pathlib.Path, names: list) -> str:
         for row in rows(register):
             fresh.append(row)
             owned.add(case_of(row))
-    # A section that RAN replaces its NOT-RUN row. Derived from the case ids present, never typed: a hand-kept
-    # list of "which sections ran" is a second copy of the truth (SD-2).
-    ran = {sec for sec in SECTIONS
-           if any(case_of(r).startswith(sec) and case_of(r)[1:2].isdigit() for r in fresh)}
+    # A section that RAN replaces its NOT-RUN row. Which sections ran comes from the runner names this run
+    # passed (RUNNER_SECTIONS), not from the case ids present (RV-40).
+    ran = {sec for name in names for sec in RUNNER_SECTIONS.get(name, "")}
     owned |= {f"§{sec}" for sec in ran}
 
     def drop(row: str) -> bool:
