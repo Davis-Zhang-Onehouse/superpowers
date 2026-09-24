@@ -143,7 +143,9 @@ names the blocker, what clears it, and who clears it. `1` means a checker found 
 
 `fleet dispatch` has one code of its own. `5` means **not-started**: the lease was claimed and the gates passed
 under the claim, then a launch step failed and was rolled back. The step might be the tmux session, the
-launcher, seed delivery, or the instant tree. `3` and `4` keep their meaning, and nothing was claimed for them.
+launcher, seed delivery, or the instant tree. A failure in a check the dry-run also makes (the slot's launch
+settings, the render) keeps the code the dry-run gives, so the two agree. `3` and `4` keep their meaning, and
+nothing was claimed for them.
 
 **Every dispatch says what it did on STDOUT, including one that started nothing.** A non-start prints a
 `refused` row (exit 3/4) or an `error` row (exit 1/2/5), with `clears_when`/`clears_who` when the answer has

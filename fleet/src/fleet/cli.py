@@ -248,6 +248,9 @@ PANE_GUARD_CODES = {
 #: from "you typed it wrong". `3`/`4` keep meaning what they meant: nothing was claimed.
 DISPATCH_NOT_STARTED = EXIT_NOT_STARTED
 DISPATCH_CODES = {DISPATCH_NOT_STARTED: "not-started"}
+#: The launch steps whose checks `--dry-run` also makes (`_dispatch_settings` on the candidate slot, and
+#: `profile.render`). A failure there keeps its own code, so the real call and its dry-run agree.
+DRY_RUN_ASKED_STEPS = ("slot settings", "render")
 
 #: Every code any verb in this package may return, base registry first.
 EXIT_CODES_ALL = {**EXIT_CODES, **{code: name for code, name in PANE_GUARD_CODES.items()
@@ -2221,8 +2224,11 @@ def _do_dispatch(ctx: Ctx, parsed: Parsed) -> int:
                          f"PENDING-LAUNCH and counts against the WIP cap until it is resolved. Clear it with "
                          f"`fleet abort --instant {child} --reason <why>`." if stranded else "")
         def not_started(lease_state):
-            """V23-B. The answer, whatever surfaced: exit 5 and rows naming the step and what was left."""
-            return NotStarted(
+            """V23-B. The answer, whatever surfaced: exit 5 and rows naming the step and what was left —
+            except at the two steps the DRY-RUN also asks (the slot's launch settings and the render), where
+            the cause's own code is kept, so a real call answers with the code its dry-run gave (`run-D.sh`
+            D5: an unresolved placeholder is bad input, 2, on both)."""
+            answer = NotStarted(
                 f"dispatch did not start: the launch failed at {step!r} after the lease on {lease.slot!r} was "
                 f"claimed, and was rolled back: {type(launch_error).__name__}: {launch_error}",
                 rows=[("step", step), ("todo_id", todo_id),
@@ -2234,6 +2240,9 @@ def _do_dispatch(ctx: Ctx, parsed: Parsed) -> int:
                       ("lease", lease_state)],
                 clears_when=getattr(launch_error, "clears_when", None),
                 clears_who=getattr(launch_error, "clears_who", None))
+            if step in DRY_RUN_ASKED_STEPS and isinstance(launch_error, FleetError):
+                answer.exit_code = launch_error.exit_code
+            return answer
         if started:
             ctx.sessions.kill(tmux)
             if ctx.sessions.alive(tmux):
