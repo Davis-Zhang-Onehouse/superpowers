@@ -74,7 +74,7 @@ def command(args, codes=(0,)):
 
 
 def fleet(*args, codes=(0,)):
-    return command([str(repo / 'bin/fleet'), *args, '--porcelain'], codes)
+    return command([os.environ['IT_FLEET'], *args, '--porcelain'], codes)   # the harness wrapper (B18)
 
 
 def fields(output):
