@@ -1,6 +1,9 @@
 #!/usr/bin/env bash
 # CXP (FB-110, D-45): a REAL codex worker, launched and revived by fleet, runs unattended with approval=never inside
 # the workspace-write sandbox with network on. Opt-in (it spends model tokens and reads the root's codex credential).
+# The credential is COPIED into a private CODEX_HOME and deleted on exit. A session that refreshes its token there may
+# rotate a ChatGPT refresh token, which can invalidate the copy in the source root (the same exposure as RTC and CXS).
+# Prefer an API-key credential when one is available (CXP_CODEX_HOME names the source).
 #   run-codex-policy.sh            the fix: asserts GREEN (CXP1)
 #   run-codex-policy.sh --red      the base: asserts the defect is observed (CXP-RED)
 #   run-codex-policy.sh --red-escalate   the base, worker asked to escalate one denied write: stalls at a dialog (CXP-RED-ESC)
