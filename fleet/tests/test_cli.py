@@ -43,6 +43,7 @@ from unittest import mock
 from fleet import (EXIT_ATTENTION, EXIT_BAD_INPUT, EXIT_CODES, EXIT_NO_CAPACITY, EXIT_OK,
                    EXIT_REFUSED)
 from fleet.runtime import LaunchSettings
+from fleet.codex_skills import CORE_SKILLS, Visibility
 from fleet import cli
 from fleet import messaging
 from fleet import render
@@ -307,6 +308,12 @@ class Fleet:
         #: observes a holder that "exited" without any wall-clock time passing.
         self.slept = []
         self.sleep = lambda seconds: self.slept.append(seconds)
+        #: FB-111. What a codex worker's CODEX_HOME can see of the superpowers skills. The launch settings
+        #: below name `/test/config`, which does not exist, so the fixture states the answer: every core
+        #: skill, through the link the installer writes. A case about a bare CODEX_HOME replaces this.
+        self.codex_skills = lambda home: Visibility(
+            home, {name: f'{home}/skills/superpowers/{name}/SKILL.md' for name in CORE_SKILLS}, (),
+            '/test/fleet-releases/current/skills')
         #: `FI-7`. The PROBE FAILING is a distinct state from the probe finding nothing, and the real
         #: probes cannot tell them apart — `list_processes` returns `[]` when pgrep exits non-zero and
         #: `capture_pane` returns `""` when tmux does. This switch reproduces the first half; an empty
@@ -565,6 +572,7 @@ class Fleet:
             return cli.Ctx(launch_settings=lambda runtime, slot: LaunchSettings(runtime, '/test/bin/' + runtime, '/test/config'),
                            seed_delivery=lambda name, text: seedcheck.Verdict(seedcheck.ATTESTED, detail='hermetic fixture delivery'),
                            resume_verified=lambda record, session_id: True,
+                           codex_skills=self.codex_skills,
                            home=self.home, instants_dir=self.instants, store=self.store,
                            pool=self.pool, sessions=self.sessions, harvest=self.harvest,
                            out=out, err=err, dry_run=parsed.on("dry-run"),

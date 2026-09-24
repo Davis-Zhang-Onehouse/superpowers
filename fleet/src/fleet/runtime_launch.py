@@ -6,6 +6,7 @@ import shlex
 import uuid
 
 from fleet.atomic import atomic_write
+from fleet.codex_skills import load_instruction
 from fleet.errors import BadInput, Refused
 from fleet.runtime import LaunchSettings, validate_model, validate_runtime
 
@@ -14,11 +15,17 @@ def fleet_executable() -> str:
     return str(Path(__file__).resolve().parents[3] / 'bin/fleet')
 
 
-def seed_cli_header() -> str:
-    return (f'Fleet CLI for this dispatch: {fleet_executable()}\n'
-            'The launcher exports this path as FLEET_BIN. For every fleet command in the task,\n'
-            'charter, or skills, invoke "$FLEET_BIN" instead of the bare fleet command.\n'
-            'Login shells may put an older fleet installation first on PATH.\n\n')
+def seed_cli_header(runtime: str = 'claude', skills=None) -> str:
+    """The lines every seed starts with. A codex seed also says how to load a skill on codex (FB-111): claude gets
+    that from the superpowers plugin's SessionStart hook, and codex has no hook, because the skills reach it
+    through a link in CODEX_HOME rather than a plugin install. A claude seed is unchanged, byte for byte."""
+    header = (f'Fleet CLI for this dispatch: {fleet_executable()}\n'
+              'The launcher exports this path as FLEET_BIN. For every fleet command in the task,\n'
+              'charter, or skills, invoke "$FLEET_BIN" instead of the bare fleet command.\n'
+              'Login shells may put an older fleet installation first on PATH.\n\n')
+    if runtime == 'codex' and skills is not None:
+        header += load_instruction(skills) + '\n\n'
+    return header
 
 
 def model_args(settings: LaunchSettings) -> list[str]:

@@ -72,8 +72,18 @@ mkdir -p "$FLEET_HOME" "$FLEET_INSTANTS"
 bash "$IT_ROOT/bin/source-pin.sh" before "$EV/out" || exit 2
 trap 'it_tmux kill-server 2>/dev/null || true' EXIT
 export FLEET_CLAUDE_BIN="$IT_ROOT/bin/claude" FLEET_CODEX_BIN="$IT_ROOT/bin/claude"
-export CODEX_HOME="$EV/codex-config"
+# Per attempt (FB-111): its skills link points into this run's releases area, removed on exit.
+export CODEX_HOME="$RT_ATTEMPT/codex-config"
 mkdir -p "$CODEX_HOME"
+# FB-111. A codex dispatch is refused when CODEX_HOME cannot see the superpowers skills, so the stub home gets them
+# the way a root's does: the installer's one link, through a private releases area whose `current` is this checkout.
+# The releases area lives OUTSIDE the checkout: `current` names the checkout, and a link to an ancestor inside it is
+# a cycle for any `rglob` over the tree. Removed on exit, with the server.
+RT_RELEASES="$(mktemp -d)"
+trap 'it_tmux kill-server 2>/dev/null || true; rm -rf "$RT_RELEASES"' EXIT
+ln -s "$(cd "$IT_ROOT/../.." && pwd)" "$RT_RELEASES/current"
+bash "$IT_ROOT/../../scripts/fleet-codex-skills.sh" --codex-home "$CODEX_HOME" --releases "$RT_RELEASES" \
+  > "$EV/out/codex-skills.txt" 2>&1 || { echo "codex skills install failed: $EV/out/codex-skills.txt" >&2; exit 2; }
 # Keep a control pane so terminal exit does not remove the private server mid-check.
 it_tmux new-session -d -s itfleet-RT-control sleep 100000 || exit 2
 if python3 "$IT_ROOT/runtime-checks.py" > "$EV/out/runtime.json" 2> "$EV/out/runtime.stderr"; then
