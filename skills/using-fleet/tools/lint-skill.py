@@ -93,6 +93,14 @@ def _on_path(src: pathlib.Path) -> None:
 
 
 def verbs_from(src: pathlib.Path) -> set:
+    if not (pathlib.Path(src) / "fleet" / "cli.py").is_file():
+        #: RV-51. A source path with no package under it used to be inserted on sys.path anyway, and the
+        #: import then resolved from whatever `fleet` PYTHONPATH carried — the lint silently checked
+        #: another checkout's verb table. Bad input is refused before any import, so the answer never
+        #: depends on the caller's environment.
+        print(f"lint-skill: no fleet package at {src}/fleet (no cli.py there). Set FLEET_SRC to the "
+              f"directory that holds the `fleet` package.", file=sys.stderr)
+        raise SystemExit(2)
     _on_path(src)
     try:
         from fleet.cli import VERBS
