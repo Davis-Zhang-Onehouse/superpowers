@@ -633,7 +633,11 @@ def _in_this_effort(ctx, instant: str) -> bool:
     path = Path(instant)
     if not path.is_absolute():
         return True
-    return path.parent.resolve() == Path(ctx.instants_dir).resolve()
+    try:
+        return path.parent.resolve() == Path(ctx.instants_dir).resolve()
+    except (OSError, RuntimeError):
+        #: RV-C3. A symlink loop (RuntimeError on 3.10) or an unreadable path cannot be placed: it counts, as before.
+        return True
 
 
 def _claims_ahead(ctx, recorded: list, by_effort=True) -> list:
