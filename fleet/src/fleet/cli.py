@@ -5123,48 +5123,120 @@ def _redirects_to(command: str, token: str) -> bool:
 #: A head is vouched when it reads and prints and can neither spawn nor write beyond its arguments. Left out
 #: on purpose, each for a named reason: `awk` (`system()`), `sed` (GNU `e`, `-i`), `find` (`-exec`,
 #: `-delete`), `xargs`/`env`/`bash`/`sh`/`python*` (run anything), `curl`/`wget`/`ssh` (fetch or reach out),
-#: `tee` (writes). A recipe that needs one of them is the author's to run by hand; `verify` says so.
+#: `tee` (writes), `cd` (moves every relative write out of the sandbox). `sort` and `date` are vouched with
+#: their writing/spawning options refused (`sort -o`, `--compress-program`; `date -s`). A recipe that needs
+#: one of them is the author's to run by hand; `verify` says so.
+#:
+#: Review of the first cut found six ways round it, all closed here and each pinned as a regression row:
+#: shlex's default `#` comment (bash starts a comment only at a word), `|&`, a `NAME=value` prefix
+#: (`GIT_EXTERNAL_DIFF`, `LD_PRELOAD`), git options that spawn or write (`-c`, `--output`, `--ext-diff`,
+#: `--open-files-in-pager`, `--exec-path`, `--config-env`), `sort -o`, and a redirect target that is
+#: absolute, climbs `..`, or is reached after a `cd`.
 _VOUCHED_HEADS = frozenset({
     "echo", "printf", "cat", "ls", "head", "tail", "wc", "grep", "sort", "uniq", "cut", "tr", "diff",
     "cmp", "sha256sum", "md5sum", "stat", "file", "basename", "dirname", "readlink", "realpath", "date",
-    "test", "[", "true", "false", "pwd", "cd", "jq",
+    "test", "[", "true", "false", "pwd", "jq",
 })
 #: `git` is vouched by SUBCOMMAND: these read the repository and print. `bundle` only as `bundle verify`.
 _VOUCHED_GIT = frozenset({
     "log", "show", "diff", "status", "rev-parse", "rev-list", "ls-files", "ls-tree", "cat-file",
     "describe", "shortlog", "blame", "grep", "name-rev", "merge-base",
 })
-_GIT_OPTIONS_WITH_VALUE = ("-C", "-c", "--git-dir", "--work-tree")
+#: The only options allowed BEFORE the git subcommand: `-C <path>` and `--no-pager`. `-c`, `--config-env`,
+#: `--exec-path`, `-p` and the rest can make a read-only subcommand run or write something.
+_GIT_LEADING_WITH_VALUE = ("-C",)
+_GIT_LEADING_FLAGS = ("--no-pager",)
+#: Arguments to a vouched git subcommand that spawn or write: refused wherever they appear.
+_GIT_ARG_BLOCKLIST = ("--output", "--ext-diff", "--textconv", "--open-files-in-pager", "-O", "--exec-path",
+                      "--config-env")
+#: Per-head options that write or spawn: a short cluster carrying the letter, or the long form's prefix.
+_HEAD_OPTION_BLOCKLIST = {"sort": ("o", ("--output", "--compress-program")), "date": ("s", ("--set",))}
 #: Text `verify` cannot see through: what runs is decided at run time, by something it did not read.
 _OPAQUE_SHAPES = (("$(", "command substitution"), ("`", "a backtick substitution"),
                   ("<(", "process substitution"), (">(", "process substitution"))
 _OPAQUE_HEADS = frozenset({"eval", "exec", "source", "."})
-_SEPARATORS = frozenset({"|", "||", "&&", ";", ";;", "&", "(", ")"})
+_SEPARATORS = frozenset({"|", "||", "&&", ";", ";;", "&", "|&", "(", ")"})
+_PUNCTUATION = frozenset("();<>|&")
 _ASSIGNMENT = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*=")
 
 
-def _segments(tokens: list) -> list:
-    """The simple commands of a token list, each as `[head, *args]` with a redirection's operator and
-    target removed. A redirection token is one made only of `<`, `>` and `&` that is not a separator;
-    the `2` of `2>` comes through shlex as its own token and is left in the argument list, where it
-    is harmless: only the head, and for `git`/`fleet` the first subcommand word, decide anything."""
-    out, current, skip = [], [], False
-    for token in tokens:
-        if skip:
-            skip = False
-            continue
+def _redirect_reason(operator: str, target) -> str:
+    """Why a redirection may not run, or `""`. A read (`<`) is fine. A write's target must be a file
+    descriptor (`2>&1`), a close (`>&-`), or a relative path that stays inside the sandbox."""
+    if ">" not in operator:
+        return ""
+    if target is None:
+        return f"it ends in the redirection {operator!r} with no target"
+    if target.isdigit() or target == "-":
+        return ""
+    if target.startswith("/") or ".." in target.split("/"):
+        return f"it writes through {operator!r} to {target}, outside the sandbox"
+    return ""
+
+
+def _segments(tokens: list):
+    """`(segments, reason)`: the simple commands of a token list, each as `[head, *args]`, or the reason
+    the recipe cannot be split into commands verify can judge. A token that starts with `#` is a comment
+    and ends the recipe, as it does in bash. A redirection's operator and target are removed after the
+    target is judged. Any other punctuation-only token is a shell operator verify does not model."""
+    out, current, index = [], [], 0
+    while index < len(tokens):
+        token = tokens[index]
+        if token.startswith("#"):
+            break
         if token in _SEPARATORS:
             if current:
                 out.append(current)
             current = []
+            index += 1
             continue
-        if token and set(token) <= set("<>&"):
-            skip = True
-            continue
+        if token and set(token) <= _PUNCTUATION:
+            if set(token) <= set("<>&|") and ("<" in token or ">" in token):      # `>`, `>>`, `2>&1`, `&>`, `>|`, `<>`
+                target = tokens[index + 1] if index + 1 < len(tokens) else None
+                reason = _redirect_reason(token, target)
+                if reason:
+                    return out, reason
+                index += 2
+                continue
+            return out, f"it uses the shell operator {token!r}, which verify does not model"
         current.append(token)
+        index += 1
     if current:
         out.append(current)
-    return out
+    return out, ""
+
+
+def _git_reason(args: list) -> str:
+    rest, sub = list(args), ""
+    while rest:
+        word = rest.pop(0)
+        if word in _GIT_LEADING_WITH_VALUE:
+            rest = rest[1:]
+        elif word in _GIT_LEADING_FLAGS:
+            continue
+        elif word.startswith("-"):
+            return (f"`git {word}` before the subcommand is not an option verify vouches for (only "
+                    f"`-C <path>` and `--no-pager`; `-c`, `--config-env` and `--exec-path` can run code)")
+        else:
+            sub = word
+            break
+    if not (sub in _VOUCHED_GIT or (sub == "bundle" and rest[:1] == ["verify"])):
+        return (f"`git {sub or '(no subcommand)'}` is not a read-only subcommand verify vouches for "
+                f"({', '.join(sorted(_VOUCHED_GIT))}, bundle verify)")
+    for word in rest:
+        if word.startswith(_GIT_ARG_BLOCKLIST):
+            return f"`git {sub} {word}` can write or spawn beyond its arguments"
+    return ""
+
+
+def _head_option_reason(head: str, args: list) -> str:
+    letter, longs = _HEAD_OPTION_BLOCKLIST.get(head, ("", ()))
+    for word in args:
+        if word.startswith("--") and word.startswith(longs):
+            return f"`{head} {word}` writes or spawns beyond its arguments"
+        if letter and word.startswith("-") and not word.startswith("--") and letter in word[1:]:
+            return f"`{head} {word}` writes or spawns beyond its arguments (`-{letter}`)"
+    return ""
 
 
 def unvouched_reason(command: str) -> str:
@@ -5179,15 +5251,19 @@ def unvouched_reason(command: str) -> str:
             return f"it uses {why} ({shape!r}), which verify cannot see through"
     lexer = shlex.shlex(text, posix=True, punctuation_chars=True)
     lexer.whitespace_split = True
+    lexer.commenters = ""                 # bash comments start at a WORD; shlex's default starts mid-word
     try:
         tokens = list(lexer)
     except ValueError as exc:
         return f"it does not tokenise as a shell command ({exc})"
-    for segment in _segments(tokens):
-        words = [word for word in segment if not _ASSIGNMENT.match(word)]
-        if not words:
-            continue
+    segments, reason = _segments(tokens)
+    if reason:
+        return reason
+    for words in segments:
         head, args = words[0], words[1:]
+        if _ASSIGNMENT.match(head):
+            return (f"it sets an environment variable for the command ({head.split('=')[0]}=…), which "
+                    f"verify does not vouch for: the environment can make a read-only tool run code")
         if head in _OPAQUE_HEADS:
             return f"it runs `{head}`, which executes text verify has not read"
         if head.startswith("$"):
@@ -5195,20 +5271,10 @@ def unvouched_reason(command: str) -> str:
         if "/" in head:
             return f"its command is a path ({head}); verify vouches for names on PATH only"
         if head == "git":
-            sub, rest = "", list(args)
-            while rest:
-                word = rest.pop(0)
-                if word in _GIT_OPTIONS_WITH_VALUE:
-                    rest = rest[1:]
-                elif word.startswith("-"):
-                    continue
-                else:
-                    sub = word
-                    break
-            if sub in _VOUCHED_GIT or (sub == "bundle" and rest[:1] == ["verify"]):
-                continue
-            return (f"`git {sub or '(no subcommand)'}` is not a read-only subcommand verify vouches for "
-                    f"({', '.join(sorted(_VOUCHED_GIT))}, bundle verify)")
+            reason = _git_reason(args)
+            if reason:
+                return reason
+            continue
         if head == "fleet":
             verb = args[0] if args else ""
             spec = VERBS.get(verb)
@@ -5217,6 +5283,9 @@ def unvouched_reason(command: str) -> str:
             return (f"`fleet {verb or '(no verb)'}` is not a read-only verb by the verb table; verify vouches "
                     f"for read-only fleet verbs only")
         if head in _VOUCHED_HEADS:
+            reason = _head_option_reason(head, args)
+            if reason:
+                return reason
             continue
         return (f"`{head}` is not a shape verify vouches for (read-and-print tools, read-only `git` "
                 f"subcommands, read-only `fleet` verbs)")
