@@ -861,5 +861,24 @@ class TestTheCapIsPerEffort(GuardCase):
         self.assertIn("00000000-07309998-inflight-append-y [folder: no, session: no, age: ", held.reason)
 
 
+    def test_the_compaction_rule_keeps_its_base_wide_record_population(self):
+        # RV-C1. `CompactionExclusive` MIS-TRIGGERS by declaration: it refuses a harmless dispatch rather than admit
+        # one under a compaction. The effort keying narrows the CAP (which under-triggers); it must not quietly
+        # narrow this rule too, so a same-base compaction RECORD refuses from any instants dir, exactly as before.
+        fleet = self.fleet(slots=3)
+        folder = fleet.worker("foreignFold", optype="compact", slot="ws1", instants=self.other_effort(fleet))
+        verdict = CompactionExclusive().evaluate(fleet.ctx(cap=5))
+        self.assertFalse(verdict.allowed, f"a same-base compaction record stopped blocking: {verdict.reason}")
+        self.assertEqual(verdict.blocker, folder)
+
+        # Neighbour: the same compaction as a won-but-unrecorded CLAIM, asked under a claim of our own.
+        claimed = self.fleet(slots=3)
+        child = self.other_effort(claimed) / "00000000-07309997-inflight-compact-foreignClaimFold"
+        claimed.pool.claim(todo_id="foreignClaimFold", tmux="dt-foreignClaimFold", base_instant=OURS,
+                           child_instant=str(child), slot="ws1")
+        held = CompactionExclusive().evaluate(claimed.ctx(cap=5).under_claim("ws2"))
+        self.assertFalse(held.allowed, f"a same-base compaction claim stopped blocking: {held.reason}")
+
+
 if __name__ == "__main__":
     unittest.main()
