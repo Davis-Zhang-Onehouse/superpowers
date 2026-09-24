@@ -1,0 +1,24 @@
+    [2m+6 lines (ctrl+t to view transcript)[0m[39m[49m
+
+• [1mRunning[0m[39m[49m [38;2;137;180;250mbash[38;2;205;214;244m /home/ubuntu/davis_root/ws5/superpowers/fleet/it/CXP-1520534/[39m
+[2m  │ [0m[38;2;205;214;244m[49mattempt-PMJm4v/probe.sh 1[39m
+
+
+  [1mWould you like to run the following command?[0m[39m[49m
+
+  Environment: [1mlocal
+[0m[39m[49m
+  Reason: [3mintegration test needs git and network[0m[39m[49m
+
+  $ [38;2;137;180;250mbash[39m
+  [38;2;205;214;244m/home/ubuntu/davis_root/ws5/superpowers/fleet/it/CXP-1520534/attempt-PMJm4v/[39m
+  [38;2;205;214;244mprobe.sh 1[39m
+
+
+[1;7m› 1. Yes, proceed (y)
+[0m[39m[49m  2. Yes, and don't ask again for commands that start with `bash /home/ubuntu/
+     davis_root/ws5/superpowers/fleet/it/CXP-1520534/attempt-PMJm4v/probe.sh 1`
+     ([1mp[0m[39m[49m)
+  3. No, and tell Codex what to do differently ([1mesc[0m[39m[49m)
+
+  [2mPress [0;1m[39m[49menter[0;2m[39m[49m to confirm or [0;1m[39m[49mesc[0;2m[39m[49m to cancel

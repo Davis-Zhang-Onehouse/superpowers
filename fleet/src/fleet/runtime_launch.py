@@ -36,14 +36,73 @@ def model_args(settings: LaunchSettings) -> list[str]:
     return ['--model' if settings.runtime == 'claude' else '-m', validate_model(settings.model)]
 
 
+#: FB-110 (operator decision D-45). Every codex worker fleet starts or resumes runs with NO approval prompts, INSIDE the
+#: workspace-write sandbox, with network on — never danger-full-access, never a bypass. It goes on the argv, the one
+#: layer above every config file, so the operator's CODEX_HOME config.toml is never edited and cannot loosen it.
+#: Measured on codex-cli 0.156.1 (both `codex` and `codex resume` take all of these):
+#:  - `-a`/`-s` are flags because clap validates their values; a mistyped `-c` key is silently ignored.
+#:  - `sandbox_workspace_write.network_access` has no flag. Without it, ssh `git ls-remote` and https fail in the sandbox.
+#:  - `check_for_update_on_startup=false`: the "Update available" modal otherwise stops an unattended pane before
+#:    its seed lands (FB-105).
+#: There is deliberately no knob. A tightening would need a consumer (a read-only worker cannot write its own instant),
+#: and a loosening is the operator's decision, not a profile's.
+CODEX_POLICY = ('-a', 'never', '-s', 'workspace-write',
+                '-c', 'sandbox_workspace_write.network_access=true',
+                '-c', 'check_for_update_on_startup=false')
+
+
+def codex_policy_args(writable_dirs=()) -> list[str]:
+    """The policy and the writable roots, in that order — the only place a codex argv gets either."""
+    args = list(CODEX_POLICY)
+    for directory in dict.fromkeys(str(d) for d in writable_dirs):
+        args += ['--add-dir', directory]
+    return args
+
+
+def codex_policy_summary(writable_dirs=()) -> str:
+    """One line for `dispatch`, `revive` and `brief`: the effective policy, as fleet puts it on the argv."""
+    roots = ', '.join(['the slot (cwd)', *dict.fromkeys(str(d) for d in writable_dirs)])
+    return (f'approval=never sandbox=workspace-write network=on update-check=off; writable: {roots} '
+            f'(argv: {" ".join(CODEX_POLICY)})')
+
+
+def writable_dirs(environ, extra=()) -> tuple:
+    """The codex writable roots beyond the slot (the sandbox cwd): the store and the instants directory — the worker
+    writes its own instant and its coordinator's proposals there — and `extra`, the slot's git dirs."""
+    base = tuple(str(Path(environ[key]).resolve()) for key in ('FLEET_HOME', 'FLEET_INSTANTS') if environ.get(key))
+    return tuple(dict.fromkeys((*base, *map(str, extra))))
+
+
+def git_writable_dirs(workspace, git) -> tuple:
+    """The git common dir of every repository at the slot root or one level below it.
+
+    Measured (codex-cli 0.156.1): workspace-write makes `<root>/.git` read-only at the TOP of each writable root, so a
+    slot that is itself a repo cannot commit, and a LINKED WORKTREE — ws5's shape, whose common dir is the shared
+    checkout's `.git` — fails with `index.lock: Read-only file system`. Adding the common dir itself fixes both, and
+    adding its parent does not. A clone nested in the slot needed nothing, and adding its `.git` costs nothing.
+    `git` is the injected `(args, cwd) -> (rc, stdout)` seam (`workspace.default_git`); a failing git adds nothing."""
+    slot = Path(workspace)
+    found = []
+    try:
+        candidates = [slot, *sorted(child for child in slot.iterdir() if child.is_dir())]
+    except OSError:
+        return ()
+    for candidate in candidates:
+        if not (candidate / '.git').exists():
+            continue
+        code, out = git(['rev-parse', '--path-format=absolute', '--git-common-dir'], candidate)
+        if code == 0 and out.strip():
+            found.append(str(Path(out.strip()).resolve()))
+    return tuple(dict.fromkeys(found))
+
+
 def launch_argv(settings: LaunchSettings, prompt: str, writable_dirs=()) -> list[str]:
     validate_runtime(settings.runtime)
     args = [settings.executable]
     if settings.runtime == 'claude':
         args += ['--permission-mode', 'auto']
     else:
-        for directory in writable_dirs:
-            args += ['--add-dir', str(directory)]
+        args += codex_policy_args(writable_dirs)
     return args + model_args(settings) + ['--', prompt]
 
 
@@ -56,10 +115,7 @@ def resume_argv(settings: LaunchSettings, session_id: str, writable_dirs=()) -> 
         raise BadInput('Resume requires an explicit session UUID') from exc
     if settings.runtime == 'claude':
         return [settings.executable, '--permission-mode', 'auto', *model_args(settings), '--resume', session_id]
-    args = [settings.executable, 'resume']
-    for directory in writable_dirs:
-        args += ['--add-dir', str(directory)]
-    return args + model_args(settings) + ['--', session_id]
+    return [settings.executable, 'resume', *codex_policy_args(writable_dirs), *model_args(settings), '--', session_id]
 
 
 def resolve_settings(runtime, slot, environ, which, runner) -> LaunchSettings:
@@ -92,10 +148,10 @@ def resolve_settings(runtime, slot, environ, which, runner) -> LaunchSettings:
     return LaunchSettings(runtime, executable, str(Path(config).resolve()))
 
 
-def prepare(settings, record, seed_path, environ, *, session_id=None) -> Path:
+def prepare(settings, record, seed_path, environ, *, session_id=None, extra_writable=()) -> Path:
+    """`extra_writable`: further codex roots, the slot's git dirs (`git_writable_dirs`); claude ignores them."""
     child = Path(record.child_instant)
-    writable = tuple(str(Path(environ[key]).resolve()) for key in ('FLEET_HOME', 'FLEET_INSTANTS')
-                     if environ.get(key))
+    writable = writable_dirs(environ, extra_writable)
     env = {key: environ[key] for key in ('FLEET_HOME', 'FLEET_INSTANTS', 'PATH') if environ.get(key)}
     env.update(FLEET_ROOT=record.root, FLEET_TMUX_SOCKET=record.tmux_socket,
                INSTANT=str(child), FLEET_INSTANT=str(child), FLEET_BIN=fleet_executable())
@@ -104,11 +160,12 @@ def prepare(settings, record, seed_path, environ, *, session_id=None) -> Path:
     # attributes so pane guards can distinguish suggested text from real drafts.
     lines = ['#!/usr/bin/env bash', 'set -euo pipefail', 'unset NO_COLOR']
     lines += ['export ' + key + '=' + shlex.quote(str(value)) for key, value in env.items()]
-    if settings.runtime == 'claude':
-        slug = Path(settings.config_dir).parent.name.removesuffix('_root')
-        token_file = Path(environ.get('HOME', str(Path.home()))) / ('.gh-token-' + slug)
-        lines += ['token_file=' + shlex.quote(str(token_file)),
-                  'if [ -r "$token_file" ]; then GH_TOKEN="$(cat -- "$token_file")"; export GH_TOKEN; fi']
+    #: FB-110: codex too. Measured in the sandbox: GH_TOKEN reaches the shell, and without it `gh` acts as whatever
+    #: account ~/.config/gh/hosts.yml names — not this root's.
+    slug = Path(settings.config_dir).parent.name.removesuffix('_root')
+    token_file = Path(environ.get('HOME', str(Path.home()))) / ('.gh-token-' + slug)
+    lines += ['token_file=' + shlex.quote(str(token_file)),
+              'if [ -r "$token_file" ]; then GH_TOKEN="$(cat -- "$token_file")"; export GH_TOKEN; fi']
     if session_id is not None:
         command = shlex.join(resume_argv(settings, session_id, writable))
     else:
