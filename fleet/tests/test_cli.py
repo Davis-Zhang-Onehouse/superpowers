@@ -1772,7 +1772,7 @@ class TestVerify(CliCase):
         instant = fleet.paths["readyWorker"]
         #: `2>/dev/null` is deliberately absent: `outward_reason` refuses a redirect to ANY absolute path,
         #: /dev/null included, and it runs first. That is the denylist's standing behaviour, not this rule's.
-        vouched = ["sha256sum RUNBOOK.md", "fleet board --porcelain | cut -f1",
+        vouched = ["sha256sum RUNBOOK.md", "wc -l RUNBOOK.md | cut -f1",
                    "ls | wc -l", "printf '%s\\n' a b | sort -u", "cat RUNBOOK.md 2>err.txt; true",
                    "test -f x || echo missing"]
         (instant / "RUNBOOK.md").write_text("# RUNBOOK\n\n```bash\n" + "\n".join(vouched) + "\n```\n")
@@ -1782,7 +1782,7 @@ class TestVerify(CliCase):
         self.assertEqual(fleet.runner.commands(), vouched)
         self.assertEqual(code, EXIT_OK, out)
 
-    def test_verify_does_not_vouch_for_a_mutating_fleet_verb_or_for_git(self):
+    def test_verify_does_not_vouch_for_fleet_or_for_git(self):
         fleet = self.loaded()
         instant = fleet.paths["readyWorker"]
         (instant / "RUNBOOK.md").write_text(
@@ -1820,13 +1820,13 @@ class TestUnvouchedReason(unittest.TestCase):
         OUT = "outside quotes"                 # the grammar's reason for a character it does not admit
         GIT = "`git` is not a shape"          # D-7: git left the vouched set (its config names programs)
         vouched = [
-            "echo verified", "ls -la", "fleet board", "fleet roadmap --instant . --porcelain | cut -f1",
+            "echo verified", "ls -la", "wc -l x | cut -f1",
             "cat x > out.txt", "true", "ls 2>&1", "ls >&2", "sort -u -k2,2 x", "date -u +%FT%TZ",
             "cat < in.txt", "ls > sub/out.txt", "echo '#' is not a comment", "printf '%s;%s\\n' a b",
             "grep -c x -- -weird-name", "echo ';' '|' '>' quoted", "test -f x || echo missing",
             "ls && wc -l x", "cat RUNBOOK.md 2>err.txt; true", "echo \"quoted words\" x", "grep -E 'a|b' x",
             "\tls\t-la", "cat x 2>err.txt", "ls >out.txt", "ls 2>>log >>out", "cat <in.txt", "ls &>all.txt",
-            "ls 2>&1 | wc -l", "fleet brief --instant . | head -3", "sha256sum a.txt b.txt", "echo a > -",
+            "ls 2>&1 | wc -l", "sha256sum a.txt b.txt", "echo a > -", "file -b x", "sort -S 1 -k1 x",
             "echo a > ..x", "ls a=b", "test -x a", "printf -v var x", "echo -e x",
         ]
         unvouched = {
@@ -1846,13 +1846,14 @@ class TestUnvouchedReason(unittest.TestCase):
             "eval ls": "eval",
             "source x.sh": "source",
             ". x.sh": "executes text",
-            "fleet dispatch --dry-run": "read-only",
-            "fleet": "read-only",
-            "fleet --porcelain board": "read-only",
-            "fleet --home /real/store board": "read-only",
-            "fleet selftest": "runs things",
-            "fleet verify --instant .": "runs things",
-            "fleet release-verify --version 1.0.0 --releases x": "runs things",
+            #: fleet in every form (D-8): the table's read_only flag is not a sandbox
+            "fleet dispatch --dry-run": "`fleet` is not a shape",
+            "fleet": "`fleet` is not a shape",
+            "fleet board": "`fleet` is not a shape",
+            "fleet --home /real/store board": "`fleet` is not a shape",
+            "fleet pane-guard --pane x --capture /home/ubuntu/y": "`fleet` is not a shape",
+            "fleet release-status --releases /x": "`fleet` is not a shape",
+            "fleet selftest": "`fleet` is not a shape",
             "ls | tee /dev/null": "tee",
             "ls && wget x": "wget",
             "cd sub && ls": "cd",
@@ -1884,10 +1885,16 @@ class TestUnvouchedReason(unittest.TestCase):
             "sort --compress-program=bash -S 1 big": "compress-program",
             "sort --compress=bash -S 1 x": "compress-program",
             "sort --random-source -- -o /abs f": "sort -o",
-            "sort -k1 -T -- --compress-program=sh f": "compress-program",
+            "sort -k1 -T -- --compress-program=sh f": "sort -T",
+            "sort -k1 -- --compress-program=sh f": "compress-program",
             "date -s now": "date -s",
             "date --set=now": "set",
             "date --se=now": "set",
+            "sort -T /abs x": "sort -T",
+            "sort --temporary-directory=/abs x": "temporary-directory",
+            "sort --temp=/abs x": "temporary-directory",
+            "file -C -m m": "file -C",
+            "file --compile -m m": "compile",
             #: globs would expand into option words the rule never saw (round 4)
             "ls *.log": OUT,
             "echo a > -o ; sort -? /abs f": OUT,
