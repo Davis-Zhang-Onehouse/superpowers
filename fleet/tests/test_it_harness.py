@@ -14,6 +14,7 @@ import subprocess
 import tempfile
 import time
 import unittest
+import uuid
 
 REPO = pathlib.Path(__file__).resolve().parents[2]
 IT = REPO / "fleet" / "it"
@@ -449,7 +450,9 @@ class ServerGuardian(unittest.TestCase):
         self.tmp = pathlib.Path(tempfile.mkdtemp(prefix="it-harness-"))
         self.addCleanup(shutil.rmtree, self.tmp, True)
         self.it = harness_copy(self.tmp)
-        self.section = f"selftest{os.getpid()}g"
+        # A sandbox may map every test process to the same small PID. The default-dir regression
+        # cases use a host-visible tmux socket, so its name must remain unique across pid namespaces.
+        self.section = f"selftest{uuid.uuid4().hex[:10]}g"
         self.socket = f"itfleet-{self.section}"
         # Every tmux socket of this test — the section's private one AND the "default" server the isolation
         # check reads — lives under the test's tmp via TMUX_TMPDIR, so nothing here touches the operator's.
