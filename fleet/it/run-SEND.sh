@@ -218,7 +218,7 @@ if [ "$s2" = 0 ] && grep -q $'^delivery\tsubmitted$' "$OUT/SEND-2-send.out" && [
 else
   it_fail SEND-2 "fleet/it/SEND/out/SEND-2-send.out" "the five-line send was not submitted on its own: rc=$s2 idle_after=$s2_idle placeholder_in_box=$s2_placeholder — $(tr '\n' ' ' < "$OUT/SEND-2-send.out" | cut -c1-200)"
   # the box is captured as the verb left it (SEND-2-pane.txt); clear it so SEND-4 measures its own draft
-  send_clear_box
+  send_clear_box || BOX_DIRTY=1
 fi
 
 # ---- SEND-3: the record ------------------------------------------------------------------------------
@@ -232,10 +232,19 @@ else
 fi
 
 # ---- SEND-4: the guard survives — a pane holding a draft is refused ------------------------------------
-it_tmux send-keys -t "$TMUXN" -l 'somebody else is typing here'; sleep 1
-send_case SEND-4 "$M2"; s4=$?
-s4_kept=0; grep -q 'somebody else is typing here' "$OUT/SEND-4-pane.txt" && ! grep -q 'Pasted text' "$OUT/SEND-4-pane.txt" && s4_kept=1
-if [ "$s4" = 4 ] && [ "$s4_kept" = 1 ]; then
+#: RV-41. A case whose box could not be emptied after the previous failure is NOT measured: at the base,
+#: SENDC-3 was refused for SENDC-2's leftover draft and read as its own failure.
+if [ "${BOX_DIRTY:-0}" = 1 ]; then
+  it_skip SEND-4 "fleet/it/SEND/out/SEND-2-pane-after.txt" "not measured: the box could not be emptied after SEND-2 failed, so a refusal here would be SEND-2's leftover draft, not this case's"
+  s4=skipped; s4_kept=0
+else
+  it_tmux send-keys -t "$TMUXN" -l 'somebody else is typing here'; sleep 1
+  send_case SEND-4 "$M2"; s4=$?
+  s4_kept=0; grep -q 'somebody else is typing here' "$OUT/SEND-4-pane.txt" && ! grep -q 'Pasted text' "$OUT/SEND-4-pane.txt" && s4_kept=1
+fi
+if [ "$s4" = skipped ]; then
+  :
+elif [ "$s4" = 4 ] && [ "$s4_kept" = 1 ]; then
   it_pass SEND-4 "fleet/it/SEND/out/SEND-4-send.out" "with a human's draft in the box, the five-line send was REFUSED (exit 4) and typed nothing: the draft is still there alone, no placeholder beside it — the guarded-messaging rule (never submit into a pane holding someone else's draft) survives the multi-line fix"
 else
   it_fail SEND-4 "fleet/it/SEND/out/SEND-4-send.out" "a pane holding a draft was not refused cleanly: rc=$s4 draft_intact=$s4_kept"
@@ -297,17 +306,24 @@ if [ "$c2" = 0 ] && grep -q $'^delivery\tsubmitted$' "$OUT/SENDC-2-send.out" && 
   it_pass SENDC-2 "fleet/it/SENDC/out/SENDC-2-send.out" "an EIGHT-line \`fleet send\` into a real codex pane exited 0 with delivery=submitted: codex renders it inline, taller than the observer's old 8-row caret window, and the verb still saw its own draft and submitted it"
 else
   it_fail SENDC-2 "fleet/it/SENDC/out/SENDC-2-send.out" "the eight-line codex send was not submitted: rc=$c2 idle_after=$c2_idle — $(tr '\n' ' ' < "$OUT/SENDC-2-send.out" | cut -c1-200)"
-  send_clear_box
+  send_clear_box || CBOX_DIRTY=1
 fi
-send_case SENDC-3 "$C3"; c3=$?
-c3_idle=0; send_wait_idle "$TMUXN" && c3_idle=1
-c3_placeholder=0; grep -q 'Pasted Content' "$OUT/SENDC-3-pane.txt" && c3_placeholder=1
-if [ "$c3" = 0 ] && grep -q $'^delivery\tsubmitted$' "$OUT/SENDC-3-send.out" && [ "$c3_idle" = 1 ]; then
+if [ "${CBOX_DIRTY:-0}" = 1 ]; then
+  it_skip SENDC-3 "fleet/it/SENDC/out/SENDC-2-pane.txt" "not measured: the box could not be emptied after SENDC-2 failed (RV-41)"
+  c3=skipped; c3_idle=0; c3_placeholder=0
+else
+  send_case SENDC-3 "$C3"; c3=$?
+  c3_idle=0; send_wait_idle "$TMUXN" && c3_idle=1
+  c3_placeholder=0; grep -q 'Pasted Content' "$OUT/SENDC-3-pane.txt" && c3_placeholder=1
+fi
+if [ "$c3" = skipped ]; then
+  :
+elif [ "$c3" = 0 ] && grep -q $'^delivery\tsubmitted$' "$OUT/SENDC-3-send.out" && [ "$c3_idle" = 1 ]; then
   it_pass SENDC-3 "fleet/it/SENDC/out/SENDC-3-send.out" "a ${C3_CHARS}-character non-ASCII \`fleet send\` (trailing newline included, as an editor writes a file) into a real codex pane exited 0 with delivery=submitted: codex shows '[Pasted Content ${C3_CHARS} chars]' for it (placeholder seen in the box: $c3_placeholder) and the verb confirmed the count against the message and submitted"
 else
   it_fail SENDC-3 "fleet/it/SENDC/out/SENDC-3-send.out" "the over-length codex send was not submitted: rc=$c3 idle_after=$c3_idle placeholder=$c3_placeholder — $(tr '\n' ' ' < "$OUT/SENDC-3-send.out" | cut -c1-200)"
 fi
-if [ "$c3" != 0 ]; then send_clear_box; fi
+if [ "$c3" != 0 ]; then send_clear_box || true; fi
 if record_check "$W" 3 'submitted' 'draft,draft,placeholder' > "$OUT/SENDC-4-record.txt" 2>&1; then
   it_pass SENDC-4 "fleet/it/SENDC/out/SENDC-4-record.txt" "all three codex sends are recorded in the worker's .fleet/sends.jsonl as submitted, with the sender, time, sha256 (re-derived and matching) and how each was confirmed — the one-line and eight-line sends by the draft read back, the over-length one by codex's '[Pasted Content C chars]' placeholder"
 else
