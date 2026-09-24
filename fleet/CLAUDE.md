@@ -9,7 +9,8 @@ obra/superpowers and does not apply to anything here.
 ```
 fleet/src/fleet/     18 modules, 31 verbs, entry point `python3 -m fleet.cli`
 fleet/tests/         the hermetic suite (864 tests) + fixtures/
-fleet/it/            the integration harness: run-*.sh, lib.sh, RESULTS.tsv, controls in bin/
+fleet/it/            the integration harness: run-*.sh, lib.sh, RESULTS.tsv, controls in bin/ (incl. `it-fleet`, the
+                     harness's ONLY route to the product, and `extract-m9.py`)
 ../bin/fleet         launcher, so you can type `fleet <verb>` from anywhere
 ```
 
@@ -88,7 +89,10 @@ not the FAIL in every later section it used to be. A loss during a run is still 
 session on the default server, which never enters the handover. `live-tmux-rebaselines.tsv` is untracked. `scripts/tests/it-live-baseline-per-run.sh` drives all of these on a private server.
 
 **`RESULTS.tsv` is current state, not an append log.** Each runner declares the case ids it owns via
-`it_own_cases` and *replaces* those rows. That is what makes "zero NOT-RUN" expressible — and it is currently
+`it_own_cases` and *replaces* those rows — in place, where its old rows stood, so a targeted run changes only
+what it re-measured (FB-76). The declaration is checked when a row is written: a row the runner's own regex
+does not claim becomes an `OWN-<case>` FAIL row, because a stale twin that survives every re-run is how the
+register stops being current (FB-37). That is what makes "zero NOT-RUN" expressible — and it is currently
 **273 PASS / 0 FAIL / 9 SKIP / 0 NOT-RUN**. Every SKIP carries a stated reason; a partial pass must never read
 as a full one, which is why the section-level `NOT-RUN` rows that used to stand in for §F §G §I §J §O were
 replaced by real cases rather than deleted.

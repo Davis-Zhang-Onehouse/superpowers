@@ -378,7 +378,8 @@ destructively — twice, by two actors, one of whom had read the entry that decl
 ```
 fleet/src/fleet/      the package (31 verbs)
 fleet/tests/          the hermetic suite
-fleet/it/             the integration harness: run-*.sh, lib.sh, RESULTS.tsv, and four controls in bin/
+fleet/it/             the integration harness: run-*.sh, lib.sh, RESULTS.tsv, and the controls in bin/ (`it-fleet`
+                      is the harness's only route to the product; every runner reaches it as "$IT_FLEET")
 bin/fleet             this launcher
 ```
 
