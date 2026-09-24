@@ -26,7 +26,9 @@ join in `reconcile`; a `HANDOFF.md` that *talks* about `Phase: AWAITING-CI` chan
 neither does a quiet pane. The profile's kind comes from `profile.json` via `profiles`, never from charter
 prose. No `.md` file is opened in this module at all.
 """
+import time
 from dataclasses import dataclass, replace
+from datetime import datetime
 from pathlib import Path
 
 from fleet.errors import BadInput, InstantNameError, NoCapacity, Refused
@@ -216,19 +218,30 @@ class WipCap(Guard):
 
     def _decide(self, ctx) -> Verdict:
         cap = self.cap if ctx.cap is None else ctx.cap
-        workers = _workers(ctx)
+        aside = []
+        workers = _workers(ctx, aside=aside)
         claims = _claims_in(workers)
         counted = [s for s in workers if _counts_against_cap(s)]
         excluded = [s for s in workers if not _counts_against_cap(s)]
-        held = ", ".join(_instant_name(s) or s.identity for s in counted) or "nothing"
+        #: `V23-D` (v2-04). Each holder with the three facts that tell a phantom from a worker, so a cap held
+        #: by records nobody can see working is visible in the refusal itself, not only after a dry-run and a
+        #: store dig. No full stop inside: the held list ends at the first one (`it/run-F.sh` F2b).
+        dispatched = {rec.todo_id: rec.dispatched_at for rec in ctx.store.all()} if counted else {}
+        now = time.time()
+        held = ", ".join(_holder(ctx, s, dispatched, now) for s in counted) or "nothing"
         spare = ", ".join(f"{_instant_name(s) or s.identity} ({s.state})" for s in excluded)
         population = (f"examined {len(workers)} subject(s) of {ctx.base or 'every base'}"
+                      + (f" in {ctx.instants_dir}" if ctx.instants_dir else "")
                       + (f", {len(claims)} of them claims held ahead of {ctx.claim!r}" if claims else "")
                       + f"; {len(counted)} counted, {len(excluded)} excluded"
-                      + (f" ({spare})" if spare else ""))
+                      + (f" ({spare})" if spare else "")
+                      + (f"; set aside {len(aside)} subject(s) of base {ctx.base or '(any)'} whose instant "
+                         f"lives in another instants directory — another effort's, which never holds this "
+                         f"cap" if aside else ""))
         if len(counted) < cap:
             return Verdict(allowed=True, guard=self.name,
-                           reason=f"{len(counted)} of {cap} active-dev slot(s) in use. {population}")
+                           reason=(f"{len(counted)} of {cap} active-dev slot(s) in use"
+                                   + (f", held by {held}" if counted else "") + f". {population}"))
         return Verdict(
             allowed=False, guard=self.name,
             reason=(f"the WIP cap is {cap} and {len(counted)} active-dev subject(s) hold it: {held}. "
@@ -238,6 +251,43 @@ class WipCap(Guard):
                          "and a quiet pane are not"),
             clears_who=held,
             blocker=held)
+
+
+def _holder(ctx, subject, dispatched: dict, now: float) -> str:
+    """`<instant> [folder: yes|no, session: yes|no, age: <dur>]` — one counted holder, as the refusal names it.
+
+    `V23-D`. Read-only: the folder and session come from the join's own evidence; a claim, which the join
+    never saw, is asked of the filesystem and the session layer (both reads)."""
+    evidence = subject.evidence
+    if "folder_state" in evidence:
+        folder = evidence.get("folder_state") != "missing"
+    else:
+        folder = bool(_recorded_instant(subject)) and Path(_recorded_instant(subject)).is_dir()
+    if "liveness" in evidence:
+        session = evidence.get("liveness") != "none"
+    else:
+        tmux = evidence.get("tmux") or ""
+        session = bool(tmux) and bool(ctx.sessions.alive(tmux))
+    since = dispatched.get(subject.identity) or evidence.get("claimed_at") or ""
+    return (f"{_instant_name(subject) or subject.identity} [folder: {'yes' if folder else 'no'}, "
+            f"session: {'yes' if session else 'no'}, age: {_age(since, now)}]")
+
+
+def _age(stamp: str, now: float) -> str:
+    """`3d4h`, `2h5m`, `4m10s`, `12s` since an ISO-8601 stamp, or `unknown`. No full stop, by contract."""
+    try:
+        then = datetime.fromisoformat(str(stamp).replace("Z", "+00:00")).timestamp()
+    except ValueError:
+        return "unknown"
+    left = max(0, int(now - then))
+    days, left = divmod(left, 86400)
+    hours, left = divmod(left, 3600)
+    minutes, seconds = divmod(left, 60)
+    if days:
+        return f"{days}d{hours}h"
+    if hours:
+        return f"{hours}h{minutes}m"
+    return f"{minutes}m{seconds}s" if minutes else f"{seconds}s"
 
 
 def _counts_against_cap(subject) -> bool:
@@ -525,12 +575,17 @@ def _override_in_force(ctx) -> bool:
     return _check_override(ctx)
 
 
-def _workers(ctx) -> list:
+def _workers(ctx, aside=None) -> list:
     """This effort's subjects, from the ONE join — plus, when the caller HOLDS A CLAIM, the claims ahead
     of its own.
 
-    Filtered by base: a WIP cap is per-effort, and another effort's compaction is that effort's rebase
-    debt. Unknown sessions and unattributed stale leases are deliberately absent — *"some of those
+    Filtered by EFFORT: a WIP cap is per-effort, and another effort's compaction is that effort's rebase
+    debt. `V23-D` (v2-04): an effort is its base AND its instants directory, and the filter used to be the
+    base alone. Efforts share base strings — ROOT_BASE `00000000` is every effort's root base, and one store
+    serves every effort on the root — so quanton's cap counted twelve harvested, folderless fleetInfraOps
+    records and was raised 4 -> 7 -> 12 -> 16 in a day. Same-base subjects of another instants directory are
+    appended to `aside` when the caller passes a list, so the verdict can say it saw them and did not count
+    them. Unknown sessions and unattributed stale leases are deliberately absent — *"some of those
     sessions are people's"* (`D-6`), and a guard that counts them refuses on evidence nobody can act on.
 
     The second half is `FI-21`. On the advisory pass (`ctx.claim` empty) this is exactly what it always
@@ -542,11 +597,36 @@ def _workers(ctx) -> list:
     artifact here that is already atomic — and asks again holding it, and on THAT pass the population also
     contains the claims that rank ahead of its own.
     """
-    recorded = [s for s in ctx.subjects()
-                if s.kind == KIND_WORKER and (not ctx.base or s.evidence.get("base") == ctx.base)]
+    same_base = [s for s in ctx.subjects()
+                 if s.kind == KIND_WORKER and (not ctx.base or s.evidence.get("base") == ctx.base)]
+    recorded = [s for s in same_base if _in_this_effort(ctx, _recorded_instant(s))]
+    if aside is not None:
+        aside.extend(s for s in same_base if s not in recorded)
     if not ctx.claim:
         return recorded
     return recorded + _claims_ahead(ctx, recorded)
+
+
+def _recorded_instant(subject) -> str:
+    """Where the subject's instant IS: the folder the join resolved, else the path its record names."""
+    raw = subject.evidence.get("instant", "") or ""
+    return raw[:-len(_MISSING_SUFFIX)] if raw.endswith(_MISSING_SUFFIX) else raw
+
+
+def _in_this_effort(ctx, instant: str) -> bool:
+    """Whether an instant path lives in this context's instants directory (`V23-D`).
+
+    A folder the join found is judged where it is, so one moved INTO this directory — which `reconcile`
+    follows by name — stays this effort's, exactly as before. A relative path is relative to this directory.
+    An empty path is unattributable and keeps the old, base-only answer: the cap under-triggers by design, and
+    dropping a subject nobody can place is a change nothing measured asks for.
+    """
+    if not instant or not getattr(ctx, "instants_dir", None):
+        return True
+    path = Path(instant)
+    if not path.is_absolute():
+        return True
+    return path.parent.resolve() == Path(ctx.instants_dir).resolve()
 
 
 def _claims_ahead(ctx, recorded: list) -> list:
@@ -573,6 +653,9 @@ def _claims_ahead(ctx, recorded: list) -> list:
         if lease.slot == ctx.claim:
             break                     # ordered: everything past our own claim came after us
         if ctx.base and (lease.base_instant or "") != ctx.base:
+            continue
+        #: `V23-D`: the same base string in another instants directory is another effort's claim.
+        if not _in_this_effort(ctx, lease.child_instant or ""):
             continue
         if not lease.base_instant or lease.todo_id in known:
             continue
