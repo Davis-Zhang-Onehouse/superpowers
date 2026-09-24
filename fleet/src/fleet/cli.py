@@ -5124,50 +5124,44 @@ def _redirects_to(command: str, token: str) -> bool:
 #: on purpose, each for a named reason: `awk` (`system()`), `sed` (GNU `e`, `-i`), `find` (`-exec`,
 #: `-delete`), `xargs`/`env`/`bash`/`sh`/`python*` (run anything), `curl`/`wget`/`ssh` (fetch or reach out),
 #: `tee` (writes), `cd` (moves every relative write out of the sandbox), `uniq` (its second positional is an
-#: output file). `sort` and `date` are vouched with their writing/spawning options refused (`sort -o`,
-#: `--compress-program`; `date -s`), `git grep` with its pager option refused. A recipe that needs one of
-#: them is the author's to run by hand; `verify` says so.
+#: output file), `git` (a repository's config — `core.fsmonitor`, `diff.external`, textconv — names programs
+#: for its read-only subcommands to run, and a RUNBOOK author controls the repository; D-7). `sort` and
+#: `date` are vouched with their writing/spawning options refused (`sort -o`, `--compress-program`;
+#: `date -s`), on EVERY argument: a `--` never ends the scan, because an option that takes a value consumes
+#: it (`sort --random-source -- -o …`). `fleet` is vouched for the verbs its own table marks read-only,
+#: minus the three that run things anyway. A recipe that needs one of the rest is the author's to run by
+#: hand; `verify` says so.
 #:
-#: HOW THE RECIPE IS READ (DECISIONS D-6). Three review rounds each found an input a shlex-based reading
+#: HOW THE RECIPE IS READ (DECISIONS D-6, D-7). Three review rounds each found an input a shlex-based reading
 #: split into fewer commands than bash runs — a mid-word `#`, a quoted operator, `'a'#`, a glued `|>`,
 #: `<&-curl`, a newline. Mirroring bash's lexer is the wrong architecture for a fail-closed rule, so the
 #: rule does not try: a recipe is vouched only when its RAW TEXT fits a grammar small enough that bash's
-#: reading of it is unambiguous and equal to this one. Tokens are separated by spaces and tabs; a word is a
-#: run of `_SIMPLE_CHARS`, a single-quoted string, or a double-quoted string with no `$`, backtick or
-#: backslash, glued in any order; an operator from `_SIMPLE_OPS` / `_SIMPLE_REDIRECTS` ends a word (as it
-#: does in bash) and must be followed by whitespace, the end, or — for a redirection that takes one — its
-#: plain target; a write's target is an unquoted plain relative word. Anything else outside quotes —
-#: `#`, `\`, `$`, `(`, `{`, `!`, `~`, two operators glued (`|>`, `<&-`), a line break — refuses, naming it.
+#: reading of it is unambiguous and equal to this one, and NOTHING in it expands. Tokens are separated by
+#: spaces and tabs; a word is a run of `_SIMPLE_CHARS` (no glob, no `$`, no `~`), a single-quoted string,
+#: or a double-quoted string with no `$`, backtick or backslash, glued in any order; an operator from
+#: `_SIMPLE_OPS` / `_SIMPLE_REDIRECTS` ends a word (as it does in bash) and must be followed by whitespace,
+#: the end, or — for a redirection that takes one — its plain target; a write's target is an unquoted plain
+#: relative word. Anything else outside quotes — `#`, `\`, `$`, `*`, `(`, `{`, `!`, `~`, two operators
+#: glued (`|>`, `<&-`), a line break — refuses, naming it.
 _VOUCHED_HEADS = frozenset({
     "echo", "printf", "cat", "ls", "head", "tail", "wc", "grep", "sort", "cut", "tr", "diff",
     "cmp", "sha256sum", "md5sum", "stat", "file", "basename", "dirname", "readlink", "realpath", "date",
-    "test", "[", "true", "false", "pwd", "jq",
+    "test", "true", "false", "pwd", "jq",
 })
-#: `git` is vouched by SUBCOMMAND: these read the repository and print. `bundle` only as `bundle verify`.
-_VOUCHED_GIT = frozenset({
-    "log", "show", "diff", "status", "rev-parse", "rev-list", "ls-files", "ls-tree", "cat-file",
-    "describe", "shortlog", "blame", "grep", "name-rev", "merge-base",
-})
-#: The only options allowed BEFORE the git subcommand: `-C <path>` and `--no-pager`. `-c`, `--config-env`,
-#: `--exec-path`, `-p` and the rest can make a read-only subcommand run or write something.
-_GIT_LEADING_WITH_VALUE = ("-C",)
-_GIT_LEADING_FLAGS = ("--no-pager",)
-#: Long options to a vouched git subcommand that spawn or write, refused by name or unambiguous prefix;
-#: the short letters that do the same, per subcommand (`-O` is `grep`'s pager, `log`'s order file).
-_GIT_LONG_BLOCKLIST = ("output", "ext-diff", "textconv", "open-files-in-pager", "exec-path", "config-env")
-_GIT_SHORT_BLOCKLIST = {"grep": "O"}
-#: Per-head options that write or spawn: the short letters, and the long names (prefix rule).
+#: Per-head options that write or spawn: the short letters, and the long names (getopt's prefix rule).
 _HEAD_OPTION_BLOCKLIST = {"sort": ("o", ("output", "compress-program")), "date": ("s", ("set",))}
+#: Read-only by the verb table, and yet they run things: the hermetic suite, every recipe, the IT suite.
+_FLEET_VERBS_THAT_RUN = frozenset({"selftest", "verify", "release-verify"})
 _OPAQUE_HEADS = frozenset({"eval", "exec", "source", "."})
-_SIMPLE_CHARS = frozenset("ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789_@%+=:,./*?-")
+_SIMPLE_CHARS = frozenset("ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789_@%+=:,./-")
 _SIMPLE_OPS = ("||", "&&", "|", ";")
 _SIMPLE_REDIRECTS = ("2>&1", ">&2", "2>>", "2>", ">>", ">", "<", "&>")
 _SIMPLE_WRITES = ("2>>", "2>", ">>", ">", "&>")
 #: Redirections that take a target may be glued to it (`2>err.txt`, `>out`); the descriptor pair forms and
 #: the operators must stand alone, followed by whitespace or the end.
 _SIMPLE_TARGETED = ("2>>", "2>", ">>", ">", "<", "&>")
-_SIMPLE_SHAPE = ("words, 'single' or \"double\" quoted strings without $, backtick or backslash, and the standalone "
-                 "operators | || && ; > >> < 2> 2>> &> 2>&1 >&2")
+_SIMPLE_SHAPE = ("words, 'single' or \"double\" quoted strings without $, backtick or backslash, no glob, and "
+                 "the standalone operators | || && ; > >> < 2> 2>> &> 2>&1 >&2")
 _ASSIGNMENT = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*=")
 _PLAIN_TARGET = re.compile(r"^[A-Za-z0-9_./-]+$")
 
@@ -5275,40 +5269,11 @@ def _long_option_hits(word: str, names) -> str:
     return ""
 
 
-def _git_reason(args: list) -> str:
-    rest, sub = list(args), ""
-    while rest:
-        word = rest.pop(0)
-        if word in _GIT_LEADING_WITH_VALUE:
-            rest = rest[1:]
-        elif word in _GIT_LEADING_FLAGS:
-            continue
-        elif word.startswith("-"):
-            return (f"`git {word}` before the subcommand is not an option verify vouches for (only "
-                    f"`-C <path>` and `--no-pager`; `-c`, `--config-env` and `--exec-path` can run code)")
-        else:
-            sub = word
-            break
-    if not (sub in _VOUCHED_GIT or (sub == "bundle" and rest[:1] == ["verify"])):
-        return (f"`git {sub or '(no subcommand)'}` is not a read-only subcommand verify vouches for "
-                f"({', '.join(sorted(_VOUCHED_GIT))}, bundle verify)")
-    letters = _GIT_SHORT_BLOCKLIST.get(sub, "")
-    for word in rest:
-        if word == "--":
-            break
-        hit = _long_option_hits(word, _GIT_LONG_BLOCKLIST)
-        if hit:
-            return f"`git {sub} {word}` selects --{hit}, which writes or spawns beyond its arguments"
-        if letters and word.startswith("-") and not word.startswith("--") and any(c in word[1:] for c in letters):
-            return f"`git {sub} {word}` carries -{letters}, which spawns a program"
-    return ""
-
-
 def _head_option_reason(head: str, args: list) -> str:
+    """EVERY argument is checked; a `--` does not end the scan, since an option that takes a value consumes
+    it (`sort --random-source -- -o …` writes through `-o`). `sort -- -o` is refused as the price."""
     letters, longs = _HEAD_OPTION_BLOCKLIST.get(head, ("", ()))
     for word in args:
-        if word == "--":
-            break
         hit = _long_option_hits(word, longs)
         if hit:
             return f"`{head} {word}` selects --{hit}, which writes or spawns beyond its arguments"
@@ -5341,24 +5306,23 @@ def unvouched_reason(command: str) -> str:
         if "/" in head:
             return f"its command is a path ({head}); verify vouches for names on PATH only"
         if head == "git":
-            reason = _git_reason(args)
-            if reason:
-                return reason
-            continue
+            return ("`git` is not a shape verify vouches for: a repository's config can name programs for "
+                    "its read-only subcommands to run, and the recipe's author controls the repository")
         if head == "fleet":
             verb = args[0] if args else ""
             spec = VERBS.get(verb)
-            if spec is not None and spec.read_only:
+            if spec is not None and spec.read_only and verb not in _FLEET_VERBS_THAT_RUN:
                 continue
-            return (f"`fleet {verb or '(no verb)'}` is not a read-only verb by the verb table; verify vouches "
-                    f"for read-only fleet verbs only")
+            return (f"`fleet {verb or '(no verb)'}` is not a read-only verb by the verb table (or is one "
+                    f"that runs things: {', '.join(sorted(_FLEET_VERBS_THAT_RUN))}); verify vouches for "
+                    f"read-only fleet verbs only")
         if head in _VOUCHED_HEADS:
             reason = _head_option_reason(head, args)
             if reason:
                 return reason
             continue
-        return (f"`{head}` is not a shape verify vouches for (read-and-print tools, read-only `git` "
-                f"subcommands, read-only `fleet` verbs)")
+        return (f"`{head}` is not a shape verify vouches for (read-and-print tools, read-only `fleet` "
+                f"verbs)")
     return ""
 
 
@@ -5392,8 +5356,8 @@ def _do_verify(ctx: Ctx, parsed: Parsed) -> int:
                         f"executes only what it can vouch for (B21: a denylist alone fails open, and three "
                         f"shapes it did not name were measured reaching the runner)."),
                 clears_when=("the recipe is rewritten in vouched shapes — read-and-print tools, read-only "
-                             "`git` subcommands, read-only `fleet` verbs, no substitution — or its author "
-                             "runs it by hand and records the output under evidence/"),
+                             "`fleet` verbs, plain words and quoted strings, no substitution, glob or "
+                             "expansion — or its author runs it by hand and records the output under evidence/"),
                 clears_who="the author of that document"))
             continue
         code, out, err = ctx.runner(recipe.command, cwd=sandbox, env=_sandbox_env(sandbox))

