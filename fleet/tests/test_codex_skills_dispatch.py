@@ -8,7 +8,9 @@ from pathlib import Path
 import shutil
 import unittest
 
-from fleet import runtime_launch
+import os
+
+from fleet import codex_skills, runtime_launch
 from fleet.codex_skills import CORE_SKILLS, Visibility
 from tests.test_cli import Fleet, snapshot
 
@@ -145,6 +147,96 @@ class CodexSkillsDispatchTests(unittest.TestCase):
         self.f.codex_skills = refuses_to_be_asked
         code, rows, text = self.brief_rows('claude')
         self.assertEqual(rows, [], text)
+
+
+class CodexSkillsCurrencyTests(unittest.TestCase):
+    """RV-28. The gate asks whether the core skills are VISIBLE; it does not refuse a link pinned to one release or a
+    plugin snapshot. The dispatch and brief rows say whether what the worker will read follows the deployed `current`,
+    so a stale home is named at the moment someone reads the dispatch, not only at the next postflight."""
+
+    def setUp(self):
+        self.f = Fleet()
+        self.addCleanup(shutil.rmtree, self.f.tmp)
+        self.profile = self.f.profile()
+        self.rel = self.f.tmp / 'fleet-releases'
+        for version in ('fleet-v1', 'fleet-v2'):
+            for name in CORE_SKILLS:
+                (self.rel / version / 'skills' / name).mkdir(parents=True)
+                (self.rel / version / 'skills' / name / 'SKILL.md').write_text(version)
+        (self.rel / 'current').symlink_to(self.rel / 'fleet-v2')
+        self.home = self.f.tmp / 'codex-home'
+        (self.home / 'skills').mkdir(parents=True)
+        self.f.codex_skills = codex_skills.visible_skills
+        original = self.f.context
+        home, rel = str(self.home), str(self.rel)
+        from fleet.runtime import LaunchSettings
+        def context():
+            build = original()
+            def candidate(parsed, out, err):
+                ctx = build(parsed, out, err)
+                ctx.launch_settings = lambda runtime, slot: LaunchSettings(runtime, '/test/bin/' + runtime,
+                                                                          home if runtime == 'codex' else '/test/config')
+                ctx.launch_environment = dict(ctx.launch_environment or {}, FLEET_RELEASES=rel)
+                return ctx
+            return candidate
+        self.f.context = context
+
+    def link(self, target):
+        os.symlink(str(target), self.home / 'skills' / 'superpowers')
+
+    def dispatch_row(self):
+        code, out, err = self.f.run(['dispatch', '--profile', str(self.profile), '--title', 'currency task',
+                                     '--runtime', 'codex', '--dry-run'])
+        self.assertEqual(code, 0, out + err)
+        rows = [line for line in out.splitlines() if line.startswith('codex_skills')]
+        self.assertEqual(len(rows), 1, out)
+        return rows[0]
+
+    def brief_row(self):
+        path = self.f.worker('coder', slot='ws1', live=False)
+        record = self.f.store.read(self.f.ids['coder'])
+        record.runtime, record.runtime_config_dir = 'codex', str(self.home)
+        self.f.store.write(record)
+        code, out, err = self.f.run(['brief', '--instant', str(path)])
+        rows = [line for line in out.splitlines() if line.startswith('skills')]
+        self.assertEqual(len(rows), 1, out)
+        return rows[0]
+
+    def test_a_link_that_follows_current_is_said_to(self):
+        self.link(self.rel / 'current' / 'skills')
+        self.assertIn('follows', self.dispatch_row())
+        self.assertNotIn('WARNING', self.dispatch_row())
+        self.assertIn(' info ', self.brief_row())
+
+    def test_a_link_pinned_to_one_release_is_named_in_the_dispatch_and_brief_rows(self):
+        self.link(self.rel / 'fleet-v1' / 'skills')
+        row = self.dispatch_row()
+        self.assertIn('WARNING', row)
+        self.assertIn('pinned', row)
+        brief = self.brief_row()
+        self.assertNotIn(' info ', brief)
+        self.assertIn('pinned', brief)
+
+    def test_a_plugin_snapshot_is_named_as_not_following_current(self):
+        for name in CORE_SKILLS:
+            (self.home / 'plugins' / 'cache' / 'm' / 'superpowers' / '1' / 'skills' / name).mkdir(parents=True)
+            (self.home / 'plugins' / 'cache' / 'm' / 'superpowers' / '1' / 'skills' / name / 'SKILL.md').write_text('x')
+        row = self.dispatch_row()
+        self.assertIn('WARNING', row)
+        self.assertIn('snapshot', row)
+
+    def test_without_a_releases_area_currency_is_said_to_be_unchecked(self):
+        self.link(self.rel / 'current' / 'skills')
+        original = self.f.context
+        def context():
+            build = original()
+            def candidate(parsed, out, err):
+                ctx = build(parsed, out, err)
+                ctx.launch_environment = {k: v for k, v in (ctx.launch_environment or {}).items() if k != 'FLEET_RELEASES'}
+                return ctx
+            return candidate
+        self.f.context = context
+        self.assertIn('not checked', self.dispatch_row())
 
 
 if __name__ == '__main__':
