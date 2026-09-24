@@ -359,7 +359,9 @@ def blocking_compactions(ctx) -> list:
                     continue
                 if parsed_name.optype != "compact" or parsed_name.state != "inflight":
                     continue
-                #: Per-effort, matching `_workers`: another effort's compaction is that effort's rebase debt.
+                #: The DISK half is this instants directory by construction and this base: an on-disk compaction of
+                #: another effort is that effort's rebase debt. The RECORD half above is base-wide (`by_effort=False`,
+                #: DECISIONS D-4 of V23-D), because this rule mis-triggers by declaration.
                 if ctx.base and parsed_name.base != ctx.base:
                     continue
                 names.add(entry.name)
