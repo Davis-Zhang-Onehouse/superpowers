@@ -111,6 +111,11 @@ def git_writable_dirs(workspace, git) -> tuple:
         if own.parent.name != 'worktrees':
             continue
         common = own.parent.parent
+        #: RV-29 (closure 1): the slot is the worker's to write, so a git dir, back-link included, forged inside it
+        #: proves nothing. The repository whose back-link counts lives outside the slot, and a worktree whose repository
+        #: is inside the slot writes it within the cwd anyway.
+        if common == slot.resolve() or slot.resolve() in common.parents:
+            continue
         #: RV-29: a `.git` FILE is the worker's to write, so it proves nothing. Git's back-link — `<own>/gitdir`, written
         #: by `git worktree add` in the OWNING repository, outside the sandbox — must name this very `.git`.
         try:
