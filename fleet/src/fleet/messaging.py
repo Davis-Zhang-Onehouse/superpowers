@@ -96,6 +96,14 @@ def sends_path(instant) -> Path:
     return Path(instant) / ".fleet" / SENDS
 
 
+def line_count(text: str) -> int:
+    """Newline-separated lines — the quantity the placeholder confirms (RV-46). Not `str.splitlines`, which
+    also splits on CR, VT, FF and U+2028 and would record a count the TUI never showed."""
+    if not text:
+        return 0
+    return text.count("\n") + (0 if text.endswith("\n") else 1)
+
+
 def head_of(text: str, width: int = 80) -> str:
     first = text.strip().splitlines()[0] if text.strip() else ""
     return first if len(first) <= width else first[:width - 1] + "…"
