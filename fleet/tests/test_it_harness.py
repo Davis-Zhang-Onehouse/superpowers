@@ -678,6 +678,19 @@ class ServerGuardian(unittest.TestCase):
                                         capture_output=True, env=env).returncode, 0,
                          "first copy's guardian killed the second copy's server")
 
+    def test_command_substitution_cannot_arm_a_guardian(self):
+        started = subprocess.run(["tmux", "-L", self.socket, "new-session", "-d", "-s", "victim"],
+                                 capture_output=True, env=self.env)
+        self.assertEqual(started.returncode, 0, started.stderr)
+        script = (f'. "{self.it}/lib.sh"\n'
+                  f'x=$(it_guard_server "$$" "{self.socket}"; sleep 0.5)\n'
+                  f'echo "$x" >/dev/null\n')
+        result = subprocess.run(["bash", "-c", script], capture_output=True, env=self.env,
+                                cwd=self.tmp)
+        self.assertIn(b"call from the runner's top-level shell", result.stderr)
+        time.sleep(3)
+        self.assertTrue(self.server_up(), "subshell guardian killed the live server")
+
 
 if __name__ == "__main__":
     unittest.main()
