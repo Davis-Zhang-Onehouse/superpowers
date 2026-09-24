@@ -355,7 +355,6 @@ road.add(Milestone(id="M1", title="the probe milestone", status="ready", deps=[]
 print("milestones:", [m.id for m in road.milestones()])
 PY
   python3 "$PY_DIR/l7setup.py" > "$EV/L7-setup.out" 2>&1
-  STALE_BASE="$EV/reg/l7stale"
   mkdir -p "$SLOTS/s1"
   fleet enroll --home "$L7H" --slot "$SLOTS/s1" >> "$EV/L7-setup.out" 2>&1
   fleet resume --home "$L7H" --instant "$INSTP" --slot s1 --tmux "itfleet-L-none" \
@@ -380,7 +379,7 @@ PY
   printf 'e1\n' > "$INSTP/e1"
   printf 'seed for %s\n' "$INST" > "$INSTP/.fleet/seed.txt"
   cp "$INSTP/.fleet/seed.txt" "$EV/l7-delivered.txt"
-  export TODO STALE_BASE
+  export TODO
 
   verb_args() {   # the valid argv for one verb; mutating verbs run --dry-run so L7 changes nothing
     case "$1" in
