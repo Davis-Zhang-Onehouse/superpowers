@@ -333,7 +333,7 @@ def blocking_compactions(ctx) -> list:
     compaction rendered `(missing)`.
     """
     names = set()
-    for subject in _workers(ctx):
+    for subject in _workers(ctx, by_effort=False):
         if _optype_of(subject) == "compact" and subject.state != COMPLETE:
             names.add(_instant_name(subject) or subject.identity)
     #: The disk. Read directly rather than by adding a fourth source to `reconcile`: an on-disk instant holds
@@ -380,7 +380,7 @@ class CompactionExclusive(Guard):
                     "touches no lease and no session whether it allows or refuses.")
 
     def _decide(self, ctx) -> Verdict:
-        workers = _workers(ctx)
+        workers = _workers(ctx, by_effort=False)
         claims = _claims_in(workers)
         #: `SI-30`: records UNION disk, through the one shared derivation. The population line now says which
         #: sources were consulted, because "examined N subjects, 0 of them compactions" was a true sentence
@@ -575,7 +575,7 @@ def _override_in_force(ctx) -> bool:
     return _check_override(ctx)
 
 
-def _workers(ctx, aside=None) -> list:
+def _workers(ctx, aside=None, by_effort=True) -> list:
     """This effort's subjects, from the ONE join — plus, when the caller HOLDS A CLAIM, the claims ahead
     of its own.
 
@@ -585,7 +585,10 @@ def _workers(ctx, aside=None) -> list:
     serves every effort on the root — so quanton's cap counted twelve harvested, folderless fleetInfraOps
     records and was raised 4 -> 7 -> 12 -> 16 in a day. Same-base subjects of another instants directory are
     appended to `aside` when the caller passes a list, so the verdict can say it saw them and did not count
-    them. Unknown sessions and unattributed stale leases are deliberately absent — *"some of those
+    them.
+
+    `by_effort=False` keeps the base-only population, for `CompactionExclusive` (RV-C1): that rule MIS-TRIGGERS by
+    declaration, and narrowing its record half would turn a refusal it gave into an admission nobody decided. Unknown sessions and unattributed stale leases are deliberately absent — *"some of those
     sessions are people's"* (`D-6`), and a guard that counts them refuses on evidence nobody can act on.
 
     The second half is `FI-21`. On the advisory pass (`ctx.claim` empty) this is exactly what it always
@@ -599,12 +602,12 @@ def _workers(ctx, aside=None) -> list:
     """
     same_base = [s for s in ctx.subjects()
                  if s.kind == KIND_WORKER and (not ctx.base or s.evidence.get("base") == ctx.base)]
-    recorded = [s for s in same_base if _in_this_effort(ctx, _recorded_instant(s))]
+    recorded = [s for s in same_base if not by_effort or _in_this_effort(ctx, _recorded_instant(s))]
     if aside is not None:
         aside.extend(s for s in same_base if s not in recorded)
     if not ctx.claim:
         return recorded
-    return recorded + _claims_ahead(ctx, recorded)
+    return recorded + _claims_ahead(ctx, recorded, by_effort=by_effort)
 
 
 def _recorded_instant(subject) -> str:
@@ -629,7 +632,7 @@ def _in_this_effort(ctx, instant: str) -> bool:
     return path.parent.resolve() == Path(ctx.instants_dir).resolve()
 
 
-def _claims_ahead(ctx, recorded: list) -> list:
+def _claims_ahead(ctx, recorded: list, by_effort=True) -> list:
     """The won-but-unrecorded claims of this effort that rank BEFORE this caller's own.
 
     Three things make this the right population, and each one is a way of getting it wrong:
@@ -655,7 +658,7 @@ def _claims_ahead(ctx, recorded: list) -> list:
         if ctx.base and (lease.base_instant or "") != ctx.base:
             continue
         #: `V23-D`: the same base string in another instants directory is another effort's claim.
-        if not _in_this_effort(ctx, lease.child_instant or ""):
+        if by_effort and not _in_this_effort(ctx, lease.child_instant or ""):
             continue
         if not lease.base_instant or lease.todo_id in known:
             continue
