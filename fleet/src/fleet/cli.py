@@ -5367,9 +5367,9 @@ def _do_verify(ctx: Ctx, parsed: Parsed) -> int:
                         f"executes only what it can vouch for (B21: a denylist alone fails open, and three "
                         f"shapes it did not name were measured reaching the runner)."),
                 clears_when=("the recipe is rewritten in vouched shapes — read-and-print tools, plain words "
-                             "and quoted strings, no substitution, glob or expansion — or, if it is a command "
-                             "for a human to run, it moves out of a shell fence (```text), since a recipe verify "
-                             "cannot vouch for stays reported and is never executed by it"),
+                             "and quoted strings, no substitution, glob or expansion. A recipe verify cannot "
+                             "vouch for stays reported and is never executed by it; moving it out of a shell "
+                             "fence silences this row but leaves the command checked by nothing"),
                 clears_who="the author of that document"))
             continue
         code, out, err = ctx.runner(recipe.command, cwd=sandbox, env=_sandbox_env(sandbox))
