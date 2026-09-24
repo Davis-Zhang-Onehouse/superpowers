@@ -72,6 +72,7 @@ from fleet.errors import BadInput, FleetError, NoCapacity, Refused
 from fleet.harvest import DEFAULT_MAX_AGE_S, REGISTER_NAME, Harvest
 from fleet.identity import ROOT_BASE, InstantName, resolve, same_instant
 from fleet.layout import INFO, VIOLATION
+from fleet.markdown import fenced, prose
 from fleet.pool import Pool, ReapReport
 from fleet.profiles import Profile
 from fleet import root as root_mod
@@ -2876,15 +2877,22 @@ def _pointer_gate(ctx: Ctx, child: Path) -> None:
     Measured in three audited instants: `complete` succeeded while `HANDOFF.md` still named the absolute
     `-inflight-` path and `evidence/INDEX.md` still had `*pending*` rows, and each cost an operator round
     trip to discover.
+
+    `B19`. PROSE only: a fenced block or an HTML comment is a QUOTATION — the coordinator's dispatch
+    command kept verbatim, an archival note — and a quotation of a path is not a pointer anyone
+    navigates from. Measured (i25): an instant whose only absolute self-reference was inside a
+    ```bash block was refused rc=4. Inline code is not an enclosure here: a code span is how a live
+    pointer is usually written. The reader is `fleet.markdown`, shared with the near-miss rule,
+    `recipes_of` and `lint-skill.py`.
     """
     offenders = []
     for rel in _POINTER_DOCS:
         path = child / rel
         if not path.is_file():
             continue
-        for number, line in enumerate(path.read_text(encoding="utf-8").splitlines(), start=1):
-            if f"/{child.name}" in line or f"{child.name}/" in line:
-                offenders.append(f"{rel}:{number}")
+        for line in prose(path.read_text(encoding="utf-8")):
+            if f"/{child.name}" in line.text or f"{child.name}/" in line.text:
+                offenders.append(f"{rel}:{line.number}")
     if not offenders:
         return
     raise Refused(
@@ -4757,6 +4765,10 @@ def near_miss_rows(child: Path) -> list:
     This reads a `.md` file and derives no control signal from it: the phase comes from
     `.fleet/declare.json` through `store.Declarations`, and the markdown is the **text under lint** — the
     standing `profiles` already has for `charter.md` (AC-2 as FD-8 made it precise).
+
+    `B19`. PROSE only, through `fleet.markdown`: a ```markdown block that QUOTES `Phase: AWAITING-CI` to
+    say "do not write this" and an HTML comment are enclosures, not declarations. The shape is matched on
+    the comment-stripped text; the retraction on the raw line.
     """
     declared = Declarations(child).phase()
     rows, scanned, shaped = [], 0, 0
@@ -4765,12 +4777,13 @@ def near_miss_rows(child: Path) -> list:
         if not path.is_file():
             continue
         scanned += 1
-        for number, line in enumerate(path.read_text().splitlines(), start=1):
-            if _DECLARATION_SHAPED.match(line) is None:
+        for line in prose(path.read_text()):
+            if _DECLARATION_SHAPED.match(line.text) is None:
                 continue
-            if _RETRACTION.search(line):
+            if _RETRACTION.search(line.raw):
                 #: Counted nowhere: a retraction is not a near miss, so it is not part of the population this
-                #: rule reports over either.
+                #: rule reports over either. Matched on the RAW line, so a retraction written inside a comment
+                #: still exempts (i25: skip enclosures, keep reading exemption tokens inside them).
                 continue
             shaped += 1
             #: Truthiness, not `is not None`. A STORED EMPTY phase used to satisfy this and suppress the rule
@@ -4778,9 +4791,10 @@ def near_miss_rows(child: Path) -> list:
             #: because a store written by an older build can still carry one.
             if declared:
                 continue
+            number, stripped = line.number, line.raw.strip()
             rows.append(Row(
                 kind=NEAR_MISS, subject=f"{path}:{number}", severity=VIOLATION,
-                detail=(f"{name}:{number} carries the declaration-shaped line {line.strip()!r} and "
+                detail=(f"{name}:{number} carries the declaration-shaped line {stripped!r} and "
                         f"{Declarations(child).path} declares no phase, so the line is read by NOTHING. "
                         "RCF-9: a worker wrote exactly this, exactly as its brief worded it, and at a WIP "
                         "cap of 1 it held the effort's only dev slot for the length of a CI queue."),
