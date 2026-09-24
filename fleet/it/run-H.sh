@@ -505,6 +505,26 @@ else
     "attested-before=$h13_att0(rc=$h13_before) attested-after-rename=$h13_att1(rc=$h13_renamed) owner-rewritten=$h13_own('$h13_owner') brief=$h13_brf disown-refused=$h13_hold($h13_disown_before/$h13_disown_after) unreadable-exits-1=$h13_unr(rc=$h13_unreadable) milestone-typo-refused=$h13_ev(rc=$h13_typo)"
 fi
 
+# H14 — instant operands use the caller's cwd for `.` and `../sibling`, and refusals
+# report the resolved path. Both relative spellings failed before the shared resolver fix.
+H14="$OUT/h14"; mkdir -p "$H14"
+( cd "$COORD" && fleet milestone --instant . --id h14new --title "relative path" --dry-run \
+      --porcelain ) > "$H14/dot.out" 2>&1; h14_dot=$?
+( cd "$COORD" && fleet review --instant "../$(basename "$WORKER")" --scope all \
+      --verdict READY --dry-run --porcelain ) > "$H14/sibling.out" 2>&1; h14_sibling=$?
+( cd "$COORD" && fleet roadmap --instant ./missing --porcelain ) > "$H14/missing.out" 2>&1
+h14_missing=$?
+if [ "$h14_dot" = 0 ] && grep -q $'^id\th14new$' "$H14/dot.out" \
+   && grep -q 'would record scope all' "$H14/sibling.out" \
+   && ! grep -q 'not an instant on disk' "$H14/sibling.out" \
+   && [ "$h14_missing" = 2 ] && grep -qF "$COORD/missing is not an instant on disk" "$H14/missing.out"; then
+  it_pass H14 "fleet/it/H/out/h14/dot.out" \
+    "milestone resolves dot, review resolves a sibling path, and a missing path refusal names the resolved absolute path"
+else
+  it_fail H14 "fleet/it/H/out/h14/missing.out" \
+    "dot rc=$h14_dot sibling rc=$h14_sibling missing rc=$h14_missing; see h14 outputs"
+fi
+
 it_assert_isolation H-leave
 bash "$IT_ROOT/bin/source-pin.sh" after "$OUT" || { echo "CONTAMINATED — no verdict" >&2; exit 3; }
 sed -i "s|$INSTANT/||g" "$RESULTS"
