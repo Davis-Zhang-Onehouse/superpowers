@@ -1,5 +1,68 @@
 # fleet — changelog
 
+## fleet/v0.6.8 — 2026-09-24T05:16:15Z
+Cut from d7a0529 on `stack/0.6.8` (upstream base snapshot/2026-09-22-152849). 55 commit(s) since fleet/v0.6.7.
+
+Every release ships the whole repository — all skills, `commands/`, `hooks/` and the plugin manifest, not only `fleet/`.
+Payload: fleet (20 files), skills (3 files), scripts (2 files).
+Skills changed: using-fleet.
+
+- 81ea088 fleet/it: an M9 mutation that did not apply is NOT-APPLIED, never SURVIVED (FB-108)
+- 5fc7741 fleet-revive.sh: report a dry-run refusal by its own sentence, not its route (PT2-I1)
+- 3803c32 fleet/it, fleet-revive.sh: close the review's gaps in the applied check and the refusal parse
+- d8e0a8c fleet-revive.sh: a refusal with no Type header is reported by its first line, not its usage (RV-18)
+- a7dda6a fleet-revive.sh: a header-like message line does not displace the refusal's Type header (RV-19)
+- 4045124 fleet-revive.sh: route-only verb output reads (no reason line), not the route twice (RV-23)
+- c99910e fleet/it: the M9 copy identity check covers tests/ as well as src/ (RV-21)
+- 5c0dcc8 fleet/it: an M9 mutation with no expected kill reason is NO-REASON, never KILLED (RV-22)
+- 5002e89 fleet: send confirms a multi-line message through the paste placeholder and records every send (FB-27, B13)
+- e516627 fleet/it: §SEND — a real multi-line send is submitted and recorded, on claude and codex panes
+- 1b3a010 tests: the three runtime paste tests run — they sat under the __main__ guard, hiding a wrong assertion (RV-37)
+- bb87e6a fleet: the delivery verdict wins over the send record — a raising recorder never turns a submitted message into an error (RV-38)
+- b2e6916 fleet: read_sends is total — bad bytes, an unreadable log and wrong field types are BadInput, so brief reports a violation row instead of crashing (RV-39)
+- 183c9c9 fleet/it: §SEND asserts HOW each send was confirmed — the five-line and over-length rows must say placeholder (RV-21)
+- 136e7ae fleet/it: §SEND derives the codex over-length count from the message file, trailing newline included (RV-40)
+- 6e9c0ab fleet/it: §SEND does not measure a case whose box the previous failure left full (RV-41)
+- 07d5369 fleet/it: §SEND arms its teardown as soon as the fixture slot exists and names a setup step that fails (RV-42)
+- 75333e2 fleet/it: §SEND removes its private codex home (a credential copy) at teardown (RV-43)
+- bdbf0bb fleet/it: §SEND's record check reports a digest it could not re-derive, and its brief check can fail (RV-44)
+- 9d9e35a fleet: send --dry-run emits the same row set as the real send, a confirmation row included (RV-45)
+- 60adbe1 fleet: the send record's line count is newline-separated lines, the quantity the placeholder confirms (RV-46)
+- 3ffa847 fleet: a single-line claude placeholder confirms as placeholder-uncounted, so the record says how weak it was (RV-47)
+- 9368384 fleet: send --by refuses an empty or whitespace-only sender, and the login-user fallback is tested (RV-49)
+- 2fd5e66 fleet: the sender identity falls back to FLEET_INSTANT alone, as D-3 documents (RV-30)
+- 8a4e3a9 fleet: the sender identity is resolved before the pane is touched (RV-49)
+- 47fd105 skills: using-fleet names every send outcome, the plain uncertain one included (RV-48)
+- d3cca19 fleet: one enclosure-aware reader for the markdown fleet reads (B19)
+- 12ef652 fleet: markdown reader follows CommonMark for comments; an unclosed inline opener is literal (B19)
+- 1a7168a fleet: complete's pointer gate and lint's near-miss rule read prose only (B19)
+- 2da0974 fleet: recipes_of reads fences through the shared markdown reader (B19)
+- 8c47019 skills: lint-skill takes its fence regions from fleet.markdown (B19)
+- 6d4b906 fleet: verify executes only recipes it can vouch for; the denylist is the first line, not the only one (B21)
+- 36cfd6b fleet: pin the reader's stated limits and the gates' line numbers; lint-skill keeps a package main put on the path (B19 review sweep)
+- ebd09ad fleet: verify's vouch rule reads a recipe the way bash does and judges what it used to discard (B21 review)
+- 19a2476 fleet: verify's vouch rule decides operators on the quote-preserving token stream (B21 review, round 2)
+- d74b58f fleet: verify vouches for a whitelist grammar it parses itself, not for a reading of bash (B21, D-6)
+- b148e54 fleet: verify vouches for no glob, no git and no fleet verb that runs things; every argument is checked (B21, D-7)
+- bd8fdb5 fleet: verify no longer vouches for fleet verbs; sort -T and file -C are refused (B21, D-8)
+- 43b8881 fleet it: G8 pins that a quoted pointer or declaration is not a finding (B19)
+- 30f80f9 fleet: verify refuses the shell-side options of its bash-builtin heads; the unvouched row promises nothing verify does not honour (B21, D-9)
+- 8d9f9d4 fleet: verify judges a read redirection's target like a write's, so bash's /dev/tcp cannot fetch (RV-29)
+- 8af13b6 fleet: verify's long-option blocklist matches a blocked name's longer aliases too (RV-30)
+- d43cdf7 fleet tests: drop the duplicated vouched row (RV-36)
+- dcda2aa fleet: the vouch block's comment states the grammar reads equal or stricter than bash, naming the fd-number case (RV-35)
+- 89f632a fleet: the unvouched row says plainly that a relabelled recipe is checked by nothing (RV-32)
+- bc800ee fleet: verify's population row counts the indented shell fences the reader did not examine (RV-31)
+- 5c32965 skills: lint-skill reports a package without the markdown reader as bad input, not as findings (RV-33)
+- d88e310 fleet: verify counts every shell fence the reader classed as prose, not only the 4-space form (RV-37)
+- ed001d4 fleet: the indented-fence counter requires the language to end at whitespace, as recipes_of does (RV-38)
+- 5bcbcc3 skills: lint-skill's other two bad-input paths exit 2 as its docstring says (RV-42)
+- ed47b50 skills: lint-skill's test covers its three bad-input doors (RV-39)
+- a9f31ef skills: lint-skill refuses a source path with no fleet package instead of importing whatever PYTHONPATH carries (RV-51)
+- ee5dfb6 skills: lint-skill's bad-input cases scrub PYTHONPATH so the tool's own source setting is what they test (RV-45)
+- bfc8e91 fleet: verify's population row names every fence shape it counts as unexamined (RV-46)
+- d7a0529 fleet: the indented-fence counter's comment states the count is an upper bound (RV-47)
+
 ## fleet/v0.6.7 — 2026-09-24T00:16:08Z
 Cut from 842d38f on `live` (upstream base snapshot/2026-09-22-152849). 93 commit(s) since fleet/v0.6.6.
 
