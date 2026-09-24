@@ -231,7 +231,17 @@ def transcript_facts(path):
                if row.get('type') == 'response_item' and row.get('payload', {}).get('type') in
                ('function_call_output', 'custom_tool_call_output')]
     outputs = [o if isinstance(o, str) else json.dumps(o) for o in outputs]
+    developer = ' '.join(json.dumps(row['payload'].get('content')) for row in rows if row.get('type') == 'response_item'
+                         and (row.get('payload') or {}).get('type') == 'message' and row['payload'].get('role') == 'developer')
+    tool_outputs = {row['payload'].get('call_id'): json.dumps(row['payload'].get('output')) for row in rows
+                    if row.get('type') == 'response_item'
+                    and (row.get('payload') or {}).get('type') in ('custom_tool_call_output', 'function_call_output')}
+    escalated_writes = [dict(call=json.dumps(call.get('input') or call.get('arguments')),
+                             output=tool_outputs.get(call.get('call_id'), ''))
+                        for call in calls if 'cxp-escalated' in json.dumps(call.get('input') or call.get('arguments') or '')]
     return dict(session=rows[0]['payload']['id'],
+                never_instruction='Approval policy is currently never' in developer,
+                escalated_writes=escalated_writes,
                 policies=[dict(approval=t.get('approval_policy'), sandbox=t.get('sandbox_policy')) for t in turns],
                 escalation_requests=escalations,
                 probe_outputs=[o for o in outputs if 'outside-write:' in o])
@@ -393,7 +403,13 @@ assert keystrokes == [], keystrokes
 if ESCALATE:
     #: RV-14: the worker asked to write outside its roots with escalated permissions; at the fix nothing prompted, the
     #: pane never showed a dialog, nobody pressed a key, and the write did not happen.
-    assert facts['escalation_requests'], 'the worker never asked to escalate, so the refusal was not exercised'
+    #: Measured at the fix: under approval=never codex tells the model "Do not provide the `sandbox_permissions` for any
+    #: reason, commands will be rejected", so the model cannot even ASK (while at the base the same seed produced a
+    #: `require_escalated` request and a prompt). What must hold is that the write was attempted, the sandbox refused it,
+    #: and nothing prompted.
+    assert facts['never_instruction'], 'the session was not told approval=never'
+    assert facts['escalated_writes'], 'the worker never attempted the out-of-roots write, so the refusal was not exercised'
+    assert all('Read-only file system' in write['output'] for write in facts['escalated_writes']), facts['escalated_writes']
     assert not (outside / 'cxp-escalated').exists(), 'an escalated write outside the roots was ALLOWED'
     verdict['escalated_write_absent'] = True
     tmux('kill-session', '-t', '=' + record.tmux)
