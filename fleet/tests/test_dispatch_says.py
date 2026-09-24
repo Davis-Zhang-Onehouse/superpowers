@@ -139,7 +139,7 @@ class TestAFailureAfterTheClaimIsNotStarted(DispatchCase):
         rows = kv(out)
         self.assertTrue(rows.get("error", "").startswith("BadInput:"), out)
         self.assertEqual(rows.get("step"), "render", out)
-        self.assertEqual(rows.get("left_instant"), "(none)", out)
+        self.assertEqual(rows.get("left_instant"), "none", out)
         self.assertEqual(rows.get("left_record"), "none", out)
         self.assertIsNone(self.fleet.pool.lease("ws1"))
 

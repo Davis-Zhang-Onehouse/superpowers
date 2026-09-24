@@ -2260,7 +2260,7 @@ def _do_dispatch(ctx: Ctx, parsed: Parsed) -> int:
                 #: RV-C6. Bare values, under keys a success never prints — a reader that treats `todo_id`
                 #: as "it started" or cds into `instant` must not match a non-start. The prose is `remedy`.
                 rows=[("step", step), ("left_todo_id", todo_id),
-                      ("left_instant", str(child) if child.exists() else "(none)"),
+                      ("left_instant", str(child) if child.exists() else "none"),   # RV-C10: one absent sentinel
                       ("left_record", record_state),
                       ("left_lease", lease_state),
                       ("remedy", " ".join(filter(None, (
