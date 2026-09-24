@@ -153,6 +153,12 @@ def install_command(codex_home) -> str:
 
 
 def load_instruction(vis: Visibility) -> str:
+    if not vis.ok:
+        #: Only reachable through `--override`. Pointing this worker at a bootstrap and a reference it cannot see
+        #: would be the FB-111 defect again, in the seed's own words.
+        return (f"Superpowers skills on codex: not installed for this worker. Its CODEX_HOME ({vis.codex_home}) "
+                f"cannot see {', '.join(vis.missing)}; it was launched with --override. When a step names one of "
+                f"these skills, say that you could not load it. Do not improvise its steps.")
     root = vis.skills_root or str(link_path(vis.codex_home))
     return (f"Superpowers skills on codex: your session's Skills list names them superpowers:<name>. To use one, "
             f"read its SKILL.md in full with your shell (e.g. `cat <path>`) and follow it; the file is the skill. "
@@ -164,7 +170,18 @@ def load_instruction(vis: Visibility) -> str:
 def _ours(link: Path) -> bool:
     """A link this installer may repoint: it resolves to a superpowers skills tree. Anything else at that
     path belongs to someone else, and is refused rather than overwritten."""
-    return os.path.islink(link) and os.path.isfile(link / 'using-superpowers' / 'SKILL.md')
+    if not os.path.islink(link):
+        return False
+    if os.path.isfile(link / 'using-superpowers' / 'SKILL.md'):
+        return True
+    #: A pin this installer's own shape left behind: `<releases>/fleet-vN/skills` or `<releases>/current/skills`
+    #: whose release was pruned. It dangles now, and it is still ours to repoint: postflight prints this install
+    #: for exactly that state.
+    try:
+        target = Path(os.readlink(link))
+    except OSError:
+        return False
+    return target.name == 'skills' and (target.parent.name == 'current' or target.parent.name.startswith('fleet-v'))
 
 
 def _emit(state: str, detail: str, stream=None) -> None:
@@ -180,6 +197,14 @@ def _check(home: Path, releases: Path) -> int:
     else:
         _emit('missing', f'{home} cannot see: {", ".join(vis.missing)}', sys.stderr)
     return EXIT_OK if ok and vis.ok else EXIT_FAILED
+
+
+def _dry_run_verdict(target: Path, absent: list) -> int:
+    if absent:
+        _emit('would-fail', f'{target} has no {", ".join(absent)}: the link would follow a release that lacks core '
+                            f'skills, and the real run would exit 1', sys.stderr)
+        return EXIT_FAILED
+    return EXIT_OK
 
 
 def main(argv=None) -> int:
@@ -214,9 +239,14 @@ def main(argv=None) -> int:
         _emit('refused', f'{target} is not a directory: this release area has no deployed `current` with '
                          f'skills to link to. Nothing was written.', sys.stderr)
         return EXIT_REFUSED
+    #: `--dry-run` answers 0 only when the real run would: a release missing a core skill makes the real run's
+    #: closing check exit 1, so the dry run says so too.
+    absent = [name for name in CORE_SKILLS if not os.path.isfile(target / name / 'SKILL.md')]
     if follows_current(home, releases)[0]:
         _emit('ok', f'{link} already follows {target}; nothing to do')
-        return _check(home, releases) if not args.dry_run else EXIT_OK
+        if args.dry_run:
+            return _dry_run_verdict(target, absent)
+        return _check(home, releases)
     if os.path.islink(link) and not _ours(link):
         _emit('refused', f'{link} -> {os.readlink(link)} is a link this installer did not write (it does not '
                          f'resolve to a superpowers skills tree). Left untouched; remove it yourself if it '
@@ -234,7 +264,7 @@ def main(argv=None) -> int:
     action = 'repoint' if os.path.islink(link) else 'create'
     if args.dry_run:
         _emit(f'would-{action}', f'{link} -> {target}')
-        return EXIT_OK
+        return _dry_run_verdict(target, absent)
     #: The one atomic publish in this package (`FI-20`): a reader sees the old link or the new one, never none.
     atomic_symlink(str(target), link)
     _emit(f'{action}d', f'{link} -> {target}')
