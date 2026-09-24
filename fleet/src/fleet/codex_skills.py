@@ -154,6 +154,22 @@ def follows_current(codex_home, releases) -> tuple:
     return True, f'{link} -> {raw} follows {current} (today {os.path.realpath(current)})'
 
 
+def currency(vis: Visibility, releases) -> tuple:
+    """RV-28. (True | False | None, sentence): does what this worker will read follow the deployed release? The dispatch gate
+    refuses only on VISIBILITY (W5-D3/W5-D8); this is what its row and `fleet brief` say about CURRENCY, so a home pinned to
+    one release or served from a plugin snapshot is named when someone reads the dispatch, not only at the next
+    postflight. None when no releases area is known to measure against."""
+    if not releases:
+        return None, 'currency not checked (FLEET_RELEASES is unset, so there is no deployed `current` to compare with)'
+    ok, why = follows_current(vis.codex_home, releases)
+    if ok:
+        return True, f'follows {Path(releases) / "current"}'
+    if not vis.link_target and vis.found:
+        return False, (f'WARNING the skills come from a plugin install, a snapshot that does not follow '
+                       f'{Path(releases) / "current"}; a deploy will not move them')
+    return False, f'WARNING {why}'
+
+
 def install_command(codex_home) -> str:
     return (f'{shlex.quote(str(SCRIPT))} --codex-home {shlex.quote(str(codex_home))} '
             f'--releases "$FLEET_RELEASES"')

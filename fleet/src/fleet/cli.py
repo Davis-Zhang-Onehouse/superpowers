@@ -2025,7 +2025,7 @@ def _do_dispatch(ctx: Ctx, parsed: Parsed) -> int:
                  ("lineage_base", parsed.get("lineage-base") or "(none — no git lineage is recorded, so "
                                                                 "nothing gates a claim of done)"),
                  ("lineage_mode", lineage_mode or "(none)"),
-                 *_choice_rows(choice), *_codex_skills_rows(skills, parsed),
+                 *_choice_rows(choice), *_codex_skills_rows(skills, parsed, _releases_of(ctx)),
                  ("seed_extra", (f"{parsed.get('seed-extra')} ({len(seed_extra)} chars would be appended "
                                  f"to the rendered seed)") if seed_extra else
                   "(none — the seed is exactly what the profile renders)")]
@@ -2180,8 +2180,13 @@ def _do_dispatch(ctx: Ctx, parsed: Parsed) -> int:
                             ("coordinator", str(coordinator) if coordinator else
                              "(none — this child has no origin.json, so its `propose` stays LOCAL)"),
                             ("launched_at", record.launched_at), *_choice_rows(choice),
-                            *_codex_skills_rows(skills, parsed)])
+                            *_codex_skills_rows(skills, parsed, _releases_of(ctx))])
     return EXIT_OK
+
+
+def _releases_of(ctx: Ctx):
+    """The release area a codex worker's skills are measured against (RV-28): the one `fleet-env.sh` exported."""
+    return (ctx.launch_environment or {}).get("FLEET_RELEASES") or None
 
 
 def _codex_skills_clears(codex_home) -> tuple:
@@ -2214,12 +2219,14 @@ def _codex_skills_gate(ctx: Ctx, settings, parsed):
     return skills
 
 
-def _codex_skills_rows(skills, parsed) -> list:
+def _codex_skills_rows(skills, parsed, releases=None) -> list:
     if skills is None:
         return []
     where = skills.skills_root or f"{skills.codex_home}/skills"
     if skills.ok:
-        return [("codex_skills", f"{len(skills.found)} skill(s) visible under {where}; every core skill among them")]
+        _, currency = codex_skills_mod.currency(skills, releases)
+        return [("codex_skills", f"{len(skills.found)} skill(s) visible under {where}; every core skill among them; "
+                                 f"{currency}")]
     return [("codex_skills", f"MISSING {', '.join(skills.missing)} under {skills.codex_home} "
                              f"(overridden: {parsed.get('override')})")]
 
@@ -4902,9 +4909,16 @@ def _do_brief(ctx: Ctx, parsed: Parsed) -> int:
                             clears_who="the coordinator"))
         elif own.runtime == 'codex':
             skills = (ctx.codex_skills or codex_skills_mod.visible_skills)(own.runtime_config_dir)
-            if skills.ok:
+            current, currency = (codex_skills_mod.currency(skills, _releases_of(ctx)) if skills.ok else (None, ""))
+            if skills.ok and current is not False:
                 rows.append(Row(kind="skills", subject=child.name, severity=INFO,
-                                detail=codex_skills_mod.load_instruction(skills)))
+                                detail=f"{codex_skills_mod.load_instruction(skills)} Currency: {currency}."))
+            elif skills.ok:
+                clears_when, clears_who = _codex_skills_clears(own.runtime_config_dir)
+                rows.append(Row(kind="skills", subject=child.name, severity=VIOLATION,
+                                detail=(f"{codex_skills_mod.load_instruction(skills)} But what it reads is not the "
+                                        f"deployed release: {currency}"),
+                                clears_when=clears_when, clears_who=clears_who))
             else:
                 clears_when, clears_who = _codex_skills_clears(own.runtime_config_dir)
                 rows.append(Row(kind="skills", subject=child.name, severity=VIOLATION,
