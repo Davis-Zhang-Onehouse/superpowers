@@ -66,8 +66,8 @@ from contextlib import nullcontext
 from pathlib import Path
 from typing import Callable
 
-from fleet import (EXIT_ATTENTION, EXIT_BAD_INPUT, EXIT_CODES, EXIT_NOT_STARTED, EXIT_OK, EXIT_REFUSED,
-                   __version__)
+from fleet import (EXIT_ATTENTION, EXIT_BAD_INPUT, EXIT_CODES, EXIT_NO_CAPACITY, EXIT_NOT_STARTED, EXIT_OK,
+                   EXIT_REFUSED, __version__)
 from fleet import guards, layout, peers as peers_mod, render, seedcheck
 from fleet.atomic import atomic_symlink, atomic_write
 from fleet.errors import BadInput, FleetError, InstantNameError, NoCapacity, NotStarted, Refused
@@ -1824,7 +1824,9 @@ def _dispatch_non_start_rows(exc: BaseException, parsed) -> list:
     and a wrapper filtering the merged text printed nothing. `refused` is the kind for a rule or capacity
     answer (exit 3/4, nothing claimed), `error` for everything else (exit 1/2, or 5 after a claim). Stderr
     keeps its paragraph."""
-    kind = "refused" if isinstance(exc, (Refused, NoCapacity)) else "error"
+    #: RV-C1. The kind follows the EXIT CODE the caller receives, not the exception class: a `NotStarted` that
+    #: kept its cause's 3/4 (`DRY_RUN_ASKED_STEPS`) is a refusal, and its row must say so.
+    kind = "refused" if getattr(exc, "exit_code", None) in (EXIT_NO_CAPACITY, EXIT_REFUSED) else "error"
     #: A `NotStarted` row names its CAUSE — the tmux refusal, the unverified seed — since the `step` row
     #: already says it was rolled back, and the cause is the part a reader acts on.
     cause = exc.__cause__ if isinstance(exc, NotStarted) and exc.__cause__ is not None else exc
