@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# §J — Completion and the harvest transaction. COMPLETE: J1-J10.
+# §J — Completion and the harvest transaction. COMPLETE: J1-J11.
 #
 # These four were picked because each is a LIVE-SAFETY property the hermetic suite structurally cannot reach —
 # every probe there is injected, so none of it exercises a real session, a real pane or a real kill:
@@ -17,6 +17,8 @@
 #   J10 the COORDINATOR form of J2 (`B01`): a worker dispatched `--from` a coordinator reports through
 #       origin.json, and harvest must apply that report from the coordinator's inbox — only that worker's
 #       rows — and give back the claim on a milestone it leaves unfinished.
+#   J11 FB-130: `close` refuses an UNATTRIBUTED claude pane whose input box cannot be located (pane-guard 14),
+#       and still closes a remain-on-exit pane tmux reports dead — the teardown twin of RV-19.
 #
 # J1 is subsumed: J2 cannot be reached without running the whole lifecycle, so the lifecycle is the setup.
 # J3/J4/J5/J6 stay NOT-RUN and the section-level row says so.
@@ -286,6 +288,76 @@ elif [ "$j8_busy_refused$j8_q_refused$j8_busy_override$j8_q_override" = "1111" ]
 else
   it_fail J8 "fleet/it/J/out/J8-queued.out" \
     "busy_refused=$j8_busy_refused queued_refused=$j8_q_refused busy_names_force=$j8_busy_override queued_names_force=$j8_q_override force_rc=$j8_force_rc forced_session_gone=$j8_forced_gone queued_untouched=$j8_still_alive"
+fi
+
+# ==================================================================================================
+# J11 — FB-130: `close` REFUSES AN UNATTRIBUTED CLAUDE PANE WHOSE INPUT BOX CANNOT BE LOCATED, AND STILL
+#       CLOSES A PANE THAT HAS NO PROCESS AT ALL.
+#
+#      Like J8's, these panes run `sh`, so no agent process is attributed to them — the attribution miss. The
+#      frame is claude's chrome with a box whose caret row is unrecognisable. `pane-guard` reads it 14; at
+#      ab2225b3 `close` skipped `observe` for an unattributed pane and closed it. The second pane holds the
+#      same frame under remain-on-exit with its process killed: tmux reports `pane_dead`, the session still
+#      answers, and nothing is left that could submit anything, so `close` must go through (DECISIONS D-3).
+#      Each pane's process is `exec sleep`, killed by exact pid, so nothing outlives the case.
+# ==================================================================================================
+J11="$OUT/j11"; mkdir -p "$J11"
+cat > "$J11/frame.txt" <<'FRAME'
+❯ earlier prompt
+
+● Done.
+
+────────────────────────────────────────
+· unrecognised box row
+────────────────────────────────────────
+  ? for shortcuts
+FRAME
+j11_case() {                      # j11_case <label> <slot> -> echoes "<todo> <session>"
+  local label="$1" slot="$2" inst sess
+  inst="$(fleet init --base 00000000 --name "$label" --porcelain 2>&1 | awk -F'\t' '$1=="path"{print $2}')"
+  sess="dt-$label"
+  printf 'cat %s\nexec sleep 900\n' "$J11/frame.txt" > "$J11/$label.sh"
+  it_tmux new-session -d -s "$sess" "sh $J11/$label.sh" 2>>"$J11/setup.err"
+  sleep 1
+  fleet resume --instant "$inst" --slot "$slot" --tmux "$sess" --porcelain > "$J11/resume-$label.out" 2>&1
+  printf '%s %s\n' "$(awk -F'\t' '$1=="todo_id"{print $2}' "$J11/resume-$label.out")" "$sess"
+}
+read -r U_TODO U_SESS <<EOF
+$(j11_case unprovenbox ws11)
+EOF
+read -r D_TODO D_SESS <<EOF
+$(j11_case deadpane ws12)
+EOF
+it_tmux set-option -w -t "=$D_SESS:" remain-on-exit on 2>>"$J11/setup.err"
+d_pid="$(it_tmux list-panes -s -t "=$D_SESS" -F '#{pane_pid}' 2>/dev/null | head -1)"
+[ -n "$d_pid" ] && kill "$d_pid" 2>/dev/null
+sleep 1
+it_tmux list-panes -s -t "=$D_SESS" -F 'pid=#{pane_pid} dead=#{pane_dead}' > "$J11/dead-pane.txt" 2>&1
+j11_dead_shape=0; grep -q 'dead=1' "$J11/dead-pane.txt" && it_tmux has-session -t "=$D_SESS" 2>/dev/null \
+  && j11_dead_shape=1
+
+fleet pane-guard --porcelain --id "${U_TODO:-none}" > "$J11/pane-guard.out" 2>&1; j11_pg_rc=$?
+fleet close --id "${U_TODO:-none}" > "$J11/close-unproven.out" 2>&1; j11_u_rc=$?
+j11_u_alive=0; it_tmux has-session -t "=$U_SESS" 2>/dev/null && j11_u_alive=1
+j11_u_why=0; grep -q 'input state cannot be established' "$J11/close-unproven.out" && j11_u_why=1
+fleet close --id "${D_TODO:-none}" > "$J11/close-dead.out" 2>&1; j11_d_rc=$?
+sleep 1
+j11_d_gone=1; it_tmux has-session -t "=$D_SESS" 2>/dev/null && j11_d_gone=0
+# Teardown of the refused fixture, through the verb's own override (and its process by exact pid).
+u_pid="$(it_tmux list-panes -s -t "=$U_SESS" -F '#{pane_pid}' 2>/dev/null | head -1)"
+fleet close --id "${U_TODO:-none}" --force > "$J11/close-force.out" 2>&1; j11_f_rc=$?
+[ -n "$u_pid" ] && kill "$u_pid" 2>/dev/null
+j11_facts="records=${U_TODO:+1}/${D_TODO:+1} pane_guard_rc=$j11_pg_rc unproven_close_rc=$j11_u_rc unproven_alive=$j11_u_alive names_why=$j11_u_why dead_shape=$j11_dead_shape dead_close_rc=$j11_d_rc dead_gone=$j11_d_gone force_rc=$j11_f_rc"
+printf '%s\n' "$j11_facts" > "$J11/facts.txt"
+if [ -z "${U_TODO:-}" ] || [ -z "${D_TODO:-}" ] || [ "$j11_dead_shape" != 1 ] || [ "$j11_pg_rc" != 14 ]; then
+  it_fail J11 "fleet/it/J/out/j11/facts.txt" \
+    "the fixture is not the shape this case is about (it needs two records, pane-guard 14 on the unattributed pane, and a remain-on-exit pane tmux reports dead while its session answers), so no verdict: $j11_facts"
+elif [ "$j11_u_rc" = 4 ] && [ "$j11_u_alive" = 1 ] && [ "$j11_u_why" = 1 ] && [ "$j11_d_rc" = 0 ] \
+     && [ "$j11_d_gone" = 1 ] && [ "$j11_f_rc" = 0 ]; then
+  it_pass J11 "fleet/it/J/out/j11/facts.txt" \
+    "an UNATTRIBUTED real pane showing claude's chrome with an unlocatable input box (pane-guard 14) was REFUSED by close (rc 4, 'input state cannot be established', session untouched) — at ab2225b3 it was closed; the same frame in a remain-on-exit pane whose process is gone (tmux pane_dead=1, session still answering) was CLOSED (rc 0, session gone); --force then closed the refused one: $j11_facts"
+else
+  it_fail J11 "fleet/it/J/out/j11/facts.txt" "$j11_facts"
 fi
 
 # ==================================================================================================
