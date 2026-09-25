@@ -557,6 +557,9 @@ class A8KillSiteAudit(unittest.TestCase):
             "variable-rooted": ("tmux -S \"$DECOY_DIR/tmux-1000/d\" kill-server\n", 0),
             "relative literal": ("tmux -S sock kill-server\n", 1),
             "the operator's directory": ("tmux -S /tmp/tmux-1000/fleet-davis kill-server\n", 1),
+            "CL-2 doubled slash": ("tmux -S /tmp//tmux-1000/default kill-server\n", 1),
+            "CL-2 dot-dot respelling": ("tmux -S /var/../tmp/tmux-1000/default kill-server\n", 1),
+            "CL-2 empty -L": ("tmux -L \"\" kill-server\n", 1),
             "python relative": ("python3 -c 'import subprocess; subprocess.run([\"tmux\", \"-S\", \"sock\", \"kill-server\"])'\n", 1),
         }.items():
             with self.subTest(label):
