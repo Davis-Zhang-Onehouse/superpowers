@@ -93,7 +93,22 @@ def _names_root(argv, root) -> bool:
     """Whether a codex argv names `root` as a root: `--add-dir <root>` / `--bind <root> <root>` as a whole argument,
     or the sandbox helper's policy JSON carrying `"<root>"`."""
     quoted = json.dumps(root)
-    return any(arg == root or quoted in arg for arg in argv[1:])
+    for arg in argv[1:]:
+        #: RV-34. `--add-dir=<root>` and `<root>/` name it as well as `--add-dir <root>` does.
+        value = arg.split('=', 1)[1] if arg.startswith('--') and '=' in arg else arg
+        if value.rstrip('/') == root or quoted in arg:
+            return True
+    return False
+
+
+def _in_a_nested_pid_namespace(proc_root) -> bool:
+    """`NSpid` in /proc/self/status lists this process's pid in each namespace it is nested in: more than one entry
+    means the census below sees only an inner namespace. Absent (an old kernel, a fixture) says nothing."""
+    try:
+        status = (Path(proc_root) / 'self' / 'status').read_text(errors='replace')
+    except OSError:
+        return False
+    return any(line.startswith('NSpid:') and len(line.split()) > 2 for line in status.splitlines())
 
 
 def codex_sandboxes_under(root, proc_root=Path('/proc')):
@@ -105,16 +120,18 @@ def codex_sandboxes_under(root, proc_root=Path('/proc')):
         init = os.path.basename(os.fsdecode((Path(proc_root) / '1' / 'cmdline').read_bytes().split(b'\0')[0]))
     except OSError:
         return None
-    if init in _CODEX_PROCESSES:
-        #: A caller inside a codex sandbox sees only its own PID namespace (docs/README.fleet-runtimes.md), so an
-        #: empty answer there would say nothing about the codex workers outside it.
+    if init in _CODEX_PROCESSES or _in_a_nested_pid_namespace(proc_root):
+        #: A caller inside a codex sandbox (or any nested PID namespace — RV-34) sees only its own namespace
+        #: (docs/README.fleet-runtimes.md), so an empty answer there would say nothing about the workers outside it.
         return None
     pids = []
     for entry in entries:
         try:
             argv = [os.fsdecode(a) for a in (entry / 'cmdline').read_bytes().split(b'\0') if a]
-        except OSError:
+        except (FileNotFoundError, ProcessLookupError):
             continue                                     # exited between the listing and the read
+        except OSError:
+            return None                                  # RV-34: unreadable (hidepid, another user) is not absent
         if not argv:
             continue
         names = [os.path.basename(argv[0])] + ([os.path.basename(argv[1])] if len(argv) > 1 else [])

@@ -122,6 +122,26 @@ class SweepCase(unittest.TestCase):
         self.assertEqual(len(left(self.root)), 2, rows)
         self.assertEqual(sum(v.startswith("kept") and "4300" in v for _, v in rows), 2, rows)
 
+    def test_holder_detection_fails_closed_on_the_edges(self):
+        """RV-34. An unreadable cmdline (hidepid, another user) is not an exited process; a census taken inside a nested
+        PID namespace sees only that namespace; `--add-dir=<root>` and `<root>/` name the root too."""
+        root = str(self.root.resolve())
+        cases = {
+            "unreadable cmdline": lambda: (fake_process(self.proc, 4400, "x"), (self.proc / "4400" / "cmdline").chmod(0)),
+            "nested pid namespace": lambda: ((self.proc / "self").mkdir(),
+                                             (self.proc / "self" / "status").write_text("Name:\tpython3\nNSpid:\t77\t3\n")),
+            "--add-dir=<root>": lambda: fake_process(self.proc, 4401, "node", "/x/bin/codex", f"--add-dir={root}"),
+            "<root>/ spelling": lambda: fake_process(self.proc, 4402, "/x/codex", "--add-dir", root + "/"),
+        }
+        for label, arrange in cases.items():
+            with self.subTest(label):
+                shutil.rmtree(self.proc)
+                fake_process(self.proc, 1, "/sbin/init")
+                arrange()
+                plant(self.root)
+                rows = self.sweep()
+                self.assertEqual(left(self.root), sorted(RESIDUE), f"{label}: {rows}")
+
     def test_an_unreadable_process_table_keeps_everything(self):
         plant(self.root)
         from fleet.runtime_launch import sweep_mount_residue
