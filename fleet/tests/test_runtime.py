@@ -190,7 +190,7 @@ class RuntimeTests(unittest.TestCase):
         self.assertNotIn('[placeholder]', annotate_placeholders(styled))
         self.assertEqual(observe('claude', styled).draft, 'Try "pytest -k foo" next')
 
-    def test_real_claude_282_midturn_enter_shows_queued_message(self):
+    def test_real_claude_282_busy_empty_box_then_queued_message_display(self):
         root = Path(__file__).resolve().parents[1] / 'it/fixtures/runtime'
         after_enter = (root / 'claude-after-busy-enter-282.frame').read_text()
         queued = (root / 'claude-queued-behind-turn-282.frame').read_text()
