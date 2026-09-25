@@ -423,12 +423,14 @@ as an UNDECIDED holder of a slot when it descends from one that sits there; a te
 into the lease before its kill, so they keep the slot held while they live (FB-90).
 
 `close` and `harvest --id` end the slot holders ATTRIBUTABLE to the instant they tear down, and only those (V23-H):
-the session's own processes that survive its kill (a harness watcher runs in its own session with no terminal),
-and a detached orphan in the slot whose argv names that instant and that started after the worker launched. Each
-one is named in a `reaped` row (`would-reap` in a dry run, which signals nothing). A refusing call signals nothing;
-a holder that names the instant but is not safe to end gets its exact `kill -TERM …` line in the refusal (or a
-`not-reaped` row from `close`). `abort` does not reap. `complete` adds a `watchers` row, without changing its exit
-code, when processes in the slot name the instant.
+the session's own processes that survive its kill (a harness watcher runs in its own session with no terminal —
+so `close` of an in-flight worker also ends its detached background jobs in the slot), and a detached orphan in the
+slot (parent init, its own session, no terminal, no live child outside it) that started after the worker launched,
+whose environment carries that worker's `FLEET_INSTANT` and whose argv names that instant. Each one is named in a
+`reaped` row (`would-reap` in a dry run, which signals nothing). A refusing call signals nothing; a holder that
+names the instant but fails any of those conditions gets its exact `kill -TERM …` line and the reason in the
+refusal (or a `not-reaped` row from `close`) and is never signalled. `abort` does not reap. `complete` adds a
+`watchers` row, without changing its exit code, when processes in the slot name the instant.
 
 A dry run of `abort` or `harvest --id` can take about 2 seconds. When a process outside the session holds the
 slot, it sleeps a fixed 2 seconds, as the real call does, then scans the slot once more before answering.

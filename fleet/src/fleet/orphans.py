@@ -224,7 +224,8 @@ def naming_holders(holders, facts: Callable, spellings, *, exclude=()) -> list:
 def reap(units, procs: dict, facts: Callable, signal_pid: Callable, sleep: Callable, *,
          wait_s: float = REAP_TERM_WAIT_S, step_s: float = 0.1) -> list:
     """End every member of `units`: TERM, wait up to `wait_s`, KILL what is left. Each signal first re-reads the pid
-    and skips it unless it is still the same process (pid + start). Returns `(pid, outcome, unit)` per member."""
+    and skips it unless it is still the same process (pid + start). Returns `(pid, outcome, unit)` per member:
+    TERM, KILL, gone (exited or recycled before the signal), unsignalled (delivery failed) or survived."""
     def same(pid):
         now = facts(pid)
         return now is not None and now.start == procs[pid].start
@@ -233,10 +234,12 @@ def reap(units, procs: dict, facts: Callable, signal_pid: Callable, sleep: Calla
     for unit in units:
         for pid in unit.members:
             unit_of[pid] = unit
-            if same(pid) and signal_pid(pid, _signal.SIGTERM):
+            if not same(pid):
+                outcome[pid] = "gone"
+            elif signal_pid(pid, _signal.SIGTERM):
                 outcome[pid] = "TERM"
             else:
-                outcome[pid] = "gone"
+                outcome[pid] = "unsignalled"            # the process is there, the signal was not delivered
     waited = 0.0
     while waited < wait_s - 1e-9 and any(how == "TERM" and same(pid) for pid, how in outcome.items()):
         sleep(step_s)

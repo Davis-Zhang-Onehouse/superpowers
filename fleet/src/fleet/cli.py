@@ -3846,22 +3846,27 @@ def _slot_watchers(ctx: Ctx, child: Path) -> list:
     """`V23-H`. A `watchers` row naming the live processes in this worker's slot whose argv names its own instant —
     harness Monitors (`tail -F … | ugrep …`) run in their own session, outlive the pane's close and hold the slot —
     or `[]`. The caller's own lineage (this very `fleet complete`) is never listed."""
-    record = _record_for(ctx, child)
-    if record is None or not record.slot:
+    #: D-5: a warning must never be the thing that stops `complete`, so a failure to read is simply no warning.
+    try:
+        record = _record_for(ctx, child)
+        if record is None or not record.slot:
+            return []
+        lease = ctx.pool.lease(record.slot)
+        layer = ctx.sessions_for(record)
+        if lease is None or lease.todo_id != record.todo_id or not layer.facts_observable():
+            return []
+        found = orphans.naming_holders(ctx.pool.cwd_holders(record.slot), layer.proc_facts,
+                                       orphans.instant_spellings(record.child_instant, child),
+                                       exclude=_caller_lineage(layer))
+    except (FleetError, OSError):
         return []
-    lease = ctx.pool.lease(record.slot)
-    layer = ctx.sessions_for(record)
-    if lease is None or lease.todo_id != record.todo_id or not layer.facts_observable():
-        return []
-    found = orphans.naming_holders(ctx.pool.cwd_holders(record.slot), layer.proc_facts,
-                                   orphans.instant_spellings(record.child_instant, child),
-                                   exclude=_caller_lineage(layer))
     if not found:
         return []
     pids = " ".join(str(proc.pid) for proc in found)
     return [("watchers", f"pid(s) {pids} hold slot {record.slot} and name this instant "
                          f"({_argv_line(found[0].argv)[:120]}) — stop your watchers before complete (TaskStop the "
-                         f"Monitor, or: kill -TERM {pids}); once orphaned, `close`/`harvest` reap them")]
+                         f"Monitor, or: kill -TERM {pids}); `close`/`harvest` end only the ones attributable to "
+                         f"this instant")]
 
 
 # --- abort ----------------------------------------------------------------------------------------
@@ -4061,6 +4066,15 @@ def _argv_line(argv) -> str:
     return line if len(line) <= 160 else line[:157] + "..."
 
 
+def _named_suffix(units) -> str:
+    """`V23-H`. The kill commands for NAME units, each with the reason it was NOT ended — they name this instant, but
+    the rule declined to attribute them, so the command is offered, never run."""
+    if not units:
+        return ""
+    return (" Named but not ended automatically (each line says why) — run it yourself only if it is yours to end: "
+            + "; ".join(f"`{unit.kill_command()}`" for unit in units) + ".")
+
+
 def _would_reap_rows(ctx: Ctx, record, child, own_snapshot: dict) -> list:
     """`V23-H`. What a real `harvest`/`close` would end, read before any kill and signalling nothing. The session's own
     processes read "ends with the session, or is reaped if it survives the kill"."""
@@ -4174,9 +4188,7 @@ def _slot_gate_before_kill(ctx: Ctx, record, child: Path, verb: str, reap: bool 
         f"{ABORT_RELEASE_WAIT_S}s to exit. Nothing was closed, released, renamed, applied or written — "
         f"session {record.tmux or '(none)'} {'still running' if live else 'not running'}, slot "
         f"{record.slot!r} still leased, {child} unchanged, the roadmap untouched. Re-run the identical "
-        f"`{verb}` command once the pid(s) named above exit."
-        + (" Attributable to this instant but not safe to end automatically — if it is yours to end: "
-           + "; ".join(f"`{unit.kill_command()}`" for unit in named) + "." if named else ""),
+        f"`{verb}` command once the pid(s) named above exit." + _named_suffix(named),
         clears_when=found.clears_when,
         clears_who=found.clears_who,
     )
@@ -4949,11 +4961,23 @@ def _do_harvest(ctx: Ctx, parsed: Parsed) -> int:
                 ctx.store.write(record)
                 #: `V23-H`. After the kill (a session's detached watchers survive it) and after the stamp (`SI-31`: a
                 #: crash here leaves a stamped record and a held slot, which `reap` recovers), before the release.
+                attribution = _attribution(ctx, record, child, session_own=own_snapshot)
+                reaped = _reap_attributed(ctx, record, attribution)
                 rows += [Row(kind="reaped", subject=str(pid), severity=INFO,
                              detail=f"{outcome}: {argv} — {why} (slot {record.slot}, instant {child.name})")
-                         for pid, outcome, argv, why in _reap_attributed(
-                             ctx, record, _attribution(ctx, record, child, session_own=own_snapshot))]
-                released = _released_or_why_not(ctx, record) if record.slot else "(none)"
+                         for pid, outcome, argv, why in reaped]
+                try:
+                    released = _released_or_why_not(ctx, record) if record.slot else "(none)"
+                except Refused as exc:
+                    #: Final-review I1. The gate let these holders through on the promise of the reap, so a release
+                    #: that still refuses must say what was signalled and what is left — not only the bare pid list.
+                    raise Refused(
+                        f"harvest of {child.name} stopped at the release: the delta was applied, session "
+                        f"{record.tmux or '(none)'} closed and the record stamped, but {exc} Signalled first: "
+                        + ("; ".join(f"{pid} {outcome} ({argv})" for pid, outcome, argv, _ in reaped) or "nothing")
+                        + "." + _named_suffix(attribution.of(orphans.NAME) if attribution else [])
+                        + " The slot stays leased; `fleet reap` frees it once nothing sits in it.",
+                        clears_when=exc.clears_when, clears_who=exc.clears_who) from exc
                 rows.append(Row(kind="harvested", subject=record.todo_id, severity=INFO,
                                 detail=(f"delta applied at {roadmap.instant.name} "
                                         f"({', '.join(applied) or 'none pending'})"
