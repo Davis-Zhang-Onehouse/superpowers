@@ -31,6 +31,7 @@ import subprocess
 import sys
 import tempfile
 import unittest
+from unittest import mock
 
 from fleet import EXIT_CODES
 from fleet.runtime import LaunchSettings
@@ -903,3 +904,17 @@ class TestTheFixtureCadenceStaysInsideItsTree(Loaded):
             os.chdir(previous)
         self.assertNotIn("not an instant on disk", err)
         self.assertEqual(code, 0, err)
+
+    def test_a_tmp_under_an_instant_named_folder_does_not_steal_the_alarm(self):
+        # V23-O RV-38. The fixture's `cwd_ceiling` is what stops the walk climbing out of its tmp into an
+        # instant-named folder that happens to contain it. This case builds that TMPDIR itself, so the kwarg is
+        # guarded wherever the suite runs (mutation M9 removes it).
+        outer = pathlib.Path(tempfile.mkdtemp(prefix="fleet-contracts-named-"))
+        self.addCleanup(shutil.rmtree, outer, True)
+        named = outer / "00000000-09250300-inflight-append-tmpProbe"
+        named.mkdir()
+        with mock.patch.object(tempfile, "tempdir", str(named)):
+            fleet = self.loaded()
+        self.assertTrue(fleet.tmp.is_relative_to(named), fleet.tmp)
+        code, out, err = fleet.run(["pane-guard", "--porcelain", "--pane", "dt-solo"])
+        self.assertIn(f"{cli.CADENCE_PREFIX} {fleet.instants / OURS}", err)
