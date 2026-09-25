@@ -145,11 +145,22 @@ those phases look like when the effort is large enough to have waves.
 the phase is gated: either this tool saw a watcher on the worker's pane, or the worker named one it could not
 see (`--watcher`). The board's note says which — `watcher observed (…)` or `watcher ATTESTED, not
 observable: …` — and an attestation says whether anything re-checks it: `its pid N is running` when it named
-a `pid:` handle, `no pid handle was recorded at the claim, so nothing re-checks it` when it did not.
+a `pid:` handle, `no pid handle was recorded at the claim, so nothing re-checks it` when it did not. A third
+note reads `no watcher observable yet, inside the 5-minute GRACE after the claim … (until T)`: nothing is on the
+pane, and the claim is younger than `WATCHER_GRACE_S` — a Monitor being armed. It is anchored to the claim's own
+stamp and never renewed, so it cannot keep a dead watcher out of the cap past `T`. A worker re-arming a Monitor
+needs no re-declare: the fresh watcher renews the old claim, and its row may drop out of `AWAITING-CI` for the
+seconds between two Monitors.
+
+**A `HOLDING` row is a worker told to wait with nothing to watch.** It declared `--phase holding` with a
+`--reason` (in the note) and an expiry (`held until T`, at most 4 h after the claim). It is excluded from the WIP
+cap until `T`; after it the note reads `HOLD EXPIRED` and the worker counts again. A hold is not a question for
+you — a worker that needs an answer parks — but a hold you did not ask for is worth a `brief`.
 
 A claim with **nothing backing it now** — nothing observed on the pane and nothing recorded (a legacy
 declaration, or one the gate let through ungated), a watcher observed at the claim that is no longer on the
-pane, or an attested pid that has exited — is no longer an `AWAITING-CI` row at all: `reconcile`
+pane past the grace, an attested pid that has exited, or an attestation with no pid handle made before the
+worker's session was relaunched by `revive`/`resume` — is no longer an `AWAITING-CI` row at all: `reconcile`
 disregards it, so the worker counts against the cap again and the ordinary detector decides the row — a quiet
 one ages into `IDLE`. The note says so. Writing `declare.json` by hand therefore buys nothing.
 
