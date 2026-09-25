@@ -4015,7 +4015,7 @@ def _session_taken_by(ctx: Ctx, record):
     if record is None or not record.tmux:
         return None
     here = getattr(ctx.sessions, "socket", "") or ""
-    owner = session_owner(ctx.store.all(), here).get((record.tmux_socket or here, record.tmux))
+    owner = session_owner(ctx.store.all(), here, ctx.pool).get((record.tmux_socket or here, record.tmux))
     return owner if owner is not None and owner.todo_id != record.todo_id else None
 
 
