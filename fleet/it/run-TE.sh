@@ -34,7 +34,8 @@ CLIENT_PID=""
 # The stopped client is OURS, killed by the pid we captured — never by a pattern, which would match this shell.
 te_cleanup() {
   if [ -n "$CLIENT_PID" ]; then kill -CONT "$CLIENT_PID" 2>/dev/null; kill "$CLIENT_PID" 2>/dev/null; fi
-  tmux -L "$IT_TMUX_SOCKET" kill-server 2>/dev/null
+  # The body may already have sent kill-server and left an exiting or absent server.
+  it_tmux list-sessions >/dev/null 2>&1 && tmux -L "$IT_TMUX_SOCKET" kill-server 2>/dev/null
   { exec 9>&-; } 2>/dev/null   # braced: a bare `exec … 2>/dev/null` would silence this shell for good
   # A server that exits by kill-server leaves its socket file behind, and every stale file costs each later
   # `session_servers` probe one `has-session`. Ours only.
@@ -64,8 +65,7 @@ observe() {                      # observe <tag> [status-id] -> board (+ status)
 }
 
 # ---- state A -----------------------------------------------------------------------------------------------
-# A server left on this socket by an aborted earlier run would ignore `-f` and neither state would be built.
-it_tmux kill-server 2>/dev/null
+# it_section gave this run a fresh socket directory, so no earlier server can be here.
 printf 'set -g exit-empty off\n' > "$OUT/empty.conf"
 it_tmux -f "$OUT/empty.conf" new-session -d -s itfleet-TE-x 'sleep 600'
 it_tmux kill-session -t =itfleet-TE-x

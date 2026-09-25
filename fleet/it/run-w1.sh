@@ -37,7 +37,8 @@ DT="dt-w1-decoy-$$"
 # tmux falls back to /tmp — the operator's directory — when TMUX_TMPDIR does not exist, so no decoy tmux call runs
 # unless the directory is really there (RV-37); W1-4 then fails naming why.
 if [ -n "$DECOY_DIR" ] && [ -d "$DECOY_DIR" ]; then
-  TMUX_TMPDIR="$DECOY_DIR" tmux -L w1-decoy kill-server 2>/dev/null
+  it_allow_tmux_dir "$DECOY_DIR" || exit 2
+  # mktemp gave this decoy a fresh directory, so there is no earlier server to kill.
   TMUX_TMPDIR="$DECOY_DIR" tmux -L w1-decoy new-session -d -s "$DT" "sleep 300" 2>/dev/null
 else
   DECOY_DIR="" DECOY=""

@@ -19,6 +19,7 @@ REPO="$(cd "$HERE/../.." && pwd)"
 command -v tmux >/dev/null || { echo "FAIL: tmux is not installed, so nothing below can run"; exit 1; }
 TMP="$(mktemp -d "${TMPDIR:-/tmp}/it-baseline-per-run-XXXXXX")"
 export TMUX_TMPDIR="$TMP/tmux" HOME="$TMP/home"
+export IT_TMUX_AUDIT_USE_AMBIENT=1  # this fixture made and owns TMUX_TMPDIR's private server
 unset TMUX FLEET_INSTANTS FLEET_ROOT FLEET_INSTANT FLEET_HOME IT_RUN_ID IT_RESULTS
 mkdir -p "$TMUX_TMPDIR" "$HOME" "$TMP/it"
 cleanup() { tmux kill-server 2>/dev/null; rm -rf "$TMP"; }

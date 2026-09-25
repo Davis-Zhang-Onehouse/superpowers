@@ -829,7 +829,9 @@ $4 $2"
 
 a5_drive() {              # a5_drive <state> <verb> <want> <args...>
   local state="$1" verb="$2" want="$3"; shift 3
-  a_run "A5-$state-$verb" timeout 300 "$IT_FLEET" "$verb" "$@"
+  local limit=300
+  [ "$verb" = selftest ] && limit=600  # the expanded hermetic suite can exceed five minutes
+  a_run "A5-$state-$verb" timeout "$limit" "$IT_FLEET" "$verb" "$@"
   a5_record "$state" "$verb" "$want" "$A_RC" "$state"
   A5_LAST_RC="$A_RC"
 }
@@ -943,6 +945,10 @@ recs = sorted((Path(os.environ['A5_H']) / 'records').glob('*.json'))
 print(json.loads(recs[0].read_text())['todo_id'] if recs else '')")"
   if [ -n "$A5_TODO" ]; then
     a5_drive ok status 0 --id "$A5_TODO"
+    # resume records the pane name but this matrix's fixture has no launched worker. Give close the
+    # section-owned session it is about to kill so the runtime audit can attribute that target.
+    it_tmux has-session -t "=$TMUX_PREFIX-a5worker" 2>/dev/null ||
+      it_tmux new-session -d -s "$TMUX_PREFIX-a5worker" "sleep 900" >> "$OUT/A5-setup.out" 2>&1
     a5_drive ok close  0 --id "$A5_TODO"
   else
     a5_record ok status "0" "-" "NOT-DRIVEN: no record on disk after resume"
@@ -1250,15 +1256,18 @@ def kill_verdicts(text):
     """One verdict per kill word in `text` (CL2-2: a line may carry several), each judged against the tmux invocation
     that ISSUES it — the nearest `tmux`/`…/tmux`/`it_tmux` before it that is not itself an option's operand (CL-1,
     CL2-3). `it_tmux` is lib.sh's wrapper, which refuses outright when no section has been entered."""
-    tokens = [t.strip("<>") for t in SPLIT.split(text) if t.strip("<>")]
     verdicts = []
-    for k, word in enumerate(tokens):
-        if word not in KILL_WORDS:
-            continue
-        cmd = next((i for i in range(k - 1, -1, -1)
-                    if (tokens[i] in ("tmux", "it_tmux") or tokens[i].endswith("/tmux")) and not is_operand(tokens, i)),
-                   None)
-        verdicts.append(cmd is not None and (tokens[cmd] == "it_tmux" or socket_is_private(tokens[cmd + 1:k])))
+    # A shell separator ends the preceding command's option scope. In particular, `bash -c` after `&&`
+    # cannot borrow a private `tmux -L` from the preceding command.
+    for part in re.split(r"[;&|]+", text):
+        tokens = [t.strip("<>") for t in SPLIT.split(part) if t.strip("<>")]
+        for k, word in enumerate(tokens):
+            if word not in KILL_WORDS:
+                continue
+            cmd = next((i for i in range(k - 1, -1, -1)
+                        if (tokens[i] in ("tmux", "it_tmux") or tokens[i].endswith("/tmux")) and not is_operand(tokens, i)),
+                       None)
+            verdicts.append(cmd is not None and (tokens[cmd] == "it_tmux" or socket_is_private(tokens[cmd + 1:k])))
     return verdicts
 
 
@@ -1329,7 +1338,7 @@ for path in sys.argv[1:]:
         reverted by coordinator decision D-82); ISSUES I-11 routes that gap, and the in-string gaps, to the coordinator."""
         for found in EMBED_KILL.finditer(text):            # CL2-2: every call-position kill, each judged alone
             report["kill_all"].append(f"{name}:{start} [{tag}] {found.group(0).strip()[:130]}")
-            if not kill_verdicts(found.group(0))[-1]:
+            if not (kill_verdicts(found.group(0)) or [False])[-1]:
                 report["kill_unsafe"].append(f"{name}:{start} [{tag}] {found.group(0).strip()[:130]}")
 
     for lineno, raw in enumerate(open(path, encoding="utf-8", errors="replace"), start=1):

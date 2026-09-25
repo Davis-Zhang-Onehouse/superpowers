@@ -1,0 +1,203 @@
+#!/usr/bin/env python3
+"""IT tmux boundary: log argv/socket and refuse unowned destructive calls before exec."""
+
+import fcntl
+import json
+import os
+import subprocess
+import sys
+import tempfile
+
+
+def parse(argv):
+    socket = None
+    name = None
+    i = 0
+    while i < len(argv) and argv[i].startswith("-") and argv[i] not in ("-", "--"):
+        option = argv[i]
+        for offset, flag in enumerate(option[1:], 1):
+            if flag in "cfLST":
+                value = option[offset + 1:]
+                if not value:
+                    i += 1
+                    value = argv[i] if i < len(argv) else ""
+                if flag == "S":
+                    socket = value
+                elif flag == "L":
+                    name = value
+                break
+        i += 1
+    command = argv[i] if i < len(argv) else ""
+    # tmux accepts unique command prefixes. Treat even an ambiguous kill prefix as destructive;
+    # real tmux may reject it, but the audit must never pass a recognized kill spelling through.
+    if command and "kill-server".startswith(command) and not "kill-session".startswith(command):
+        command = "kill-server"
+    elif command and "kill-session".startswith(command):
+        command = "kill-session"
+    rest = argv[i + 1:]
+    directory = os.environ.get("TMUX_TMPDIR") or "/tmp"
+    if not os.path.isdir(directory):
+        directory = "/tmp"
+    if socket is None:
+        if name:
+            socket = os.path.join(directory, f"tmux-{os.getuid()}", name)
+        elif os.environ.get("TMUX"):
+            socket = os.environ["TMUX"].split(",", 1)[0]
+        else:
+            socket = os.path.join(directory, f"tmux-{os.getuid()}", "default")
+    return os.path.realpath(socket), command, rest
+
+
+def option(rest, flag):
+    for i, arg in enumerate(rest):
+        if arg == flag and i + 1 < len(rest):
+            return rest[i + 1]
+        if arg.startswith(flag) and len(arg) > len(flag):
+            return arg[len(flag):]
+    return None
+
+
+def server_pid(real, socket):
+    try:
+        found = subprocess.run([real, "-S", socket, "display-message", "-p", "#{pid}"],
+                               capture_output=True, text=True, timeout=2)
+    except subprocess.TimeoutExpired:
+        return None
+    return found.stdout.strip() if found.returncode == 0 else None
+
+
+def refresh_result(rows):
+    """A runner may kill in its EXIT trap, after its leave row was written."""
+    path = os.environ.get("IT_TMUX_AUDIT_RESULTS")
+    section = os.environ.get("IT_TMUX_AUDIT_SECTION")
+    if not path or not section or not os.path.isfile(path):
+        return
+    case = f"KILL-AUDIT-{section}"
+    with open(path, encoding="utf-8") as source:
+        lines = source.readlines()
+    if not any(line.startswith(case + "\t") for line in lines):
+        return
+    kills = [r for r in rows if r["command"] in ("kill-server", "kill-session")]
+    names = [r["command"] + "@" + os.path.basename(r["socket"]) +
+             (":" + str(r["target"]) if r["target"] else "") + "[" + r["decision"] + "]"
+             for r in kills]
+    verdict = "FAIL" if any(r["decision"] == "deny" for r in kills) else "PASS"
+    note = f"{len(kills)} kill(s): " + (", ".join(names) if names else "(none)")
+    replacement = f"{case}\t{verdict}\tfleet/it/{section}/tmux-audit.jsonl\t{note}\n"
+    fd, temporary = tempfile.mkstemp(prefix=".kill-audit-", dir=os.path.dirname(path))
+    try:
+        with os.fdopen(fd, "w", encoding="utf-8") as out:
+            out.writelines(replacement if line.startswith(case + "\t") else line for line in lines)
+        os.replace(temporary, path)
+    finally:
+        if os.path.exists(temporary):
+            os.unlink(temporary)
+
+
+def main():
+    argv = sys.argv[1:]
+    socket, command, rest = parse(argv)
+    real = os.environ.get("IT_TMUX_REAL", "/usr/bin/tmux")
+    ledger = os.environ.get("IT_TMUX_AUDIT_LEDGER")
+    dirs = [os.path.realpath(p) for p in os.environ.get("IT_TMUX_AUDIT_PRIVATE_DIRS", "").split(":") if p]
+    name = os.path.basename(socket)
+    private = name not in ("default", "fleet", "fleet-davis") and any(
+        os.path.commonpath((socket, directory)) == directory and socket != directory
+        for directory in dirs)
+    destructive = command in ("kill-server", "kill-session")
+    creates = command in ("new-session", "new")
+    row = {"argv": argv, "socket": socket, "command": command,
+           "target": option(rest, "-t"), "decision": "allow", "reason": ""}
+    if not ledger:
+        row.update(decision="deny", reason="no audit ledger")
+        print("IT tmux audit: missing ledger", file=sys.stderr)
+        return 97
+    try:
+        with open(ledger, "a+", encoding="utf-8") as stream:
+            fcntl.flock(stream, fcntl.LOCK_EX)
+            stream.seek(0)
+            history = [json.loads(line) for line in stream if line.strip()]
+            created = any(r.get("socket") == socket and r.get("created") for r in history)
+            owned_inode = next((r["socket_inode"] for r in reversed(history)
+                                if r.get("socket") == socket and r.get("socket_inode")), None)
+            owned_pid = next((r["server_pid"] for r in reversed(history)
+                              if r.get("socket") == socket and r.get("server_pid")), None)
+            try:
+                stat = os.stat(socket)
+                current_inode = [stat.st_dev, stat.st_ino]
+            except FileNotFoundError:
+                current_inode = None
+            current_pid = server_pid(real, socket) if private and created and current_inode \
+                and (destructive or creates) else None
+            sessions = next((r["sessions"] for r in reversed(history)
+                             if r.get("socket") == socket and "sessions" in r), [])
+            if destructive or creates:
+                if not private:
+                    row.update(decision="deny", reason="socket outside section private directories or reserved name")
+                elif creates and not created and os.path.exists(socket):
+                    row.update(decision="deny", reason="server existed before section created it")
+                elif destructive and not created:
+                    row.update(decision="deny", reason="server not created by section")
+                elif (destructive or creates) and created and current_inode and (
+                        current_inode != owned_inode or
+                        (owned_pid is not None and current_pid is not None and current_pid != owned_pid)):
+                    row.update(decision="deny", reason="socket was replaced after section created it")
+                elif destructive and current_inode is None:
+                    row.update(decision="deny", reason="created socket no longer exists")
+                elif command == "kill-session" and (not row["target"] or not row["target"].startswith("=")
+                                                    or row["target"][1:] not in sessions):
+                    row.update(decision="deny", reason="session target is not an exact created session")
+                elif creates and not option(rest, "-s"):
+                    row.update(decision="deny", reason="new session has no auditable name")
+            if row["decision"] == "deny":
+                row["status"] = 97
+                stream.seek(0, os.SEEK_END)
+                stream.write(json.dumps(row) + "\n")
+                stream.flush()
+                if destructive:
+                    refresh_result([*history, row])
+                print(f"IT tmux audit: refused {command}: {row['reason']}", file=sys.stderr)
+                return 97
+            if command in ("attach", "attach-session"):
+                # An attached client may live for hours. Record its argv/socket, then release the
+                # ledger lock before becoming tmux so every other invocation can proceed.
+                row["status"] = "started"
+                stream.seek(0, os.SEEK_END)
+                stream.write(json.dumps(row) + "\n")
+                stream.flush()
+                fcntl.flock(stream, fcntl.LOCK_UN)
+                stream.close()
+                os.execv(real, [real, *argv])
+            result = subprocess.run([real, *argv])
+            row["status"] = result.returncode
+            if result.returncode == 0 and private and (creates or created):
+                row["created"] = True
+                if creates:
+                    try:
+                        stat = os.stat(socket)
+                        row["socket_inode"] = [stat.st_dev, stat.st_ino]
+                        row["server_pid"] = server_pid(real, socket)
+                    except FileNotFoundError:
+                        row["created"] = False
+                else:
+                    row["socket_inode"] = owned_inode
+                    row["server_pid"] = owned_pid
+                if command == "kill-server":
+                    row["sessions"] = []
+                else:
+                    listed = subprocess.run([real, "-S", socket, "list-sessions", "-F", "#{session_name}"],
+                                            capture_output=True, text=True)
+                    row["sessions"] = listed.stdout.splitlines() if listed.returncode == 0 else []
+            stream.seek(0, os.SEEK_END)
+            stream.write(json.dumps(row) + "\n")
+            stream.flush()
+            if destructive:
+                refresh_result([*history, row])
+            return result.returncode
+    except (OSError, ValueError, json.JSONDecodeError) as exc:
+        print(f"IT tmux audit: unavailable: {exc}", file=sys.stderr)
+        return 97
+
+
+if __name__ == "__main__":
+    sys.exit(main())

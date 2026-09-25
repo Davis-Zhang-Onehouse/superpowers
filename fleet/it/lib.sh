@@ -133,6 +133,9 @@ IT_INSTANTS_FAIL_MARK="A FOLDER THIS SECTION NAMED IS IN A LIVE INSTANTS TREE"
 # half and leaves the first exactly as broken, one layer down: run §E and §M concurrently on one socket
 # and §E sees §M's sessions again.
 IT_TMUX_SOCKET=""       # set by it_section. Empty until then, and it_tmux refuses rather than guessing.
+IT_AMBIENT_TMUX_TMPDIR="${TMUX_TMPDIR:-}"
+# Resolve the real executable before any section puts the auditing shim first on PATH.
+IT_TMUX_REAL="${IT_TMUX_REAL:-$(command -v tmux)}"; export IT_TMUX_REAL
 
 # The harness's OWN tmux calls. Never a bare `tmux` for section work — the same rule as `fleet()` below,
 # and for the same reason: the server, like FLEET_HOME, is explicit or it is somebody else's.
@@ -292,17 +295,86 @@ subprocess.run(["tmux", "-S", os.path.join(directory, "tmux-" + str(os.getuid())
 # directory now holds. The four runners that relocate their tmux directory call this instead of a bare
 # `export`, so the guardian never guards a directory the runner has left.
 it_move_tmux_tmpdir() {   # it_move_tmux_tmpdir <dir>
+  it_allow_tmux_dir "$1" || return 1
   export TMUX_TMPDIR="$1"
   [ -n "${IT_TMUX_SOCKET:-}" ] && it_guard_server "$$" "$IT_TMUX_SOCKET"
   return 0
 }
 
+# Register a directory this section created before any tmux call uses it. Existing B/C/D/E/K and W1
+# fixtures need short socket paths; each is an explicit private directory, never the shared /tmp root.
+it_allow_tmux_dir() {
+  [ -n "${IT_TMUX_AUDIT_LEDGER:-}" ] && [ -d "$1" ] || return 1
+  local absolute
+  absolute="$(realpath "$1")" || return 1
+  case "$absolute" in /tmp|/tmp/tmux-*|/|"$HOME") return 1 ;; esac
+  export IT_TMUX_AUDIT_PRIVATE_DIRS="${IT_TMUX_AUDIT_PRIVATE_DIRS:+$IT_TMUX_AUDIT_PRIVATE_DIRS:}$absolute"
+}
+
+it_kill_audit_result() {
+  [ -n "${IT_TMUX_AUDIT_LEDGER:-}" ] && [ -f "$IT_TMUX_AUDIT_LEDGER" ] || {
+    it_fail "KILL-AUDIT-$SECTION" "" "tmux audit ledger is missing"; return 1;
+  }
+  local summary verdict
+  summary="$(python3 - "$IT_TMUX_AUDIT_LEDGER" <<'PY'
+import json, os, sys
+rows = [json.loads(line) for line in open(sys.argv[1], encoding='utf-8') if line.strip()]
+kills = [r for r in rows if r['command'] in ('kill-server', 'kill-session')]
+names = [r['command'] + '@' + os.path.basename(r['socket']) +
+         (':' + str(r['target']) if r['target'] else '') + '[' + r['decision'] + ']'
+         for r in kills]
+print(('FAIL' if any(r['decision'] == 'deny' for r in kills) else 'PASS') + '|' +
+      str(len(kills)) + ' kill(s): ' + (', '.join(names) if names else '(none)'))
+PY
+)" || { it_fail "KILL-AUDIT-$SECTION" "" "tmux audit ledger cannot be parsed"; return 1; }
+  verdict="${summary%%|*}"
+  if [ "$verdict" = PASS ]; then
+    it_pass "KILL-AUDIT-$SECTION" "fleet/it/$SECTION/tmux-audit.jsonl" "${summary#*|}"
+  else
+    it_fail "KILL-AUDIT-$SECTION" "fleet/it/$SECTION/tmux-audit.jsonl" "${summary#*|}"
+    return 1
+  fi
+}
+
 it_section() {            # it_section <name> -> own FLEET_HOME, own slots, own tmux prefix, own tmux SERVER
+  if [ ! -x "$IT_ROOT/bin/tmux" ] && [ "${IT_TMUX_AUDIT_USE_AMBIENT:-}" != 1 ]; then
+    echo "it_section: runtime tmux audit shim is missing — refusing to enter a section" >&2
+    return 2
+  fi
   SECTION="$1"
+  # Runners declare their legacy rows before entering a section. Extend that ownership with this
+  # section's audit row and remove its prior verdict, without touching another section's rows.
+  if [ -n "${IT_OWN_RE:-}" ] && [ "$RESULTS" = "${IT_OWN_FILE:-}" ] && [ -f "$RESULTS" ]; then
+    local audit_tmp
+    audit_tmp="$(mktemp "$(dirname "$RESULTS")/.$(basename "$RESULTS").XXXXXX")" || return 1
+    IT_AUDIT_CASE="KILL-AUDIT-$SECTION" awk -F '\t' 'NR==1 || $1 != ENVIRON["IT_AUDIT_CASE"]' "$RESULTS" > "$audit_tmp" \
+      && mv "$audit_tmp" "$RESULTS" || return 1
+    IT_OWN_RE="$IT_OWN_RE|KILL-AUDIT-$SECTION"
+  fi
   export FLEET_HOME="$IT_ROOT/$SECTION/home"
   SLOTS="$IT_ROOT/$SECTION/slots"
   EV="$IT_ROOT/$SECTION"
   mkdir -p "$FLEET_HOME" "$SLOTS" "$EV"
+  # The socket path must stay short enough for sun_path. Keep scratch in the leased slot and make
+  # a fresh directory for each section, so a prior runner's socket cannot be adopted as ours.
+  local socket_root
+  if { [ -n "${FLEET_SUITE_TRIPWIRE:-}" ] || [ "${IT_TMUX_AUDIT_USE_AMBIENT:-}" = 1 ]; } \
+     && [ -d "$IT_AMBIENT_TMUX_TMPDIR" ]; then
+    # The hermetic suite has already made an isolated socket directory for this test.
+    TMUX_TMPDIR="$IT_AMBIENT_TMUX_TMPDIR"
+  else
+    socket_root="$(realpath "$IT_ROOT/../../..")/.it-tmux"
+    mkdir -p "$socket_root"
+    TMUX_TMPDIR="$(mktemp -d "$socket_root/$SECTION.XXXXXX")" || return 1
+  fi
+  export TMUX_TMPDIR
+  IT_TMUX_AUDIT_LEDGER="$EV/tmux-audit.jsonl"; export IT_TMUX_AUDIT_LEDGER
+  : > "$IT_TMUX_AUDIT_LEDGER"
+  IT_TMUX_AUDIT_RESULTS="$RESULTS"; IT_TMUX_AUDIT_SECTION="$SECTION"
+  export IT_TMUX_AUDIT_RESULTS IT_TMUX_AUDIT_SECTION
+  IT_TMUX_AUDIT_BIN="$IT_ROOT/bin"; export IT_TMUX_AUDIT_BIN
+  IT_TMUX_AUDIT_PRIVATE_DIRS="$(realpath "$TMUX_TMPDIR")"; export IT_TMUX_AUDIT_PRIVATE_DIRS
+  case ":$PATH:" in *":$IT_ROOT/bin:"*) ;; *) export PATH="$IT_ROOT/bin:$PATH" ;; esac
   TMUX_PREFIX="itfleet-$SECTION"
   # The section's own tmux server, and the variable that carries it into every `fleet` subprocess this
   # section spawns (`session.TMUX_SOCKET_ENV`). The name prefix stays too: it is what `it_cleanup_tmux`
@@ -582,7 +654,13 @@ it_zero_delta() {
 # that is not a contamination and a check that reports it as one gets switched off. A session APPEARING or
 # DISAPPEARING is the thing that must never happen.
 #: `-L default`, never a bare `tmux`: bare follows an inherited `$TMUX` to whatever server the caller's pane is on.
-it_live_tmux_sessions() { tmux -L default ls -F '#{session_name}' 2>/dev/null | sort; }
+it_live_tmux_sessions() {
+  if [ -n "$IT_AMBIENT_TMUX_TMPDIR" ]; then
+    TMUX_TMPDIR="$IT_AMBIENT_TMUX_TMPDIR" tmux -L default ls -F '#{session_name}' 2>/dev/null | sort
+  else
+    env -u TMUX_TMPDIR tmux -L default ls -F '#{session_name}' 2>/dev/null | sort
+  fi
+}
 
 # it_assert_no_private_leak <case-id> <private-names-file> [<note-suffix>]
 #
@@ -1000,6 +1078,9 @@ it_establish_run_baseline() {   # it_establish_run_baseline <tag> <sessions> <no
 
 it_assert_isolation() {
   local tag="$1" now sessions
+  if [ -n "${IT_TMUX_AUDIT_LEDGER:-}" ]; then
+    case "$tag" in *-leave|*-exit) it_kill_audit_result || true ;; esac
+  fi
   now="$( { find ~/.claude-dispatch-board ~/.claude-ws-pool -type f -print0 2>/dev/null | sort -z | xargs -0 sha256sum; } )"
   # ESTABLISH on the first call, exactly as the tmux baseline below does. Both are snapshots of THIS BOX —
   # the operator's pdispatch stores and the live session set — so neither can be committed: another checkout

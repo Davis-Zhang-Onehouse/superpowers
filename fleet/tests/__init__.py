@@ -238,7 +238,11 @@ _OWNER = not _inherits_a_live_boundary(os.environ)
 
 
 def _ambient_path():
-    return os.pathsep.join(p for p in os.environ.get("PATH", "").split(os.pathsep) if p != _TRIPWIRE_PATH_DIR)
+    # A nested selftest owns its own hermetic tmux boundary. Its real binary must not resolve
+    # back to the outer IT section's PATH shim.
+    outer_audit_bin = os.environ.get("IT_TMUX_AUDIT_BIN")
+    return os.pathsep.join(p for p in os.environ.get("PATH", "").split(os.pathsep)
+                           if p != _TRIPWIRE_PATH_DIR and p != outer_audit_bin)
 
 
 def _real_runtimes(path):

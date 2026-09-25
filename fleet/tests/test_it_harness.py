@@ -572,7 +572,7 @@ class A8KillSiteAudit(unittest.TestCase):
     def setUp(self):
         self.tmp = pathlib.Path(tempfile.mkdtemp(prefix="itf-", dir="/tmp"))
         self.addCleanup(shutil.rmtree, self.tmp, True)
-        src = (IT / "run-A.sh").read_text()
+        src = pathlib.Path(os.environ.get("A8_AUDIT_SOURCE", IT / "run-A.sh")).read_text()
         self.assertEqual(src.count(self.ANCHOR), 1, "the A8 audit block is not uniquely anchored in run-A.sh")
         body = src.split(self.ANCHOR, 1)[1].split("\nPY\n", 1)[0]
         (self.tmp / "a8audit.py").write_text(body + "\n")
@@ -670,6 +670,15 @@ class A8KillSiteAudit(unittest.TestCase):
                 counts, out = self.audit(**{"run-X.sh": text})
                 self.assertEqual((counts["kill_all"], counts["kill_unsafe"]), (2, 1), out)
 
+    def test_bash_c_operand_does_not_hide_a_later_tmux_kill(self):
+        counts, out = self.audit(**{"run-X.sh":
+            'tmux -L x has-session -t s && bash -c "tmux kill-server"\n'})
+        self.assertEqual((counts["kill_all"], counts["kill_unsafe"]), (1, 1), out)
+
+    def test_colon_before_kill_word_fails_closed_without_crashing(self):
+        counts, out = self.audit(**{"run-X.sh": 'bash -c "tmux a:kill-server"\n'})
+        self.assertEqual((counts["kill_all"], counts["kill_unsafe"]), (1, 1), out)
+
     def test_prose_and_the_audits_own_patterns_are_not_sites(self):
         text = ("# the guardian runs `tmux kill-server` on its socket\n"
                 "echo 'never a bare tmux kill-server here'\n"
@@ -693,6 +702,157 @@ class A8KillSiteAudit(unittest.TestCase):
         counts = json.loads(next(l for l in done.stdout.splitlines() if l.startswith("COUNTS "))[7:])
         self.assertEqual(counts["kill_unsafe"], 0, done.stdout)
         self.assertGreater(counts["kill_all"], 0, done.stdout)
+
+
+class RuntimeTmuxKillAudit(unittest.TestCase):
+    """The PATH command must refuse dangerous kills before invoking real tmux."""
+
+    def setUp(self):
+        self.tmp = pathlib.Path(tempfile.mkdtemp(prefix="it-kill-audit-"))
+        self.addCleanup(shutil.rmtree, self.tmp, True)
+        self.private = self.tmp / "private"
+        self.private.mkdir()
+        self.ledger = self.tmp / "calls.jsonl"
+        self.real = shutil.which("tmux", path=os.environ.get("FLEET_SUITE_AMBIENT_PATH", os.environ["PATH"]))
+        self.assertTrue(self.real)
+        self.env = dict(os.environ, IT_TMUX_AUDIT_LEDGER=str(self.ledger),
+                        IT_TMUX_AUDIT_PRIVATE_DIRS=str(self.private), IT_TMUX_REAL=self.real,
+                        TMUX_TMPDIR=str(self.private), TMUX="")
+        self.shim = pathlib.Path(os.environ.get("IT_TMUX_AUDIT_SHIM", IT / "bin" / "tmux"))
+        self.assertTrue(self.shim.is_file(), "runtime tmux audit shim is missing")
+
+    def tmux(self, *args, env=None):
+        return subprocess.run([str(self.shim), *args], env=env or self.env, text=True, capture_output=True)
+
+    def test_own_server_and_exact_session_kills_are_logged_and_allowed(self):
+        started = self.tmux("-L", "own", "new-session", "-d", "-s", "mine", "sleep 30")
+        self.assertEqual(started.returncode, 0, started.stderr)
+        killed = self.tmux("-L", "own", "kill-session", "-t", "=mine")
+        self.assertEqual(killed.returncode, 0, killed.stderr)
+        rows = [json.loads(line) for line in self.ledger.read_text().splitlines()]
+        self.assertEqual([r["command"] for r in rows], ["new-session", "kill-session"])
+        self.assertEqual(rows[-1]["decision"], "allow")
+        self.assertEqual(rows[-1]["socket"], str(self.private / f"tmux-{os.getuid()}" / "own"))
+
+    def test_foreign_server_kill_is_denied_before_real_tmux(self):
+        for args in (("kill-server",), ("-L", "default", "kill-server"),
+                     ("-S", str(self.tmp / "other" / "fleet-davis"), "kill-server")):
+            with self.subTest(args=args):
+                result = self.tmux(*args)
+                self.assertEqual(result.returncode, 97, result.stderr)
+        rows = [json.loads(line) for line in self.ledger.read_text().splitlines()]
+        self.assertEqual([r["decision"] for r in rows], ["deny"] * 3)
+
+    def test_private_socket_that_section_did_not_create_is_denied(self):
+        result = self.tmux("-L", "unborn", "kill-server")
+        self.assertEqual(result.returncode, 97, result.stderr)
+
+    def test_preexisting_private_server_is_not_section_owned(self):
+        socket = self.private / f"tmux-{os.getuid()}" / "foreign"
+        socket.parent.mkdir(mode=0o700)
+        self.assertEqual(subprocess.run([self.real, "-S", str(socket), "new-session", "-d", "-s", "mine", "sleep 30"],
+                                        capture_output=True).returncode, 0)
+        self.addCleanup(subprocess.run, [self.real, "-S", str(socket), "kill-server"], capture_output=True)
+        self.assertEqual(self.tmux("-L", "foreign", "kill-server").returncode, 97)
+        self.assertEqual(subprocess.run([self.real, "-S", str(socket), "has-session"],
+                                        capture_output=True).returncode, 0)
+
+    def test_missing_ledger_fails_closed(self):
+        env = dict(self.env)
+        env.pop("IT_TMUX_AUDIT_LEDGER")
+        result = self.tmux("-L", "unborn", "kill-server", env=env)
+        self.assertEqual(result.returncode, 97, result.stderr)
+
+    def test_session_kill_requires_exact_created_target(self):
+        started = self.tmux("-L", "own", "new-session", "-d", "-s", "mine", "sleep 30")
+        self.assertEqual(started.returncode, 0, started.stderr)
+        self.addCleanup(self.tmux, "-L", "own", "kill-server")
+        for target in ("mine", "=other"):
+            with self.subTest(target=target):
+                result = self.tmux("-L", "own", "kill-session", "-t", target)
+                self.assertEqual(result.returncode, 97, result.stderr)
+
+    def test_replaced_socket_is_not_still_owned(self):
+        socket = self.private / f"tmux-{os.getuid()}" / "own"
+        self.assertEqual(self.tmux("-L", "own", "new-session", "-d", "-s", "mine", "sleep 30").returncode, 0)
+        self.assertEqual(subprocess.run([self.real, "-S", str(socket), "kill-server"],
+                                        capture_output=True).returncode, 0)
+        self.assertEqual(subprocess.run([self.real, "-S", str(socket), "new-session", "-d", "-s", "foreign", "sleep 30"],
+                                        capture_output=True).returncode, 0)
+        self.addCleanup(subprocess.run, [self.real, "-S", str(socket), "kill-server"], capture_output=True)
+        result = self.tmux("-L", "own", "kill-server")
+        self.assertEqual(result.returncode, 97, result.stderr)
+
+    def test_tmux_kill_command_abbreviation_is_also_guarded(self):
+        socket = self.private / f"tmux-{os.getuid()}" / "foreign"
+        socket.parent.mkdir(mode=0o700)
+        self.assertEqual(subprocess.run([self.real, "-S", str(socket), "new-session", "-d", "-s", "mine", "sleep 30"],
+                                        capture_output=True).returncode, 0)
+        first_probe = subprocess.run([self.real, "-S", str(socket), "has-session"], capture_output=True, text=True)
+        self.assertEqual(first_probe.returncode, 0, f"real={self.real}; {first_probe.stderr}")
+        self.addCleanup(subprocess.run, [self.real, "-S", str(socket), "kill-server"], capture_output=True)
+        result = self.tmux("-L", "foreign", "kill-ser")
+        self.assertEqual(result.returncode, 97, result.stderr)
+        probe = subprocess.run([self.real, "-S", str(socket), "has-session"], capture_output=True, text=True)
+        self.assertEqual(probe.returncode, 0, f"{result.stderr}; probe={probe.stderr}; ledger={self.ledger.read_text()}")
+
+    def test_unregistered_directory_is_denied_even_if_server_was_created(self):
+        other = self.tmp / "other"
+        other.mkdir()
+        self.addCleanup(subprocess.run, [self.real, "-S", str(other / f"tmux-{os.getuid()}" / "other"),
+                                         "kill-server"], capture_output=True)
+        env = dict(self.env, TMUX_TMPDIR=str(other))
+        started = self.tmux("-L", "other", "new-session", "-d", "-s", "mine", "sleep 30", env=env)
+        self.assertEqual(started.returncode, 97, started.stderr)
+        self.assertEqual(self.tmux("-L", "other", "kill-server", env=env).returncode, 97)
+
+    def test_kill_after_leave_refreshes_the_existing_result_row(self):
+        results = self.tmp / "results.tsv"
+        results.write_text("case\tverdict\tevidence\tnote\n"
+                           "KILL-AUDIT-X\tPASS\tfleet/it/X/tmux-audit.jsonl\t0 kill(s): (none)\n")
+        env = dict(self.env, IT_TMUX_AUDIT_RESULTS=str(results), IT_TMUX_AUDIT_SECTION="X")
+        self.assertEqual(self.tmux("-L", "own", "new-session", "-d", "-s", "mine", "sleep 30", env=env).returncode, 0)
+        self.assertEqual(self.tmux("-L", "own", "kill-server", env=env).returncode, 0)
+        self.assertIn("kill-server@own[allow]", results.read_text())
+
+    def test_attached_client_does_not_hold_ledger_lock(self):
+        fake = self.tmp / "slow-tmux"
+        fake.write_text("#!/bin/sh\ncase \"$*\" in *attach*) sleep 3;; esac\nexit 0\n")
+        fake.chmod(0o755)
+        env = dict(self.env, IT_TMUX_REAL=str(fake))
+        attached = subprocess.Popen([str(self.shim), "-L", "own", "attach"], env=env,
+                                    stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+        try:
+            time.sleep(0.1)
+            try:
+                probe = subprocess.run([str(self.shim), "-L", "own", "list-clients"], env=env,
+                                       capture_output=True, timeout=0.5)
+            except subprocess.TimeoutExpired:
+                self.fail("an attached client held the ledger lock across its lifetime")
+            self.assertEqual(probe.returncode, 0, probe.stderr)
+        finally:
+            attached.terminate()
+            attached.wait(timeout=5)
+
+
+class NestedSelftestTmuxBoundary(unittest.TestCase):
+    def test_nested_suite_excludes_outer_it_shim_from_real_tmux_path(self):
+        before = dict(os.environ)
+        try:
+            os.environ["PATH"] = "/outer/it/bin:/usr/bin"
+            os.environ["IT_TMUX_AUDIT_BIN"] = "/outer/it/bin"
+            self.assertEqual(tests._ambient_path(), "/usr/bin")
+        finally:
+            os.environ.clear()
+            os.environ.update(before)
+
+    def test_section_refuses_when_runtime_shim_is_missing(self):
+        tmp = pathlib.Path(tempfile.mkdtemp(prefix="it-missing-shim-"))
+        self.addCleanup(shutil.rmtree, tmp, True)
+        it = harness_copy(tmp)
+        (it / "bin" / "tmux").unlink()
+        result = run_bash(f'. "{it}/lib.sh"\nit_section X', tmp, home=tmp / "home")
+        self.assertNotEqual(result.returncode, 0, result.stdout + result.stderr)
 
 
 class ServerGuardian(unittest.TestCase):
