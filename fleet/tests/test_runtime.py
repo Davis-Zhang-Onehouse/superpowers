@@ -137,6 +137,19 @@ class RuntimeTests(unittest.TestCase):
                             '\u00b7 unrecognised box row', border, '  \u23f5\u23f5 auto mode on']) + '\n'
         self.assertEqual('unknown', observe('claude', frame).state)
 
+    def test_the_draft_runs_to_the_located_border_not_to_any_rule_character(self):
+        """RV-20. Inside a bordered box every row down to the bottom border is the draft: a markdown rule or a
+        table row with a box-drawing character does not end it, and chrome followed by text is not chrome."""
+        cases = ((['\u276f\u00a0Press up to edit queued messages', '  \u2500\u2500\u2500\u2500', '  real text'],
+                  'Press up to edit queued messages\n\u2500\u2500\u2500\u2500\nreal text'),
+                 (['\u276f\u00a0compare a \u2500 b', '  | x \u2502 y |', '  done'],
+                  'compare a \u2500 b\n| x \u2502 y |\ndone'))
+        for busy in (False, True):
+            for rows, draft in cases:
+                with self.subTest(busy=busy, draft=draft):
+                    actual = observe('claude', box_variant(rows, busy=busy))
+                    self.assertEqual(('busy' if busy else 'queued', draft), (actual.state, actual.draft))
+
     def test_dim_suggestions_are_marked_in_capture_and_never_drafts(self):
         from fleet.runtime import annotate_placeholders
         frames = (('claude', '❯\u00a0\x1b[2mfix RV-29 too\x1b[0m\n? for shortcuts\n'),

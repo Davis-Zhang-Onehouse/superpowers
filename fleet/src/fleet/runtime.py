@@ -169,14 +169,27 @@ def _claude_draft(rows, frame):
     # RV-18: the caret row may be BLANK (a draft that starts with a newline), so the continuation rows are
     # read before emptiness is decided; returning on an empty caret row hid the whole draft.
     content = [_caret_content(rows[index]) or '']
-    for row in rows[index + 1:]:
-        visible = plain(row)
-        if (not visible.startswith('  ') or any(c in visible for c in '─━')
-                or visible.lstrip().startswith(('⏵⏵', '? for shortcuts'))):
-            break
-        content.append(_undim(_cells(row)[2:]))
+    border = _claude_border_index(rows)
+    if border is not None and border > index:
+        #: RV-20. In a bordered box every row down to the located bottom border is the draft (the caret walk
+        #: already proved each is indented or blank): a markdown rule or table row drawn with `─` is text, and
+        #: ending there cut a message short, or reduced chrome-plus-text to bare chrome.
+        content.extend(_undim(_cells(row)[2:]) for row in rows[index + 1:border])
+    else:
+        for row in rows[index + 1:]:
+            visible = plain(row)
+            if (not visible.startswith('  ') or any(c in visible for c in '─━')
+                    or visible.lstrip().startswith(('⏵⏵', '? for shortcuts'))):
+                break
+            content.append(_undim(_cells(row)[2:]))
     draft = '\n'.join(content).strip()
     return None if not draft or _is_placeholder(draft) else draft
+
+
+def _claude_border_index(rows):
+    """The input box's LOWER border: the last rule row in the bottom window, or None for a borderless capture."""
+    return next((i for i in range(len(rows) - 1, max(-1, len(rows) - PROMPT_TAIL_LINES - 1), -1)
+                 if plain(rows[i]).strip().startswith(('────', '━━━━'))), None)
 
 
 def _claude_caret_index(rows):
@@ -206,8 +219,7 @@ def _claude_caret_index(rows):
     falling back to an earlier caret (falling back IS the `N4` defect); what an empty box renders (a dim
     suggestion, measured chrome) is filtered by `_caret_content` and `_is_placeholder`, not here.
     """
-    border = next((i for i in range(len(rows) - 1, max(-1, len(rows) - PROMPT_TAIL_LINES - 1), -1)
-                   if plain(rows[i]).strip().startswith(('────', '━━━━'))), None)
+    border = _claude_border_index(rows)
     if border is not None:
         index = border - 1
         while index >= 0 and (not plain(rows[index]).strip() or plain(rows[index]).startswith('  ')):
