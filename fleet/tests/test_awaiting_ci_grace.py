@@ -196,6 +196,14 @@ class TestTheHoldingPhase(unittest.TestCase):
         self.assertIn('2026-07-30T13:00:00Z', note)
         self.assertIn(HOLDING, CAP_EXCLUDED_STATES)
 
+    def test_the_claim_stamp_and_the_expiry_come_from_one_clock(self):
+        """RV-22. `at` and `hold_until` are compared by the join, so both are read off `ctx.now` — the verb's
+        one clock seam — never one from the wall clock and one from the seam."""
+        self.assertEqual(self.declare('--reason', 'r', '--for', '30m')[0], 0)
+        stored = json.loads((self.path / '.fleet' / 'declare.json').read_text())
+        self.assertEqual(stored['at'], NOW)
+        self.assertEqual(stored['hold_until'], '2026-07-30T12:30:00Z')
+
     def test_a_hold_without_a_reason_is_refused(self):
         for extra in ((), ('--reason', ''), ('--reason', '   ')):
             with self.subTest(extra=extra):
