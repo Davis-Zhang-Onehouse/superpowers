@@ -19,10 +19,13 @@ while [ $# -gt 0 ]; do
     *) break ;;
   esac
 done
+# tmux uses TMUX_TMPDIR only when it names an existing directory, and /tmp otherwise (RV-25).
+tmpdir="${TMUX_TMPDIR:-}"
+[ -n "$tmpdir" ] && [ -d "$tmpdir" ] || tmpdir=/tmp
 if [ -z "$server" ]; then
-  if [ -n "$name" ]; then server="${TMUX_TMPDIR:-/tmp}/tmux-$(id -u)/$name"
+  if [ -n "$name" ]; then server="$tmpdir/tmux-$(id -u)/$name"
   elif [ -n "${TMUX:-}" ]; then server="${TMUX%%,*}"
-  else server="${TMUX_TMPDIR:-/tmp}/tmux-$(id -u)/default"
+  else server="$tmpdir/tmux-$(id -u)/default"
   fi
 fi
 server="$(realpath -m -- "$server")"

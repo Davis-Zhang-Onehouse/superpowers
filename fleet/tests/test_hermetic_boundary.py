@@ -137,6 +137,22 @@ class TheTripwire(unittest.TestCase):
         self.assertEqual(len(seen), 1, seen)
         self.assertTrue(seen[0].startswith("runtime\t"), seen)
 
+    def test_a_missing_TMUX_TMPDIR_resolves_where_tmux_falls_back_to(self):
+        """RV-25. tmux ignores a TMUX_TMPDIR that does not exist and uses /tmp — measured on 3.2a — so a model that
+        resolves under the missing directory would call a live `-L` socket private."""
+        live = os.path.realpath(f"/tmp/tmux-{os.getuid()}/v23n-no-such-server")
+        for tmpdir in ("/nonexistent-v23n-dir", ""):
+            with self.subTest(TMUX_TMPDIR=tmpdir):
+                self.assertEqual(tests.tmux_server(["tmux", "-L", "v23n-no-such-server", "ls"],
+                                                   {"TMUX_TMPDIR": tmpdir}), live)
+        env = dict(self.child_env, TMUX_TMPDIR="/nonexistent-v23n-dir",
+                   FLEET_SUITE_FOREIGN_TMUX=f"/tmp/tmux-{os.getuid()}")
+        with tests.expect_tripwire() as seen:
+            done = subprocess.run(["bash", "-c", "tmux -L v23n-no-such-server ls"], env=env,
+                                  capture_output=True, text=True)
+        self.assertEqual(done.returncode, 97, done.stderr)
+        self.assertEqual(len(seen), 1, seen)
+
     def test_the_test_whose_run_grew_the_tripwire_log_fails(self):
         """The record is what makes a SWALLOWED refusal still fail: a product that catches the non-zero exit
         and carries on would otherwise turn the refusal into a pass."""
