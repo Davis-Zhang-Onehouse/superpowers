@@ -215,7 +215,7 @@ class RuntimeCliTests(unittest.TestCase):
             self.f.panes[name] = '❯ ' + text + '\n? for shortcuts'
         def submit(name):
             events.append(('submit',None))
-            self.f.panes[name] = 'esc to interrupt'
+            self.f.panes[name] = '❯ \n? for shortcuts · esc to interrupt'
         self.f.sessions.probes.send_literal = insert
         self.f.sessions.probes.submit = submit
         args = ['send', '--id', self.f.ids['active'], '--message-file', str(message)]
