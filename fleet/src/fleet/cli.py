@@ -4285,6 +4285,10 @@ def _pane_refusal(ctx: Ctx, record: Record, override: str = ""):
     layer = ctx.sessions_for(record)
     if not tmux or not layer.alive(tmux):
         return None
+    if layer.dead(tmux) is True:
+        #: FB-130, D-3. remain-on-exit: the session answers, but tmux says no pane of it has a process left. A close
+        #: discards only what a live process could still submit, and there is none; the last frame is a picture.
+        return None
     captured = layer.capture(tmux)
     text = captured or ''
     live = layer.live()   # one census for every question below (see `_do_pane_guard`)
@@ -4293,8 +4297,9 @@ def _pane_refusal(ctx: Ctx, record: Record, override: str = ""):
         return ('indeterminate', f'{tmux} runtime differs from its record',
                 'resolve the runtime mismatch before closing', record.todo_id)
     agent = layer.is_agent_process(tmux, live)
-    state = observe(layer.runtime, text).state if (captured is not None and agent) else None
-    if captured is None or state == 'unknown':
+    #: FB-130. `pane-guard`'s own predicate, attributed or not: an unattributed claude pane whose box cannot be
+    #: located is 14 there, and closing it on a missed attribution discarded whatever that box held.
+    if captured is None or _box_unproven(layer, text, tmux, live, agent):
         return (PANE_GUARD_CODES[PANE_INDETERMINATE], f'{tmux} input state cannot be established',
                 'inspect the pane and wait for a recognizable idle input', record.todo_id)
     if layer.busy(text):
@@ -6108,6 +6113,18 @@ def _is_claude(sessions, text: str, name: str = "", live=None) -> bool:
     return sessions.busy(text) or sessions.unsubmitted(text) is not None
 
 
+def _box_unproven(sessions, text: str, name: str, live, agent: bool) -> bool:
+    """Whether this is an agent's pane whose input box could not be located, so nothing proves the box EMPTY.
+
+    D-85/RV-19 for `pane-guard`, FB-130 for `close`/`abort`/`harvest --id`: ONE predicate, asked by both. The pane
+    is the agent's when a process is attributed to it OR its screen is claude's (`_is_claude`) — attribution
+    misses about one poll in a hundred, and a teardown that skipped `observe` for those closed a claude pane with
+    an unreadable box that `pane-guard` called 14. An `unknown` observation already excludes a dialog and, for
+    claude, a draft (`runtime._claude_draft` needs the located caret), so asking this before those is safe.
+    """
+    return observe(sessions.runtime, text).state == 'unknown' and (agent or _is_claude(sessions, text, name, live))
+
+
 def _pane_subject(ctx: Ctx, parsed: Parsed):
     """WHICH pane `pane-guard` is being asked about, and on WHICH SERVER — `SI-54`, then `SI-59`.
 
@@ -6206,7 +6223,6 @@ def _do_pane_guard(ctx: Ctx, parsed: Parsed) -> int:
         #: disagree with each other, and each one is a `pgrep` plus a `/proc` walk.
         live = layer.live()
         agent = layer.is_agent_process(pane, live)
-        state = observe(layer.runtime, text).state if (captured is not None and agent) else None
         if captured is None:
             code, detail = PANE_INDETERMINATE, (
                 f"{pane} is alive but nothing about it could be read: the pane capture FAILED — tmux "
@@ -6218,8 +6234,13 @@ def _do_pane_guard(ctx: Ctx, parsed: Parsed) -> int:
             #: v23-k. Only the pane's own agent (`session.outer`): a claude that a codex worker is running — the suite's
             #: or `fleet peers`' `claude agents --json` — is that worker's child, and read 14 for its whole life.
             code, detail = PANE_INDETERMINATE, f'{pane} runtime differs from the recorded or selected runtime'
-        elif agent and state == 'unknown':
-            code, detail = PANE_INDETERMINATE, f'{pane} is a {layer.runtime} worker with an unrecognized input layout'
+        elif _box_unproven(layer, text, pane, live, agent):
+            #: D-85, RV-19, FB-130. `0` and `11` both admit a send, so both assert an EMPTY box, and only a located
+            #: input box can say that — whether or not a process is attributed. `_pane_refusal` asks the same.
+            code, detail = PANE_INDETERMINATE, (
+                f'{pane} is a {layer.runtime} worker with an unrecognized input layout' if agent else
+                f"{pane} looks like a {layer.runtime} pane but its input box could not be located; inspect the "
+                f"pane before sending")
         elif not _is_claude(layer, text, pane, live):
             code, detail = PANE_NOT_CLAUDE, (f"{pane} is alive and nothing in its tail is claude; a send "
                                              "here goes to somebody else's shell")
@@ -6245,13 +6266,6 @@ def _do_pane_guard(ctx: Ctx, parsed: Parsed) -> int:
             queued = layer.unsubmitted(text)
             code, detail = PANE_QUEUED_TEXT, (f"{pane} holds unsubmitted text in its input box "
                                               f"({queued!r}); a send would concatenate onto it")
-        elif observe(layer.runtime, text).state == 'unknown':
-            #: D-85, RV-19. `0` and `11` both admit a send, so both assert an EMPTY box, and only a located input
-            #: box can say that. The `agent and state == 'unknown'` branch above covers an attributed pane; this
-            #: one answers for a pane whose process is not attributed (state is None there), which read 0 or 11
-            #: with no box found.
-            code, detail = PANE_INDETERMINATE, (f"{pane} looks like a {layer.runtime} pane but its input box "
-                                                "could not be located; inspect the pane before sending")
         elif layer.busy(text):
             code, detail = PANE_MID_TURN, (f"{pane} is mid-turn with an empty input box; "
                                            "fleet send can queue a message behind this turn")

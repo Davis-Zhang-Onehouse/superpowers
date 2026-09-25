@@ -133,6 +133,10 @@ class Probes:
     pane_pids: Optional[Callable[[str], Optional[list]]] = None
     #: Read-only bulk census for a board invocation. None keeps injected legacy probes usable.
     list_session_names: Optional[Callable[[], Optional[set[str]]]] = None
+    #: FB-130. True when the session answers and EVERY pane of it reports tmux's `#{pane_dead}` (remain-on-exit:
+    #: the process is gone, the last screen stays), False when any pane is alive, None when unobservable. The
+    #: screen's `Pane is dead` banner is text an agent can print, so tmux's own flag is the only evidence.
+    panes_dead: Optional[Callable[[str], Optional[bool]]] = None
 
 
 @dataclass(frozen=True)
@@ -445,6 +449,13 @@ class SessionLayer:
                 current, steps = walk(current), steps + 1
         return own
 
+    def dead(self, name: str) -> Optional[bool]:
+        """FB-130. Whether every pane of `name` has no process left (tmux `pane_dead`), or None when that cannot be
+        observed. Only True is a fact a caller may act on: None is NOT "alive", it is "not asked"."""
+        if not name or self.probes.panes_dead is None:
+            return None
+        return self.probes.panes_dead(name)
+
     def pane_pid(self, name: str) -> Optional[int]:
         """The pid tmux started in this session's pane, or None if it cannot be observed.
 
@@ -746,6 +757,15 @@ def default_probes(process_name: str = "claude", tmux_socket=_FROM_ENV, *,
             return None
         return [int(token) for token in done.stdout.split() if token.isdigit()] or None
 
+    def panes_dead(name: str):
+        """FB-130. `list-panes -s` like `pane_pids`: every pane of every window must be dead, and an empty or
+        failed answer is None (unobservable), never True."""
+        done = run(tmux + ["list-panes", "-s", "-t", exact_session_target(name), "-F", "#{pane_dead}"])
+        flags = done.stdout.split() if done.returncode == 0 else []
+        if not flags or any(flag not in ("0", "1") for flag in flags):
+            return None
+        return all(flag == "1" for flag in flags)
+
     def session_servers(name: str) -> list:
         """Every tmux server on this box with a session called `name`, socket names, sorted.
 
@@ -835,7 +855,7 @@ def default_probes(process_name: str = "claude", tmux_socket=_FROM_ENV, *,
                   start_session=start_session,
                   kill_session=kill_session,
                   pane_pid=pane_pid,
-                  pane_pids=pane_pids,
+                  pane_pids=pane_pids, panes_dead=panes_dead,
                   parent_of=parent_of,
                   attachment=attachment,
                   list_session_names=list_session_names)
