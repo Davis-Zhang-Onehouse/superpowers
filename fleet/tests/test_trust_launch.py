@@ -121,6 +121,26 @@ class TestDispatchReportsTheTrustScreen(CliCase):
         self.assertIn("capture exploded", rows_of(out)["trust_screen"])
         self.assertTrue(any(r.title == "watchRaises" and r.launched_at for r in fleet.store.all()))
 
+    def test_the_prediction_is_made_before_the_pane_starts_with_the_launchers_env(self):
+        """Fix round 1 (F3): predicted before `sessions.start`, from the environment the launcher gets."""
+        fleet = self.loaded()
+        inject(fleet, Watch(lambda tmux, runtime: cli.LaunchWatch("ready")))
+        seen = []
+        real = cli._predict_trust
+
+        def spy(ctx, settings, cwd, environ=None):
+            seen.append((len(fleet.started), dict(environ or {})))
+            return real(ctx, settings, cwd, environ=environ)
+
+        with mock.patch.object(cli, "_predict_trust", spy):
+            code, out, err = fleet.run(dispatch_argv(fleet, "predictFirst"))
+        self.assertEqual(0, code, out + err)
+        self.assertEqual(1, len(seen))
+        started_before, environ = seen[0]
+        self.assertEqual(0, started_before, "the prediction ran after the pane was started")
+        self.assertEqual(str(fleet.home), environ.get("FLEET_HOME"), "not the launcher's environment")
+        self.assertIn("trust", rows_of(out))
+
     def test_the_dry_run_prints_a_trust_row_and_never_watches(self):
         fleet = self.loaded()
         watch = Watch(lambda tmux, runtime: cli.LaunchWatch("ready"))
@@ -237,6 +257,11 @@ class TestTheWatchLoop(unittest.TestCase):
         self.assertEqual(0.0, cli._trust_watch_window({cli.TRUST_WATCH_SECONDS: "0"}))
         self.assertEqual(cli.TRUST_WATCH_DEFAULT_S, cli._trust_watch_window({cli.TRUST_WATCH_SECONDS: "-1"}))
         self.assertEqual(cli.TRUST_WATCH_DEFAULT_S, cli._trust_watch_window({cli.TRUST_WATCH_SECONDS: "x"}))
+
+    def test_an_infinite_or_nan_window_falls_back_to_the_default(self):
+        """Fix round 1 (F2): `float("inf")` parses, and an unbounded watch would hang a dispatch."""
+        for raw in ("inf", "-inf", "nan", "Infinity", "1e999"):
+            self.assertEqual(cli.TRUST_WATCH_DEFAULT_S, cli._trust_watch_window({cli.TRUST_WATCH_SECONDS: raw}), raw)
 
 
 if __name__ == "__main__":
