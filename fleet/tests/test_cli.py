@@ -1227,6 +1227,13 @@ OUTWARD_CALL_SITES = {
         "names matching atomic.tmp_name's shape are removed, and ANY other entry makes the whole reclaim "
         "raise Refused naming that entry rather than sweeping it, so a recovery cannot become a data loss. "
         "The rmdir then fails safe, because rmdir cannot empty a directory"),
+    ("runtime_launch", "sweep_mount_residue"): (
+        "FB-117. rmdir of codex's sandbox mount-point residue — only an entry named exactly .agents, .codex or .git, "
+        "directly in a root fleet itself passed to a codex worker as writable (FLEET_HOME, the instants tree), that "
+        "is a real directory, not a symlink or a mount point, and EMPTY — and only while no codex naming that root "
+        "is alive, since an rmdir under a live sandbox would detach its protection mount. codex makes these empty "
+        "directories itself and leaves them behind after an unclean end. rmdir cannot empty a directory, so a "
+        "real repository or anything that gained an entry fails safe"),
     ("release", "prune"): (
         "rmtree of a RELEASE DIRECTORY under $FLEET_RELEASES, beyond the 10-release ceiling, chosen by "
         "semver order from `versions()` — which only ever returns directories this package named "
