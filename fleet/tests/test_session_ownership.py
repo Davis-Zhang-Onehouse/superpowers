@@ -393,6 +393,26 @@ class TheTeardownVerbsLeaveASessionThatIsNotTheirs(unittest.TestCase):
         code, out, err = fleet.run(["close", "--id", old_id, "--force"])
         self._assert_left_alone(fleet, code, out, err)
 
+    def test_abort_is_refused_before_anything_when_a_holder_stays_in_the_old_slot(self):
+        """RV-34. `_slot_gate_before_kill` read the owner's session as the old record's, so a holder in the old slot
+        was judged against B's pane, and could pass as undecided when that pane's pids were unreadable. The abort then
+        wrote its reason, killed nothing (the session is B's) and the release refused: the partial state the pre-kill
+        gate exists to prevent. The old record's session is gone, so nothing this abort closes frees the slot."""
+        fleet = Fleet()
+        self.addCleanup(shutil.rmtree, fleet.tmp, True)
+        old = fleet.worker("mile", slot="ws1", live=False)
+        rec = fleet.store.read(fleet.ids["mile"])
+        rec.launched_at = "2026-07-29T09:00:00Z"
+        fleet.store.write(rec)
+        fleet.worker("mile", slot="ws2", pane=IDLE_PANE)
+        fleet.hold_slot_cwd("ws1", 777)
+        fleet.sessions.probes.pane_pid = lambda name: None          # the owner's pane pids cannot be read
+        code, out, err = fleet.run(["abort", "--instant", str(old), "--reason", "superseded", "--force"])
+        self.assertNotEqual(code, 0, out)
+        self.assertTrue(old.exists(), "nothing was renamed")
+        self.assertFalse((old / ".fleet" / "abort.json").exists(), "nothing was written")
+        self.assertIn("is not running", err)
+
     def test_close_of_the_owner_still_kills_its_own_session(self):
         """Control: the rule removes a kill only from a record that does not own the session."""
         fleet, _, _ = self._pair("abort")

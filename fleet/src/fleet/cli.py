@@ -3965,7 +3965,9 @@ def _slot_gate_before_kill(ctx: Ctx, record, child: Path, verb: str) -> str:
     if record is None or not record.slot:
         return ""
     layer = ctx.sessions_for(record)
-    live = bool(record.tmux) and layer.alive(record.tmux)
+    #: V23-T (RV-34). A session another record owns is not this record's: the verb will not end it, so none of its
+    #: processes is spared and a holder in this slot is judged as for a session that is gone.
+    live = bool(record.tmux) and _session_taken_by(ctx, record) is None and layer.alive(record.tmux)
     #: `RV-33`. What the real call then does is the verb's own, and the two differ (see the docstring).
     after_an_undecided_gate = (
         "the real call closes the session, waits once more, releases, and names the partial state if a "
