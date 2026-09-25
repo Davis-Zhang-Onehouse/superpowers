@@ -295,6 +295,59 @@ class TrustScreenCase(unittest.TestCase):
     def test_codex_idle_is_not_a_trust_screen(self):
         self.assertIsNone(trust.trust_screen_path("codex", self.frame("codex-idle.frame")))
 
+    def rendered(self, name: str) -> list:
+        """The frame's rows with tmux's bottom padding dropped, as they appear when scrolled into history."""
+        rows = self.frame(name).splitlines()
+        while rows and not trust._ANSI.sub("", rows[-1]).strip():
+            rows.pop()
+        return rows
+
+    def test_RV24_quoted_claude_trust_screen_above_the_idle_tui_is_not_a_trust_screen(self):
+        """RV-24. A resumed pane redraws history; a trust screen QUOTED there (hint row and all) sits above the
+        live prompt, outside the dialog window, and must not be read as the screen."""
+        frame = "\n".join([*self.rendered("claude-trust-2.1.282.frame"), "",
+                           self.frame("claude-tui-2.1.282.frame")])
+        self.assertIsNone(trust.trust_screen_path("claude", frame))
+
+    def test_RV24_quoted_codex_trust_screen_above_the_idle_tui_is_not_a_trust_screen(self):
+        for quoted in ("codex-trust-0156.frame", "codex-trust.frame"):
+            with self.subTest(quoted):
+                frame = "\n".join([*self.rendered(quoted), "", self.frame("codex-idle.frame")])
+                self.assertIsNone(trust.trust_screen_path("codex", frame))
+
+    def test_RV24_one_prose_line_above_the_codex_idle_tui_is_not_a_trust_screen(self):
+        frame = "\n".join(["• codex asks Trust this folder? on first launch.", self.frame("codex-idle.frame")])
+        self.assertIsNone(trust.trust_screen_path("codex", frame))
+        frame = "\n".join(["• codex asks Do you trust the contents of this directory? there.",
+                           self.frame("codex-idle.frame")])
+        self.assertIsNone(trust.trust_screen_path("codex", frame))
+
+    def test_RV24_codex_screen_text_without_its_hint_row_is_not_a_trust_screen(self):
+        """Neighbour: the 0.156 screen's text with the hint row removed (a partial redraw)."""
+        rows = [r for r in self.rendered("codex-trust-0156.frame") if "enter" not in trust._ANSI.sub("", r)]
+        self.assertIsNone(trust.trust_screen_path("codex", "\n".join(rows)))
+
+    def test_RV24_another_confirm_dialog_below_a_quoted_trust_phrase_is_not_a_trust_screen(self):
+        """Neighbour: the phrase sits above the last header-to-hint span, so it belongs to history, not the
+        dialog that owns the hint row."""
+        frame = "\n".join([*self.rendered("claude-trust-2.1.282.frame"), "",
+                           " Allow this edit to settings.json?", "", " ❯ Yes", "   No", "",
+                           " Enter to confirm · Esc to cancel"])
+        # the quoted screen's own hint row is now above the window; the live one ends a dialog with no header
+        # or trust phrase of its own
+        self.assertIsNone(trust.trust_screen_path("claude", frame))
+
+    def test_RV24_a_real_screen_below_quoted_history_names_its_own_path(self):
+        """Neighbour: a quoted screen ABOVE a real one. The real screen's path, not the quoted one's."""
+        quoted = [r.replace("/tmp/v23p-m.YM7x/plain/sub", "/home/ubuntu/davis_root/ws10")
+                  for r in self.rendered("claude-trust-2.1.282.frame")]
+        frame = "\n".join([*quoted, "", self.frame("claude-trust-2.1.282.frame")])
+        self.assertEqual(trust.trust_screen_path("claude", frame), "/tmp/v23p-m.YM7x/plain/sub")
+        quoted = [r.replace("/home/ubuntu/.fb110-trust.N3eo/untrusted", "/elsewhere")
+                  for r in self.rendered("codex-trust-0156.frame")]
+        frame = "\n".join([*quoted, "", self.frame("codex-trust-0156.frame")])
+        self.assertEqual(trust.trust_screen_path("codex", frame), "/home/ubuntu/.fb110-trust.N3eo/untrusted")
+
     def test_runtimes_do_not_cross(self):
         self.assertIsNone(trust.trust_screen_path("codex", self.frame("claude-trust-2.1.282.frame")))
         self.assertIsNone(trust.trust_screen_path("claude", self.frame("codex-trust-0156.frame")))

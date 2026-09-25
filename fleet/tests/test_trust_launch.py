@@ -327,6 +327,37 @@ class TestTheWatchLoop(unittest.TestCase):
         ctx.launch_watch = lambda tmux, runtime: cli.LaunchWatch("dialog")
         self.assertEqual("dialog", cli._watch_launch(ctx, FakeLayer([idle]), "dt-x", "claude").outcome)
 
+    @staticmethod
+    def _history(name):
+        rows = (FIXTURES / name).read_text().splitlines()
+        while rows and not cli.trust._ANSI.sub("", rows[-1]).strip():
+            rows.pop()
+        return rows
+
+    def test_RV24_quoted_trust_screen_above_an_idle_tui_is_ready(self):
+        """RV-24. A revived pane redraws history quoting the screen; the live prompt below it is `ready`."""
+        for runtime, quoted, idle in (("claude", "claude-trust-2.1.282.frame", "claude-tui-2.1.282.frame"),
+                                      ("codex", "codex-trust-0156.frame", "codex-idle.frame"),
+                                      ("codex", "codex-trust.frame", "codex-idle.frame")):
+            with self.subTest(quoted):
+                frame = "\n".join([*self._history(quoted), "", (FIXTURES / idle).read_text()])
+                self.assertEqual("ready", cli._watch_launch(FakeCtx(), FakeLayer([frame]), "dt-x", runtime).outcome)
+
+    def test_RV24_the_watch_asks_observe_before_believing_the_recognizer(self):
+        """RV-24. Even a recognizer that answers a path is not believed unless `observe` says dialog."""
+        idle = (FIXTURES / "claude-tui-2.1.282.frame").read_text()
+        with mock.patch.object(cli.trust, "trust_screen_path", return_value="/home/ubuntu/davis_root/ws10"):
+            self.assertEqual("ready", cli._watch_launch(FakeCtx(), FakeLayer([idle]), "dt-x", "claude").outcome)
+
+    def test_RV24_the_real_trust_frames_are_still_trust_screens(self):
+        for runtime, name, path in (("claude", "claude-trust-2.1.282.frame", TRUST_FRAME_PATH),
+                                    ("codex", "codex-trust-0156.frame", "/home/ubuntu/.fb110-trust.N3eo/untrusted"),
+                                    ("codex", "codex-trust.frame",
+                                     "/tmp/fleet-runtime-probe-8x14rwii/coordinator-probe/slot2")):
+            with self.subTest(name):
+                watch = cli._watch_launch(FakeCtx(), FakeLayer([(FIXTURES / name).read_text()]), "dt-x", runtime)
+                self.assertEqual(("trust-screen", path), (watch.outcome, watch.path))
+
     def test_a_tilde_screen_path_is_expanded_before_the_slot_comparison(self):
         """Final review I3: 2.1.282 draws the absolute path even under HOME (claude-trust-under-home-2.1.282.frame);
         a `~` path is expanded anyway, as a defence."""

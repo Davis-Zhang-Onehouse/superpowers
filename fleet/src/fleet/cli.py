@@ -1818,11 +1818,13 @@ def _watch_launch(ctx, layer, tmux, runtime) -> LaunchWatch:
         while True:
             frame = layer.capture(tmux)
             if frame:
-                path = trust.trust_screen_path(runtime, frame)
-                if path is not None:
-                    return LaunchWatch("trust-screen", path=path)
                 state = observe(runtime, frame).state
                 if state == "dialog":
+                    #: RV-24. The recognizer is asked only of a pane `observe` already calls a dialog: a revived
+                    #: pane redraws history that may QUOTE the screen above a live prompt, which is not the screen.
+                    path = trust.trust_screen_path(runtime, frame)
+                    if path is not None:
+                        return LaunchWatch("trust-screen", path=path)
                     return LaunchWatch("dialog")
                 if state in ("busy", "queued", "idle"):
                     return LaunchWatch("ready")
