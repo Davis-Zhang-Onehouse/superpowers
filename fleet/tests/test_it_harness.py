@@ -579,6 +579,20 @@ class A8KillSiteAudit(unittest.TestCase):
                 counts, out = self.audit(**{"run-X.sh": text})
                 self.assertEqual((counts["kill_all"], counts["kill_unsafe"]), (1, unsafe), out)
 
+    def test_every_kill_on_a_line_is_judged_against_its_own_tmux(self):
+        """CL2-2. Only the first kill word on a line (or joined call) was judged, so a private kill followed by a bare one
+        passed. Each kill is a site of its own, judged against the nearest tmux before it."""
+        for label, text in {
+            "shell ;": "tmux -L x kill-session -t a; tmux kill-server\n",
+            "shell &&": "tmux -L x kill-server && tmux kill-session -t y\n",
+            "shell, no spaces around ;": "tmux -L x kill-session -t a;tmux kill-server;\n",
+            "embedded, joined across lines": ("python3 - <<'PY'\nimport subprocess\nsubprocess.run([\"tmux\", \"-L\", \"x\",\n"
+                                              "    \"kill-server\"]); subprocess.run([\"tmux\", \"kill-server\"])\nPY\n"),
+        }.items():
+            with self.subTest(label):
+                counts, out = self.audit(**{"run-X.sh": text})
+                self.assertEqual((counts["kill_all"], counts["kill_unsafe"]), (2, 1), out)
+
     def test_prose_and_the_audits_own_patterns_are_not_sites(self):
         text = ("# the guardian runs `tmux kill-server` on its socket\n"
                 "echo 'never a bare tmux kill-server here'\n"

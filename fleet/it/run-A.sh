@@ -1205,41 +1205,55 @@ KILL = re.compile(r"tmux[^;&|]*kill-(server|session)")
 #: right after a quote, `[`, `(` or a `-c`, and a whole `kill-server`/`kill-session` word after it. Prose ("never a
 #: bare tmux kill-server") and this audit's own patterns (`kill-(server|session)`) are not call shapes.
 EMBED_KILL = re.compile(r"""(?:^|["'`\[(]|\s-c\s+["']?)\s*(?:\S*/)?tmux\b[^#\n]*?(?<![\w-])kill-(?:server|session)(?![\w-])""")
-SPLIT = re.compile(r"""[\s,\[\]()'"`=]+""")
+SPLIT = re.compile(r"""[\s,\[\]()'"`=;&|]+""")
 IDENT = re.compile(r"[A-Za-z_][A-Za-z0-9_]*$")
 
 
-def private_socket(text):
-    """Whether a tmux kill names a PRIVATE server. `-L <name>` unless the name is `default`; `-S <path>` only with an
-    absolute path outside the box's /tmp/tmux-<uid>, a path rooted in a variable (`"$DIR/..."`, as A8b accepts for
-    rm targets), or python's `os.path.join(<variable>, ...)`. No socket option at all is the default server."""
-    tokens = [t for t in SPLIT.split(text) if t]
-    kill = next((i for i, t in enumerate(tokens) if t in ("kill-server", "kill-session")), len(tokens))
-    #: CL-1. The tmux invocation that KILLS: the last `tmux` before the kill word, not the first on the line, which
-    #: may be a named `has-session` guarding a bare `tmux kill-server`.
-    start = next((i for i in range(kill - 1, -1, -1) if tokens[i] == "tmux" or tokens[i].endswith("/tmux")), None)
-    if start is None:
-        return False
-    rest = tokens[start + 1:]
-    for i, t in enumerate(rest):
-        if t in ("kill-server", "kill-session"):
-            return False
-        flag, value = (t[:2], t[2:]) if t[:2] in ("-L", "-S") and len(t) > 2 else (t, rest[i + 1] if i + 1 < len(rest) else "")
-        if value in ("kill-server", "kill-session") or value.startswith("-"):
-            value = ""                               # CL-2: `-L ""` / `-S ""` — the empty operand was split away
+KILL_WORDS = ("kill-server", "kill-session")
+
+
+def is_operand(tokens, i):
+    """Whether tokens[i] is the VALUE of a tmux option (`-S x`, `-uS x`, `-L x`, `-c`, `-f`, `-T`), not a command."""
+    prev = tokens[i - 1] if i > 0 else ""
+    return prev.startswith("-") and not prev.startswith("--") and prev[1:].isalnum() and prev[-1] in "cfLST"
+
+
+def socket_is_private(opts):
+    """Whether the options between a tmux command and its kill word name a PRIVATE server. `-L <name>` unless the name
+    is `default` or empty; `-S <path>` only with an absolute path outside the box's /tmp/tmux-<uid> (judged on the
+    normalised path, CL-2), a path rooted in a variable (`"$DIR/..."`, as A8b accepts for rm targets), or python's
+    `os.path.join(<variable>, ...)`. No socket option at all is the default server."""
+    for i, t in enumerate(opts):
+        flag, value = (t[:2], t[2:]) if t[:2] in ("-L", "-S") and len(t) > 2 else (t, opts[i + 1] if i + 1 < len(opts) else "")
+        if value.startswith("-"):
+            value = ""                               # `-L ""` / `-S ""` — the empty operand was split away
         if flag == "-L":
             return bool(value) and value != "default"
         if flag == "-S":
             if value.startswith("/"):
-                #: CL-2. Judged on the normalised path: `/tmp//tmux-1000/x` and `/var/../tmp/tmux-1000/x` are the
-                #: operator's directory too.
                 return not os.path.normpath(re.sub("/+", "/", value)).startswith("/tmp/tmux-")
             if value.startswith("$"):
                 return True
-            if value == "os.path.join" and i + 2 < len(rest):
-                return bool(IDENT.match(rest[i + 2]))
+            if value == "os.path.join" and i + 2 < len(opts):
+                return bool(IDENT.match(opts[i + 2]))
             return False
     return False
+
+
+def kill_verdicts(text):
+    """One verdict per kill word in `text` (CL2-2: a line may carry several), each judged against the tmux invocation
+    that ISSUES it — the nearest `tmux`/`…/tmux`/`it_tmux` before it that is not itself an option's operand (CL-1,
+    CL2-3). `it_tmux` is lib.sh's wrapper, which refuses outright when no section has been entered."""
+    tokens = [t.strip("<>") for t in SPLIT.split(text) if t.strip("<>")]
+    verdicts = []
+    for k, word in enumerate(tokens):
+        if word not in KILL_WORDS:
+            continue
+        cmd = next((i for i in range(k - 1, -1, -1)
+                    if (tokens[i] in ("tmux", "it_tmux") or tokens[i].endswith("/tmux")) and not is_operand(tokens, i)),
+                   None)
+        verdicts.append(cmd is not None and (tokens[cmd] == "it_tmux" or socket_is_private(tokens[cmd + 1:k])))
+    return verdicts
 
 
 def open_brackets(text):
@@ -1319,11 +1333,10 @@ for path in sys.argv[1:]:
             embedded.state = [joined, start, held_n + 1]
             return
         embedded.state = ["", 0, 0]
-        found = EMBED_KILL.search(joined)
-        if found:
-            report["kill_all"].append(f"{name}:{start} [{tag}] {joined.strip()[:130]}")
-            if not private_socket(found.group(0) + joined[found.end():]):
-                report["kill_unsafe"].append(f"{name}:{start} [{tag}] {joined.strip()[:130]}")
+        for found in EMBED_KILL.finditer(joined):          # CL2-2: every call-position kill, each judged alone
+            report["kill_all"].append(f"{name}:{start} [{tag}] {found.group(0).strip()[:130]}")
+            if not kill_verdicts(found.group(0))[-1]:
+                report["kill_unsafe"].append(f"{name}:{start} [{tag}] {found.group(0).strip()[:130]}")
     embedded.state = ["", 0, 0]
 
     for lineno, raw in enumerate(open(path, encoding="utf-8", errors="replace"), start=1):
@@ -1343,12 +1356,13 @@ for path in sys.argv[1:]:
             if pattern.search(code):
                 report["forbidden"].append(f"{where} [{label}] {code.strip()[:120]}")
         if KILL.search(code):
-            report["kill_all"].append(f"{where} {masked.strip()[:130]}")
-            # Safe iff it names a private server (`private_socket`: `-L <name>` other than `default`, or an absolute /
-            # variable-rooted `-S`), or goes through `it_tmux` — lib.sh's wrapper, which refuses outright when no
-            # section has been entered and so cannot reach the default server.
-            if not private_socket(plain) and not re.search(r"\bit_tmux\b", code):
-                report["kill_unsafe"].append(f"{where} {masked.strip()[:130]}")
+            # One site per kill word on the line (CL2-2); each is safe iff the tmux that issues it names a private server
+            # (`kill_verdicts`) or is `it_tmux`.
+            #: A line KILL matched but no kill word could be read from is a site too, judged unsafe (fail closed).
+            for safe in (kill_verdicts(plain) or [False]):
+                report["kill_all"].append(f"{where} {masked.strip()[:130]}")
+                if not safe:
+                    report["kill_unsafe"].append(f"{where} {masked.strip()[:130]}")
             embedded.state = ["", 0, 0]
         else:
             #: FB-119: inside a string on this line (a `python3 -c`/`bash -c` body, a multi-line quoted script).
