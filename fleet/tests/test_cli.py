@@ -2364,6 +2364,22 @@ class TestPaneGuard(CliCase):
                 self.assertEqual(EXIT_REFUSED, code, (out, err))
                 self.assertEqual(before, fleet.panes['dt-solo'])
 
+    def test_a_claude_pane_whose_box_cannot_be_located_is_indeterminate_attributed_or_not(self):
+        """RV-19. 0 and 11 both admit a send, so both assert an EMPTY box; an unlocatable box is 14, idle or
+        busy, whether or not a process is attributed to the pane."""
+        fleet = self.loaded()
+        border = '\u2500' * 40
+        transcript = '\n'.join(['\u276f earlier prompt', '', '\u25cf Done.', '', border,
+                                 '\u00b7 unrecognised box row', border, '  ? for shortcuts'])
+        caretless = '\n'.join(['\u25cf Done.', '', border, '\u00b7 unrecognised box row', border, '  ? for shortcuts'])
+        fleet.panes['dt-solo'] = transcript
+        fleet.tmux_live.add('dt-looseA'); fleet.panes['dt-looseA'] = transcript
+        fleet.tmux_live.add('dt-looseB'); fleet.panes['dt-looseB'] = caretless
+        for pane in ('dt-solo', 'dt-looseA', 'dt-looseB'):
+            with self.subTest(pane=pane):
+                code, out, err = fleet.run(['pane-guard', '--porcelain', '--pane', pane])
+                self.assertEqual(cli.PANE_INDETERMINATE, code, (out, err))
+
     def test_multiline_box_reports_all_queued_text(self):
         fleet = self.loaded()
         frame = (pathlib.Path(__file__).resolve().parents[1] /

@@ -129,6 +129,14 @@ class RuntimeTests(unittest.TestCase):
                 self.assertEqual(('busy' if busy else 'queued', 'Delete the release branch now'),
                                  (actual.state, actual.draft))
 
+    def test_an_unlocatable_box_under_a_transcript_caret_is_unknown_when_idle(self):
+        """RV-19a. Idle, like busy, needs the LOCATED caret: a caret echoed in the transcript above a box whose
+        caret row cannot be read is not an empty box."""
+        border = '\u2500' * 40
+        frame = '\n'.join(['\u276f earlier prompt', '', '\u25cf Done.', '', border,
+                            '\u00b7 unrecognised box row', border, '  \u23f5\u23f5 auto mode on']) + '\n'
+        self.assertEqual('unknown', observe('claude', frame).state)
+
     def test_dim_suggestions_are_marked_in_capture_and_never_drafts(self):
         from fleet.runtime import annotate_placeholders
         frames = (('claude', '❯\u00a0\x1b[2mfix RV-29 too\x1b[0m\n? for shortcuts\n'),

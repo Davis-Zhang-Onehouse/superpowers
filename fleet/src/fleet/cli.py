@@ -6141,12 +6141,13 @@ def _do_pane_guard(ctx: Ctx, parsed: Parsed) -> int:
             queued = layer.unsubmitted(text)
             code, detail = PANE_QUEUED_TEXT, (f"{pane} holds unsubmitted text in its input box "
                                               f"({queued!r}); a send would concatenate onto it")
-        elif layer.busy(text) and observe(layer.runtime, text).state == 'unknown':
-            #: D-85. `11` admits a send, so it asserts an EMPTY box, and only a located caret can say that. The
-            #: `agent and state == 'unknown'` branch above covers an attributed pane; this one answers for a
-            #: pane whose process is not attributed (state is None there), which read 11 with no caret found.
-            code, detail = PANE_INDETERMINATE, (f"{pane} is mid-turn but its input box could not be located; "
-                                                "inspect the pane before sending")
+        elif observe(layer.runtime, text).state == 'unknown':
+            #: D-85, RV-19. `0` and `11` both admit a send, so both assert an EMPTY box, and only a located input
+            #: box can say that. The `agent and state == 'unknown'` branch above covers an attributed pane; this
+            #: one answers for a pane whose process is not attributed (state is None there), which read 0 or 11
+            #: with no box found.
+            code, detail = PANE_INDETERMINATE, (f"{pane} looks like a {layer.runtime} pane but its input box "
+                                                "could not be located; inspect the pane before sending")
         elif layer.busy(text):
             code, detail = PANE_MID_TURN, (f"{pane} is mid-turn with an empty input box; "
                                            "fleet send can queue a message behind this turn")
