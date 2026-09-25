@@ -10,12 +10,14 @@ import io
 import json
 import os
 import pathlib
+import tempfile
 import unittest
 from unittest import mock
 
 from fleet import cli
 from fleet.runtime import LaunchSettings
 from tests.test_cli import FRESH_BASE_DIGITS, CliCase, hermetic_environment
+from tests.test_trust import _outside_git_root
 
 FIXTURES = pathlib.Path(__file__).resolve().parents[1] / "it" / "fixtures" / "runtime"
 TRUST_FRAME = (FIXTURES / "claude-trust-2.1.282.frame").read_text()
@@ -218,6 +220,14 @@ class TestDispatchReportsTheTrustScreen(CliCase):
         self.assertEqual(0, len(watch.calls))
 
     def test_the_trust_row_reads_the_real_config(self):
+        """RV-34. The fixture's slot and config are built under a temp root verified outside every git work tree
+        and every `.git` entry (RV-26's `_outside_git_root`, shared, not copied): a stray `/tmp/.git` made the
+        prediction for the slot UNKNOWN, correctly, and this test fail on the location rather than the product."""
+        root = str(_outside_git_root())       # raises SkipTest, naming the candidates, when none qualifies
+        with mock.patch.object(tempfile, "tempdir", root):
+            self._trust_row_reads_the_real_config()
+
+    def _trust_row_reads_the_real_config(self):
         fleet = self.loaded()
         slot = str(fleet.pool.slot_path("ws4"))
         config = fleet.tmp / "claude-config"
