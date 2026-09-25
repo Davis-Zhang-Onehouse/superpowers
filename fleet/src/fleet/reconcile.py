@@ -228,10 +228,12 @@ def reconcile(store, pool, sessions, instants_dir: Path, idle_after_s: int = 180
         return censuses[layer]
 
     records = list(store.all())
-    record_by_tmux = {}
-    for rec in records:
-        if rec.tmux and (not rec.tmux_socket or rec.tmux_socket == sessions.socket):
-            record_by_tmux.setdefault(rec.tmux, rec)
+    #: V23-T (RV-S1). ONE owner per (server, session name): a re-dispatch reuses `dt-<name>`, and every record
+    #: naming the session used to read it as live — the first by todo_id through pass 1, every other one through
+    #: pass 2 — so a harvested record read the new worker's pane and carried its pid. Losers read as if it were gone.
+    here = getattr(sessions, "socket", "") or ""
+    owners = session_owner(records, here)
+    record_by_tmux = {name: rec for (socket, name), rec in owners.items() if socket == here}
 
     live_sessions, _, _ = census(sessions)
     subjects, seen_records, accounted_slots = [], set(), set()
@@ -273,12 +275,13 @@ def reconcile(store, pool, sessions, instants_dir: Path, idle_after_s: int = 180
         #: was: the slot holder is process evidence and deliberately not re-asked, since `/proc` does not
         #: care which tmux server anybody is pointed at.
         layer = layer_of(rec.tmux_socket)
+        owns = not rec.tmux or owners.get((rec.tmux_socket or here, rec.tmux)) is rec
         _, process_names, session_names = census(layer)
         subject = _worker_subject(rec, pool, layer, instants_dir, idle_after_s,
-                                  live=layer.alive(rec.tmux, process_names=process_names,
-                                                   session_names=session_names), sess=None,
+                                  live=owns and layer.alive(rec.tmux, process_names=process_names,
+                                                            session_names=session_names), sess=None,
                                   live_sessions=live_sessions,
-                                  local_nested_sessions=live_sessions if layer is sessions else (),
+                                  local_nested_sessions=live_sessions if layer is sessions and owns else (),
                                   resolution_index=resolution_index)
         if subject.holds_slot:
             accounted_slots.add(rec.slot)
@@ -295,6 +298,33 @@ def reconcile(store, pool, sessions, instants_dir: Path, idle_after_s: int = 180
                                            name, process_names=process_names, session_names=session_names)))
 
     return subjects
+
+
+def _launch_rank(rec) -> tuple:
+    """The order in which records naming one session could have STARTED it: the latest `launched_at`, where a record
+    never launched (absent or unparsable: PENDING-LAUNCH) ranks as epoch 0, below every launch; a tie goes to the
+    unstamped record, then the todo id, so the answer never depends on store order."""
+    return (_stamp_s(rec.launched_at) or 0, not (rec.harvested_at or rec.closed_at), rec.todo_id)
+
+
+def session_owner(records, here: str) -> dict:
+    """`(server, session name) -> record` that owns the session, for every name some record claims. V23-T, D-1.
+
+    The owner is the record with the latest `launched_at`, and that is read off the writers rather than guessed:
+    every successful start stamps it on the record that started (dispatch after seed delivery, `revive` after its
+    verify, `resume` when it adopts a live session), and no start succeeds while a same-named session is live (tmux
+    refuses the duplicate; `revive` refuses an occupied pane). So of the records naming a live session, the latest
+    launch is the one whose pane it is. Stamps (harvested/closed) are what fleet did to a record LATER and decide
+    only a tie: in the live store every reused-name pair has BOTH records stamped. A record naming no server is keyed
+    on `here`, as the join already treats it."""
+    owners = {}
+    for rec in records:
+        if not rec.tmux:
+            continue
+        key = (rec.tmux_socket or here, rec.tmux)
+        if key not in owners or _launch_rank(rec) > _launch_rank(owners[key]):
+            owners[key] = rec
+    return owners
 
 
 # --- workers ---------------------------------------------------------------------------------------

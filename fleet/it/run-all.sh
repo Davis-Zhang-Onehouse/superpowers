@@ -102,6 +102,9 @@ RUNNERS=(
   "RH:bash $IT_ROOT/run-reviewhead.sh"
   # V23-I: a cheap real-CLI correction with a dependent row and visible history.
   "RETITLE:bash $IT_ROOT/run-retitle.sh"
+  # V23-T: one owner per reused `dt-<name>` on a real server — the aborted record reads no pid and `close` of it
+  # leaves the re-dispatch's session alive. About a minute (it waits out one minute boundary: SI-20).
+  "SO:bash $IT_ROOT/run-SO.sh"
 )
 
 # The sections added after this orchestrator was written. No prerequisites — checked per runner: each
