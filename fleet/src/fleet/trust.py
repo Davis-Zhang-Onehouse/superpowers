@@ -24,6 +24,8 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Callable, Mapping, Optional
 
+from fleet.runtime import PROMPT_TAIL_LINES
+
 TRUSTED, UNTRUSTED, UNKNOWN, NOT_PREDICTED = "trusted", "untrusted", "unknown", "not-predicted"
 
 #: V23-P. Only the codex screen text is recognised for codex; its trust store is not read (see `predict`).
@@ -193,39 +195,79 @@ def predict(runtime: str, config_dir, cwd, *, environ: Optional[Mapping] = None,
 
 
 def _rows(frame: str) -> list:
-    return _ANSI.sub("", frame).splitlines()
+    """The frame's rows with SGR stripped and tmux's bottom padding removed (`runtime._rendered`'s rule)."""
+    rows = _ANSI.sub("", frame).splitlines()
+    while rows and not rows[-1].strip():
+        rows.pop()
+    return rows
+
+
+def _window(rows: list) -> int:
+    return max(0, len(rows) - PROMPT_TAIL_LINES)
+
+
+def _dialog(rows: list, hints: tuple, option: str) -> "Optional[tuple[int, int]]":
+    """RV-24. `(start, hint)`: the span of the LIVE screen, or None when it is not showing. Its hint row (beginning
+    with one of `hints`) and its first-choice `option` row must both sit inside the dialog window — the last
+    `runtime.PROMPT_TAIL_LINES` rendered rows, where `runtime.observe` looks for a dialog — and the screen starts
+    after any earlier hint row. A screen quoted in history (a resumed pane redraws it above the live prompt) has
+    both rows above that window, so it is not the screen and cannot lend its path to one below it."""
+    def is_hint(row):
+        return row.lstrip().lower().startswith(hints)
+    window = _window(rows)
+    hint = next((i for i in range(len(rows) - 1, window - 1, -1) if is_hint(rows[i])), None)
+    if hint is None or not any(option in row for row in rows[window:hint]):
+        return None
+    earlier = _last(rows[:hint], is_hint)
+    return (0 if earlier is None else earlier + 1), hint
+
+
+def _last(rows: list, test) -> Optional[int]:
+    return next((i for i in range(len(rows) - 1, -1, -1) if test(rows[i])), None)
 
 
 def _claude_path(rows: list) -> Optional[str]:
-    if not any("one you trust" in row for row in rows):
-        return None
     #: The hint row, not merely the phrase: an answer that QUOTES the screen is not the screen.
-    if not any(row.lstrip().lower().startswith("enter to confirm") for row in rows):
+    span = _dialog(rows, ("enter to confirm",), "Yes, I trust this folder")
+    if span is None:
         return None
-    for i, row in enumerate(rows):
-        if row.strip() == "Accessing workspace:":
-            parts = []
-            for later in rows[i + 1:]:
-                if later.strip():
-                    parts.append(later.strip())
-                elif parts:
-                    break
-            #: No separator: the TUI wraps a long path mid-word (claude-trust-wrapped-2.1.282.frame).
-            return "".join(parts)
-    return ""
+    start, hint = span
+    screen = rows[start:hint]
+    if not any("one you trust" in row for row in screen):
+        return None
+    header = _last(screen, lambda row: row.strip() == "Accessing workspace:")
+    if header is None:
+        return ""
+    parts = []
+    for later in screen[header + 1:]:
+        if later.strip():
+            parts.append(later.strip())
+        elif parts:
+            break
+    #: No separator: the TUI wraps a long path mid-word (claude-trust-wrapped-2.1.282.frame).
+    return "".join(parts)
 
 
 def _codex_path(rows: list) -> Optional[str]:
-    if any("Trust this folder?" in row for row in rows):  # codex 0.156
-        for i, row in enumerate(rows):
-            if row.strip() == "Folder access":
-                return next((later.strip() for later in rows[i + 1:] if later.strip()), "")
-        return ""
-    if any("Do you trust the contents of this directory?" in row for row in rows):  # codex 0.154
-        for row in rows:
-            if "You are in " in row:
-                return row.split("You are in ", 1)[1].strip()
-        return ""
+    #: RV-24. Each screen only with its own hint and first option inside the dialog window: "enter continue · esc
+    #: quit" under "1. Trust and continue" on 0.156 (codex-trust-0156.frame), "Press enter to continue" under
+    #: "1. Yes, continue" on 0.154 (codex-trust.frame).
+    span = _dialog(rows, ("enter continue",), "Trust and continue")
+    if span is not None:
+        screen = rows[span[0]:span[1]]
+        if not any("Trust this folder?" in row for row in screen):
+            return None
+        header = _last(screen, lambda row: row.strip() == "Folder access")
+        if header is None:
+            return ""
+        return next((later.strip() for later in screen[header + 1:] if later.strip()), "")
+    span = _dialog(rows, ("press enter to continue",), "Yes, continue")
+    if span is not None:
+        screen = rows[span[0]:span[1]]
+        if not any("Do you trust the contents of this directory?" in row for row in screen):
+            return None
+        where = _last(screen, lambda row: "You are in " in row)
+        return "" if where is None else screen[where].split("You are in ", 1)[1].strip()
     return None
 
 
