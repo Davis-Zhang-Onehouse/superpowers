@@ -7,12 +7,14 @@ server or the tracked RESULTS.tsv. Each class names the defect it pins and the R
 """
 import tests  # noqa: F401 — installs the suite's host boundary when this module runs alone (FB-118)
 import atexit
+import json
 import os
 import pathlib
 import re
 import shutil
 import signal
 import subprocess
+import sys
 import tempfile
 import time
 import unittest
@@ -490,6 +492,87 @@ class StdinImmunity(unittest.TestCase):
         self.assertNotRegex(text, r"\nPY\nsort\)\"",
                             "J5 still runs `sort` as a separate command reading the runner's stdin")
         self.assertIn("<<'PY' | sort", text)
+
+
+class A8KillSiteAudit(unittest.TestCase):
+    """FB-119. run-A's A8a audit lexes each shell line and masks string literals before looking for
+    `tmux … kill-server`, so a kill issued from code INSIDE a string — a multi-line `python3 -c '…'`, a
+    `bash -c "…"`, a heredoc body — was neither counted nor judged. And it accepted only `tmux -L`/`it_tmux`,
+    so the safe absolute-path `tmux -S <dir>/tmux-<uid>/<sock>` that v23-l's guardian uses read as unsafe.
+    The audit is lifted out of run-A.sh exactly as run-A writes it, and run over fixture harness files."""
+
+    ANCHOR = 'cat > "$PY_DIR/a8audit.py" <<\'PY\'\n'
+
+    def setUp(self):
+        self.tmp = pathlib.Path(tempfile.mkdtemp(prefix="it-harness-a8-"))
+        self.addCleanup(shutil.rmtree, self.tmp, True)
+        src = (IT / "run-A.sh").read_text()
+        self.assertEqual(src.count(self.ANCHOR), 1, "the A8 audit block is not uniquely anchored in run-A.sh")
+        body = src.split(self.ANCHOR, 1)[1].split("\nPY\n", 1)[0]
+        (self.tmp / "a8audit.py").write_text(body + "\n")
+
+    def audit(self, **files):
+        paths = []
+        for name, text in files.items():
+            (self.tmp / name).write_text(text)
+            paths.append(str(self.tmp / name))
+        done = subprocess.run([sys.executable, str(self.tmp / "a8audit.py"), *paths], capture_output=True, text=True)
+        self.assertEqual(done.returncode, 0, done.stderr)
+        counts = json.loads(next(l for l in done.stdout.splitlines() if l.startswith("COUNTS "))[7:])
+        return counts, done.stdout
+
+    V23L_GUARDIAN = (
+        "it_guard_server() {\n"
+        "  python3 -c '\n"
+        "import os, subprocess, sys\n"
+        "sock, directory = sys.argv[1:3]\n"
+        "subprocess.run([\"tmux\", \"-S\", os.path.join(directory, \"tmux-\" + str(os.getuid()), sock), \"kill-server\"],\n"
+        "               stdin=subprocess.DEVNULL)\n"
+        "  ' it-guardian \"$sock\" \"$dir\" &\n"
+        "}\n")
+
+    def test_a_python_embedded_absolute_S_kill_is_counted_and_safe(self):
+        counts, out = self.audit(**{"run-X.sh": self.V23L_GUARDIAN})
+        self.assertEqual(counts["kill_all"], 1, out)
+        self.assertEqual(counts["kill_unsafe"], 0, out)
+
+    def test_an_embedded_default_socket_kill_is_flagged(self):
+        for label, text in {
+            "python -c list": "python3 -c 'import subprocess; subprocess.run([\"tmux\", \"kill-server\"])'\n",
+            "bash -c string": "bash -c \"tmux kill-server\"\n",
+            "heredoc body": "python3 - <<'PY'\nimport subprocess\nsubprocess.run(['tmux', 'kill-session', '-t', 'x'])\nPY\n",
+            "-L default": "tmux -L default kill-server\n",
+        }.items():
+            with self.subTest(label):
+                counts, out = self.audit(**{"run-X.sh": text})
+                self.assertEqual((counts["kill_all"], counts["kill_unsafe"]), (1, 1), out)
+
+    def test_S_is_accepted_only_with_an_absolute_private_path(self):
+        for label, (text, unsafe) in {
+            "absolute literal": ("tmux -S /var/tmp/it/sock kill-server\n", 0),
+            "variable-rooted": ("tmux -S \"$DECOY_DIR/tmux-1000/d\" kill-server\n", 0),
+            "relative literal": ("tmux -S sock kill-server\n", 1),
+            "the operator's directory": ("tmux -S /tmp/tmux-1000/fleet-davis kill-server\n", 1),
+            "python relative": ("python3 -c 'import subprocess; subprocess.run([\"tmux\", \"-S\", \"sock\", \"kill-server\"])'\n", 1),
+        }.items():
+            with self.subTest(label):
+                counts, out = self.audit(**{"run-X.sh": text})
+                self.assertEqual((counts["kill_all"], counts["kill_unsafe"]), (1, unsafe), out)
+
+    def test_prose_and_the_audits_own_patterns_are_not_sites(self):
+        text = ("# the guardian runs `tmux kill-server` on its socket\n"
+                "echo 'never a bare tmux kill-server here'\n"
+                "python3 - <<'PY'\nKILL = re.compile(r\"tmux[^;&|]*kill-(server|session)\")\n"
+                "# a comment: tmux kill-server\nPY\n")
+        counts, out = self.audit(**{"run-X.sh": text})
+        self.assertEqual(counts["kill_all"], 0, out)
+
+    def test_the_real_harness_has_no_unsafe_kill_site(self):
+        files = [str(IT / "lib.sh")] + sorted(str(p) for p in IT.glob("run-*.sh"))
+        done = subprocess.run([sys.executable, str(self.tmp / "a8audit.py"), *files], capture_output=True, text=True)
+        counts = json.loads(next(l for l in done.stdout.splitlines() if l.startswith("COUNTS "))[7:])
+        self.assertEqual(counts["kill_unsafe"], 0, done.stdout)
+        self.assertGreater(counts["kill_all"], 0, done.stdout)
 
 
 class ServerGuardian(unittest.TestCase):
