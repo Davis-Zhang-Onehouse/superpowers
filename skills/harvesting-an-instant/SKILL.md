@@ -59,7 +59,8 @@ kill, or a detached orphan (parent init, its own session, no terminal, started a
 outside it) whose environment carries that worker's `FLEET_INSTANT` and whose argv names that instant — and print a
 `reaped` row per pid. Anything else is never signalled:
 `harvest` still refuses and lists it, and when a holder names the instant but is not safe to end (a live parent, a
-child outside it, a server that predates the worker, another instant's environment) the refusal prints the exact `kill -TERM …` line with the
+child outside it, a server that predates the worker, a terminal multiplexer, another instant's environment) the
+refusal prints the exact `kill -TERM …` line with the
 reason. Run it yourself only if the process is yours to end; `--dry-run` shows `would-reap` rows first.
 
 **A tmux server can outlive its last session.** After `close` of the last session on the root's socket
