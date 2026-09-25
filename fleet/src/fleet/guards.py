@@ -341,7 +341,7 @@ def blocking_compactions(ctx) -> list:
     """
     names = set()
     for subject in _workers(ctx, by_effort=False):
-        if _optype_of(subject) == "compact" and subject.state != COMPLETE:
+        if _optype_of(subject) == "compact" and subject.state not in (COMPLETE, HARVESTED):
             names.add(_instant_name(subject) or subject.identity)
     #: The disk. Read directly rather than by adding a fourth source to `reconcile`: an on-disk instant holds
     #: no slot, so `board` — "every subject HOLDING A SLOT" (FD-4) — would not show it anyway, and widening
