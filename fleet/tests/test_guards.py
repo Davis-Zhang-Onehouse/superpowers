@@ -384,6 +384,29 @@ class TestTheCap(GuardCase):
             self.assertEqual("COMPLETE", subject.state)
             self.assertTrue(WipCap().evaluate(fleet.ctx()).allowed)
 
+    def test_complete_folder_with_observed_watcher_stays_active(self):
+        fleet = self.fleet()
+        fleet.worker("observedComplete", state="complete", slot="ws1", pane=WATCHED_PANE,
+                     phase="awaiting-ci")
+        subject = fleet.subjects()[0]
+        self.assertEqual("COMPLETE-BUT-WORKING", subject.state)
+        self.assertIn("watcher is alive", board([subject]))
+        self.assertFalse(WipCap().evaluate(fleet.ctx()).allowed)
+
+    def test_complete_folder_with_busy_codex_pane_stays_active(self):
+        fleet = self.fleet()
+        frame = (pathlib.Path(__file__).resolve().parents[1] / "it" / "fixtures" /
+                 "runtime" / "codex-busy.frame").read_text()
+        fleet.worker("codexComplete", state="complete", slot="ws1", pane=frame)
+        record = fleet.store.all()[0]
+        record.runtime = "codex"
+        fleet.store.write(record)
+        fleet.procs[0].runtime = "codex"
+        subject = fleet.subjects()[0]
+        self.assertEqual("COMPLETE-BUT-WORKING", subject.state)
+        self.assertNotIn("the work is over", board([subject]))
+        self.assertFalse(WipCap().evaluate(fleet.ctx()).allowed)
+
     def test_wip_cap_defaults_to_one(self):
         # MD-6. The default is 1, and there IS an override channel — otherwise "default" is a fiction.
         self.assertEqual(DEFAULT_WIP_CAP, 1)
