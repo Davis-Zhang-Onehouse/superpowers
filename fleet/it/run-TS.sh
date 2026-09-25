@@ -7,9 +7,9 @@
 # argv is right while the pane waits on a human.
 #
 # The runner owns everything the real binary reads:
-#  - a SCRATCH config root outside any git checkout ($TS_ROOT, mktemp under /tmp). The owners map sends both fixture
-#    slots to $TS_ROOT/.claude, whose .claude.json this runner writes: onboarding done, and ONE trust record (the
-#    control slot). The operator's Claude config is never read or written, and nothing here answers the trust screen;
+#  - a SCRATCH config root outside any git checkout ($TS_ROOT, mktemp under the parent `ts_scratch_parent` chooses).
+#    The owners map sends both fixture slots to $TS_ROOT/.claude, whose .claude.json this runner writes:
+#    onboarding done, and ONE trust record (the control slot). The operator's Claude config is never read or written, and nothing here answers the trust screen;
 #  - a private tmux server (`it_section`) and a private store.
 # The worker is never logged in, so no model is called: the trusted control reaches the prompt and prints "Not logged
 # in", and the untrusted case never gets past the screen.
@@ -43,7 +43,38 @@ if [ ! -x "$REAL_CLAUDE" ]; then
   echo "§TS skipped"; exit 0
 fi
 
-TS_ROOT="$(mktemp -d /tmp/fleet-it-ts.XXXXXX)" || exit 2
+#: RV-33. The scratch parent must sit under NO `.git` entry. fleet's trust walk and Claude 2.1.282's root finder both
+#: treat any `.git` (a dir or a file, even an empty one) on a directory or an ancestor as a git root, so a stray
+#: `/tmp/.git` made both predictions UNKNOWN and failed TS1c/TS2b on the environment, not the product.
+#: `ts_scratch_parent <candidate>...` prints the first candidate that exists, has no `.git` entry on itself or any
+#: ancestor, and that `git -C` does not place in a work tree; else lists each rejected candidate and returns 1.
+ts_scratch_parent() {
+  local cand d rejected=""
+  for cand in "$@"; do
+    [ -n "$cand" ] || continue
+    d="$(cd "$cand" 2>/dev/null && pwd -P)" || { rejected="$rejected $cand (missing);"; continue; }
+    local a="$d" hit=""
+    while :; do
+      [ -e "$a/.git" ] && { hit="$a/.git"; break; }
+      [ "$a" = / ] && break
+      a="$(dirname "$a")"
+    done
+    if [ -n "$hit" ]; then rejected="$rejected $cand ($hit);"; continue; fi
+    if env -u GIT_DIR -u GIT_WORK_TREE -u GIT_COMMON_DIR -u GIT_CEILING_DIRECTORIES \
+         git -C "$d" rev-parse --show-toplevel >/dev/null 2>&1; then
+      rejected="$rejected $cand (inside a git work tree);"; continue
+    fi
+    printf '%s\n' "$d"; return 0
+  done
+  printf '%s\n' "${rejected# }"
+  return 1
+}
+if ! TS_PARENT="$(ts_scratch_parent "${TS_TMP_PARENT:-}" /tmp /var/tmp)"; then
+  it_skip TS1a "" "SETUP: every candidate scratch parent sits under a .git entry ($TS_PARENT)"
+  it_assert_isolation TS-leave
+  echo "§TS skipped"; exit 0
+fi
+TS_ROOT="$(mktemp -d "$TS_PARENT/fleet-it-ts.XXXXXX")" || exit 2
 TODOS=()
 cleanup_TS() {
   for todo in "${TODOS[@]}"; do
@@ -52,7 +83,7 @@ cleanup_TS() {
   done
   it_cleanup_tmux
   it_tmux kill-server 2>/dev/null
-  case "$TS_ROOT" in /tmp/fleet-it-ts.*) rm -rf "$TS_ROOT" ;; esac
+  case "$TS_ROOT" in "$TS_PARENT"/fleet-it-ts.*) rm -rf "$TS_ROOT" ;; esac
 }
 trap cleanup_TS EXIT
 
