@@ -217,6 +217,11 @@ def send(home, sessions, record, text, *, timeout_s=10.0, clock=time.monotonic,
             sessions.submit(record.tmux)
             deadline = clock() + timeout_s
             retried = False
+            #: RV-23. The outcome LABEL (queued-behind-turn / submitted-mid-turn vs submitted) is the pane's
+            #: state at ADMISSION (`before`), not at Enter: a turn that ends, or starts, in the gap between the
+            #: two is labelled by what was observed when the send was admitted. Delivery itself is decided
+            #: below from the box emptying; only the label can lag. Re-observing before Enter would move the
+            #: gap, not close it.
             while True:
                 observation = sessions.observe(record.tmux)
                 if observation.state in ('busy', 'idle') and not observation.draft:
