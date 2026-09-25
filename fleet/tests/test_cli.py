@@ -48,7 +48,7 @@ from fleet.codex_skills import CORE_SKILLS, Visibility
 from fleet import cli
 from fleet import messaging
 from fleet import render
-from tests import FLEET_ENV, hermetic_environment
+from tests import CLAUDE_AGENTS_STUB, FLEET_ENV, hermetic_environment
 from fleet import seedcheck
 from fleet.harvest import NO_ISSUES_FILED, REGISTER_NAME, UNREADABLE, VACUOUS, Harvest
 from fleet.identity import InstantName, resolve
@@ -610,6 +610,9 @@ class Fleet:
         #: time, so without this the suite measured whatever the person running it had exported — 33 cases
         #: passed on an ambient `FLEET_HOME` and failed inside `release-verify`, which runs with it unset.
         with hermetic_environment(self.instants, home=self.tmp):
+            #: FB-118. `peers` asks `claude agents --json` who is running; in this fixture, nobody. Unset, it
+            #: was the box's real claude (four execs per suite run at 74bea441).
+            os.environ["FLEET_CLAUDE_BIN"] = CLAUDE_AGENTS_STUB
             # The suite may itself run from a checkout nested under a real instant. Keep the fixture's
             # default cwd in its private tree. A case that already chdir'd INTO the private tree (the relative
             # --instant cases, and the cwd cases via `working_directory`) keeps its own cwd. Only a cwd OUTSIDE

@@ -37,7 +37,7 @@ from fleet import EXIT_CODES
 from fleet.runtime import LaunchSettings
 from fleet import seedcheck
 from fleet import cli
-from tests import hermetic_environment
+from tests import CLAUDE_AGENTS_STUB, hermetic_environment
 from fleet.guards import Context, evaluate_all, guards_for
 from fleet.harvest import Harvest
 from fleet.layout import validate as layout_validate
@@ -234,6 +234,9 @@ class Fleet:
         #: time, so without this the suite measured whatever the person running it had exported — 33 cases
         #: passed on an ambient `FLEET_HOME` and failed inside `release-verify`, which runs with it unset.
         with hermetic_environment(self.instants, home=self.tmp):
+            #: FB-118. `peers` asks `claude agents --json` who is running; in this fixture, nobody. Unset, it
+            #: was the box's real claude (four execs per suite run at 74bea441).
+            os.environ["FLEET_CLAUDE_BIN"] = CLAUDE_AGENTS_STUB
             # V23-O RV-14. The verb runs from the fixture's own tree, as `tests.test_cli.Fleet.run` does, so the
             # runner's checkout location cannot become "the caller's instant". A cwd already inside the tree is
             # the case's own anchor for a relative operand and is kept (RV-39).

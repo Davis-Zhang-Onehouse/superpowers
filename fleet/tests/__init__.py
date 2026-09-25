@@ -8,9 +8,15 @@ and nothing made them agree: 33 tests passed only because the operator's shell h
 
 A test that passes because of what the person running it exported is not measuring the product.
 """
+import atexit
 import contextlib
 import os
 import pathlib
+import shutil
+import subprocess
+import sys
+import tempfile
+import unittest
 from unittest import mock
 
 #: Every variable `cli` reads. Cleared as a SET rather than one at a time: the failure this file exists
@@ -45,6 +51,11 @@ def hermetic_environment(instants, home=None):
         #: inventing one for them would be this file's own failure in the other direction.
         if home is not None:
             os.environ["HOME"] = str(home)
+        #: FB-118. Cleared is not the same as absent: `peers` falls through an unset FLEET_CLAUDE_BIN to the box's
+        #: real claude, and `resolve_settings` to PATH. Inside a fixture both name the refusing stub; a case
+        #: that needs a runtime to answer sets its own stub over this.
+        for name in RUNTIME_BINS:
+            os.environ[name] = NO_REAL_RUNTIME
         yield
 
 
@@ -162,3 +173,219 @@ def _install_live_fleet_guard():
 
 
 _install_live_fleet_guard()
+
+
+# --- the host boundary: no real runtime, no tmux server the suite did not create (FB-118) ---------------
+#
+# Measured at 74bea441 from a worker pane: every suite run exec'd the box's real `claude agents --json` four
+# times (peers, with FLEET_CLAUDE_BIN cleared and nothing in its place), answered two bare `tmux` calls from
+# the pane's `$TMUX` server (fleet-davis), sent seventeen `tmux -L fleet-davis` calls from tests that inherited
+# the pane's FLEET_TMUX_SOCKET, and created the suite's own servers in /tmp/tmux-<uid> beside the live ones.
+# Read-only today; a test that can read the live server can one day write to it.
+#
+# So, for the whole process and everything it starts, before any test runs:
+#   * the caller's tmux handles are gone (`TMUX`, `TMUX_PANE`, `FLEET_TMUX_SOCKET`) and `TMUX_TMPDIR` is a
+#     directory of this suite, so a bare or `-L` tmux can only name a server that lives here;
+#   * FLEET_CLAUDE_BIN / FLEET_CODEX_BIN name `fixtures/bin/no-real-runtime`, which runs nothing;
+#   * THE TRIPWIRE: an audit hook refuses an in-process exec of a real runtime binary or of a tmux call aimed at
+#     a FOREIGN server (the caller's tmux directory or `$TMUX` server), `fixtures/tmux-tripwire/tmux` — first on
+#     PATH — refuses the same for child processes, and both, like the stub, append to one log. A test whose run
+#     grew that log FAILS, even if the product swallowed the refusal. `expect_tripwire()` is how a case that
+#     trips it on purpose takes its records back.
+#
+# A child that inherits this environment reuses it (the log, the foreign set) instead of minting its own, so a
+# suite run from inside the suite still charges the right process.
+
+
+class HostReached(LiveFleetReached):
+    """A test exec'd a real runtime, or a tmux call aimed at a server the suite did not create."""
+
+
+_FIXTURES = pathlib.Path(__file__).resolve().parent / "fixtures"
+NO_REAL_RUNTIME = str(_FIXTURES / "bin" / "no-real-runtime")
+#: A claude that answers `claude agents --json` with no sessions — for a fixture whose verbs reach `peers`.
+CLAUDE_AGENTS_STUB = str(_FIXTURES / "bin" / "claude-agents-stub")
+_TMUX_SHIM_DIR = str(_FIXTURES / "tmux-tripwire")
+RUNTIME_BINS = ("FLEET_CLAUDE_BIN", "FLEET_CODEX_BIN")
+TMUX_HANDLES = ("TMUX", "TMUX_PANE", "FLEET_TMUX_SOCKET")
+_OWNER = "FLEET_SUITE_TRIPWIRE" not in os.environ
+
+
+def _ambient_path():
+    return os.pathsep.join(p for p in os.environ.get("PATH", "").split(os.pathsep) if p != _TMUX_SHIM_DIR)
+
+
+def _real_runtimes(path):
+    """Every binary a real claude or codex resolves to on this box, resolved: PATH's, peers' hard-coded default,
+    and whatever the caller exported. Captured before this module replaces any of them."""
+    from fleet import peers
+
+    found = {shutil.which("claude", path=path), shutil.which("codex", path=path), peers.DEFAULT_CLAUDE_BIN,
+             os.environ.get("REAL_CLAUDE")}
+    found |= {os.environ.get(name) for name in RUNTIME_BINS}
+    return frozenset(os.path.realpath(p) for p in found if p and p != NO_REAL_RUNTIME and os.path.exists(p))
+
+
+if _OWNER:
+    AMBIENT_PATH = _ambient_path()
+    REAL_TMUX = shutil.which("tmux", path=AMBIENT_PATH) or "/usr/bin/tmux"
+    #: The operator's servers: the tmux directory the caller's shell resolves, and the `$TMUX` server if any.
+    FOREIGN_TMUX = tuple(dict.fromkeys(filter(None, (
+        str(pathlib.Path(os.environ.get("TMUX_TMPDIR") or "/tmp").resolve() / f"tmux-{os.getuid()}"),
+        os.environ.get("TMUX", "").split(",")[0]))))
+    REAL_RUNTIMES = _real_runtimes(AMBIENT_PATH)
+    SUITE_DIR = tempfile.mkdtemp(prefix="fleet-suite-")
+    SUITE_TMUX_TMPDIR = os.path.join(SUITE_DIR, "tmux")
+    os.mkdir(SUITE_TMUX_TMPDIR)
+    TRIPWIRE_LOG = os.path.join(SUITE_DIR, "tripwire.log")
+    open(TRIPWIRE_LOG, "a").close()
+    os.environ.update(FLEET_SUITE_TRIPWIRE=TRIPWIRE_LOG, FLEET_SUITE_FOREIGN_TMUX=":".join(FOREIGN_TMUX),
+                      FLEET_SUITE_REAL_TMUX=REAL_TMUX, FLEET_SUITE_AMBIENT_PATH=AMBIENT_PATH,
+                      FLEET_SUITE_REAL_RUNTIMES=":".join(sorted(REAL_RUNTIMES)))
+else:
+    AMBIENT_PATH = os.environ.get("FLEET_SUITE_AMBIENT_PATH", _ambient_path())
+    REAL_TMUX = os.environ.get("FLEET_SUITE_REAL_TMUX") or "/usr/bin/tmux"
+    FOREIGN_TMUX = tuple(filter(None, os.environ.get("FLEET_SUITE_FOREIGN_TMUX", "").split(":")))
+    REAL_RUNTIMES = frozenset(filter(None, os.environ.get("FLEET_SUITE_REAL_RUNTIMES", "").split(":")))
+    TRIPWIRE_LOG = os.environ["FLEET_SUITE_TRIPWIRE"]
+    SUITE_TMUX_TMPDIR = os.environ.get("TMUX_TMPDIR") or os.path.join(os.path.dirname(TRIPWIRE_LOG), "tmux")
+
+for _name in TMUX_HANDLES:
+    os.environ.pop(_name, None)
+os.environ["TMUX_TMPDIR"] = SUITE_TMUX_TMPDIR
+for _name in RUNTIME_BINS:
+    os.environ[_name] = NO_REAL_RUNTIME
+if not os.environ.get("PATH", "").startswith(_TMUX_SHIM_DIR + os.pathsep):
+    os.environ["PATH"] = _TMUX_SHIM_DIR + os.pathsep + AMBIENT_PATH
+
+
+def tmux_server(argv, env):
+    """The socket a tmux argv reaches under `env`, resolved the way tmux resolves it."""
+    server = name = None
+    args = list(argv[1:])
+    while args:
+        arg = args.pop(0)
+        if arg in ("-S", "-L", "-c", "-f", "-T"):
+            value = args.pop(0) if args else ""
+            server = value if arg == "-S" else server
+            name = value if arg == "-L" else name
+        elif arg.startswith("-S") and len(arg) > 2:
+            server = arg[2:]
+        elif arg.startswith("-L") and len(arg) > 2:
+            name = arg[2:]
+        elif arg == "--" or not arg.startswith("-"):
+            break
+    if server is None:
+        base = pathlib.Path(env.get("TMUX_TMPDIR") or "/tmp") / f"tmux-{os.getuid()}"
+        if name is not None:
+            server = base / name
+        elif env.get("TMUX"):
+            server = env["TMUX"].split(",")[0]
+        else:
+            server = base / "default"
+    return os.path.realpath(server)
+
+
+def _is_foreign(server):
+    for foreign in FOREIGN_TMUX:
+        foreign = os.path.realpath(foreign)
+        if server == foreign or os.path.dirname(server) == foreign:
+            return True
+    return False
+
+
+def _trip(kind, what, argv):
+    with open(TRIPWIRE_LOG, "a") as log:
+        log.write(f"{kind}\t{what}\t{' '.join(map(str, argv))}\n")
+    raise HostReached(f"this test exec'd {' '.join(map(str, argv))!r}: {what}. The hermetic suite reaches neither a "
+                      f"real claude/codex nor a tmux server it did not create (FB-118). Give the test its own "
+                      f"stub (tests/fixtures/bin/claude-agents-stub) or its own server (-S <tmp path>).")
+
+
+def _exec_guard(event, args):
+    if event != "subprocess.Popen":
+        return
+    executable, argv, _cwd, env = args
+    if isinstance(argv, (str, bytes)):
+        argv = [argv]
+    argv = [os.fsdecode(a) for a in argv] if argv else []
+    first = os.fsdecode(executable) if executable else (argv[0] if argv else "")
+    if not first:
+        return
+    env = os.environ if env is None else {os.fsdecode(k): os.fsdecode(v) for k, v in env.items()}
+    path = first if os.sep in first else shutil.which(first, path=env.get("PATH"))
+    resolved = os.path.realpath(path) if path else None
+    if resolved in REAL_RUNTIMES:
+        _trip("runtime", f"{resolved} is the box's real runtime", argv)
+    if os.path.basename(first) == "tmux" or (resolved and resolved == os.path.realpath(REAL_TMUX)):
+        server = tmux_server(argv or [first], env)
+        if _is_foreign(server):
+            _trip("tmux", f"it would reach {server}, a server this suite did not create", argv)
+
+
+def _log_size():
+    try:
+        return os.path.getsize(TRIPWIRE_LOG)
+    except OSError:
+        return 0
+
+
+def _read_from(offset):
+    try:
+        with open(TRIPWIRE_LOG) as log:
+            log.seek(offset)
+            return [line.rstrip("\n") for line in log if line.strip()]
+    except OSError:
+        return []
+
+
+@contextlib.contextmanager
+def expect_tripwire():
+    """For a case that trips the tripwire ON PURPOSE: yields the list of records written inside the block,
+    and takes them back off the log so the case is not failed for them."""
+    offset, seen = _log_size(), []
+    try:
+        yield seen
+    finally:
+        seen.extend(_read_from(offset))
+        with open(TRIPWIRE_LOG, "r+") as log:
+            log.truncate(offset)
+
+
+def _install_host_tripwire():
+    if getattr(unittest.TestCase.run, "host_tripwire", False):
+        return
+    sys.addaudithook(_exec_guard)
+    real_run = unittest.TestCase.run
+
+    def run(self, result=None):
+        offset = _log_size()
+        outcome = real_run(self, result)
+        tripped = _read_from(offset)
+        if tripped:
+            #: Taken back off the log once charged, so the NEXT test starts clean and nothing is charged twice.
+            with open(TRIPWIRE_LOG, "r+") as log:
+                log.truncate(offset)
+            target = result if result is not None else outcome
+            try:
+                raise HostReached("the host tripwire recorded, during this test: " + " | ".join(tripped))
+            except HostReached:
+                if target is not None:
+                    target.addFailure(self, sys.exc_info())
+        return outcome
+
+    run.host_tripwire = True
+    unittest.TestCase.run = run
+
+
+def _remove_suite_dir():
+    """The suite's own tmux servers, then its directory. Only the process that made the directory does this."""
+    sockets = pathlib.Path(SUITE_TMUX_TMPDIR) / f"tmux-{os.getuid()}"
+    for sock in (sockets.iterdir() if sockets.is_dir() else ()):
+        subprocess.run([REAL_TMUX, "-S", str(sock), "kill-server"], capture_output=True)
+    shutil.rmtree(SUITE_DIR, ignore_errors=True)
+
+
+_install_host_tripwire()
+if _OWNER:
+    atexit.register(_remove_suite_dir)

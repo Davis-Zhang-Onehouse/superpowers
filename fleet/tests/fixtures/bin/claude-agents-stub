@@ -1,0 +1,9 @@
+#!/usr/bin/env bash
+# FB-118. A claude that knows one command: `claude agents --json`, answered with no sessions. For a test whose
+# verb reaches `peers.load_peers` and does not care who is running on the box. Anything else is refused
+# exactly as `no-real-runtime` refuses it.
+if [ "$*" = "agents --json" ]; then
+  echo '[]'
+  exit 0
+fi
+exec "$(dirname "$0")/no-real-runtime" "$@"
