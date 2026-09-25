@@ -69,6 +69,7 @@ VIEWS = ("all", "board", "leases", "roadmap", "releases")
 STATE_STYLE = {
     "RUNNING": (GREEN, "●"), "IDLE": (YELLOW, "○"), "BLOCKED": (RED, "!"),
     "PARKED": (YELLOW, "?"), "AWAITING-CI": (BLUE, "⋯"), "COMPLETE": (DIM, "✓"),
+    "HARVESTED": (DIM, "✓"), "CLOSED": (DIM, "✓"),
     "DEAD": (RED, "✗"), "UNREACHABLE": (YELLOW, "~"), "PENDING-LAUNCH": (DIM, "·"),
     "UNKNOWN-SESSION": (DIM, "·"), "STALE-LEASE": (YELLOW, "~"),
 }

@@ -47,7 +47,8 @@ DEFAULT_WIP_CAP = 1
 #: The only states the cap excludes. Everything else counts — including `DEAD` and `PENDING-LAUNCH`,
 #: deliberately: a stopped worker's half-finished tree is exactly what a second dispatch collides with,
 #: and inventing an exemption for it is the silent slot leak this direction exists to avoid.
-#: A stamped harvest or close is an explicit terminal act, even after its folder is removed.
+#: A harvested record is terminal once no live work holds it. A closed record is terminal only when
+#: its folder is gone; closing an unfinished session leaves DEAD work counted until recovery.
 CAP_EXCLUDED_STATES = (AWAITING_CI, COMPLETE, HARVESTED, CLOSED)
 
 #: Verbs no admission rule is evaluated for. `OI-2`/`MD-9.2`/`FD-9`, and the reason is recorded below
@@ -334,7 +335,8 @@ def blocking_compactions(ctx) -> list:
     unrepairable. A declared direction that the implementation can violate is worse than an undeclared one.
 
     Two vocabularies, deliberately not unified. A recorded subject carries a RECONCILE state (`RUNNING`,
-    `DEAD`, `AWAITING-CI`, `COMPLETE`) and is blocking while it is not `COMPLETE`; a folder carries an
+    `DEAD`, `AWAITING-CI`, `COMPLETE`, `HARVESTED`) and is blocking while it is neither `COMPLETE` nor
+    `HARVESTED`; a folder carries an
     INSTANT state (`inflight`, `complete`, `abort`) and is blocking only while `inflight`. Collapsing them
     into one word is how `OI-17` happened — a hardcoded value of a parsed field, after which every correct
     compaction rendered `(missing)`.
