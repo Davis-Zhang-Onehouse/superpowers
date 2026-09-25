@@ -18,6 +18,7 @@ SEND_SCHEMA_VERSION = 1
 #: wrote nothing into the pane, and the record is a record of what was written there.
 SUBMITTED = "submitted"
 QUEUED_BEHIND_TURN = "queued-behind-turn"
+SUBMITTED_MID_TURN = "submitted-mid-turn"
 INSERTED_NOT_SUBMITTED = "inserted-not-submitted"
 UNCERTAIN_AFTER_INSERTION = "uncertain-after-insertion"
 UNCERTAIN_AFTER_ENTER = "uncertain-after-enter"
@@ -219,7 +220,7 @@ def send(home, sessions, record, text, *, timeout_s=10.0, clock=time.monotonic,
             while True:
                 observation = sessions.observe(record.tmux)
                 if observation.state in ('busy', 'idle') and not observation.draft:
-                    outcome = QUEUED_BEHIND_TURN if before.state == 'busy' else SUBMITTED
+                    outcome = (QUEUED_BEHIND_TURN if runtime == 'claude' else SUBMITTED_MID_TURN) if before.state == 'busy' else SUBMITTED
                     break
                 if observation.state == 'dialog':
                     outcome = UNCERTAIN_AFTER_ENTER
@@ -227,6 +228,16 @@ def send(home, sessions, record, text, *, timeout_s=10.0, clock=time.monotonic,
                 if clock() >= deadline:
                     if observation.draft and confirms(runtime, observation.draft, text):
                         if not retried:
+                            # The first Enter may have landed during the wait. Check the pane
+                            # again immediately before retrying; a dialog or another draft
+                            # must never receive our Enter.
+                            latest = sessions.observe(record.tmux)
+                            if latest.state in ('busy', 'idle') and not latest.draft:
+                                outcome = (QUEUED_BEHIND_TURN if runtime == 'claude' else SUBMITTED_MID_TURN) if before.state == 'busy' else SUBMITTED
+                                break
+                            if latest.state not in ('queued', 'busy') or not confirms(runtime, latest.draft, text):
+                                outcome = UNCERTAIN_AFTER_ENTER
+                                raise FleetError('Delivery uncertain after Enter; retry refused because the input changed')
                             sessions.submit(record.tmux)
                             retried = True
                             deadline = clock() + timeout_s

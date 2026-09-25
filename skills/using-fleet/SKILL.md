@@ -233,11 +233,13 @@ fleet send --id "$ID" --message-file "$MESSAGE_FILE"
 ```
 
 The command locks that pane, checks its ownership and empty input (idle or mid-turn), pastes once,
-observes the draft, sends Enter and verifies that the input box empties. An empty busy pane queues
-the message behind its current turn and reports `queued-behind-turn`; idle delivery reports `submitted`.
+observes the draft, sends Enter and verifies that the input box empties. Claude Code
+shows a queued-message display after a mid-turn Enter and reports `queued-behind-turn`. Codex reports
+`submitted-mid-turn` until its queue or steering semantics are measured. Idle delivery reports `submitted`.
 Queued text, an operator dialog and an indeterminate pane refuse. If the confirmed inserted draft
-remains after Enter, the command retries Enter once, then reports `inserted-not-submitted` if it still
-remains. If delivery is uncertain, inspect the pane before another send. Never clear another draft.
+remains after Enter, the command re-observes immediately before retrying Enter once; a dialog,
+foreign draft or unreadable state refuses that retry. A one-round-trip race between observation and Enter
+remains. It reports `inserted-not-submitted` if the same draft still remains. If delivery is uncertain, inspect the pane before another send. Never clear another draft.
 
 **Multi-line messages are delivered whole (`FB-27`).** Both TUIs replace a large paste with a count summary —
 Claude Code draws `[Pasted text #N +M lines]` for four or more lines, codex `[Pasted Content C chars]` above
@@ -249,7 +251,7 @@ single-line `[Pasted text #N]`, which states no length at all), and the record s
 
 **Every send that reached the pane is recorded (`B13`)** in the worker's `.fleet/sends.jsonl`: when, by whom
 (`--by`, else the sender's own `FLEET_INSTANT`), the message's sha256, size and first line, the outcome
-(`submitted`, `queued-behind-turn`, `inserted-not-submitted`; `uncertain-after-insertion` / `uncertain-after-enter` when the draft or its consumption could not
+(`submitted`, `queued-behind-turn`, `submitted-mid-turn`, `inserted-not-submitted`; `uncertain-after-insertion` / `uncertain-after-enter` when the draft or its consumption could not
 be confirmed; plain `uncertain` when the paste or the Enter could not be issued at all, so the pane may hold
 nothing) and how it was confirmed. A refusal before the paste wrote nothing into the pane and is not a row. `fleet brief --instant <worker>` reads it
 back on its `messages` row, so "who wrote into this pane" has a subject to join against. `--dry-run`

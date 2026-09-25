@@ -364,8 +364,9 @@ class SessionLayer:
         """Whether the pane is blocked at an operator dialog — `AskUserQuestion`, the folder-trust modal,
         Codex's approval prompt — waiting on a human's answer. `I-16`.
 
-        Callers check this AFTER `busy` and BEFORE `unsubmitted` (`cli._do_pane_guard`, `_pane_refusal`):
-        a live turn keeps its stronger answer, and the trust modal's caret row is a dialog before it is
+        `cli._do_pane_guard` checks this before busy and unsubmitted; `_pane_refusal` checks
+        busy and asking separately, and refuses either. A dialog must never be typed into, and
+        the trust modal's caret row is a dialog before it is
         anybody's typed text. ONE dialog
         predicate: this delegates to `runtime.observe`, whose per-runtime rows (`CLAUDE_DIALOG_ROWS`,
         `CODEX_DIALOG_ROWS`) are measured captures matched as several fragments on one row inside the

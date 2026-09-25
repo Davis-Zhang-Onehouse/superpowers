@@ -31,6 +31,44 @@ class RuntimeTests(unittest.TestCase):
         frame = (Path(__file__).resolve().parents[1] / 'it/fixtures/runtime/claude-multiline.frame').read_text()
         self.assertEqual(claude_unsubmitted(frame), 'Reply with these two words only:\nMULTILINE READY')
 
+    def test_busy_claude_tall_drafts_never_look_empty(self):
+        root = Path(__file__).resolve().parents[1] / 'it/fixtures/runtime'
+        original = (root / 'claude-busy.frame').read_text()
+        lines = original.splitlines()
+        caret = max(i for i, row in enumerate(lines) if row.startswith('❯'))
+        for count in (7, 12, 30):
+            for wrapped in (False, True):
+                with self.subTest(count=count, wrapped=wrapped):
+                    body = [f'line {i}' for i in range(count)] if not wrapped else [('word ' * 12).strip()] * count
+                    frame = '\n'.join(lines[:caret] + ['❯ ' + body[0]] +
+                                      ['  ' + row for row in body[1:]] + lines[caret + 1:]) + '\n'
+                    actual = observe('claude', frame)
+                    self.assertEqual(('busy', '\n'.join(body)), (actual.state, actual.draft))
+
+    def test_busy_claude_without_located_caret_is_unknown(self):
+        root = Path(__file__).resolve().parents[1] / 'it/fixtures/runtime'
+        frame = (root / 'claude-busy.frame').read_text()
+        lines = frame.splitlines()
+        caret = max(i for i, row in enumerate(lines) if row.startswith('❯'))
+        lines[caret] = '  editor redraw in progress'
+        self.assertEqual('unknown', observe('claude', '\n'.join(lines)).state)
+
+    def test_styled_literal_suggestion_lookalikes_are_drafts(self):
+        root = Path(__file__).resolve().parents[1] / 'it/fixtures/runtime'
+        for state in ('idle', 'busy'):
+            original = (root / f'claude-{state}.frame').read_text()
+            lines = original.splitlines()
+            caret = max(i for i, row in enumerate(lines) if row.startswith('❯'))
+            for draft in ('ask the reviewer to rerun RV-3', 'Try "pytest -k foo" next',
+                          'Ask him first:\nthen proceed', 'new task? no, keep going'):
+                with self.subTest(state=state, draft=draft):
+                    body = draft.splitlines()
+                    frame = '\n'.join(lines[:caret] + ['❯\u00a0\x1b[1m' + body[0] + '\x1b[0m'] +
+                                      ['  ' + row for row in body[1:]] + lines[caret + 1:]) + '\n'
+                    actual = observe('claude', frame)
+                    self.assertEqual((state if state == 'busy' else 'queued', draft),
+                                     (actual.state, actual.draft))
+
     def test_dim_suggestions_are_marked_in_capture_and_never_drafts(self):
         from fleet.runtime import annotate_placeholders
         frames = (('claude', '❯\u00a0\x1b[2mfix RV-29 too\x1b[0m\n? for shortcuts\n'),
@@ -48,6 +86,25 @@ class RuntimeTests(unittest.TestCase):
         marked = annotate_placeholders(frame)
         self.assertEqual(marked.count('[placeholder] '), 1)
         self.assertIn('[placeholder] ❯\u00a0\x1b[2mcontinue', marked)
+
+    def test_capture_labels_only_sgr_free_fallback_placeholders(self):
+        from fleet.runtime import annotate_placeholders
+        legacy = '❯ try "fix the failing test"\n? for shortcuts\n'
+        self.assertIn('[placeholder] ❯', annotate_placeholders(legacy))
+        styled = '❯\x1b[1mTry "pytest -k foo" next\x1b[0m\n? for shortcuts\n'
+        self.assertNotIn('[placeholder]', annotate_placeholders(styled))
+        self.assertEqual(observe('claude', styled).draft, 'Try "pytest -k foo" next')
+
+    def test_real_claude_282_midturn_enter_shows_queued_message(self):
+        root = Path(__file__).resolve().parents[1] / 'it/fixtures/runtime'
+        after_enter = (root / 'claude-after-busy-enter-282.frame').read_text()
+        queued = (root / 'claude-queued-behind-turn-282.frame').read_text()
+        self.assertEqual('busy', observe('claude', after_enter).state)
+        self.assertFalse(observe('claude', after_enter).draft)
+        self.assertIn('After this turn, reply with exactly QUEUED PROBE.', queued)
+        self.assertIn('ctrl+x ctrl+s to send now', queued)
+        self.assertEqual('busy', observe('claude', queued).state)
+        self.assertFalse(observe('claude', queued).draft)
 
     def test_invalid_runtime_is_always_bad_input(self):
         for value in (None, [], {}, True, 1, '', 'gpt', 'Claude'):
@@ -148,6 +205,16 @@ class RuntimeTests(unittest.TestCase):
         actual = observe('codex', (root / 'codex-tall-draft.frame').read_text())
         self.assertEqual('queued', actual.state)
         self.assertEqual('\n'.join(['Reply OK.'] + [f'line {i}' for i in range(2, 8)]), actual.draft)
+        # Codex's caret walk is already unbounded by the eight-row tail. Keep
+        # that property explicit beside the new Claude safety regression.
+        captured = (root / 'codex-tall-draft.frame').read_text()
+        for count in (12, 30):
+            with self.subTest(count=count):
+                extended = captured.replace('  line 7\n', '  line 7\n' +
+                    ''.join(f'  line {i}\n' for i in range(8, count + 1)))
+                observed = observe('codex', extended)
+                self.assertEqual('queued', observed.state)
+                self.assertIn(f'line {count}', observed.draft)
         # An empty box under scrollback prose that happens to be indented stays what it was.
         prose_then_idle = "\n".join(["  some indented prose from the transcript", "  more of it", "",
                                      "\x1b[1m›\x1b[0m \x1b[2mAsk Codex to do anything\x1b[0m", "",

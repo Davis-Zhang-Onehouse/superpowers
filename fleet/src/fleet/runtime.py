@@ -98,10 +98,11 @@ def observe(runtime: RuntimeName, frame: str) -> PaneObservation:
     if _dialog_row(runtime, visible):
         return PaneObservation("dialog")
     if runtime == "claude":
+        caret = _claude_caret_index(rows)
         draft = _claude_draft(rows, frame)
         watcher = claude_watchers(frame)
         if claude_busy(frame):
-            return PaneObservation("busy", draft, watcher)
+            return PaneObservation("busy" if caret is not None else "unknown", draft, watcher)
         if draft:
             return PaneObservation("queued", draft, watcher)
         prompt = any(_caret_content(row) is not None for row in rows[-PROMPT_TAIL_LINES:])
@@ -158,22 +159,37 @@ def _dialog_row(runtime: RuntimeName, visible: list[str]) -> bool:
 
 
 def _claude_draft(rows, frame):
-    draft = _claude_first_line(frame)
+    index = _claude_caret_index(rows)
+    draft = _caret_content(rows[index]) if index is not None else None
+    if draft and not _SGR.search(frame) and _is_placeholder(draft):
+        draft = None
     if not draft:
-        return draft
+        return None
     # The measured multiline editor has a caret row followed by indented
     # continuations, ending at the input border. Never include status chrome.
+    content = [draft]
+    for row in rows[index + 1:]:
+        visible = plain(row)
+        if (not visible.startswith('  ') or any(c in visible for c in '─━')
+                or visible.lstrip().startswith(('⏵⏵', '? for shortcuts'))):
+            break
+        content.append(_undim(_cells(row)[2:]))
+    return '\n'.join(content).strip()
+
+
+def _claude_caret_index(rows):
+    """Find the current caret from the lower input border, including tall wrapped drafts."""
+    border = next((i for i in range(len(rows) - 1, max(-1, len(rows) - PROMPT_TAIL_LINES - 1), -1)
+                   if plain(rows[i]).strip().startswith(('────', '━━━━'))), None)
+    if border is not None:
+        index = border - 1
+        while index >= 0 and (not plain(rows[index]).strip() or plain(rows[index]).startswith('  ')):
+            index -= 1
+        return index if index >= 0 and _caret_content(rows[index]) is not None else None
     for index in range(len(rows) - 1, max(-1, len(rows) - PROMPT_TAIL_LINES - 1), -1):
-        if _caret_content(rows[index]) == draft:
-            content = [draft]
-            for row in rows[index + 1:]:
-                visible = plain(row)
-                if (not visible.startswith('  ') or any(c in visible for c in '─━')
-                        or visible.lstrip().startswith(('⏵⏵', '? for shortcuts'))):
-                    break
-                content.append(_undim(_cells(row)[2:]))
-            return '\n'.join(content).strip()
-    return draft
+        if _caret_content(rows[index]) is not None:
+            return index
+    return None
 
 
 def _observe_codex(rows: list[str], visible: list[str]) -> PaneObservation:
@@ -375,6 +391,7 @@ _PLACEHOLDERS = (
     re.compile(r"^/\s*for\s+commands\b", re.I),
     re.compile(r"^#\s*for\s+memory\b", re.I),
     re.compile(r"^new\s+task\?", re.I),
+    re.compile(r"^press up to edit queued messages$", re.I),
 )
 
 #: A pane is busy when it is still offering a way to interrupt the work.
@@ -504,8 +521,10 @@ def _is_placeholder(content: str) -> bool:
 def _claude_first_line(pane_text: str) -> Optional[str]:
     """Text sitting in the input box that was never submitted, or None.
 
-    The input box is identified STRUCTURALLY: it is the **last** caret among the rendered rows,
-    within `PROMPT_TAIL_LINES` of the last non-blank one. Both halves are corrections of measured
+    The current box is located from its lower border, walking up through any number of
+    indented continuation rows, or by the last caret in a short borderless capture. This corrects
+    the tall busy-draft false empty observation in receive pass 1. The earlier bounded window was a
+    correction of measured
     false answers (`FI-24`), and they fail in opposite directions:
 
     * **The last caret, not the first.** A real shell — and Claude's own transcript — leaves the
@@ -526,12 +545,10 @@ def _claude_first_line(pane_text: str) -> Optional[str]:
     falling back to an earlier caret (falling back IS the `N4` defect), and the placeholder shapes
     a pane renders when the box is empty are filtered out rather than reported.
     """
-    box = None
-    for line in _tail(pane_text, PROMPT_TAIL_LINES):
-        content = _caret_content(line)
-        if content is not None:
-            box = content              # keep going: the LAST caret in the window is the box
-    if not box or _is_placeholder(box):
+    rows = _rendered(pane_text)
+    index = _claude_caret_index(rows)
+    box = _caret_content(rows[index]) if index is not None else None
+    if not box or (not _SGR.search(pane_text) and _is_placeholder(box)):
         return None
     return box
 
@@ -542,13 +559,13 @@ def claude_unsubmitted(pane_text: str) -> Optional[str]:
 
 
 def annotate_placeholders(frame: str) -> str:
-    """Make a dim suggestion in the current input box explicit in an exported pane capture."""
+    """Mark dim suggestions, or legacy plain suggestions in an SGR-free capture."""
     annotated = []
     rows = frame.splitlines(keepends=True)
     rendered_count = len(_rendered(frame))
-    current = None
+    current = _claude_caret_index(_rendered(frame))
     for index in range(max(0, rendered_count - PROMPT_TAIL_LINES), rendered_count):
-        if _caret_content(rows[index]) is not None or _codex_caret_row(rows[index]):
+        if _codex_caret_row(rows[index]):
             current = index
     for index, row in enumerate(rows):
         if index != current:
@@ -559,7 +576,8 @@ def annotate_placeholders(frame: str) -> str:
             cells = _trim(cells[1:])
         if cells and cells[0][0] in ('❯', '›'):
             body = _trim(cells[1:])
-            if body and any(dim and not char.isspace() for char, dim in body) and not _undim(body):
+            if body and ((any(dim and not char.isspace() for char, dim in body) and not _undim(body))
+                         or (not _SGR.search(frame) and _is_placeholder(_caret_content(row) or ''))):
                 row = '[placeholder] ' + row
         annotated.append(row)
     return ''.join(annotated)

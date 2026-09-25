@@ -92,7 +92,8 @@ FRESH_BASE_DIGITS = "07300400"
 FOREIGN_BASE = "00000000-07300500-inflight-append-someoneElsesEffort"
 
 #: A pane still offering a way to interrupt: "the agent is mid-turn".
-BUSY_PANE = "\n".join(["editing src/fleet/cli.py", "Thinking...", "  esc to interrupt"])
+BUSY_PANE = "\n".join(["editing src/fleet/cli.py", "Thinking...", "❯ ",
+                       "  ? for shortcuts · esc to interrupt"])
 #: Text sitting in the input box that nobody submitted, with nothing working: "queued text".
 QUEUED_PANE = "\n".join(["wrote tests/test_cli.py", "", "❯ now run the suite again"])
 #: An idle claude pane: the input box renders its placeholder, which is NOT a swallowed submit.
@@ -2191,6 +2192,18 @@ class TestUnvouchedReason(unittest.TestCase):
 
 
 class TestPaneGuard(CliCase):
+    def test_tall_busy_claude_draft_is_queued_text(self):
+        fleet = self.loaded()
+        lines = (ROOT / 'it/fixtures/runtime/claude-busy.frame').read_text().splitlines()
+        caret = max(i for i, row in enumerate(lines) if row.startswith('❯'))
+        for count in (7, 12, 30):
+            with self.subTest(count=count):
+                fleet.panes['dt-solo'] = '\n'.join(lines[:caret] + ['❯ existing draft'] +
+                    [f'  continuation {i}' for i in range(count - 1)] + lines[caret + 1:]) + '\n'
+                code, out, err = fleet.run(['pane-guard', '--porcelain', '--pane', 'dt-solo'])
+                self.assertEqual(cli.PANE_QUEUED_TEXT, code, (out, err))
+                self.assertIn('existing draft', dict(row.split('\t', 1) for row in out.splitlines())['queued_text'])
+
     """FD-10: the external watcher is REQUIRED to call this before any send-keys, and DA-2 enumerated
     SIX send paths — so the guard sits at the choke point and its codes are a contract."""
 
@@ -2435,8 +2448,8 @@ class TestPaneGuard(CliCase):
                                   "--capture", str(target)])
 
         self.assertEqual(code, cli.PANE_SAFE, "preserving the capture must not change the verdict")
-        self.assertEqual(target.read_text(), IDLE_PANE,
-                         "the preserved capture is not what the verdict was computed from")
+        self.assertEqual(target.read_text().replace('[placeholder] ', ''), IDLE_PANE,
+                         "annotation must preserve the original capture after removing its label")
 
     def test_capture_labels_a_dim_suggestion_without_queued_text(self):
         fleet = self.loaded()
@@ -7957,6 +7970,20 @@ class TestSendKeepsARecord(CliCase):
         self.assertIn("by the coordinator: submitted (confirmed by draft)", messages[0])
         self.assertIn(record.sha256[:8], messages[0])
 
+    def test_brief_counts_each_send_outcome_separately(self):
+        fleet = self.loaded()
+        sent = self.message(fleet)
+        code, _, err = fleet.run(['send', '--id', fleet.ids['closable'], '--message-file', str(sent)])
+        self.assertEqual(EXIT_OK, code, err)
+        [first] = messaging.read_sends(fleet.paths['closable'])
+        for outcome in (messaging.QUEUED_BEHIND_TURN, messaging.SUBMITTED_MID_TURN,
+                        messaging.INSERTED_NOT_SUBMITTED, messaging.UNCERTAIN_AFTER_ENTER):
+            messaging.record_send(fleet.paths['closable'], dataclasses.replace(first, outcome=outcome))
+        code, out, err = fleet.run(['brief', '--porcelain', '--instant', str(fleet.paths['closable'])])
+        self.assertEqual(EXIT_OK, code, err)
+        self.assertIn('1 submitted, 1 queued-behind-turn, 1 submitted-mid-turn, '
+                      '1 inserted-not-submitted, 1 uncertain', out)
+
     def test_the_sender_defaults_to_its_own_instant_then_the_user(self):
         fleet = self.loaded()
         sent = self.message(fleet)
@@ -7982,6 +8009,15 @@ class TestSendKeepsARecord(CliCase):
         code, out, err = fleet.run(["brief", "--porcelain", "--instant", str(fleet.paths["closable"])])
         self.assertEqual(EXIT_OK, code, err)
         self.assertIn("no `fleet send` has been recorded", out)
+
+    def test_busy_send_dry_run_names_queue_outcome(self):
+        fleet = self.loaded()
+        sent = self.message(fleet)
+        fleet.panes['dt-closable'] = (ROOT / 'it/fixtures/runtime/claude-busy.frame').read_text()
+        code, out, err = fleet.run(['send', '--dry-run', '--porcelain', '--id', fleet.ids['closable'],
+                                    '--message-file', str(sent)])
+        self.assertEqual(EXIT_OK, code, err)
+        self.assertIn('delivery\twould-queue-behind-turn', out)
 
     def test_an_uncertain_send_is_recorded_as_such_and_named_in_the_error(self):
         """A paste that could not be confirmed is exactly the record a later reader needs."""

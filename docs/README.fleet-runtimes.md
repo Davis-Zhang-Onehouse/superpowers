@@ -157,9 +157,9 @@ fleet revive --id "$ID" --session-id "$SESSION_UUID" --dry-run
 fleet revive --id "$ID" --session-id "$SESSION_UUID"
 ```
 
-`send` checks the record, lease, runtime and pane, observes an empty idle input, pastes once, waits for
-the matching draft, presses Enter once, and observes consumption. Temporary redraws are observed within
-the existing deadline; they never cause another insertion or submission. A refusal types nothing; an uncertain
+`send` checks the record, lease, runtime and pane, observes an empty idle or busy input, pastes once, waits for
+the matching draft, presses Enter and observes consumption. If that draft remains after the deadline,
+it checks the pane again and retries Enter once only while the same draft is still visible. A refusal types nothing; an uncertain
 delivery requires inspection before retrying. It never clears another person's draft. Multiline input
 is supported for the captured layouts; large or unfamiliar editor layouts can be refused.
 

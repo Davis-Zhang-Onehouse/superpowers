@@ -1691,7 +1691,8 @@ def _do_send(ctx: Ctx, parsed: Parsed) -> int:
         if observation.state not in ('idle', 'busy') or observation.draft:
             raise messaging.not_idle(record)
         #: RV-45 (RV-24's shape, one row along): the dry-run and the real call emit the SAME row set.
-        _emit(ctx, 'send', [('todo_id', record.todo_id), ('delivery', 'would-submit'),
+        would_deliver = ('would-queue-behind-turn' if record.runtime == 'claude' else 'would-submit-mid-turn') if observation.state == 'busy' else 'would-submit'
+        _emit(ctx, 'send', [('todo_id', record.todo_id), ('delivery', would_deliver),
                             ('confirmation', 'not observed (dry-run)'), ('sha256', sha),
                             ('record', 'dry-run: nothing recorded')])
         return EXIT_OK
@@ -4209,7 +4210,7 @@ def _pane_refusal(ctx: Ctx, record: Record, override: str = ""):
                 f"the turn finishes, or `{override}` is said out loud",
                 record.base_instant or record.todo_id)
     if layer.asking(text):
-        #: After `busy`, before `unsubmitted` — the one ordering `_do_pane_guard` uses (see there).
+        #: Dialogs block input before queued text is considered.
         return (PANE_GUARD_CODES[PANE_AWAITING_OPERATOR],
                 f"{tmux} is showing an operator dialog and is blocked on a human's answer: closing it "
                 f"now discards a decision in progress",
@@ -5489,9 +5490,14 @@ def _do_brief(ctx: Ctx, parsed: Parsed) -> int:
         if sends:
             last = sends[-1]
             submitted = sum(1 for item in sends if item.outcome == messaging.SUBMITTED)
+            queued = sum(1 for item in sends if item.outcome == messaging.QUEUED_BEHIND_TURN)
+            mid_turn = sum(1 for item in sends if item.outcome == messaging.SUBMITTED_MID_TURN)
+            inserted = sum(1 for item in sends if item.outcome == messaging.INSERTED_NOT_SUBMITTED)
+            uncertain = len(sends) - submitted - queued - mid_turn - inserted
             rows.append(Row(kind="messages", subject=child.name, severity=INFO,
                             detail=(f"{len(sends)} message(s) recorded into pane {last.tmux or '(none)'} "
-                                    f"({submitted} submitted, {len(sends) - submitted} uncertain); last at {last.at} "
+                                    f"({submitted} submitted, {queued} queued-behind-turn, {mid_turn} submitted-mid-turn, "
+                                    f"{inserted} inserted-not-submitted, {uncertain} uncertain); last at {last.at} "
                                     f"by {last.by}: {last.outcome}"
                                     + (f" (confirmed by {last.confirmation})" if last.confirmation else "")
                                     + f", sha256 {last.sha256[:8]}, {last.lines} line(s): {last.head!r}; "
