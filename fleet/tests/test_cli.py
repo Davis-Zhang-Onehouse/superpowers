@@ -7980,6 +7980,8 @@ class TestMilestoneRetitle(CliCase):
         path = fleet.paths["readyWorker"]
         roadmap = Roadmap(path)
         before = roadmap.milestone("M1")
+        row_before = json.loads(roadmap.path.read_text())["milestones"][0]
+        proposals_before = roadmap.proposals_path.read_bytes()
         argv = ["milestone", "--instant", str(path), "--id", "M1",
                 "--retitle", "land the revised CLI", "--reason", "scope clarified"]
         directory_mtime = roadmap.path.parent.stat().st_mtime_ns
@@ -7993,9 +7995,14 @@ class TestMilestoneRetitle(CliCase):
         self.assertEqual(EXIT_OK, code, err)
         after = roadmap.milestone("M1")
         self.assertEqual("land the revised CLI", after.title)
-        for field in ("id", "status", "deps", "claims", "evidence", "owner"):
-            if hasattr(before, field):
-                self.assertEqual(getattr(before, field), getattr(after, field), field)
+        row_after = json.loads(roadmap.path.read_text())["milestones"][0]
+        self.assertEqual(before.owner, after.owner, "retitle changed the claim")
+        self.assertEqual(proposals_before, roadmap.proposals_path.read_bytes(),
+                         "retitle changed the pending proposal inbox")
+        for key in ("title", "title_history"):
+            row_before.pop(key, None)
+            row_after.pop(key, None)
+        self.assertEqual(row_before, row_after, "retitle changed a field beyond title/history")
         self.assertEqual("land the cli", after.title_history[0]["old_title"])
         self.assertEqual("scope clarified", after.title_history[0]["reason"])
         self.assertEqual("reviewer@example.test", after.title_history[0]["actor"])
@@ -8024,19 +8031,20 @@ class TestMilestoneRetitle(CliCase):
         fleet = self.loaded()
         path = fleet.paths["readyWorker"]
         base = ["milestone", "--instant", str(path), "--id", "M1"]
-        for extra in (["--retitle", "new"],
-                      ["--retitle", "   ", "--reason", "why"],
-                      ["--retitle", "land the cli", "--reason", "why"],
-                      ["--retitle", "new", "--reason", "why", "--retire"],
-                      ["--retitle", "new", "--reason", "why", "--status", "running"]):
+        for extra, message in ((["--retitle", "new"], "needs `--reason`"),
+                               (["--retitle", "   ", "--reason", "why"], "nonempty title"),
+                               (["--retitle", "land the cli", "--reason", "why"], "already has that title"),
+                               (["--retitle", "new", "--reason", "why", "--retire"], "operations cannot be combined"),
+                               (["--retitle", "new", "--reason", "why", "--status", "running"], "cannot be combined")):
             for dry in ([], ["--dry-run"]):
                 code, _, err = fleet.run(base + list(extra) + dry)
                 self.assertEqual(EXIT_BAD_INPUT, code, (extra, dry, err))
+                self.assertIn(message, err.split("BadInput:", 1)[1], (extra, dry, err))
                 self.assertEqual("land the cli", Roadmap(path).milestone("M1").title)
         code, _, err = fleet.run(["milestone", "--instant", str(path), "--id", "unknown",
                                   "--retitle", "new", "--reason", "why"])
         self.assertEqual(EXIT_BAD_INPUT, code)
-        self.assertIn("unknown", err)
+        self.assertIn("no milestone 'unknown'", err.split("BadInput:", 1)[1])
         Roadmap(path).retire("M1", "superseded")
         code, _, err = fleet.run(base + ["--retitle", "new", "--reason", "why"])
         self.assertEqual(EXIT_BAD_INPUT, code)
