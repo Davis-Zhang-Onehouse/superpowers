@@ -125,8 +125,8 @@ Optional: `P_REAL_CLAUDE=/path/to/claude` (default `/home/ubuntu/.local/bin/clau
 stops at the enclosing git toplevel, so a slot inside this clone asks about the clone even when the workspace
 above it is trusted. §P therefore builds its slot under `it_outside_checkout_dir` (the first non-repo ancestor of
 the checkout; override with `IT_REAL_AGENT_PARENT=<a trusted, non-repo directory>`), and §SEND places its slot
-beside the checkout. If a dispatch still reports `trust_screen observed`, §P records P1 as `BLOCKED BY
-ENVIRONMENT` and stops instead of polling a pane nobody will answer.
+beside the checkout. If a dispatch still reports `trust_screen observed`, §P records P1 as FAIL with the
+note `BLOCKED BY ENVIRONMENT` and stops instead of polling a pane nobody will answer.
 
 What it does: builds a slot whose lineage base is on a **diverged sibling** branch, dispatches a real
 `claude` from `skills/using-fleet/profiles/worker`, delivers the rendered seed, and polls until the worker
