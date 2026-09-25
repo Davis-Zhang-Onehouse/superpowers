@@ -1796,7 +1796,9 @@ def _trust_watch_window(env=None) -> float:
         window = float(raw)
     except (TypeError, ValueError):
         return TRUST_WATCH_DEFAULT_S
-    return window if window >= 0 else TRUST_WATCH_DEFAULT_S
+    #: V23-P (review M1). Finite only: `inf` parses, and would make the watch unbounded; `nan` compares false.
+    import math
+    return window if math.isfinite(window) and window >= 0 else TRUST_WATCH_DEFAULT_S
 
 
 def _watch_launch(ctx, layer, tmux, runtime) -> LaunchWatch:
@@ -1829,11 +1831,12 @@ def _watch_launch(ctx, layer, tmux, runtime) -> LaunchWatch:
                                                           f"{exc}"))
 
 
-def _predict_trust(ctx, settings, cwd) -> "trust.TrustPrediction":
-    """`trust.predict` for this launch, under the environment the worker will be started with. Read-only."""
+def _predict_trust(ctx, settings, cwd, environ=None) -> "trust.TrustPrediction":
+    """`trust.predict` for this launch, under the environment the worker will be started with (`environ`, the
+    launcher's own overlay, else `ctx.launch_environment`) over this process's. Read-only; never raises."""
     try:
-        return trust.predict(settings.runtime, settings.config_dir, cwd,
-                             environ={**os.environ, **(ctx.launch_environment or {})})
+        overlay = environ if environ is not None else (ctx.launch_environment or {})
+        return trust.predict(settings.runtime, settings.config_dir, cwd, environ={**os.environ, **overlay})
     except Exception as exc:  # noqa: BLE001 - a prediction is advice; it must never refuse or fail a launch
         return trust.TrustPrediction(trust.UNKNOWN, "", _one_line(f"{type(exc).__name__}: {exc}"))
 
@@ -1939,7 +1942,7 @@ def _do_revive(ctx: Ctx, parsed: Parsed) -> int:
     revive_env = dict(ctx.launch_environment or {}, FLEET_HOME=str(ctx.home), FLEET_INSTANTS=str(ctx.instants_dir))
     policy_rows = _codex_policy_rows(settings.runtime, revive_env)
     #: V23-P (FB-126). Predicted before anything starts, read-only, on the dry-run too.
-    prediction = _predict_trust(ctx, settings, lease.path)
+    prediction = _predict_trust(ctx, settings, lease.path, environ=revive_env)
     if ctx.dry_run:
         _emit(ctx, 'revive', [('todo_id', record.todo_id), ('session_id', session_id),
                             ('transcript', str(transcript)), *policy_rows, *_trust_rows(prediction),
@@ -2391,6 +2394,9 @@ def _do_dispatch(ctx: Ctx, parsed: Parsed) -> int:
         source = ctx.harvest.record_dispatch(ctx.store, record)
         launch_env = dict(ctx.launch_environment or {}, FLEET_HOME=str(ctx.home),
                           FLEET_INSTANTS=str(ctx.instants_dir))
+        #: V23-P (review M2). Predicted BEFORE the pane starts, from the env the launcher gets. Never raises, so
+        #: it cannot turn a good launch into a rollback.
+        prediction = _predict_trust(ctx, settings, lease.path, environ=launch_env)
         step = "launcher"
         launcher = runtime_launch.prepare(settings, record, seed, launch_env)
         step = "tmux new-session"
@@ -2512,8 +2518,7 @@ def _do_dispatch(ctx: Ctx, parsed: Parsed) -> int:
     #: V23-P (FB-126). After the record and the milestone claim, OUTSIDE the rollback try: the seed check read
     #: argv, which is right while the pane waits at the trust screen, and an observation problem here must never
     #: roll a good launch back (D-3). `_launch_trust_rows` never raises.
-    trust_rows = _launch_trust_rows(ctx, _predict_trust(ctx, settings, lease.path), ctx.sessions, tmux,
-                                    settings.runtime, lease.path)
+    trust_rows = _launch_trust_rows(ctx, prediction, ctx.sessions, tmux, settings.runtime, lease.path)
     _emit(ctx, "dispatch", [("todo_id", todo_id), ("instant", str(child)), ("slot", lease.slot),
                             ("tmux", tmux), *_title_rows(title), ("watched_source", source.base),
                             ("milestone", milestone_id or "(none)"),

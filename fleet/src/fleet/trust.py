@@ -20,7 +20,6 @@ decision, and a tool that quietly granted it would be the bug this milestone exi
 import json
 import os
 import re
-import subprocess
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Callable, Mapping, Optional
@@ -60,13 +59,14 @@ class GitLayoutUnknown(Exception):
 
 
 def _run(argv: list) -> "Optional[tuple[int, str]]":
-    env = {k: v for k, v in os.environ.items() if k not in _GIT_SCRUB}
+    """`argv` is `["git", ...]`; run through `workspace.default_git`, the package's documented git seam (FI-27a:
+    three spawn seams, and trust is not a fourth). The scrub and the 5s bound are that seam's opt-in arguments.
+    `-C <cwd>` in `argv` chooses the directory, so the process itself runs in `/`, which always exists."""
+    from fleet import workspace
     try:
-        done = subprocess.run(argv, stdout=subprocess.PIPE, stderr=subprocess.DEVNULL, text=True, timeout=5,
-                              env=env)
-    except (OSError, subprocess.SubprocessError):
+        return workspace.default_git(scrub_env=_GIT_SCRUB, timeout=5)(argv[1:], "/")
+    except Exception:  # noqa: BLE001 - V23-P: missing git, a timeout, an OS error: "git could not be run" -> None
         return None
-    return done.returncode, done.stdout
 
 
 def _under_dot_git(cwd: Path) -> Optional[Path]:
@@ -80,8 +80,8 @@ def _under_dot_git(cwd: Path) -> Optional[Path]:
 def git_layout(cwd: Path, run: Optional[Runner] = None) -> "tuple[Optional[Path], Optional[Path]]":
     """(toplevel, canonical_root) or (None, None) outside git. canonical_root = parent of
     `git rev-parse --path-format=absolute --git-common-dir` when that ends in `.git` (the MAIN worktree for a linked
-    worktree), else the toplevel. `run(argv) -> (rc, stdout)` is injectable; the default is subprocess.run, 5s
-    timeout, with the repository-selecting GIT_* variables scrubbed.
+    worktree), else the toplevel. `run(argv) -> (rc, stdout)` is injectable; the default is `workspace.default_git`,
+    5s timeout, with the repository-selecting GIT_* variables scrubbed.
 
     Raises `GitLayoutUnknown` when git could not run, or answered rc != 0 while a `.git` entry sits at or above
     `cwd` (dubious ownership, a ceiling, a broken repo): "not a repository" is only believed where none is visible.

@@ -294,5 +294,44 @@ class TrustScreenCase(unittest.TestCase):
         self.assertIsNone(trust.trust_screen_path("claude", self.frame("codex-trust-0156.frame")))
 
 
+class TrustGitSeamCase(unittest.TestCase):
+    """V23-P fix round 1 (F1). trust's git goes through `workspace.default_git`, the package's documented git
+    seam (FI-27a keeps three spawn seams), with an OPT-IN scrub and timeout that leave other callers as they were."""
+
+    def test_default_git_with_scrub_env_drops_the_variable(self):
+        from fleet.workspace import default_git
+        with tempfile.TemporaryDirectory() as tmp:
+            repo = Path(tmp) / "r"
+            _git("init", "-q", str(repo))
+            with mock.patch.dict(os.environ, {"GIT_DIR": str(Path(tmp) / "no-such-repo")}):
+                rc_plain, _ = default_git()(["rev-parse", "--git-dir"], repo)
+                rc, out = default_git(scrub_env=("GIT_DIR",), timeout=5)(["rev-parse", "--absolute-git-dir"], repo)
+        self.assertNotEqual(0, rc_plain, "without the scrub the exported GIT_DIR must still apply (unchanged)")
+        self.assertEqual(0, rc)
+        self.assertEqual((repo / ".git").resolve(), Path(out.strip()).resolve())
+
+    def test_trust_spawns_nothing_itself(self):
+        import ast
+        tree = ast.parse(Path(trust.__file__).read_text())
+        imported = {alias.name for node in ast.walk(tree) if isinstance(node, (ast.Import, ast.ImportFrom))
+                    for alias in node.names} | {node.module for node in ast.walk(tree)
+                                                if isinstance(node, ast.ImportFrom)}
+        self.assertNotIn("subprocess", imported)
+
+    def test_a_git_that_times_out_or_cannot_start_reads_as_none(self):
+        for exc in (subprocess.TimeoutExpired(["git"], 5), FileNotFoundError("git"), NotADirectoryError("x")):
+            def runner(args, cwd, exc=exc):
+                raise exc
+            with mock.patch("fleet.workspace.default_git", return_value=runner):
+                self.assertIsNone(trust._run(["git", "-C", "/tmp", "rev-parse", "--show-toplevel"]))
+
+    def test_the_run_adapter_strips_git_and_passes_the_args(self):
+        seen = []
+        with mock.patch("fleet.workspace.default_git",
+                        return_value=lambda args, cwd: (seen.append((list(args), str(cwd))), (0, "x\n"))[1]):
+            self.assertEqual((0, "x\n"), trust._run(["git", "-C", "/some/dir", "rev-parse"]))
+        self.assertEqual(["-C", "/some/dir", "rev-parse"], seen[0][0])
+
+
 if __name__ == "__main__":
     unittest.main()

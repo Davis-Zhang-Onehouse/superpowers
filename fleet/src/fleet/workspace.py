@@ -21,6 +21,7 @@ filed defects got the least specification (FI-6).
 
 `git` is INJECTED — `(args, cwd) -> (rc, stdout)`. `default_git()` is the only subprocess in this module.
 """
+import os
 import shutil
 from dataclasses import dataclass
 from pathlib import Path
@@ -50,17 +51,28 @@ class BaseCheck:
     verdict: str      # "at-base" | "descendant" | "present" | "absent"
 
 
-def default_git():
+def default_git(scrub_env=(), timeout=None):
     """The real git runner: `(args, cwd) -> (rc, stdout)`.
 
     This function is the ONLY place in this module that spawns a subprocess. Every caller may inject its
     own runner, so the whole of `base_check` is decidable without a repository underneath it.
+
+    V23-P (FB-126). `scrub_env` and `timeout` are OPT-IN, for `trust.git_layout`: the variables named are
+    removed from the child's environment (a caller's exported GIT_DIR must not choose the repository), and
+    `timeout` bounds the call (it raises `subprocess.TimeoutExpired`). With neither given the call is exactly
+    what it always was: the inherited environment, no bound. This keeps git on the package's documented
+    spawn seams (FI-27a) instead of a fourth one in `trust`.
     """
     import subprocess
 
     def run(args, cwd):
+        extra = {}
+        if scrub_env:
+            extra["env"] = {k: v for k, v in os.environ.items() if k not in scrub_env}
+        if timeout is not None:
+            extra["timeout"] = timeout
         done = subprocess.run(["git", *list(args)], cwd=str(cwd),
-                              capture_output=True, text=True)
+                              capture_output=True, text=True, **extra)
         return done.returncode, done.stdout
 
     return run
