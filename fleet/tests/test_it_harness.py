@@ -721,6 +721,20 @@ class ServerGuardian(unittest.TestCase):
         time.sleep(3)
         self.assertTrue(self.server_up(), "subshell guardian killed the live server")
 
+    def test_failed_token_move_does_not_arm(self):
+        bin_dir = self.tmp / "bin"
+        bin_dir.mkdir()
+        fake_mv = bin_dir / "mv"
+        fake_mv.write_text("#!/bin/sh\nexit 1\n")
+        fake_mv.chmod(0o755)
+        env = dict(self.env, PATH=f"{bin_dir}:{os.environ['PATH']}")
+        script = (f'. "{self.it}/lib.sh"\n'
+                  f'it_guard_server "$$" "{self.socket}"\n'
+                  'echo "arm-status=$?"\n')
+        result = subprocess.run(["bash", "-c", script], capture_output=True, env=env, cwd=self.tmp)
+        self.assertIn(b"arm-status=1", result.stdout)
+        self.assertFalse((self.it / ".guardians" / f"{self.socket}.pid").exists())
+
 
 if __name__ == "__main__":
     unittest.main()
