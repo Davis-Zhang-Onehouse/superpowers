@@ -50,7 +50,8 @@ over the whole suite, which is how P-1, `selftest` and `release-verify` run it, 
 `TMUX_PANE` and `FLEET_TMUX_SOCKET`, points `TMUX_TMPDIR` at a directory of the suite (removed at exit, its servers
 killed), and sets `FLEET_CLAUDE_BIN`/`FLEET_CODEX_BIN` to `tests/fixtures/bin/no-real-runtime`, which runs nothing
 (`hermetic_environment` re-sets them after clearing). A tripwire backs it: an in-process exec of a real claude/codex,
-or of tmux aimed at the caller's tmux directory or `$TMUX` server, raises `HostReached`; `tests/fixtures/tripwire-path/`
+or of tmux aimed at a server outside the suite (the box's `/tmp/tmux-<uid>` always, the caller's tmux directory, the
+caller's `$TMUX` server), raises `HostReached`; `tests/fixtures/tripwire-path/`
 (first on PATH, holding `tmux`, `claude` and `codex`) refuses the same for child processes; and a test whose run recorded any of these FAILS, even when the
 product swallowed the refusal. A fixture whose verbs reach `peers` uses `tests/fixtures/bin/claude-agents-stub`; a case
 that trips the tripwire on purpose wraps it in `tests.expect_tripwire()`. Before this, one suite run from a worker pane
