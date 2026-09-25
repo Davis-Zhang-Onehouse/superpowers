@@ -148,6 +148,18 @@ class TheBoundaryInAChild(unittest.TestCase):
         self.assertIn("not charged to any test", done.stderr)
 
 
+    def test_a_forked_child_does_not_tear_down_the_parent_suite(self):
+        """RV-32. A fork inherits the owner's exit handler; the child's sys.exit must not kill the suite's servers and
+        delete its directory while the parent is still running."""
+        probe = ("import os, sys, tests\npid = os.fork()\nif pid == 0:\n    sys.exit(0)\nos.waitpid(pid, 0)\n"
+                 "print('suite dir survives:', os.path.isdir(tests.SUITE_DIR))\n")
+        env = {k: v for k, v in os.environ.items() if not k.startswith("FLEET_SUITE_") and k != "TMUX_TMPDIR"}
+        env["PYTHONPATH"] = str(FIXTURES.parent.parent / "src")
+        done = subprocess.run([sys.executable, "-c", probe], cwd=FIXTURES.parent.parent, env=env,
+                              capture_output=True, text=True, timeout=60)
+        self.assertIn("suite dir survives: True", done.stdout, done.stderr)
+
+
 class TheTripwire(unittest.TestCase):
     """The tripwire refuses and RECORDS; the record fails the test that caused it. Every case aims it at a
     decoy server this case created, so if the tripwire were broken the call would reach only the decoy."""

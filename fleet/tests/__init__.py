@@ -405,7 +405,10 @@ def _remove_suite_dir():
     """The suite's own tmux servers, then its directory. Only the process that made the directory does this.
 
     RV-31: a record still on the log here was written after the last test ended (tearDownClass, tearDownModule, a
-    late child) and was charged to nobody, so the suite process itself fails."""
+    late child) and was charged to nobody, so the suite process itself fails.
+    RV-32: a forked child inherits this handler; only the pid that registered it acts."""
+    if os.getpid() != _OWNER_PID:
+        return
     uncharged = _read_from(0)
     sockets = pathlib.Path(SUITE_TMUX_TMPDIR) / f"tmux-{os.getuid()}"
     for sock in (sockets.iterdir() if sockets.is_dir() else ()):
@@ -419,5 +422,6 @@ def _remove_suite_dir():
 
 
 _install_host_tripwire()
+_OWNER_PID = os.getpid()
 if _OWNER:
     atexit.register(_remove_suite_dir)
