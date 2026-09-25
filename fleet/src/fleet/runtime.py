@@ -220,7 +220,8 @@ def _observe_codex(rows: list[str], visible: list[str]) -> PaneObservation:
 _CODEX_ELAPSED = r"\((?:\d+h )?(?:\d+m )?\d+s • esc to interrupt\)"
 #: RV-29: the pane-edge cut can also land just after the closed paren (`…)…`, `…) …`, `…) ·…`); the elapsed time is whole.
 _CODEX_SPINNER = re.compile(r"[◦•] \S.*" + _CODEX_ELAPSED + r"(?: · .*| ?·?…)?")
-#: RV-21. fleet starts panes 80 columns wide (`new-session -d`, no `-x`), and codex cuts the row with `…` at the edge. A long
+#: RV-21. Fleet now starts panes 200 columns wide, but existing and externally resized 80-column panes can still
+#: cut the row with `…` at the edge. A long
 #: status pushes the cut into the paren group: a paren that opens on a digit and never closes before the `…` is the elapsed
 #: time cut short, and is still a turn.
 _CODEX_SPINNER_CUT = re.compile(r"[◦•] \S.*\(\d[^()]*…")
