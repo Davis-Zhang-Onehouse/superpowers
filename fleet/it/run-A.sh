@@ -1225,11 +1225,15 @@ def private_socket(text):
         if t in ("kill-server", "kill-session"):
             return False
         flag, value = (t[:2], t[2:]) if t[:2] in ("-L", "-S") and len(t) > 2 else (t, rest[i + 1] if i + 1 < len(rest) else "")
+        if value in ("kill-server", "kill-session") or value.startswith("-"):
+            value = ""                               # CL-2: `-L ""` / `-S ""` — the empty operand was split away
         if flag == "-L":
             return bool(value) and value != "default"
         if flag == "-S":
             if value.startswith("/"):
-                return not value.startswith("/tmp/tmux-")
+                #: CL-2. Judged on the normalised path: `/tmp//tmux-1000/x` and `/var/../tmp/tmux-1000/x` are the
+                #: operator's directory too.
+                return not os.path.normpath(re.sub("/+", "/", value)).startswith("/tmp/tmux-")
             if value.startswith("$"):
                 return True
             if value == "os.path.join" and i + 2 < len(rest):
