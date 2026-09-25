@@ -78,7 +78,8 @@ from fleet.markdown import fenced, prose
 from fleet.pool import Pool, ReapReport
 from fleet.profiles import Profile
 from fleet import root as root_mod
-from fleet.reconcile import (COMPLETE, KIND_WORKER, PHASE_AWAITING_CI, PID_GONE, PID_RUNNING, RUNNING,
+from fleet.reconcile import (COMPLETE, COMPLETE_BUT_WORKING, KIND_WORKER, PHASE_AWAITING_CI, PID_GONE,
+                             PID_RUNNING, RUNNING, WATCHER_ATTESTED, WATCHER_OBSERVED, _watcher_of,
                              attested_pid_status, needs_a_human, pid_start, reconcile)
 from fleet.release import (CANDIDATE, DEV, HISTORY_COLUMNS, META_DIR, RELEASE_RETENTION, RELEASED, Releases, Version,
                            actor, tree_sha, utc_now)
@@ -3607,6 +3608,32 @@ def _do_review(ctx: Ctx, parsed: Parsed) -> int:
     return exit_code_for(gate)
 
 
+def _last_claim_report(ctx: Ctx, child: Path):
+    """The claimed milestone and this worker's last report, including reports already applied."""
+    origin = origin_mod.read(child)
+    if origin is None or not origin.milestone:
+        return None
+    try:
+        coordinator = _resolve_instant(ctx, origin.coordinator)
+        roadmap = Roadmap(coordinator)
+        milestone = roadmap.milestone(origin.milestone)
+    except BadInput:
+        return None
+    if not milestone.owner or resolve(Path(milestone.owner)) != child:
+        return None
+
+    def mine(rows):
+        return [p for p in rows if p.milestone == origin.milestone and _proposed_by(child, p)]
+
+    fields = {f.name for f in dataclass_fields(Proposal)}
+    superseded = [Proposal(**{k: v for k, v in row.items() if k in fields})
+                  for row in roadmap.closed() if row.get("closed_as") == SUPERSEDED]
+    arrived = sorted([(p.at, 1, p) for p in mine(roadmap.applied())]
+                     + [(p.at, 0, p) for p in mine(superseded)], key=lambda row: row[:2])
+    last = (mine(roadmap.proposals()) or [p for _, _, p in arrived] or [None])[-1]
+    return origin.milestone, last.status if last is not None else None
+
+
 def _do_complete(ctx: Ctx, parsed: Parsed) -> int:
     """The gate, then the rename. The rename IS the state transition, and it is the one signal a worker
     cannot produce by writing a document about being finished."""
@@ -3615,12 +3642,28 @@ def _do_complete(ctx: Ctx, parsed: Parsed) -> int:
     #: the wrong base is the artefact everything downstream trusts.
     _lineage_gate(ctx, child, "complete")
     _pointer_gate(ctx, child)
-    if Declarations(child).phase() == PHASE_AWAITING_CI:
+    declarations = Declarations(child)
+    if declarations.phase() == PHASE_AWAITING_CI:
+        record = _record_for(ctx, child)
+        session = ctx.sessions if record is None else ctx.sessions_for(record)
+        pane = session.capture(record.tmux) if record is not None and session.alive(record.tmux) else ""
+        kind, watcher = _watcher_of(pane or "", session, child, capture_failed=pane is None)
+        live = kind in (WATCHER_OBSERVED, WATCHER_ATTESTED)
         raise Refused(
-            f"{GUARD_COMPLETE_PHASE}: the declared phase is still awaiting-ci, and an instant that is "
-            f"completing is not waiting on CI. A stale claim outlives the watcher that justified it.",
+            f"{GUARD_COMPLETE_PHASE}: the declared phase is still awaiting-ci"
+            + (f" with a live watcher ({watcher})" if live else "")
+            + ", and an instant that is completing is not waiting on CI.",
             clears_when=f"fleet declare --phase done --instant {child}",
             clears_who="this worker")
+    claim = _last_claim_report(ctx, child)
+    if claim is not None:
+        milestone, status = claim
+        if status is None or status in ("running", "awaiting-ci"):
+            raise Refused(
+                f"complete-report: claimed milestone {milestone!r} has last report {status or '(none)'!r}; "
+                "the work is still live",
+                clears_when="propose a final report after the work is finished (done, dropped, blocked or ready)",
+                clears_who="this worker")
     review = Review(child, now=ctx.now)
     gate = review.gate(require_scope="all")
     name = InstantName.parse(child.name)
@@ -4595,6 +4638,8 @@ def _arm_refusal(subject) -> str:
                 "authorised to send it a keystroke — it is reported for a human to decide (D-6)")
     if subject.state == COMPLETE:
         return "the instant folder is terminal (`-complete-` or `-abort-`); the work is over"
+    if subject.state == COMPLETE_BUT_WORKING:
+        return "the instant folder is `-complete-` but work is still live; the monitor must not act"
     if subject.evidence.get("liveness", "none") == "none":
         return f"no live process and no session answers for {subject.evidence.get('tmux') or 'it'}"
     return ""

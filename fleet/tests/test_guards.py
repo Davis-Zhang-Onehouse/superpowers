@@ -21,6 +21,7 @@ import re
 import shutil
 import tempfile
 import unittest
+from unittest import mock
 
 from fleet import EXIT_NO_CAPACITY, EXIT_REFUSED
 from fleet.errors import BadInput, FleetError, NoCapacity, Refused
@@ -33,7 +34,8 @@ from fleet.pool import Pool
 from fleet.profiles import Profile
 from fleet.reconcile import reconcile
 from fleet.session import LiveSession, Probes, SessionLayer
-from fleet.store import Declarations, Record, Store
+from fleet.store import ATTESTED_PREFIX, Declarations, Record, Store
+from fleet.render import board
 
 OURS = "/i/00000000-07300312-inflight-append-fleetInfraRebuild"
 THEIRS = "/i/00000000-07290101-inflight-append-otherEffort"
@@ -358,6 +360,30 @@ class TestInterrogation(GuardCase):
 
 
 class TestTheCap(GuardCase):
+    def test_complete_folder_with_busy_pane_stays_active_on_board_and_cap(self):
+        fleet = self.fleet()
+        fleet.worker("busyComplete", state="complete", slot="ws1", pane=BUSY_PANE)
+        subject = fleet.subjects()[0]
+        self.assertIn("WORKING", board([subject]))
+        self.assertNotIn("the work is over", board([subject]))
+        self.assertFalse(WipCap().evaluate(fleet.ctx()).allowed)
+
+    def test_complete_folder_with_live_attested_watcher_stays_active(self):
+        fleet = self.fleet()
+        fleet.worker("watchedComplete", state="complete", slot="ws1", pane=QUIET_PANE,
+                     phase="awaiting-ci", live=False)
+        Declarations(fleet.paths["watchedComplete"]).set_watchers(
+            ATTESTED_PREFIX + "gate pid:999", pid={"pid": 999, "start": "1"})
+        with mock.patch("fleet.reconcile.pid_start", return_value=("pid-running", "1")):
+            subject = fleet.subjects()[0]
+            self.assertIn("WORKING", board([subject]))
+            self.assertNotIn("the work is over", board([subject]))
+            self.assertFalse(WipCap().evaluate(fleet.ctx()).allowed)
+        with mock.patch("fleet.reconcile.pid_start", return_value=("pid-gone", "")):
+            subject = fleet.subjects()[0]
+            self.assertEqual("COMPLETE", subject.state)
+            self.assertTrue(WipCap().evaluate(fleet.ctx()).allowed)
+
     def test_wip_cap_defaults_to_one(self):
         # MD-6. The default is 1, and there IS an override channel — otherwise "default" is a fiction.
         self.assertEqual(DEFAULT_WIP_CAP, 1)

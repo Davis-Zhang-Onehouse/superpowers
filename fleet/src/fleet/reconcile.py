@@ -41,6 +41,7 @@ BLOCKED = "BLOCKED"
 PARKED = "PARKED"
 AWAITING_CI = "AWAITING-CI"
 COMPLETE = "COMPLETE"
+COMPLETE_BUT_WORKING = "COMPLETE-BUT-WORKING"
 HARVESTED = "HARVESTED"
 CLOSED = "CLOSED"
 DEAD = "DEAD"
@@ -58,8 +59,8 @@ UNREACHABLE = "UNREACHABLE"
 UNKNOWN_SESSION = "UNKNOWN-SESSION"
 STALE_LEASE = "STALE-LEASE"
 
-STATES = (PENDING_LAUNCH, RUNNING, IDLE, BLOCKED, PARKED, AWAITING_CI, COMPLETE, HARVESTED, CLOSED, DEAD,
-          UNREACHABLE, UNKNOWN_SESSION, STALE_LEASE)
+STATES = (PENDING_LAUNCH, RUNNING, IDLE, BLOCKED, PARKED, AWAITING_CI, COMPLETE, COMPLETE_BUT_WORKING, HARVESTED, CLOSED,
+          DEAD, UNREACHABLE, UNKNOWN_SESSION, STALE_LEASE)
 
 KIND_WORKER = "worker"
 KIND_UNKNOWN = "unknown-session"
@@ -286,6 +287,15 @@ def _worker_subject(rec, pool, sessions, instants_dir: Path, idle_after_s: int, 
     holder = _slot_holder_pid(rec, pool, live_sessions) if holds else None
     state, note, on_pane = _state_of(rec, folder_state, live, phase, parked, pane, sessions,
                                      instant, idle_after_s, holder, capture_failed=captured is None)
+    if folder_state == "complete":
+        watcher_kind, watcher_text = _watcher_of(pane, sessions, instant,
+                                                 capture_failed=captured is None)
+        busy = live and sessions.busy(pane)
+        if busy or (phase == PHASE_AWAITING_CI and watcher_kind in
+                    (WATCHER_OBSERVED, WATCHER_ATTESTED)):
+            state = COMPLETE_BUT_WORKING
+            note = ("the instant folder is `-complete-` but its pane is busy" if busy
+                    else f"the instant folder is `-complete-` but its watcher is alive: {watcher_text}")
     if sess is not None and sess.runtime != rec.runtime:
         state, note = BLOCKED, f'live runtime {sess.runtime} differs from record runtime {rec.runtime}'
         on_pane = False
