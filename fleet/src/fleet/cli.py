@@ -4137,7 +4137,13 @@ def _pane_refusal(ctx: Ctx, record: Record, override: str = ""):
 
 def _refuse_live_complete_watcher(ctx: Ctx, record: Record, child: Path, verb: str) -> None:
     """A completed folder may still own a live CI watcher; never tear it down."""
-    if child is None or InstantName.parse(child.name).state != "complete":
+    if child is None:
+        return
+    try:
+        state = InstantName.parse(child.name).state
+    except FleetError:
+        return          # not an instant name, so not a `-complete-` folder: as `_record_for` answers
+    if state != "complete":
         return
     if Declarations(child).phase() != PHASE_AWAITING_CI:
         return
