@@ -105,20 +105,26 @@ fi
 # W1-5 · the product is blind to it too, which is the claim a section relies on. `alive()` must say no about a
 #        session that demonstrably exists — on the other server. The "default" probe (no socket) reaches the decoy
 #        the way a bare tmux in a pane reaches that pane's server: through `$TMUX`, set for this one call.
-TMUX="$DECOY,0,0" python3 - "$DT" > "$OUT/W1-5-blindness.txt" 2>&1 <<'PY'
+if [ -z "$DECOY_DIR" ]; then
+  #: CL-4. Without a decoy, TMUX=",0,0" is ignored by tmux, and the "default" probe would reach the operator's own
+  #: default server — a server this harness did not create. No probe runs.
+  it_fail W1-5 "" "no decoy server (its directory could not be created), so the socketless probe has nothing of its own to reach"
+else
+  TMUX="$DECOY,0,0" python3 - "$DT" > "$OUT/W1-5-blindness.txt" 2>&1 <<'PY'
 from fleet.session import SessionLayer, default_probes
 import sys
 name = sys.argv[1]
 print("private:", SessionLayer(default_probes()).alive(name))
 print("default:", SessionLayer(default_probes(tmux_socket=None)).alive(name))
 PY
-# READ-ONLY on both servers: `alive` is has-session, and the name is never passed to anything else.
-if grep -q '^private: False$' "$OUT/W1-5-blindness.txt" && grep -q '^default: True$' "$OUT/W1-5-blindness.txt"; then
-  it_pass W1-5 "fleet/it/W1/out/W1-5-blindness.txt" \
-    "the product reports $DT alive through the socketless probe (the decoy) and NOT alive on $IT_TMUX_SOCKET — the same call, the same name, two servers, so the blindness is the socket's and not a lookup failure"
-else
-  it_fail W1-5 "fleet/it/W1/out/W1-5-blindness.txt" \
-    "want private:False + default:True, got: $(tr '\n' ' ' < "$OUT/W1-5-blindness.txt")"
+  # READ-ONLY on both servers: `alive` is has-session, and the name is never passed to anything else.
+  if grep -q '^private: False$' "$OUT/W1-5-blindness.txt" && grep -q '^default: True$' "$OUT/W1-5-blindness.txt"; then
+    it_pass W1-5 "fleet/it/W1/out/W1-5-blindness.txt" \
+      "the product reports $DT alive through the socketless probe (the decoy) and NOT alive on $IT_TMUX_SOCKET — the same call, the same name, two servers, so the blindness is the socket's and not a lookup failure"
+  else
+    it_fail W1-5 "fleet/it/W1/out/W1-5-blindness.txt" \
+      "want private:False + default:True, got: $(tr '\n' ' ' < "$OUT/W1-5-blindness.txt")"
+  fi
 fi
 
 # W1-6 · cleanup kills this section's session by exact name on the private server, and nothing else.
