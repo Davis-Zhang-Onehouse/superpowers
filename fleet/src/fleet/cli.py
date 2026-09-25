@@ -3181,10 +3181,16 @@ def _do_milestone(ctx: Ctx, parsed: Parsed) -> int:
     if parsed.get("retitle") is not None:
         operations.append("retitle")
     if len(operations) > 1:
-        raise BadInput(f"milestone operations cannot be combined: {', '.join(operations)}")
+        raise BadInput(f"milestone operations cannot be combined: {', '.join(operations)}",
+                       clears_when="the coordinator submits one milestone operation per call, with no other "
+                                   "operation flag",
+                       clears_who="the coordinator")
     if operations and (any(parsed.get(name) is not None for name in ("title", "status", "owner"))
                        or parsed.all("dep") or parsed.all("evidence")):
-        raise BadInput(f"milestone --{operations[0]} cannot be combined with raising or changing status")
+        raise BadInput(f"milestone --{operations[0]} cannot be combined with raising or changing status",
+                       clears_when="the coordinator submits the milestone operation without raise fields "
+                                   "or status flags; status changes go through propose and apply",
+                       clears_who="the coordinator")
     if parsed.on("history"):
         if parsed.get("reason") is not None:
             raise BadInput("milestone --history does not take --reason")
