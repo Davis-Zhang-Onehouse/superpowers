@@ -133,5 +133,23 @@
     "columns": 180,
     "rows": 45,
     "evidence": "w1sendrecords instant, evidence/02-rca/codex-probe/round2/7lines.frame — SEVEN lines pasted and drawn INLINE: the bold › caret sits above the 8-row tail window while its continuation rows fill it; the base observer answered `unknown` for a box holding the whole message (FB-27, codex)"
+  },
+  {
+    "runtime": "claude",
+    "cli_version": "2.1.282",
+    "state": "busy",
+    "frame": "claude-after-busy-enter-282.frame",
+    "columns": 80,
+    "rows": 24,
+    "evidence": "v23-f worker instant 09212227-09250240-complete-append-v23fsendbusypane, evidence/review/real-claude-midturn-after-enter.frame — a MID-TURN pane (`Puttering…`, `esc to interrupt` on the status row) with an EMPTY box; captured with -e and carrying no escape codes. That folder's `-before` and `-inserted` captures are byte-identical to it, so it evidences a busy empty box, not the moment after Enter"
+  },
+  {
+    "runtime": "claude",
+    "cli_version": "2.1.282",
+    "state": "busy",
+    "frame": "claude-queued-behind-turn-282.frame",
+    "columns": 80,
+    "rows": 24,
+    "evidence": "v23-f worker instant 09212227-09250240-complete-append-v23fsendbusypane, evidence/review/real-claude-midturn-after-1s.frame — the same send one second later: the message is listed above the box with `ctrl+x ctrl+s to send now`, and the box shows the chrome `Press up to edit queued messages` (runtime._EMPTY_BOX_CHROME); no escape codes"
   }
 ]
