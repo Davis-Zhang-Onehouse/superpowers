@@ -28,12 +28,15 @@ S="itfleet-W1-probe-$$"
 # read-only, and SKIP when it had none — and from a worker pane "the live server" was the fleet server `$TMUX`
 # named (FB-118). A decoy of this runner's own stands in: a real server, reachable only by the path below.
 # Named the way the FB-73 guardian names a server (`TMUX_TMPDIR=<dir> tmux -L <name>`), which A8a recognises as private.
-DECOY_DIR="$OUT/decoy"
+# The decoy's directory is SHORT and independent of the checkout's depth (S5, gate 0.6.14 attempt 1): under the gate's verify
+# worktree `$OUT/decoy/tmux-<uid>/w1-decoy` was 132 bytes, past the unix socket limit (108), and tmux refused it
+# ("File name too long"); FB-131's class. A private mktemp directory under /tmp, never /tmp/tmux-<uid> itself.
+DECOY_DIR="$(mktemp -d /tmp/itw1d.XXXXXX 2>/dev/null)"
 DECOY="$DECOY_DIR/tmux-$(id -u)/w1-decoy"
 DT="dt-w1-decoy-$$"
 # tmux falls back to /tmp — the operator's directory — when TMUX_TMPDIR does not exist, so no decoy tmux call runs
 # unless the directory is really there (RV-37); W1-4 then fails naming why.
-if mkdir -p "$DECOY_DIR" && [ -d "$DECOY_DIR" ]; then
+if [ -n "$DECOY_DIR" ] && [ -d "$DECOY_DIR" ]; then
   TMUX_TMPDIR="$DECOY_DIR" tmux -L w1-decoy kill-server 2>/dev/null
   TMUX_TMPDIR="$DECOY_DIR" tmux -L w1-decoy new-session -d -s "$DT" "sleep 300" 2>/dev/null
 else

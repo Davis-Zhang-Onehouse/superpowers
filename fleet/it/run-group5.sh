@@ -1285,11 +1285,14 @@ PY
   FILL='i=1; while [ $i -le 200 ]; do echo "filler line $i"; i=$((i+1)); done;'
   it_tmux_new "itfleet-M-clean" "sh -c '$FILL echo \"? for shortcuts\"; printf \"\\342\\235\\257\\302\\240\"; sleep 900'"
   it_tmux_new "itfleet-M-queued" "sh -c '$FILL echo \"? for shortcuts\"; printf \"\\342\\235\\257\\302\\240draft message\"; sleep 900'"
-  it_tmux_new "itfleet-M-busy" "sh -c '$FILL echo \"? for shortcuts\"; echo \"esc to interrupt\"; sleep 900'"
+  # A real busy claude frame keeps its (empty) input box under the spinner: 11. The same frame with NO box is v23-f's RV-19
+  # case, which reads 14 indeterminate on purpose (S5, gate 0.6.14 attempt 1: this fixture used to have no box and want 11).
+  it_tmux_new "itfleet-M-busy" "sh -c '$FILL echo \"? for shortcuts\"; echo \"esc to interrupt\"; printf \"\\342\\235\\257\\302\\240\"; sleep 900'"
+  it_tmux_new "itfleet-M-busynobox" "sh -c '$FILL echo \"? for shortcuts\"; echo \"esc to interrupt\"; sleep 900'"
   it_tmux_new "itfleet-M-shell" "sleep 900"
   sleep 2
   m10_bad=0
-  for pair in "itfleet-M-clean 0" "itfleet-M-queued 10" "itfleet-M-busy 11" "itfleet-M-shell 12" "itfleet-M-absent-zzz 13"; do
+  for pair in "itfleet-M-clean 0" "itfleet-M-queued 10" "itfleet-M-busy 11" "itfleet-M-busynobox 14" "itfleet-M-shell 12" "itfleet-M-absent-zzz 13"; do
     set -- $pair
     pane="$1"; want="$2"
     it_cap "$pane" > "$EV/M10-$pane.pane" 2>/dev/null || : > "$EV/M10-$pane.pane"
@@ -1299,8 +1302,8 @@ PY
     [ "$rc" = "$want" ] || m10_bad=$((m10_bad+1))
   done
   [ "$m10_bad" = 0 ] \
-    && it_pass M10 "$EV/M10-verdicts.txt" "real panes: clean=0 queued=10 esc-to-interrupt=11 non-claude-shell=12 nonexistent=13" \
-    || it_fail M10 "$EV/M10-verdicts.txt" "$m10_bad of 5 real-pane verdicts wrong"
+    && it_pass M10 "$EV/M10-verdicts.txt" "real panes: clean=0 queued=10 busy-with-empty-box=11 busy-no-box=14 non-claude-shell=12 nonexistent=13" \
+    || it_fail M10 "$EV/M10-verdicts.txt" "$m10_bad of 6 real-pane verdicts wrong"
 
   # M11 — the real render byte sequence: U+276F U+00A0 == e2 9d af c2 a0
   it_cap "itfleet-M-queued" > "$EV/M11-pane.txt"
