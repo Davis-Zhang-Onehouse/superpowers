@@ -481,7 +481,13 @@ class Roadmap:
                     continue
                 if entry["status"] in TERMINAL:
                     raise BadInput(f"milestone {milestone_id!r} is {entry['status']}, which is terminal; "
-                                   "reopen it through apply --reopen before retitling")
+                                   "reopen it through apply --reopen before retitling",
+                                   clears_when=(f"a nonterminal proposal is pending on {self.instant} "
+                                                f"(fleet propose --to {self.instant} --milestone "
+                                                f"{milestone_id} ...), then the coordinator changes its "
+                                                f"status with fleet apply --instant {self.instant} "
+                                                f"--milestone {milestone_id} --reopen"),
+                                   clears_who="the coordinator")
                 if normalized_title == _normalized_title(entry["title"]):
                     raise BadInput(f"milestone {milestone_id!r} already has that title")
                 return entry

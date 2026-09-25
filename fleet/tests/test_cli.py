@@ -8091,3 +8091,22 @@ class TestMilestoneRetitle(CliCase):
                                   "--retitle", "new scope", "--reason", "updated"])
         self.assertEqual(EXIT_OK, code, err)
         self.assertEqual("keep me", json.loads(roadmap.path.read_text())["milestones"][0]["future_optional"])
+
+    def test_terminal_and_combination_refusals_name_clearing_routes(self):
+        fleet = self.loaded()
+        path = fleet.paths["readyWorker"]
+        base = ["milestone", "--instant", str(path), "--id", "M1"]
+        code, _, err = fleet.run(base + ["--retitle", "new", "--reason", "why", "--retire"])
+        self.assertEqual(EXIT_BAD_INPUT, code)
+        own = err.split("BadInput:", 1)[1]
+        self.assertIn("operations cannot be combined", own)
+        self.assertIn("clears when:", own)
+        self.assertIn("clears who: the coordinator", own)
+        Roadmap(path).retire("M1", "done elsewhere")
+        code, _, err = fleet.run(base + ["--retitle", "new", "--reason", "why"])
+        self.assertEqual(EXIT_BAD_INPUT, code)
+        own = err.split("BadInput:", 1)[1]
+        self.assertIn("terminal", own)
+        self.assertIn("propose", own)
+        self.assertIn("apply --reopen", own)
+        self.assertIn("clears who: the coordinator", own)
