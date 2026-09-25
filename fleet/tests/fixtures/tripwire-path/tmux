@@ -1,9 +1,10 @@
 #!/usr/bin/env bash
 # FB-118. The hermetic suite's `tmux`, first on PATH for every process the suite starts (`tests/__init__.py`).
 # It resolves the server this call would reach the way tmux does — `-S path`, else `-L name` under
-# $TMUX_TMPDIR/tmux-<uid>, else $TMUX's socket, else `default` there — and REFUSES (records on the tripwire log,
-# exits 97, runs nothing) when that server is in FLEET_SUITE_FOREIGN_TMUX: the tmux directory and the $TMUX
-# server of the shell that started the suite, i.e. the operator's live servers. Anything else is the real tmux.
+# $TMUX_TMPDIR/tmux-<uid> (or /tmp when that directory does not exist), else $TMUX's socket, else `default` there —
+# and REFUSES (records on the tripwire log, exits 97, runs nothing) when that server is in FLEET_SUITE_FOREIGN_TMUX:
+# the box's /tmp/tmux-<uid> always, plus the tmux directory and the $TMUX server of the shell that started the suite,
+# i.e. the operator's live servers. Anything else is the real tmux.
 real="${FLEET_SUITE_REAL_TMUX:-/usr/bin/tmux}"
 server="" name=""
 argv=("$@")

@@ -188,10 +188,10 @@ _install_live_fleet_guard()
 #     directory of this suite, so a bare or `-L` tmux can only name a server that lives here;
 #   * FLEET_CLAUDE_BIN / FLEET_CODEX_BIN name `fixtures/bin/no-real-runtime`, which runs nothing;
 #   * THE TRIPWIRE: an audit hook refuses an in-process exec of a real runtime binary or of a tmux call aimed at
-#     a FOREIGN server (the caller's tmux directory or `$TMUX` server); `fixtures/tripwire-path/`, first on PATH
-#     with `tmux`, `claude` and `codex`, refuses the same for child processes; both, like the stub, append to one
-#     log. A test whose run grew that log FAILS, even if the product swallowed the refusal. `expect_tripwire()` is how a case that
-#     trips it on purpose takes its records back.
+#     a FOREIGN server (the box's /tmp/tmux-<uid> always, the caller's tmux directory, the caller's `$TMUX` server);
+#     `fixtures/tripwire-path/`, first on PATH with `tmux`, `claude` and `codex`, refuses the same for child
+#     processes; both, like the stub, append to one log. A test whose run grew that log FAILS, even if the product
+#     swallowed the refusal. `expect_tripwire()` is how a case that trips it on purpose takes its records back.
 #
 # A child that inherits this environment reuses it (the log, the foreign set) instead of minting its own, so a
 # suite run from inside the suite still charges the right process.
