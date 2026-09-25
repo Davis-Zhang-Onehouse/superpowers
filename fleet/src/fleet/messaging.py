@@ -96,7 +96,31 @@ def _is_scrolled_tail(draft, text) -> bool:
     if not draft or draft.count("\n") + 1 < TAIL_MIN_ROWS:
         return False
     seen, whole = _squash(draft), _squash(text)
-    return 0 < len(seen) < len(whole) and whole.endswith(seen) and whole[-len(seen) - 1] == " "
+    if not (0 < len(seen) < len(whole) and whole.endswith(seen) and whole[-len(seen) - 1] == " "):
+        return False
+    #: RV-8. A suffix is not yet a SCROLLED view: a box that lost its head and re-wrapped what was left is a suffix too,
+    #: and Enter would submit it truncated. A scrolled view shows the message's own last rows, so the visible rows
+    #: must be exactly the last rows of the whole message wrapped at one width. Claude Code wraps greedily at word
+    #: boundaries: every real scrolled frame re-wraps this way (80 columns -> width 76). Only a head lost in WHOLE
+    #: rows still passes, and nothing in a frame can tell that from a scroll.
+    rows = [" ".join(row.split()) for row in draft.split("\n")]
+    words = whole.split(" ")
+    #: A width at or past `row + space + next row's first word` would have pulled that word up, so only widths below
+    #: every such bound can draw these rows.
+    widest = min(len(row) + 1 + len(nxt.split(" ")[0]) for row, nxt in zip(rows, rows[1:]))
+    return any(_wrap(words, width)[-len(rows):] == rows for width in range(max(map(len, rows)), widest))
+
+
+def _wrap(words, width) -> list:
+    """`words` wrapped greedily at `width`, the way Claude Code draws a paste in its box."""
+    rows, row = [], ""
+    for word in words:
+        if row and len(row) + 1 + len(word) > width:
+            rows.append(row)
+            row = word
+        else:
+            row = f"{row} {word}" if row else word
+    return rows + [row]
 
 
 def digest(text: str) -> str:

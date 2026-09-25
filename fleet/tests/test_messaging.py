@@ -94,28 +94,48 @@ class MessagingTests(unittest.TestCase):
                     send(Path(directory), layer, SimpleNamespace(tmux='worker'), self.SCROLLED_TEXT, timeout_s=0)
                 self.assertEqual(events, [('literal', self.SCROLLED_TEXT)])
 
+    @staticmethod
+    def wrapped(words, width=76):
+        """Rows as Claude Code 2.1.282 wraps a paste: greedy, at word boundaries. At 80 columns the text width is 76,
+        measured by re-wrapping every real scrolled frame (both fixtures, and SEND-6's base pane)."""
+        rows, row = [], ''
+        for word in words:
+            if row and len(row) + 1 + len(word) > width:
+                rows.append(row)
+                row = word
+            else:
+                row = f'{row} {word}' if row else word
+        return rows + [row]
+
     def test_what_a_tail_is_not(self):
         """Each guard of the tail confirmation, one at a time. None of these may ever reach Enter."""
         text = self.SCROLLED_TEXT
         words = text.split()
-        rows = lambda ws, per=12: '\n'.join(' '.join(ws[i:i + per]) for i in range(0, len(ws), per))
-        suffix3 = rows(words[-36:])                           # a 3-row, word-aligned suffix: the control
-        self.assertEqual(CONFIRMED_BY_DRAFT_TAIL, confirms('claude', suffix3, text))
+        rows = self.wrapped(words)
+        tail3 = '\n'.join(rows[-3:])                     # the last 3 rows of the wrapped message: the control
+        self.assertEqual(CONFIRMED_BY_DRAFT_TAIL, confirms('claude', tail3, text))
         cases = {
-            'two rows are too few to be a scrolled box': rows(words[-24:]),
-            'a suffix cut mid-word is not a row start': rows(words[-36:])[3:],
-            'a prefix is a paste still arriving': rows(words[:36]),
-            'a middle slice does not end at our end': rows(words[-40:-4]),
-            'somebody else\'s text': rows(('lorem ipsum dolor sit amet ' * 8).split()),
-            'our text twice is not a suffix': rows((text + ' ' + text).split()),
+            'two rows are too few to be a scrolled box': '\n'.join(rows[-2:]),
+            'a suffix cut mid-word is not a row start': '\n'.join(rows[-3:])[3:],
+            'a prefix is a paste still arriving': '\n'.join(rows[:3]),
+            'a middle slice does not end at our end': '\n'.join(rows[-5:-2]),
+            'somebody else\'s text': '\n'.join(self.wrapped(('lorem ipsum dolor sit amet ' * 20).split())),
+            'our text twice is not a suffix': '\n'.join(self.wrapped((text + ' ' + text).split())),
+            #: RV-8. A box that LOST its head (here its first five words) and re-wrapped what was left is a word-aligned
+            #: suffix of 3+ rows, but its rows are not the message's own rows at any width: before the fix it confirmed,
+            #: and Enter submitted a truncated message.
+            'a head-lost box re-wraps into rows the message never has': '\n'.join(self.wrapped(words[5:])),
+            'a head-lost box re-wrapped, seen scrolled': '\n'.join(self.wrapped(words[5:])[-4:]),
         }
         for why, draft in cases.items():
             with self.subTest(why):
                 self.assertIsNone(confirms('claude', draft, text))
         with self.subTest('codex is not measured to scroll, so it never confirms by tail'):
-            self.assertIsNone(confirms('codex', suffix3, text))
+            self.assertIsNone(confirms('codex', tail3, text))
         with self.subTest('the whole text is still the strong kind'):
-            self.assertEqual(CONFIRMED_BY_DRAFT, confirms('claude', rows(words), text))
+            self.assertEqual(CONFIRMED_BY_DRAFT, confirms('claude', '\n'.join(rows), text))
+        with self.subTest('the measured width is not the only one: any consistent width confirms'):
+            self.assertEqual(CONFIRMED_BY_DRAFT_TAIL, confirms('claude', '\n'.join(self.wrapped(words, 150)[-3:]), text))
 
     def test_the_retry_waits_for_the_same_tail_evidence(self):
         """After Enter the scrolled box still shows the tail: one retry on the same evidence, then the distinct
