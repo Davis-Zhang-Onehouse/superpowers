@@ -6,6 +6,7 @@ the pane itself sits at the trust screen waiting for a human. The output was pla
 hermetic `Fleet` fixture (no tmux, no claude, no real sleep) with an injected `ctx.launch_watch`, and drive
 `_watch_launch` itself over the real 2.1.282 trust frame.
 """
+import io
 import json
 import os
 import pathlib
@@ -14,7 +15,7 @@ from unittest import mock
 
 from fleet import cli
 from fleet.runtime import LaunchSettings
-from tests.test_cli import FRESH_BASE_DIGITS, CliCase
+from tests.test_cli import FRESH_BASE_DIGITS, CliCase, hermetic_environment
 
 FIXTURES = pathlib.Path(__file__).resolve().parents[1] / "it" / "fixtures" / "runtime"
 TRUST_FRAME = (FIXTURES / "claude-trust-2.1.282.frame").read_text()
@@ -56,6 +57,24 @@ def inject(fleet, watch=None, config_dir=None):
     fleet.context = lambda: build
 
 
+def run_interrupted(case, fleet, argv):
+    """`Fleet.run`, but for a verb that must RAISE KeyboardInterrupt: the stdout written before the raise is kept."""
+    out, err = io.StringIO(), io.StringIO()
+    with hermetic_environment(fleet.instants, home=fleet.tmp):
+        prior_cwd = os.getcwd()
+        os.chdir(fleet.tmp)
+        try:
+            with case.assertRaises(KeyboardInterrupt):
+                cli.main(list(argv), stdout=out, stderr=err, context=fleet.context())
+        finally:
+            os.chdir(prior_cwd)
+    return out.getvalue(), err.getvalue()
+
+
+def interrupting(tmux, runtime):
+    raise KeyboardInterrupt
+
+
 def dispatch_argv(fleet, title, *extra):
     return ["dispatch", "--porcelain", "--profile", str(fleet.profile("worker")), "--title", title,
             "--base", FRESH_BASE_DIGITS, "--optype", "append", "--slot", "ws4", *extra]
@@ -80,6 +99,52 @@ class TestDispatchReportsTheTrustScreen(CliCase):
         keys = [line.split("\t")[0] for line in out.splitlines()]
         self.assertLess(keys.index("launched_at"), keys.index("trust"))
         self.assertLess(keys.index("trust"), keys.index("trust_screen"))
+
+    def test_the_claude_remedy_says_the_coordinator_or_operator_answers_it(self):
+        """Final review: whoever reads the row may be the coordinator, so the row names both."""
+        fleet = self.loaded()
+        slot = str(fleet.pool.slot_path("ws4"))
+        inject(fleet, Watch(lambda tmux, runtime: cli.LaunchWatch("trust-screen", path=slot)))
+        code, out, err = fleet.run(dispatch_argv(fleet, "claudeRemedy"))
+        self.assertEqual(0, code, out + err)
+        rows = rows_of(out)
+        self.assertIn("the coordinator or operator answers it once on the pane", rows["trust_screen"])
+        self.assertIn('press Down to "Yes, I trust this folder"', rows["trust_screen"])
+        self.assertIn("the coordinator or operator answers it once on the pane", rows["trust"])
+
+    def test_a_codex_trust_screen_gets_the_codex_remedy_and_never_down(self):
+        """Final review I1: on codex the first option (trust and continue) is already selected; Down+Enter QUITS."""
+        fleet = self.loaded()
+        slot = str(fleet.pool.slot_path("ws4"))
+        watch = Watch(lambda tmux, runtime: cli.LaunchWatch("trust-screen", path=slot))
+        inject(fleet, watch)
+        code, out, err = fleet.run(dispatch_argv(fleet, "codexScreen", "--runtime", "codex"))
+        self.assertEqual(0, code, out + err)
+        self.assertEqual("codex", watch.calls[0][1])
+        rows = rows_of(out)
+        remedy = rows["trust_screen"]
+        self.assertTrue(remedy.startswith("observed — the slot's folder is not trusted by codex"), remedy)
+        self.assertIn("the first option (trust and continue) is already selected", remedy)
+        self.assertIn("CODEX_HOME/config.toml", remedy)
+        self.assertIn("the coordinator or operator answers it once on the pane", remedy)
+        self.assertNotIn("Down", remedy)
+        self.assertNotIn("Claude", remedy)
+        self.assertEqual("yes", rows["trust_screen_is_slot"])
+        self.assertNotIn("Claude Code", err)
+
+    def test_an_interrupted_watch_still_prints_the_launch_and_reraises(self):
+        """Final review I2 (RV-C5): the launch is recorded and the milestone claimed before the watch, so an
+        interrupt there must still print todo_id — its absence means nothing started."""
+        fleet = self.loaded()
+        inject(fleet, Watch(interrupting))
+        out, err = run_interrupted(self, fleet, dispatch_argv(fleet, "watchInterrupted"))
+        rows = rows_of(out)
+        self.assertIn("todo_id", rows, out + err)
+        self.assertIn("instant", rows)
+        self.assertTrue(rows["trust_screen"].startswith("unobserved — the watch was interrupted"), rows)
+        self.assertIn("fleet pane-guard --pane", rows["trust_screen"])
+        self.assertIn("trust", rows)
+        self.assertTrue(any(r.title == "watchInterrupted" and r.launched_at for r in fleet.store.all()))
 
     def test_a_trust_screen_naming_another_folder_says_NO(self):
         fleet = self.loaded()
@@ -171,6 +236,7 @@ class TestDispatchReportsTheTrustScreen(CliCase):
         code, out, err = fleet.run(dispatch_argv(fleet, "untrustedSlot", "--dry-run"))
         self.assertEqual(0, code, out + err)
         self.assertTrue(rows_of(out)["trust"].startswith("untrusted"), out)
+        self.assertIn("the coordinator or operator answers it once on the pane", rows_of(out)["trust"])
         self.assertIn("folder-trust screen", rows_of(out)["trust"])
 
 
@@ -189,6 +255,15 @@ class TestReviveReportsTheTrustScreen(CliCase):
         self.assertTrue(rows["trust_screen"].startswith("observed"), rows)
         self.assertEqual("yes", rows["trust_screen_is_slot"])
         self.assertEqual(1, len(watch.calls))
+
+    def test_an_interrupted_revive_watch_still_prints_the_revive_and_reraises(self):
+        fleet = self.loaded()
+        argv = fleet.revival_fixture()
+        inject(fleet, Watch(interrupting))
+        out, err = run_interrupted(self, fleet, ["revive", "--porcelain", *argv])
+        rows = rows_of(out)
+        self.assertIn("todo_id", rows, out + err)
+        self.assertTrue(rows["trust_screen"].startswith("unobserved — the watch was interrupted"), rows)
 
     def test_the_revive_dry_run_prints_a_trust_row_and_never_watches(self):
         fleet = self.loaded()
@@ -251,6 +326,19 @@ class TestTheWatchLoop(unittest.TestCase):
         ctx = FakeCtx()
         ctx.launch_watch = lambda tmux, runtime: cli.LaunchWatch("dialog")
         self.assertEqual("dialog", cli._watch_launch(ctx, FakeLayer([idle]), "dt-x", "claude").outcome)
+
+    def test_a_tilde_screen_path_is_expanded_before_the_slot_comparison(self):
+        """Final review I3: 2.1.282 draws the absolute path even under HOME (claude-trust-under-home-2.1.282.frame);
+        a `~` path is expanded anyway, as a defence."""
+        import shutil
+        import tempfile
+        home = pathlib.Path(tempfile.mkdtemp())
+        self.addCleanup(shutil.rmtree, home, True)
+        (home / "slot").mkdir()
+        with mock.patch.dict(os.environ, {"HOME": str(home)}):
+            rows = dict(cli._watch_rows(cli.LaunchWatch("trust-screen", path="~/slot"), "dt-x", str(home / "slot"),
+                                        "claude"))
+        self.assertEqual("yes", rows["trust_screen_is_slot"])
 
     def test_the_window_reads_like_the_seed_window(self):
         self.assertEqual(cli.TRUST_WATCH_DEFAULT_S, cli._trust_watch_window({}))

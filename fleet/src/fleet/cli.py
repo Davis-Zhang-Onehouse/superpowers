@@ -234,6 +234,10 @@ PANE_AWAITING_OPERATOR = 15
 #: capacity (the `E1` shape the integration suite had to learn to tolerate). Launches WAIT for each other;
 #: only `runtime --set` keeps the short bounded refusal (`runtime_config.admission_lock`'s default), because
 #: a switch refused by a slow holder is the spec's intended outcome and a dispatch refused by one is not.
+#:
+#: V23-P: the admission lock is now also held through the read-only trust prediction and the post-launch watch
+#: (`FLEET_TRUST_WATCH_SECONDS`, default 8, which exits early on the first decisive frame; about 1 s measured for a
+#: trusted claude in §TS), so a queued launch can wait up to that window longer behind the holder.
 ADMISSION_WAIT_S = 60.0
 
 PANE_GUARD_CODES = {
@@ -1835,6 +1839,9 @@ def _predict_trust(ctx, settings, cwd, environ=None) -> "trust.TrustPrediction":
     """`trust.predict` for this launch, under the environment the worker will be started with (`environ`, the
     launcher's own overlay, else `ctx.launch_environment`) over this process's. Read-only; never raises."""
     try:
+        #: Final review M3. `CLAUDE_CODE_SANDBOXED` is read from fleet's OWN environment plus the launch overlay, not
+        #: the tmux server's environment the pane inherits, so the prediction may say trusted while the pane still
+        #: shows the screen (or the reverse). The post-launch watch is the ground truth; this row is advice.
         overlay = environ if environ is not None else (ctx.launch_environment or {})
         return trust.predict(settings.runtime, settings.config_dir, cwd, environ={**os.environ, **overlay})
     except Exception as exc:  # noqa: BLE001 - a prediction is advice; it must never refuse or fail a launch
@@ -1848,24 +1855,40 @@ def _trust_rows(prediction) -> list:
         value = f"trusted — projects[{key}]: {detail}" if key else f"trusted — {detail}"
     elif state == trust.UNTRUSTED:
         value = (f"untrusted — {detail}, so the launch will stop at Claude Code's folder-trust screen for {key}; "
-                 f"the operator answers it once on the pane")
+                 f"the coordinator or operator answers it once on the pane")
     else:
         value = f"{state} — {detail}"
     return [("trust", _one_line(value))]
 
 
-def _watch_rows(watch, tmux, slot_path) -> list:
+def _trust_screen_remedy(runtime, tmux, slot_path) -> str:
+    """V23-P (final review I1). The keys that answer the trust screen differ by runtime, and the wrong ones QUIT:
+    Claude's screen opens on "No, exit" (Down, then Enter trusts), codex's opens on its first option, trust and
+    continue (`› 1. Trust and continue / 2. Quit` on 0.156, `› 1. Yes, continue / 2. No, quit` before), so Down
+    then Enter picks Quit and kills the worker (fixtures `codex-trust-0156.frame`, `codex-trust.frame`)."""
+    if runtime == "codex":
+        return (f"observed — the slot's folder is not trusted by codex: the coordinator or operator answers it once "
+                f"on the pane — answer the trust screen in {tmux} (verify the path it shows is the leased slot "
+                f"{slot_path}): the first option (trust and continue) is already selected — check it on screen, "
+                f"then Enter. fleet never answers it, because the answer is written into CODEX_HOME/config.toml")
+    return (f"observed — the slot's folder is not trusted by Claude Code: the coordinator or operator answers it once "
+            f"on the pane — answer the trust screen in {tmux} (verify the path it shows is the leased slot "
+            f"{slot_path}): press Down to \"Yes, I trust this folder\", check it is selected on screen, then Enter. "
+            f"fleet never answers it, because the answer is written into the operator's Claude config")
+
+
+def _watch_rows(watch, tmux, slot_path, runtime="claude") -> list:
     """V23-P. What the pane showed after the launch, and when it is the trust screen, whether the folder it names
     is the leased slot — the one fact the operator must check before answering it."""
     if watch.outcome == "trust-screen":
-        rows = [("trust_screen",
-                 f"observed — the slot's folder is not trusted by Claude Code: answer the trust screen in {tmux} "
-                 f"once (verify the path it shows is the leased slot {slot_path}): press Down to \"Yes, I trust "
-                 f"this folder\", check it is selected on screen, then Enter. fleet never answers it, because the "
-                 f"answer is written into the operator's Claude config"),
+        rows = [("trust_screen", _trust_screen_remedy(runtime, tmux, slot_path)),
                 ("trust_screen_path", watch.path or "(unreadable — the screen's path row could not be read)")]
         try:
-            same = bool(watch.path) and Path(watch.path).resolve() == Path(slot_path).resolve()
+            #: Final review I3. Measured: Claude Code 2.1.282 draws the ABSOLUTE path even when the cwd is under
+            #: HOME (`claude-trust-under-home-2.1.282.frame`), so `expanduser` changes nothing today; it is a
+            #: harmless defence should a build ever draw `~/…`.
+            same = bool(watch.path) and (Path(os.path.expanduser(watch.path)).resolve() ==
+                                         Path(slot_path).resolve())
         except (OSError, RuntimeError, ValueError):
             same = False
         shown = watch.path or "no readable path"
@@ -1882,14 +1905,24 @@ def _watch_rows(watch, tmux, slot_path) -> list:
                                        f"`fleet pane-guard --pane {tmux}`"))]
 
 
-def _launch_trust_rows(ctx, prediction, layer, tmux, runtime, slot_path) -> list:
+def _launch_trust_rows(ctx, prediction, layer, tmux, runtime, slot_path) -> tuple:
     """V23-P. Called only after the launch is recorded, outside any rollback: the rows, plus one stderr line
-    when the pane is waiting at the trust screen."""
-    watch = _watch_launch(ctx, layer, tmux, runtime)
+    when the pane is waiting at the trust screen.
+
+    Returns `(rows, interrupt)`. Final review I2 (RV-C5): a KeyboardInterrupt during the watch arrives AFTER the
+    record is written and the milestone claimed, so the caller must still print its full success rows — the
+    absence of `todo_id` means nothing started — and only then re-raise `interrupt`, so the caller of fleet
+    still sees an interrupt."""
+    interrupt = None
+    try:
+        watch = _watch_launch(ctx, layer, tmux, runtime)
+    except KeyboardInterrupt as exc:
+        watch, interrupt = LaunchWatch("unobserved", detail="the watch was interrupted"), exc
     if watch.outcome == "trust-screen":
-        print(f"fleet: {tmux} is waiting at Claude Code's folder-trust screen for {watch.path or '(unreadable path)'}; "
+        screen = "codex's trust screen" if runtime == "codex" else "Claude Code's folder-trust screen"
+        print(f"fleet: {tmux} is waiting at {screen} for {watch.path or '(unreadable path)'}; "
               f"answer it once on the pane (see the trust_screen row).", file=ctx.err)
-    return [*_trust_rows(prediction), *_watch_rows(watch, tmux, slot_path)]
+    return [*_trust_rows(prediction), *_watch_rows(watch, tmux, slot_path, runtime)], interrupt
 
 
 def _do_revive(ctx: Ctx, parsed: Parsed) -> int:
@@ -1959,10 +1992,12 @@ def _do_revive(ctx: Ctx, parsed: Parsed) -> int:
     ctx.store.write(record)
     #: V23-P (FB-126). `_verify_resume` read argv, which is right while the pane waits at the trust screen. Watched
     #: after the record is written, so an observation problem is a row and never a failed revive (D-3).
-    trust_rows = _launch_trust_rows(ctx, prediction, layer, record.tmux, settings.runtime, lease.path)
+    trust_rows, interrupt = _launch_trust_rows(ctx, prediction, layer, record.tmux, settings.runtime, lease.path)
     _emit(ctx, 'revive', [('todo_id', record.todo_id), ('session_id', session_id), ('runtime', record.runtime),
                           ('model', record.runtime_model or "(none — the CLI's configured default model)"),
                           *policy_rows, *trust_rows])
+    if interrupt is not None:
+        raise interrupt
     return EXIT_OK
 
 
@@ -2517,8 +2552,9 @@ def _do_dispatch(ctx: Ctx, parsed: Parsed) -> int:
         raise not_started("given-back", "was given back") from launch_error
     #: V23-P (FB-126). After the record and the milestone claim, OUTSIDE the rollback try: the seed check read
     #: argv, which is right while the pane waits at the trust screen, and an observation problem here must never
-    #: roll a good launch back (D-3). `_launch_trust_rows` never raises.
-    trust_rows = _launch_trust_rows(ctx, prediction, ctx.sessions, tmux, settings.runtime, lease.path)
+    #: roll a good launch back (D-3). `_launch_trust_rows` never raises: it hands back a KeyboardInterrupt from the
+    #: watch, which is re-raised only AFTER the success rows are printed (final review I2, RV-C5).
+    trust_rows, interrupt = _launch_trust_rows(ctx, prediction, ctx.sessions, tmux, settings.runtime, lease.path)
     _emit(ctx, "dispatch", [("todo_id", todo_id), ("instant", str(child)), ("slot", lease.slot),
                             ("tmux", tmux), *_title_rows(title), ("watched_source", source.base),
                             ("milestone", milestone_id or "(none)"),
@@ -2531,6 +2567,8 @@ def _do_dispatch(ctx: Ctx, parsed: Parsed) -> int:
                             ("launched_at", record.launched_at), *_choice_rows(choice),
                             *_codex_skills_rows(skills, parsed, _releases_of(ctx)),
                             *_codex_policy_rows(settings.runtime, launch_env), *trust_rows])
+    if interrupt is not None:
+        raise interrupt
     return EXIT_OK
 
 

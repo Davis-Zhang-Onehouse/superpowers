@@ -178,5 +178,14 @@
     "columns": 120,
     "rows": 40,
     "evidence": "v23ptrustscreen instant (09212227-09251051-inflight-append-v23ptrustscreen), evidence/01-trust-rule/frames/F.frame — case F of trust-matrix.sh: a linked worktree whose main worktree is trusted, so no trust screen; the ordinary TUI after one turn (not logged in), the control for the recognizer — captured with `tmux capture-pane -p -e` from a real Claude Code 2.1.282 on a private tmux socket (v23p-matrix / v23p-wrap) with a scratch CLAUDE_CONFIG_DIR and HOME, never the operator's config (V23-P, FB-126)"
+  },
+  {
+    "runtime": "claude",
+    "cli_version": "2.1.282",
+    "state": "dialog",
+    "frame": "claude-trust-under-home-2.1.282.frame",
+    "columns": 120,
+    "rows": 40,
+    "evidence": "v23ptrustscreen instant (09212227-09251051-inflight-append-v23ptrustscreen), evidence/01-trust-rule/frames/under-home.frame, with under-home.txt beside it — the folder-trust screen for a cwd UNDER a scratch HOME (cwd=/tmp/v23p-home.d2Kb/home/slot HOME=/tmp/v23p-home.d2Kb/home): Claude Code 2.1.282 draws the ABSOLUTE path, not a ~-relative one — captured with `tmux capture-pane -p -e` from a real Claude Code 2.1.282 on a private tmux socket with a scratch CLAUDE_CONFIG_DIR and HOME, never the operator's config (V23-P, FB-126)"
   }
 ]

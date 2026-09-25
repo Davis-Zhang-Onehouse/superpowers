@@ -376,6 +376,7 @@ it_outside_checkout_dir() {   # it_outside_checkout_dir <name> -> prints a FRESH
   if [ -z "$parent" ]; then
     parent="$IT_ROOT"
     while top="$(git -C "$parent" rev-parse --show-toplevel 2>/dev/null)" && [ -n "$top" ]; do
+      [ "$top" = / ] && break
       parent="$(cd "$top/.." && pwd)"
     done
   fi

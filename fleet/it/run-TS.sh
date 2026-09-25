@@ -30,6 +30,8 @@ it_own_cases 'TS[0-9]+[a-z]?|ISOLATION-TS-(enter|leave)'
 REAL_CLAUDE="${P_REAL_CLAUDE:-/home/ubuntu/.local/bin/claude}"
 TS_WAIT="${TS_WAIT:-25}"
 
+#: Final review M4. The control must stay logged out, so no model is ever called: no ambient credential reaches claude.
+unset ANTHROPIC_API_KEY ANTHROPIC_AUTH_TOKEN CLAUDE_CODE_OAUTH_TOKEN
 it_section TS
 it_fresh_store
 OUT="$EV/out"; rm -rf "$OUT"; mkdir -p "$OUT"
@@ -41,7 +43,7 @@ if [ ! -x "$REAL_CLAUDE" ]; then
   echo "§TS skipped"; exit 0
 fi
 
-TS_ROOT="$(mktemp -d /tmp/fleet-it-ts.XXXXXX)"
+TS_ROOT="$(mktemp -d /tmp/fleet-it-ts.XXXXXX)" || exit 2
 TODOS=()
 cleanup_TS() {
   for todo in "${TODOS[@]}"; do

@@ -262,6 +262,12 @@ class TrustScreenCase(unittest.TestCase):
                          "/tmp/v23p-wrap.WLO3/a-deliberately-long-slot-directory-name/"
                          "that-wraps-past-eighty-columns/on-the-trust-screen")
 
+    def test_claude_under_home_draws_the_absolute_path(self):
+        """Final review I3: measured on 2.1.282 with the cwd under a scratch HOME — the screen shows the absolute
+        path, never `~/slot`."""
+        self.assertEqual(trust.trust_screen_path("claude", self.frame("claude-trust-under-home-2.1.282.frame")),
+                         "/tmp/v23p-home.d2Kb/home/slot")
+
     def test_claude_tui_is_not_a_trust_screen(self):
         self.assertIsNone(trust.trust_screen_path("claude", self.frame("claude-tui-2.1.282.frame")))
 
