@@ -160,11 +160,35 @@ class TheLiveSessionBelongsToTheLatestLaunch(unittest.TestCase):
         duplicate name leaves exactly this beside the record whose session is live."""
         pair = Pair(self)
         pair.record("08262300", "inflight", "ws1", launched_at=ts(-9e5), lease=True)
-        pair.record("09251200", "inflight", "ws2", launched_at=None, lease=True)
+        #: The rollback of a start tmux refused gives the lease back (cli `_do_dispatch`, `started` False).
+        pair.record("09251200", "inflight", "ws2", launched_at=None, lease=False)
         pair.launch("ws1", QUIET)
         subs = pair.reconcile()
         self.assertEqual(subs["mile-08262300"].state, RUNNING)
         self.assertEqual(subs["mile-09251200"].state, PENDING_LAUNCH)
+        self.assertEqual(subs["mile-09251200"].evidence["liveness"], "none")
+
+    def test_a_start_in_progress_owns_the_session_it_just_started(self):
+        """RV-32. Dispatch starts `dt-<name>`, delivers the seed, and only then stamps `launched_at`; for those seconds the
+        new record is unlaunched but unstamped and HOLDS ITS LEASE. It is the latest start, so it owns the session, and
+        the dead record it replaces reads as gone rather than as RUNNING on the new worker's pid."""
+        pair = Pair(self)
+        pair.record("08262300", "inflight", "ws1", launched_at=ts(-9e5), lease=True)       # died, never closed
+        pair.record("09251200", "inflight", "ws2", launched_at=None, lease=True)           # starting now
+        pair.launch("ws2", QUIET)
+        subs = pair.reconcile()
+        old = subs["mile-08262300"]
+        self.assertEqual((old.state, old.evidence["liveness"], old.evidence["pid"]), (DEAD, "none", ""))
+        self.assertNotEqual(subs["mile-09251200"].evidence["liveness"], "none")
+
+    def test_a_stamped_record_that_never_launched_does_not_own_the_session(self):
+        """Neighbour: `close` stamped a never-launched record whose lease it did not release. Its start is over."""
+        pair = Pair(self)
+        pair.record("08262300", "inflight", "ws1", launched_at=ts(-9e5), lease=True)
+        pair.record("09251200", "inflight", "ws2", launched_at=None, lease=True, closed=True)
+        pair.launch("ws1", QUIET)
+        subs = pair.reconcile()
+        self.assertEqual(subs["mile-08262300"].state, RUNNING)
         self.assertEqual(subs["mile-09251200"].evidence["liveness"], "none")
 
     def test_a_stamped_record_alone_still_reads_its_live_session(self):
@@ -226,6 +250,25 @@ class TheOwnerRule(unittest.TestCase):
         old = self._rec("mile-01", "2026-08-08T13:05:42Z")
         pending = self._rec("mile-02", None)
         self.assertIs(R.session_owner([pending, old], "here")[("here", "dt-mile")], old)
+
+    def test_a_start_in_progress_ranks_by_its_dispatch(self):
+        """RV-32. An unstamped, never-launched record that still holds its lease is a start in progress (or one whose
+        rollback kill failed): it ranks by `dispatched_at`. Without its lease it was rolled back and ranks below all."""
+        from fleet.pool import Pool
+        tmp = pathlib.Path(tempfile.mkdtemp())
+        self.addCleanup(shutil.rmtree, tmp, True)
+        pool = Pool(tmp / "home", cwd_probe=lambda p: [], alive=lambda n: False)
+        (tmp / "ws2").mkdir()
+        pool.enroll(tmp / "ws2")
+        old = self._rec("mile-01", "2026-09-22T00:03:33Z")
+        new = self._rec("mile-02", None)
+        new.slot, new.dispatched_at = "ws2", "2026-09-22T00:05:00Z"
+        self.assertIs(R.session_owner([old, new], "here", pool)[("here", "dt-mile")], old, "no lease: rolled back")
+        pool.claim(todo_id="mile-02", tmux="dt-mile", base_instant="B", child_instant="/i/x", slot="ws2")
+        self.assertIs(R.session_owner([old, new], "here", pool)[("here", "dt-mile")], new, "lease held: starting")
+        new.dispatched_at = "2026-09-22T00:03:00Z"
+        self.assertIs(R.session_owner([old, new], "here", pool)[("here", "dt-mile")], old,
+                      "a start dispatched before the rival's launch cannot own what the rival started later")
 
     def test_on_a_tie_the_unstamped_record_wins(self):
         a = self._rec("mile-02", "2026-09-22T00:05:06Z", harvested=True)
@@ -339,6 +382,15 @@ class TheTeardownVerbsLeaveASessionThatIsNotTheirs(unittest.TestCase):
         d.set_watchers("attested: Monitor b1e6x9hs6 polls gh pr checks 521")
         code, out, err = fleet.run(["close", "--id", old_id])
         self.assertEqual(code, 0, f"{out}\n{err}")
+        self._assert_left_alone(fleet, code, out, err)
+
+    def test_close_of_a_dead_record_does_not_kill_a_re_dispatch_that_is_still_starting(self):
+        """RV-32 at the verb: B's dispatch has started `dt-mile` and holds ws2, but has not stamped `launched_at` yet."""
+        fleet, _, old_id = self._pair("inflight", old_closed=False)
+        rec = fleet.store.read(fleet.ids["mile"])
+        rec.launched_at = None
+        fleet.store.write(rec)
+        code, out, err = fleet.run(["close", "--id", old_id, "--force"])
         self._assert_left_alone(fleet, code, out, err)
 
     def test_close_of_the_owner_still_kills_its_own_session(self):

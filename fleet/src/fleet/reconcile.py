@@ -232,7 +232,7 @@ def reconcile(store, pool, sessions, instants_dir: Path, idle_after_s: int = 180
     #: naming the session used to read it as live — the first by todo_id through pass 1, every other one through
     #: pass 2 — so a harvested record read the new worker's pane and carried its pid. Losers read as if it were gone.
     here = getattr(sessions, "socket", "") or ""
-    owners = session_owner(records, here)
+    owners = session_owner(records, here, pool)
     record_by_tmux = {name: rec for (socket, name), rec in owners.items() if socket == here}
 
     live_sessions, _, _ = census(sessions)
@@ -300,30 +300,40 @@ def reconcile(store, pool, sessions, instants_dir: Path, idle_after_s: int = 180
     return subjects
 
 
-def _launch_rank(rec) -> tuple:
-    """The order in which records naming one session could have STARTED it: the latest `launched_at`, where a record
-    never launched (absent or unparsable: PENDING-LAUNCH) ranks as epoch 0, below every launch; a tie goes to the
-    unstamped record, then the todo id, so the answer never depends on store order."""
-    return (_stamp_s(rec.launched_at) or 0, not (rec.harvested_at or rec.closed_at), rec.todo_id)
+def _launch_rank(rec, pool=None) -> tuple:
+    """The order in which records naming one session could have STARTED it: the latest start, where a completed start
+    is its `launched_at` and a start IN PROGRESS (RV-32: never launched, unstamped, still holding its own lease) is its
+    `dispatched_at`; any other never-launched record (absent or unparsable `launched_at`: rolled back, or stamped) ranks
+    as epoch 0, below every start. A tie goes to the unstamped record, then the todo id, so the answer never depends on
+    store order."""
+    stamped = bool(rec.harvested_at or rec.closed_at)
+    started = _stamp_s(rec.launched_at)
+    if started is None and not stamped and pool is not None and rec.slot:
+        held = pool.lease(rec.slot)
+        if held is not None and held.todo_id == rec.todo_id:
+            started = _stamp_s(rec.dispatched_at)
+    return (started or 0, not stamped, rec.todo_id)
 
 
-def session_owner(records, here: str) -> dict:
+def session_owner(records, here: str, pool=None) -> dict:
     """`(server, session name) -> record` that owns the session, for every name some record claims. V23-T, D-1.
 
     The owner is the record with the latest `launched_at`, and that is read off the writers rather than guessed:
     every successful start stamps it on the record that started (dispatch after seed delivery, `revive` after its
     verify, `resume` when it adopts a live session), and no start succeeds while a same-named session is live (tmux
     refuses the duplicate; `revive` refuses an occupied pane). So of the records naming a live session, the latest
-    COMPLETED launch is the one whose pane it is. Not yet a start in progress: dispatch starts the session, delivers
-    the seed and only then stamps `launched_at`, so for those seconds the new record ranks as never launched. Stamps (harvested/closed) are what fleet did to a record LATER and decide
-    only a tie: in the live store every reused-name pair has BOTH records stamped. A record naming no server is keyed
-    on `here`, as the join already treats it."""
+    launch is the one whose pane it is. A start in progress counts too (RV-32): dispatch starts the session, delivers the
+    seed and only then stamps `launched_at`, so for those seconds the new record is known by its lease — held, unstamped
+    — and ranks by `dispatched_at`. A start tmux refused gave its lease back and ranks below every start. `pool` is
+    what that needs; without one, a never-launched record never owns. Stamps (harvested/closed) are what fleet did to
+    a record LATER and decide only a tie: in the live store every reused-name pair has BOTH records stamped. A record
+    naming no server is keyed on `here`, as the join already treats it."""
     owners = {}
     for rec in records:
         if not rec.tmux:
             continue
         key = (rec.tmux_socket or here, rec.tmux)
-        if key not in owners or _launch_rank(rec) > _launch_rank(owners[key]):
+        if key not in owners or _launch_rank(rec, pool) > _launch_rank(owners[key], pool):
             owners[key] = rec
     return owners
 
