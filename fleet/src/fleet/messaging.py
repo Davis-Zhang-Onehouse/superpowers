@@ -299,7 +299,11 @@ def send(home, sessions, record, text, *, timeout_s=10.0, clock=time.monotonic,
                             if latest.state in ('busy', 'idle') and not latest.draft:
                                 outcome = (QUEUED_BEHIND_TURN if runtime == 'claude' else SUBMITTED_MID_TURN) if before.state == 'busy' else SUBMITTED
                                 break
-                            if latest.state not in ('queued', 'busy') or not confirms(runtime, latest.draft, text):
+                            kind = confirms(runtime, latest.draft, text)
+                            #: RV-11. A tail cannot show the head, so the retry needs the SAME tail twice, as the
+                            #: first Enter did; two different tails that each confirm are not that evidence.
+                            if (latest.state not in ('queued', 'busy') or not kind
+                                    or (kind == CONFIRMED_BY_DRAFT_TAIL and latest.draft != observation.draft)):
                                 outcome = UNCERTAIN_AFTER_ENTER
                                 raise FleetError('Delivery uncertain after Enter; retry refused because the input changed')
                             sessions.submit(record.tmux)

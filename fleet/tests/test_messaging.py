@@ -165,6 +165,19 @@ class MessagingTests(unittest.TestCase):
                 send(Path(directory), layer, SimpleNamespace(tmux='worker'), self.SCROLLED_TEXT, timeout_s=0)
             self.assertEqual(events, [('literal', self.SCROLLED_TEXT), ('submit', None)])
 
+    def test_the_retry_refuses_a_different_valid_tail(self):
+        """RV-11. Both retry frames confirming is not the same evidence: a tail that CHANGED between them, even into
+        another valid tail of our message, refuses the retry."""
+        tail = self.scrolled('claude-scrolled-box-282.frame')
+        other = PaneObservation('queued', '\n'.join(tail.draft.split('\n')[1:]))
+        self.assertEqual(CONFIRMED_BY_DRAFT_TAIL, confirms('claude', other.draft, self.SCROLLED_TEXT))
+        with tempfile.TemporaryDirectory() as directory:
+            layer, events = self.runtime_fixture('claude', [PaneObservation('idle'), tail, tail, tail, other])
+            with self.assertRaisesRegex(FleetError, 'retry refused'):
+                send(Path(directory), layer, SimpleNamespace(tmux='worker'), self.SCROLLED_TEXT, timeout_s=0,
+                     sleep=lambda _: None)
+            self.assertEqual(events, [('literal', self.SCROLLED_TEXT), ('submit', None)])
+
     def test_nonidle_never_types(self):
         for state in ('queued','dialog','unknown'):
             with self.subTest(state=state), tempfile.TemporaryDirectory() as directory:
