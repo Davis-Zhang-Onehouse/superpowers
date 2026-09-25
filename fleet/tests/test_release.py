@@ -1808,6 +1808,22 @@ class CliCase(ReleaseCliFixture, unittest.TestCase):
         self.assertEqual((last["action"], last["version"], last["from_version"]),
                          ("DEPLOY", "0.1.0", "none"))
 
+    def test_deploy_note_counts_parked_worker_that_is_progressing(self):
+        from unittest import mock
+        from fleet import EXIT_OK
+        from fleet.cli import Ctx
+        from fleet.reconcile import KIND_WORKER, PARKED, RUNNING, Subject
+        from fleet.release import RELEASED
+        self.seed("0.1.0", RELEASED)
+        subjects = [Subject(KIND_WORKER, "a", RUNNING, True, {"working": "false"}, ""),
+                    Subject(KIND_WORKER, "b", PARKED, True, {"working": "true"}, "question"),
+                    Subject(KIND_WORKER, "c", PARKED, True, {"working": "false"}, "question")]
+        with mock.patch.object(Ctx, "subjects", return_value=subjects):
+            code = self.run_verb("release-deploy", "--version", "0.1.0", "--releases", str(self.releases),
+                                 "--home", str(self.home))
+        self.assertEqual(code, EXIT_OK, self.err.getvalue())
+        self.assertIn("2 subject(s) are working", self.err.getvalue())
+
     def test_dev_points_current_at_the_checkout_this_package_came_from(self):
         # `--dev` is how live editing comes back, and it has to aim at a tree shaped like an export:
         # both ends of the symlink hold `fleet/` at the top, so every consumer resolves them the same way.

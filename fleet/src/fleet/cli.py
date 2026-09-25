@@ -78,7 +78,7 @@ from fleet.markdown import fenced, prose
 from fleet.pool import Pool, ReapReport
 from fleet.profiles import Profile
 from fleet import root as root_mod
-from fleet.reconcile import (COMPLETE, COMPLETE_BUT_WORKING, KIND_WORKER, PHASE_AWAITING_CI, PID_GONE,
+from fleet.reconcile import (COMPLETE, COMPLETE_BUT_WORKING, KIND_WORKER, PARKED, PHASE_AWAITING_CI, PID_GONE,
                              PID_RUNNING, RUNNING, WATCHER_ATTESTED, WATCHER_OBSERVED, _watcher_of,
                              attested_pid_status, needs_a_human, pid_start, reconcile)
 from fleet.release import (CANDIDATE, DEV, HISTORY_COLUMNS, META_DIR, RELEASE_RETENTION, RELEASED, Releases, Version,
@@ -6703,9 +6703,11 @@ def _deploy(ctx: Ctx, parsed: Parsed, rel: Releases, target_label: str, target_p
 
     with rel.lock():
         before = rel.current_label()
-        running = [subject for subject in ctx.subjects() if subject.state == RUNNING]
+        running = [subject for subject in ctx.subjects()
+                   if subject.state == RUNNING or
+                   (subject.state == PARKED and subject.evidence.get("working") == "true")]
         if running:
-            print(f"note: {len(running)} subject(s) are RUNNING. Their next `fleet` call gets "
+            print(f"note: {len(running)} subject(s) are working. Their next `fleet` call gets "
                   f"{target_label}; the one in flight keeps the release it started on.", file=ctx.err)
         rel.point_current_at(target_path)
         evidence = "-" if target_label == DEV else f"{Path(target_path).name}/{META_DIR}/evidence"
