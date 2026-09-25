@@ -31,12 +31,17 @@ S="itfleet-W1-probe-$$"
 DECOY_DIR="$OUT/decoy"
 DECOY="$DECOY_DIR/tmux-$(id -u)/w1-decoy"
 DT="dt-w1-decoy-$$"
-mkdir -p "$DECOY_DIR"      # tmux falls back to /tmp — the operator's directory — when TMUX_TMPDIR does not exist
-TMUX_TMPDIR="$DECOY_DIR" tmux -L w1-decoy kill-server 2>/dev/null
-TMUX_TMPDIR="$DECOY_DIR" tmux -L w1-decoy new-session -d -s "$DT" "sleep 300" 2>/dev/null
+# tmux falls back to /tmp — the operator's directory — when TMUX_TMPDIR does not exist, so no decoy tmux call runs
+# unless the directory is really there (RV-37); W1-4 then fails naming why.
+if mkdir -p "$DECOY_DIR" && [ -d "$DECOY_DIR" ]; then
+  TMUX_TMPDIR="$DECOY_DIR" tmux -L w1-decoy kill-server 2>/dev/null
+  TMUX_TMPDIR="$DECOY_DIR" tmux -L w1-decoy new-session -d -s "$DT" "sleep 300" 2>/dev/null
+else
+  DECOY_DIR="" DECOY=""
+fi
 
 # Whatever happens after this point, this section's sessions die on the private server only, and the decoy dies.
-trap 'it_cleanup_tmux; TMUX_TMPDIR="$DECOY_DIR" tmux -L w1-decoy kill-server 2>/dev/null; rm -rf "$DECOY_DIR"' EXIT
+trap 'it_cleanup_tmux; [ -n "$DECOY_DIR" ] && TMUX_TMPDIR="$DECOY_DIR" tmux -L w1-decoy kill-server 2>/dev/null; [ -n "$DECOY_DIR" ] && rm -rf "$DECOY_DIR"' EXIT
 
 # ---------------------------------------------------------------------------------------------------
 # The pre-image of the live server, captured through the same helper the isolation check uses.
@@ -85,7 +90,9 @@ fi
 
 # W1-4 · and it is not visible from the private server either — the other direction, which is the one an
 #        isolation assertion actually reads. A section that can SEE `dt-…` can also match it by prefix.
-if ! TMUX_TMPDIR="$DECOY_DIR" tmux -L w1-decoy has-session -t "=$DT" 2>/dev/null; then
+if [ -z "$DECOY_DIR" ]; then
+  it_fail W1-4 "" "the decoy's directory $OUT/decoy could not be created, so no decoy was started (a tmux call there would fall back to /tmp)"
+elif ! TMUX_TMPDIR="$DECOY_DIR" tmux -L w1-decoy has-session -t "=$DT" 2>/dev/null; then
   it_fail W1-4 "" "the decoy $DT did not come up on $DECOY, so this cell cannot distinguish blindness from an empty world"
 elif grep -q '^dt-' "$OUT/W1-2-private-sessions.txt"; then
   it_fail W1-4 "fleet/it/W1/out/W1-2-private-sessions.txt" \
