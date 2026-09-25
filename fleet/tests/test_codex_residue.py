@@ -102,6 +102,9 @@ class SweepCase(unittest.TestCase):
                 rows = self.sweep()
                 self.assertEqual(left(self.root), sorted(RESIDUE), f"{shape}: swept under a live codex: {rows}")
                 self.assertTrue(any(str(4000 + n) in v for _, v in rows), rows)
+                #: A holder alive before the sweep began is reported as such — not as one that "started during the
+                #: sweep", which is the per-rmdir re-census's (RV-33) answer for a late arrival.
+                self.assertTrue(all("is alive" in v for _, v in rows), rows)
 
     def test_a_codex_under_ANOTHER_root_or_a_non_codex_naming_this_one_does_not_block(self):
         fake_process(self.proc, 4100, "node", "/x/bin/codex", "--add-dir", str(self.tmp / "elsewhere"))
