@@ -7297,6 +7297,8 @@ def _cadence(ctx: Ctx, parsed: Parsed) -> list:
         print(f"{CADENCE_PREFIX} could not be evaluated during {parsed.verb!r}: {exc} · clears when: the "
               f"watched-source registry is readable · clears who: the coordinator", file=ctx.err)
         return []
+    if not overdue:
+        return []          # nothing to scope: resolving the operand here would only repeat the verb's work (RV-17)
     named = parsed.get("instant") or parsed.get("from")
     target = Path(ctx.instants_dir)
     if named:
