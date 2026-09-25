@@ -4127,6 +4127,24 @@ def _pane_refusal(ctx: Ctx, record: Record, override: str = ""):
     return None
 
 
+def _refuse_live_complete_watcher(ctx: Ctx, record: Record, child: Path, verb: str) -> None:
+    """A completed folder may still own a live CI watcher; never tear it down."""
+    if child is None or InstantName.parse(child.name).state != "complete":
+        return
+    if Declarations(child).phase() != PHASE_AWAITING_CI:
+        return
+    sessions = ctx.sessions_for(record)
+    captured = sessions.capture(record.tmux) if record.tmux and sessions.alive(record.tmux) else ""
+    kind, watcher = _watcher_of(captured or "", sessions, child, capture_failed=captured is None)
+    if kind not in (WATCHER_OBSERVED, WATCHER_ATTESTED):
+        return
+    raise Refused(
+        f"{verb} refused: {child.name} is {COMPLETE_BUT_WORKING}; its watcher is alive: {watcher}. "
+        "Nothing was closed, released, renamed, applied or written.",
+        clears_when=f"fleet declare --phase done --instant {child} after the watcher finishes",
+        clears_who="the dispatched instant or the coordinator on its behalf")
+
+
 def _do_close(ctx: Ctx, parsed: Parsed) -> int:
     """Shut a pane this store owns, and disarm the monitor by doing it (FD-10).
 
@@ -4147,6 +4165,8 @@ def _do_close(ctx: Ctx, parsed: Parsed) -> int:
     #: progress. Being pointed at the wrong server is not a judgement to override; forcing it would kill
     #: nothing and stamp the record anyway.
     _refuse_a_session_on_another_server(ctx, record)
+    child, _ = _child_or_why(ctx, record)
+    _refuse_live_complete_watcher(ctx, record, child, "close")
     refusal = None if parsed.on("force") else _pane_refusal(ctx, record)
 
     if ctx.dry_run:
@@ -4415,6 +4435,7 @@ def _do_harvest(ctx: Ctx, parsed: Parsed) -> int:
     if parsed.get("id"):
         record = _record(ctx, parsed)
         child = _child_of(ctx, record)
+        _refuse_live_complete_watcher(ctx, record, child, "harvest")
         review = Review(child, now=ctx.now)
         gate = review.gate(harvest=True)
         unreported = _unreported_to_coordinator(ctx, child)
