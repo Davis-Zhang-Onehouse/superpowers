@@ -546,6 +546,10 @@ class Ctx:
     #: skills. `None` means the real filesystem probe; a fixture whose launch settings name a directory that does
     #: not exist states the answer instead.
     codex_skills: object = None
+    #: V23-O (FB-123). The highest directory `_cadence`'s walk from cwd may inspect for "the caller's instant".
+    #: `None` — every real call — walks to `/`. A fixture names its private tree, so a TMPDIR that happens to
+    #: sit under an instant-named folder is not mistaken for the caller's effort.
+    cwd_ceiling: object = None
 
     def live_work_now(self) -> bool:
         if self.live_work is not None:
@@ -7294,14 +7298,25 @@ def _cadence(ctx: Ctx, parsed: Parsed) -> list:
               f"watched-source registry is readable · clears who: the coordinator", file=ctx.err)
         return []
     named = parsed.get("instant") or parsed.get("from")
-    target = Path(named) if named else Path(ctx.instants_dir)
-    if named and not target.is_absolute():
-        target = Path(ctx.instants_dir) / target
+    target = Path(ctx.instants_dir)
+    if named:
+        #: V23-O (FB-123). The operand is resolved by the SAME function the verb resolves it with. A second
+        #: spelling here joined a relative operand onto the instants dir while the verb read it from cwd, so
+        #: `--instant .` inside a foreign effort nagged ours and `../../other/<name>` nagged nobody. An operand
+        #: that resolves to nothing is the verb's refusal to make; the alarm is scoped as if none were named.
+        try:
+            target = _resolve_instant(ctx, named)
+        except (FleetError, OSError):
+            named = None
     unscoped = False
     if not named:
         cwd = Path.cwd()
+        ceiling = Path(ctx.cwd_ceiling).resolve() if ctx.cwd_ceiling is not None else None
         nearest = None
         for candidate in (cwd, *cwd.parents):
+            #: The walk never climbs above `ctx.cwd_ceiling`: above it lies a tree the caller never meant.
+            if ceiling is not None and not candidate.resolve().is_relative_to(ceiling):
+                break
             try:
                 InstantName.parse(candidate.name)
             except FleetError:

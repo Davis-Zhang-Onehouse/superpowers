@@ -1,4 +1,5 @@
 """Relative instant operands are interpreted from the caller's working directory."""
+import json
 import os
 from pathlib import Path
 import re
@@ -6,10 +7,19 @@ import re
 from fleet import cli
 from fleet.origin import Origin, write as write_origin
 from fleet.roadmap import Milestone, Roadmap
-from tests.test_cli import CliCase, NOW
+from tests.test_cli import FRESH_BASE, LONG_AGO, NOW, OURS, CliCase
 
 
 class TestInstantPaths(CliCase):
+    def run_in(self, fleet, cwd, argv):
+        """Run a verb FROM `cwd`, which must lie inside the fixture's tree (`Fleet.run` keeps it then)."""
+        previous = Path.cwd()
+        try:
+            os.chdir(cwd)
+            return fleet.run(argv)
+        finally:
+            os.chdir(previous)
+
     def test_symlinked_instants_dir_preserves_open_owner_route(self):
         fleet = self.loaded()
         coordinator = fleet.paths['readyWorker']
@@ -74,21 +84,26 @@ class TestInstantPaths(CliCase):
         # The output comparison proves path selection for verbs that print the subject.
         # declare, park, unpark, apply, withdraw, complete and abort print no subject
         # path on their normal fixture branch; for those seven this is smoke coverage.
+        # V23-O (FB-123). The relative path is computed from the cwd the VERB runs in. It was computed from
+        # the runner's cwd while `Fleet.run` chdirs into the fixture's tmp, so it only passed from a checkout
+        # deep enough for the surplus `..` to collapse at `/`.
         fleet = self.loaded()
         arguments = self.argv_for(fleet)
+        verb_cwd = fleet.paths['solo']
         for name, spec in cli.VERBS.items():
             if not any(flag.name == '--instant' for flag in spec.flags):
                 continue
             absolute = list(arguments[name])
             argv = list(absolute)
             index = argv.index('--instant') + 1
-            argv[index] = os.path.relpath(argv[index], Path.cwd())
+            argv[index] = os.path.relpath(argv[index], verb_cwd)
+            self.assertEqual(os.path.normpath(verb_cwd / argv[index]), absolute[index])
             if not spec.read_only:
                 argv.append('--dry-run')
                 absolute.append('--dry-run')
             with self.subTest(verb=name):
-                expected_code, expected_out, expected_err = fleet.run([name, *absolute])
-                code, out, err = fleet.run([name, *argv])
+                expected_code, expected_out, expected_err = self.run_in(fleet, verb_cwd, [name, *absolute])
+                code, out, err = self.run_in(fleet, verb_cwd, [name, *argv])
                 self.assertEqual(code, expected_code, err)
                 if name == 'verify':
                     # Each run owns a fresh sandbox; its random directory is reported.
@@ -101,10 +116,11 @@ class TestInstantPaths(CliCase):
     def test_dispatch_from_accepts_a_cwd_relative_path(self):
         fleet = self.loaded()
         coordinator = fleet.paths['readyWorker']
+        verb_cwd = fleet.paths['solo']
         base = ['dispatch', *self.argv_for(fleet)['dispatch'], '--dry-run']
-        expected = fleet.run([*base, '--from', str(coordinator)])
-        argv = [*base, '--from', os.path.relpath(coordinator, Path.cwd())]
-        code, out, err = fleet.run(argv)
+        expected = self.run_in(fleet, verb_cwd, [*base, '--from', str(coordinator)])
+        argv = [*base, '--from', os.path.relpath(coordinator, verb_cwd)]
+        code, out, err = self.run_in(fleet, verb_cwd, argv)
         self.assertEqual((code, out, err), expected)
 
     def test_propose_to_relative_path_reaches_the_destination_inbox(self):
@@ -156,3 +172,72 @@ class TestInstantPaths(CliCase):
         self.assertEqual(code, 2)
         self.assertIn(f'resolved input {malformed}', err)
         self.assertIn(f'parsed instant {malformed}', err)
+
+
+class TestCadenceResolvesTheOperandLikeTheVerb(CliCase):
+    """V23-O (FB-123). `_cadence` scopes its alarm to the effort of the instant a verb was pointed at. It
+    joined a relative `--instant`/`--from` onto the instants directory while the verb itself resolved the
+    same operand from cwd, so `--instant .` inside a foreign effort nagged OURS and dropped the foreign
+    one. Both halves now go through `_resolve_instant`."""
+
+    def overdue_foreign(self, fleet):
+        """A second effort beside ours, with BOTH efforts' registers overdue."""
+        foreign = fleet.tmp / "other-effort" / FRESH_BASE
+        foreign.mkdir(parents=True)
+        register = foreign / "ISSUES.md"
+        register.write_text("## Other-1 overdue\n")
+        fleet.harvest.register(str(foreign), str(register))
+        data = json.loads(fleet.harvest.path.read_text())
+        for source in data["sources"]:
+            source["registered_at"] = LONG_AGO
+            source["last_run"] = LONG_AGO
+        fleet.harvest.path.write_text(json.dumps(data))
+        return foreign
+
+    def run_from(self, fleet, cwd, argv):
+        previous = Path.cwd()
+        try:
+            os.chdir(cwd)
+            return fleet.run(argv)
+        finally:
+            os.chdir(previous)
+
+    def assert_nags_only(self, err, foreign, fleet):
+        self.assertIn(f"{cli.CADENCE_PREFIX} {foreign}", err)
+        self.assertNotIn(str(fleet.instants / OURS), err)
+
+    def test_dot_inside_a_foreign_effort_nags_that_effort(self):
+        fleet = self.loaded()
+        foreign = self.overdue_foreign(fleet)
+        code, out, err = self.run_from(fleet, foreign, ['roadmap', '--porcelain', '--instant', '.'])
+        self.assert_nags_only(err, foreign, fleet)
+        self.assertNotIn(cli.CADENCE_PREFIX, out)
+
+    def test_parent_relative_operand_to_a_foreign_effort_nags_that_effort(self):
+        fleet = self.loaded()
+        foreign = self.overdue_foreign(fleet)
+        ours = fleet.paths['readyWorker']
+        relative = os.path.relpath(foreign, ours)
+        self.assertTrue(relative.startswith('..'), relative)
+        code, out, err = self.run_from(fleet, ours, ['roadmap', '--porcelain', '--instant', relative])
+        self.assert_nags_only(err, foreign, fleet)
+
+    def test_dispatch_from_relative_foreign_coordinator_nags_that_effort(self):
+        fleet = self.loaded()
+        foreign = self.overdue_foreign(fleet)
+        ours = fleet.paths['readyWorker']
+        base = ['dispatch', '--porcelain', *self.argv_for(fleet)['dispatch'], '--dry-run']
+        code, out, err = self.run_from(fleet, ours,
+                                       [*base, '--from', os.path.relpath(foreign, ours)])
+        self.assert_nags_only(err, foreign, fleet)
+
+    def test_unresolvable_operand_falls_back_to_the_callers_effort_and_the_verb_still_refuses(self):
+        # A path that names nothing cannot scope the alarm; the verb refuses it (exit 2), and the alarm
+        # is scoped as if no operand were named — never silenced, never a crash.
+        fleet = self.loaded()
+        foreign = self.overdue_foreign(fleet)
+        code, out, err = self.run_from(fleet, foreign,
+                                       ['roadmap', '--porcelain', '--instant', './missing-instant'])
+        self.assertEqual(code, 2, err)
+        self.assertIn('not an instant on disk', err)
+        self.assert_nags_only(err, foreign, fleet)
