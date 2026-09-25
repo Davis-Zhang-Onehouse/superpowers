@@ -2526,11 +2526,13 @@ def _do_resume(ctx: Ctx, parsed: Parsed) -> int:
     #: folder's; adopting it would hand the live worker to this record. Asked before the dry-run returns, like every
     #: refusal here, and it names the recovery path, so it blocks none (FD-9).
     here = getattr(ctx.sessions, "socket", "") or ""
+    #: RV-39: only a LIVE claimant blocks — an unstamped record. A harvested or closed one's work is over, and a live
+    #: session of its name is the orphan resume exists to adopt (FD-9).
     owner = session_owner(ctx.store.all(), here, ctx.pool).get((here, tmux)) if ctx.sessions.alive(tmux) else None
-    if owner is not None and owner.todo_id != todo_id:
-        raise Refused(f"{tmux} is live and belongs to {owner.todo_id} (launched {owner.launched_at or 'not yet'}), "
-                      f"a later dispatch of the same title; resuming {child.name} would adopt that worker's session "
-                      f"as this record's. Nothing was adopted, claimed or written",
+    if owner is not None and owner.todo_id != todo_id and not (owner.harvested_at or owner.closed_at):
+        raise Refused(f"{tmux} is live and belongs to {owner.todo_id} ({_start_of(owner)}), another dispatch of the "
+                      f"same title that is still open; resuming {child.name} would adopt that worker's session as "
+                      f"this record's. Nothing was adopted, claimed or written",
                       clears_when=f"{tmux} is gone, or the session is adopted by its own instant: `fleet resume "
                                   f"--instant {owner.child_instant}`",
                       clears_who="the operator")
@@ -4066,6 +4068,12 @@ def _owns_live_session(ctx: Ctx, record, layer=None) -> bool:
         return False
     layer = layer if layer is not None else ctx.sessions_for(record)
     return _session_taken_by(ctx, record) is None and bool(layer.alive(record.tmux))
+
+
+def _start_of(record) -> str:
+    """How a record's start reads in a sentence: launched, or still starting (RV-32's start in progress)."""
+    return (f"launched {record.launched_at}" if record.launched_at
+            else f"starting, dispatched {record.dispatched_at or 'at an unrecorded time'}")
 
 
 def _session_left_note(record, owner) -> str:
