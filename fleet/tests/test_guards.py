@@ -393,6 +393,42 @@ class TestTheCap(GuardCase):
         self.assertIn("watcher is alive", board([subject]))
         self.assertFalse(WipCap().evaluate(fleet.ctx()).allowed)
 
+    def test_stamped_complete_folder_with_stale_pidless_watcher_is_over(self):
+        """RV-C1 (0.6.12). The real shape of 5 live quanton records: harvested (or closed) long ago, `-complete-` folder, a
+        stale `awaiting-ci` phase and an attested watcher with NO pid handle, no session. A pid-less attestation is never
+        re-checked, so it must not resurrect a stamped record into the cap — it reads COMPLETE (the folder rename decides,
+        as in 0.6.11) and is excluded. The unstamped control keeps v23-j's COMPLETE-BUT-WORKING."""
+        for stamp in ("harvested_at", "closed_at", None):
+            with self.subTest(stamp=stamp):
+                fleet = self.fleet()
+                fleet.worker("staleWatched", state="complete", slot="ws1", pane=QUIET_PANE,
+                             phase="awaiting-ci", live=False)
+                Declarations(fleet.paths["staleWatched"]).set_watchers(
+                    ATTESTED_PREFIX + "Monitor task bl3e1orgg, persistent, emits each PR check")
+                if stamp:
+                    record = fleet.store.all()[0]
+                    setattr(record, stamp, "2026-08-12T01:36:49Z")
+                    fleet.store.write(record)
+                subject = fleet.subjects()[0]
+                if stamp:
+                    self.assertEqual("COMPLETE", subject.state, subject.note)
+                    self.assertTrue(WipCap().evaluate(fleet.ctx()).allowed, "a stamped record's stale watcher held the cap")
+                else:
+                    self.assertEqual("COMPLETE-BUT-WORKING", subject.state, subject.note)
+                    self.assertFalse(WipCap().evaluate(fleet.ctx()).allowed)
+
+    def test_stamped_complete_folder_with_live_busy_pane_still_works(self):
+        """RV-C1's boundary: a terminal stamp never hides LIVE evidence (v23-m RV-4). A harvested record whose session is
+        alive and busy on a `-complete-` folder still reads COMPLETE-BUT-WORKING and counts."""
+        fleet = self.fleet()
+        fleet.worker("busyHarvested", state="complete", slot="ws1", pane=BUSY_PANE)
+        record = fleet.store.all()[0]
+        record.harvested_at = "2026-08-12T01:36:49Z"
+        fleet.store.write(record)
+        subject = fleet.subjects()[0]
+        self.assertEqual("COMPLETE-BUT-WORKING", subject.state, subject.note)
+        self.assertFalse(WipCap().evaluate(fleet.ctx()).allowed)
+
     def test_complete_folder_with_busy_codex_pane_stays_active(self):
         fleet = self.fleet()
         frame = (pathlib.Path(__file__).resolve().parents[1] / "it" / "fixtures" /

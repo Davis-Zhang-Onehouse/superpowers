@@ -291,7 +291,10 @@ def _worker_subject(rec, pool, sessions, instants_dir: Path, idle_after_s: int, 
         watcher_kind, watcher_text = _watcher_of(pane, sessions, instant,
                                                  capture_failed=captured is None)
         busy = live and sessions.busy(pane)
-        if busy or (phase == PHASE_AWAITING_CI and watcher_kind in
+        #: RV-C1. A harvested or closed record with no live session is over: its stale `awaiting-ci` claim (often a
+        #: pid-less attestation nothing ever re-checks) must not resurrect it into the cap. Live evidence still wins.
+        stamped_and_gone = bool(rec.harvested_at or rec.closed_at) and not live
+        if busy or (phase == PHASE_AWAITING_CI and not stamped_and_gone and watcher_kind in
                     (WATCHER_OBSERVED, WATCHER_ATTESTED)):
             state = COMPLETE_BUT_WORKING
             note = ("the instant folder is `-complete-` but its pane is busy" if busy
@@ -459,8 +462,8 @@ def _state_of(rec, folder_state, live, phase, parked, pane, sessions, instant, i
                    if rec.tmux_socket else
                    "This record predates the server field, so nothing says where to look: usually the "
                    "wrong tmux server, and `export FLEET_TMUX_SOCKET` to the one it was dispatched on.")), False
-        #: FB-121. Harvest releases the lease and kills the session BEFORE it stamps, so a harvested record with no
-        #: live slot holder is over wherever it was dispatched — including a server we are not talking to.
+        #: FB-121. Harvest kills the session, stamps, then releases the lease, so a harvested record with no live slot
+        #: holder is over wherever it was dispatched — including a server we are not talking to.
         if rec.harvested_at:
             return HARVESTED, f"record harvested at {rec.harvested_at}; the work is over", False
         #: `SI-59`. The record NAMES a server, and it is not the one we looked on. `SI-39` gave this
