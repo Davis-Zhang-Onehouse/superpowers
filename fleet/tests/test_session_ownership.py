@@ -478,6 +478,23 @@ class ResumeDoesNotAdoptASessionAnotherRecordOwns(unittest.TestCase):
         code, out, err = fleet.run(["resume", "--instant", str(orphan)])
         self.assertNotEqual(code, 0, out)
 
+    def test_a_harvested_record_does_not_block_adopting_a_live_orphan(self):
+        """RV-39 (closure 1). The refusal is for a LIVE claimant. A harvested record of the same title is over; the live
+        `dt-mile` is the orphan folder's, which is exactly what resume exists to adopt (FD-9)."""
+        fleet = Fleet()
+        self.addCleanup(shutil.rmtree, fleet.tmp, True)
+        fleet.worker("mile", state="complete", live=False)
+        rec = fleet.store.read(fleet.ids["mile"])
+        rec.launched_at = "2026-07-29T09:00:00Z"
+        rec.harvested_at = rec.closed_at = "2026-07-29T10:00:00Z"
+        fleet.store.write(rec)
+        orphan = fleet.orphan("mile")
+        fleet.procs.append(LiveSession(pid=4242, cwd=orphan, name="dt-mile"))
+        fleet.panes["dt-mile"] = IDLE_PANE
+        fleet.tmux_live.add("dt-mile")
+        code, out, err = fleet.run(["resume", "--instant", str(orphan)])
+        self.assertEqual(code, 0, f"{out}{err}")
+
     def test_resuming_the_owner_still_adopts_its_session(self):
         """Control: the refusal is about another record's session, not about a live one."""
         fleet, _, _, new = self._pair()
