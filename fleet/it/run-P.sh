@@ -42,7 +42,7 @@ cleanup_P() {
   tmux -L "$IT_TMUX_SOCKET" kill-server 2>/dev/null
   #: V23-P. The slot now lives OUTSIDE the checkout, so it is not swept with `$OUT`. Removed only when the path has
   #: the shape `it_outside_checkout_dir` gives it: a bad or empty variable must never reach an `rm -rf`.
-  case "$P_DIR" in */fleet-it-P-*) rm -rf "$P_DIR" ;; esac
+  case "$P_DIR" in */fleet-it-P) rm -rf "$P_DIR" ;; esac
 }
 trap cleanup_P EXIT
 
@@ -59,8 +59,10 @@ fi
 #: bounds its folder-trust walk-up at the enclosing git toplevel: the real claude asked "Is this a project you
 #: created or one you trust?" about the clone although the workspace above it was trusted, and waited 900s on a pane
 #: nobody answers. `it_outside_checkout_dir` picks the first non-repo ancestor (overridable: IT_REAL_AGENT_PARENT).
-P_DIR="$(it_outside_checkout_dir P)" || P_DIR=""
-case "$P_DIR" in */fleet-it-P-*) ;; *) echo "§P: no directory outside the checkout for the slot ('$P_DIR')" >&2; exit 2 ;; esac
+#: RV-31. Stable (`<parent>/fleet-it-P`), so the operator's Claude config gains one projects entry, not one per run;
+#: a concurrent §P holding it is refused by the helper (exit 2, naming its pid) rather than removed under it.
+P_DIR="$(it_outside_checkout_dir P)" || { P_DIR=""; exit 2; }
+case "$P_DIR" in */fleet-it-P) ;; *) echo "§P: no directory outside the checkout for the slot ('$P_DIR')" >&2; exit 2 ;; esac
 SLOT="$P_DIR/slot"; mkdir -p "$SLOT/alpha"
 echo "slot: $SLOT" > "$OUT/P-slot.txt"
 (

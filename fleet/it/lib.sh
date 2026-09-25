@@ -368,7 +368,7 @@ it_fresh_store() {
   mkdir -p "${FLEET_INSTANTS:-$FLEET_HOME/instants}"
 }
 
-it_outside_checkout_dir() {   # it_outside_checkout_dir <name> -> prints a FRESH dir outside every git checkout
+it_outside_checkout_dir() {   # it_outside_checkout_dir <name> -> prints a FRESH <parent>/fleet-it-<name> outside every checkout
   #: V23-P (S4-I3). Claude Code bounds its trust walk-up at the enclosing git toplevel, so a real claude whose cwd is
   #: under this checkout asks about the checkout even when the slot above it is trusted. The default parent is the
   #: first directory above the checkout that is in no git work tree: the leased slot dir, which the operator trusts.
@@ -383,8 +383,17 @@ it_outside_checkout_dir() {   # it_outside_checkout_dir <name> -> prints a FRESH
       parent="$(cd "$top/.." && pwd)"
     done
   fi
-  local dir="$parent/fleet-it-$1-$$"
-  rm -rf "$dir" && mkdir -p "$dir" && printf '%s\n' "$dir"
+  #: RV-31. A STABLE name, not one per pid: Claude Code writes a `projects[<cwd>]` entry into the operator's config
+  #: for every cwd it starts in, so a per-run path added one entry per §P run, and a SIGKILLed run left its dir
+  #: behind for good. The dir records its owner's pid (`$$`: the calling runner, also inside `$(...)`); a LIVE owner
+  #: is refused rather than removed, a dead one's leftovers are removed and the dir made fresh.
+  local dir="$parent/fleet-it-$1" holder=""
+  [ -r "$dir/.it-pid" ] && holder="$(tr -dc 0-9 < "$dir/.it-pid")"
+  if [ -n "$holder" ] && [ "$holder" != "$$" ] && kill -0 "$holder" 2>/dev/null; then
+    echo "it_outside_checkout_dir: $dir is in use by a live run, pid $holder (recorded in $dir/.it-pid); wait for it to finish or stop it, then re-run" >&2
+    return 2
+  fi
+  rm -rf "$dir" && mkdir -p "$dir" && printf '%s\n' "$$" > "$dir/.it-pid" && printf '%s\n' "$dir"
 }
 
 # Never a bare `fleet` on PATH — FLEET_HOME must be explicit.
