@@ -114,6 +114,14 @@ class TestTheBoardOnACompleteFolder(GuardCase):
                 with self.subTest(stamp=stamp, shape=name):
                     self.assertOver(*self.subject_for(fields, stamp=stamp))
 
+    def test_a_stamped_record_with_a_live_session_still_works(self):
+        """Delta review RV-D2: the stamped rule is "stamped AND no live session". With the session live (quiet, not busy), a
+        standing hold or an in-grace claim is still live work."""
+        for stamp in ("harvested_at", "closed_at"):
+            for name, fields, words in (("standing hold", standing_hold(), "holding"), ("grace", grace(), "GRACE")):
+                with self.subTest(stamp=stamp, shape=name):
+                    self.assertWorking(*self.subject_for(fields, stamp=stamp, live=True), words)
+
     def test_a_claim_made_before_the_relaunch_is_not_live(self):
         """Review RV-H5: `launched_at` reaches both CBW sites. A claim older than the record's (re)launch was an earlier
         session's: a pid-less attestation and a claim still inside its grace are both disregarded."""
@@ -180,6 +188,46 @@ class TestCloseAndHarvestAskTheSamePredicate(test_cli.TestCompleteRefusesBrokenP
                     setattr(record, stamp, None)
                     with self.assertRaises(Refused, msg="control: the unstamped record is refused"):
                         cli._refuse_live_complete_watcher(self.ctx_of(env), record, child, "harvest")
+
+
+    def test_a_claim_made_before_the_relaunch_is_admitted(self):
+        """Delta review RV-D1: the refusal passes `launched_at`. A claim older than the record's (re)launch is not live."""
+        for name, fields in (("pidless attested", pidless_attested(age=120)), ("grace", grace(age=120))):
+            with self.subTest(shape=name):
+                env, record, child = self.completed()
+                _declare(child, **fields)
+                record.launched_at = _stamp(30)
+                self.assertIsNone(cli._refuse_live_complete_watcher(self.ctx_of(env), record, child, "close"))
+                record.launched_at = _stamp(3600)
+                with self.assertRaises(Refused, msg="control: launched before the claim"):
+                    cli._refuse_live_complete_watcher(self.ctx_of(env), record, child, "close")
+
+    def test_a_stamped_record_with_a_live_session_is_refused(self):
+        """Delta review RV-D2: a stamp does not end work whose session is still live."""
+        for stamp in ("harvested_at", "closed_at"):
+            with self.subTest(stamp=stamp):
+                env, record, child = self.completed()
+                _declare(child, **standing_hold())
+                env.fleet.tmux_live.add(record.tmux)           # the record's session is live, and its pane quiet
+                env.fleet.panes[record.tmux] = QUIET_PANE
+                setattr(record, stamp, "2026-08-12T01:36:49Z")
+                with self.assertRaises(Refused):
+                    cli._refuse_live_complete_watcher(self.ctx_of(env), record, child, "harvest")
+
+    def test_completes_awaiting_ci_message_classifies_like_the_board(self):
+        """Delta review RV-D3: `complete` refuses a standing awaiting-ci claim either way; its message says "with a live
+        watcher" for a claim inside its grace, and not for a pid-less attestation made before the relaunch."""
+        for name, fields, launched, live in (("grace", grace(), _stamp(3600), True),
+                                             ("pre-relaunch pidless", pidless_attested(age=120), _stamp(30), False)):
+            with self.subTest(shape=name):
+                env = self.ready_to_complete()
+                record = next(r for r in env.fleet.store.all() if pathlib.Path(r.child_instant) == env.instant)
+                record.launched_at = launched
+                env.fleet.store.write(record)
+                _declare(env.instant, **fields)
+                code, out, err = env.fleet.run(["complete", "--instant", str(env.instant)])
+                self.assertEqual(EXIT_REFUSED, code, out + err)
+                self.assertEqual(live, "with a live watcher" in err, err)
 
 
 # The inherited cases of TestCompleteRefusesBrokenPointers run in test_cli; this module runs only its own.
