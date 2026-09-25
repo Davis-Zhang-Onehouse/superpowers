@@ -47,7 +47,7 @@ resuming session reads it, and the milestone is what makes it dispatchable.
 Nothing here reads a `.md` file. The registry is JSON; `render` turns it into markdown, never back.
 """
 import json
-from dataclasses import asdict, dataclass, field
+from dataclasses import asdict, dataclass, field, fields
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Optional
@@ -148,6 +148,9 @@ class Milestone:
     disowned_reason: str = ""
     #: Prior titles remain on the row they describe. Default keeps old roadmaps readable.
     title_history: list = field(default_factory=list)
+
+
+MILESTONE_FIELDS = {item.name for item in fields(Milestone)}
 
 
 @dataclass(frozen=True)
@@ -301,7 +304,9 @@ def _milestone(entry: dict, owners: "_Owners" = None) -> "Milestone":
     """Every `Milestone` a reader gets is built here, so every reader — `brief`, `dispatch`'s refusal, the
     `roadmap` rows, `--disown` — sees `owner` where it is now (`B08`). `owners` shares one listing cache
     across a whole read."""
-    return Milestone(**dict(entry, owner=(owners or _Owners()).now(entry.get("owner"))))
+    known = {key: value for key, value in entry.items() if key in MILESTONE_FIELDS}
+    known["owner"] = (owners or _Owners()).now(entry.get("owner"))
+    return Milestone(**known)
 
 
 def last_index(rows: list, row) -> int:
@@ -397,7 +402,11 @@ class Roadmap:
             data = self._load()
             if any(d["id"] == m.id for d in data["milestones"]):
                 raise _shadowing(m)
-            data["milestones"].append(asdict(m))
+            row = asdict(m)
+            # Only a retitle writes the new optional field. Untouched rows stay readable by older fleet.
+            if not row["title_history"]:
+                del row["title_history"]
+            data["milestones"].append(row)
             self._save(self.path, data)
 
     def retire(self, milestone_id: str, reason: str) -> Milestone:

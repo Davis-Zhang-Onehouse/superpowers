@@ -8054,8 +8054,7 @@ class TestMilestoneRetitle(CliCase):
         path = fleet.paths["readyWorker"]
         roadmap = Roadmap(path)
         data = json.loads(roadmap.path.read_text())
-        del data["milestones"][0]["title_history"]
-        roadmap.path.write_text(json.dumps(data))
+        self.assertNotIn("title_history", data["milestones"][0])
         self.assertEqual([], roadmap.milestone("M1").title_history)
         code, _, err = fleet.run(["milestone", "--instant", str(path), "--id", "M1",
                                   "--retitle", "revised scope", "--reason", "old row"])
@@ -8071,3 +8070,24 @@ class TestMilestoneRetitle(CliCase):
         self.assertEqual(EXIT_BAD_INPUT, code)
         self.assertIn("already has that title", err)
         self.assertEqual(before, Roadmap(path).path.read_bytes())
+
+    def test_add_omits_empty_title_history_for_older_readers(self):
+        fleet = self.loaded()
+        path = fleet.paths["readyWorker"]
+        roadmap = Roadmap(path)
+        rows = json.loads(roadmap.path.read_text())["milestones"]
+        self.assertNotIn("title_history", rows[0])
+        self.assertEqual([], roadmap.milestone("M1").title_history)
+
+    def test_reader_preserves_unknown_optional_row_field_during_retitle(self):
+        fleet = self.loaded()
+        path = fleet.paths["readyWorker"]
+        roadmap = Roadmap(path)
+        data = json.loads(roadmap.path.read_text())
+        data["milestones"][0]["future_optional"] = "keep me"
+        roadmap.path.write_text(json.dumps(data))
+        self.assertEqual("land the cli", roadmap.milestone("M1").title)
+        code, _, err = fleet.run(["milestone", "--instant", str(path), "--id", "M1",
+                                  "--retitle", "new scope", "--reason", "updated"])
+        self.assertEqual(EXIT_OK, code, err)
+        self.assertEqual("keep me", json.loads(roadmap.path.read_text())["milestones"][0]["future_optional"])
