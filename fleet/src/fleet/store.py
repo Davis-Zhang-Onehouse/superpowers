@@ -148,10 +148,12 @@ class Store:
         return Record.from_json(_read_json(path, "record"))
 
     def all(self) -> list[Record]:
-        if not self.records.exists() and not self.records.is_symlink():
-            return []
         try:
             paths = sorted(p for p in self.records.iterdir() if p.suffix == ".json")
+        except FileNotFoundError as exc:
+            if not self.records.is_symlink():
+                return []
+            raise BadInput(f"records at {self.records} cannot be read ({exc}); an unreadable store is not empty") from exc
         except OSError as exc:
             raise BadInput(f"records at {self.records} cannot be read ({exc}); an unreadable store is not empty") from exc
         return [Record.from_json(_read_json(p, "record")) for p in paths]

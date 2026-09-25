@@ -1,5 +1,6 @@
 import tests  # noqa: F401 — installs the suite's host boundary when this module runs alone (FB-118)
 import json, pathlib, shutil, tempfile, unittest
+from unittest import mock
 from fleet.store import SCHEMA_VERSION, Record, Store, Declarations
 from fleet.errors import AmbiguousId, BadInput
 
@@ -61,6 +62,11 @@ class TestRecord(unittest.TestCase):
         (self.home / "records").symlink_to(self.home / "missing")
         with self.assertRaises(BadInput):
             self.store.all()
+
+    def test_directory_enumeration_failure_is_not_an_empty_store(self):
+        with mock.patch.object(pathlib.Path, 'iterdir', side_effect=PermissionError('denied')):
+            with self.assertRaises(BadInput):
+                self.store.all()
 
     def test_resolve_id_accepts_a_unique_prefix_and_refuses_ambiguity(self):
         self.store.write(rec(todo_id="alphaOne-07300312"))
