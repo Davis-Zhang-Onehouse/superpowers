@@ -837,7 +837,8 @@ class TestTheDimGhostIsNotTypedText(unittest.TestCase):
         would trade one blind spot for another."""
         for placeholder in ('❯ Try "fix the bug"', "❯ / for commands", "❯ # for memory",
                             "❯ new task?", "❯ ask about this repo"):
-            self.assertIsNone(self.sessions.unsubmitted(pane("output", placeholder, "footer")),
+            stripped_capture = "\n".join(("output", placeholder, "footer"))
+            self.assertIsNone(self.sessions.unsubmitted(stripped_capture),
                               f"the legacy fallback must still hold for {placeholder!r}")
 
 
