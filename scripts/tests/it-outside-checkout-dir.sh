@@ -29,8 +29,8 @@ FN="$(awk '/^it_outside_checkout_dir\(\) *\{/,/^}/' "$REPO/fleet/it/lib.sh")"
 T="$TMP/box"; OUTER="$T/outer"; CHECKOUT="$OUTER/checkout"; ITROOT="$CHECKOUT/fleet/it"
 mkdir -p "$ITROOT"
 git_q init -q "$OUTER"; git_q init -q "$CHECKOUT"
-: > "$T/keep-file"; mkdir -p "$T/keep-dir" "$T/fleet-it-X-other"; : > "$T/keep-dir/x"
-: > "$T/fleet-it-X-other/x"
+: > "$T/keep-file"; mkdir -p "$T/keep-dir" "$T/fleet-it-Y"; : > "$T/keep-dir/x"
+: > "$T/fleet-it-Y/x"
 
 helper() {   # helper <name> [VAR=value ...] -> prints the dir; rc passes through
   local name="$1"; shift
@@ -58,13 +58,41 @@ check "GIT_DIR, GIT_WORK_TREE and GIT_CEILING_DIRECTORIES exported: same parent"
 # --- 3. it removes nothing unexpected -------------------------------------------------------------------
 check "a sibling file survives" yes "$([ -f "$T/keep-file" ] && echo yes || echo no)"
 check "a sibling dir and its content survive" yes "$([ -f "$T/keep-dir/x" ] && echo yes || echo no)"
-check "another run's fleet-it-X-* dir survives" yes "$([ -f "$T/fleet-it-X-other/x" ] && echo yes || echo no)"
+check "another section's fleet-it-* dir survives" yes "$([ -f "$T/fleet-it-Y/x" ] && echo yes || echo no)"
 check "the checkout and the outer repo survive" yes "$([ -d "$CHECKOUT/.git" ] && [ -d "$OUTER/.git" ] && echo yes || echo no)"
 
 # --- 4. IT_REAL_AGENT_PARENT overrides the walk ---------------------------------------------------------
 mkdir -p "$TMP/trusted"
 dir4="$(helper X IT_REAL_AGENT_PARENT="$TMP/trusted")"; rc=$?
 check "IT_REAL_AGENT_PARENT is the parent" "0|$TMP/trusted" "$rc|$(dirname "$dir4")"
+
+# --- 5. RV-31: a STABLE name, so §P adds one projects[<cwd>] entry to the operator's Claude config, not one
+# per run (Claude writes it itself for every cwd it starts in), and a SIGKILLed run leaves nothing new behind -------
+p1="$(helper P)"; rc=$?
+check "the §P dir is <parent>/fleet-it-P" "0|$T/fleet-it-P" "$rc|$p1"
+: > "$p1/stale-from-a-killed-run"
+p2="$(helper P)"; rc=$?
+check "a second run gets the same path" "0|$p1" "$rc|$p2"
+check "a dead run's leftovers are removed and the dir recreated" no \
+  "$([ -e "$p2/stale-from-a-killed-run" ] && echo yes || echo no)"
+check "the dir records the pid that owns it" yes "$([ -s "$p2/.it-pid" ] && echo yes || echo no)"
+
+# --- 6. RV-31: a LIVE §P holding the dir is refused, exit 2, naming the pid; nothing of it is removed ----------
+sleep 60 & live=$!
+printf '%s\n' "$live" > "$p2/.it-pid"; : > "$p2/live-run-work"
+err="$(helper P 2>&1 >/dev/null)"; rc=$?
+check "a live holder: exit 2" 2 "$rc"
+case "$err" in *"$live"*) note "ok   the refusal names the live pid ($live)" ;;
+               *) note "FAIL the refusal does not name the live pid $live: [$err]"; fails=1 ;; esac
+check "a live holder's files are untouched" yes "$([ -e "$p2/live-run-work" ] && echo yes || echo no)"
+kill "$live" 2>/dev/null; wait "$live" 2>/dev/null
+p3="$(helper P)"; rc=$?
+check "once that pid is gone the dir is taken over" "0|$p1|no" "$rc|$p3|$([ -e "$p3/live-run-work" ] && echo yes || echo no)"
+
+# --- 7. run-P.sh's rm guard matches the stable name, and only it --------------------------------------------
+grep -q 'case "$P_DIR" in \*/fleet-it-P) rm -rf "$P_DIR"' "$REPO/fleet/it/run-P.sh" \
+  && ! grep -q 'fleet-it-P-\*' "$REPO/fleet/it/run-P.sh" \
+  && note "ok   run-P.sh removes only */fleet-it-P" || { note "FAIL run-P.sh's rm guard is not the stable */fleet-it-P pattern"; fails=1; }
 
 if [ "$fails" = 0 ]; then echo "it-outside-checkout-dir: all ok"; else echo "it-outside-checkout-dir: FAILED"; fi
 exit "$fails"
