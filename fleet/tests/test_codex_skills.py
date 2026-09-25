@@ -4,6 +4,7 @@ Every case builds its own releases area and CODEX_HOME under a temporary directo
 real box: `<releases>/current` is an absolute symlink to `<releases>/fleet-vX`, and the link the installer
 writes names `current`, never the version it resolves to today.
 """
+import tests  # noqa: F401 — installs the suite's host boundary when this module runs alone (FB-118)
 import contextlib
 import io
 import os

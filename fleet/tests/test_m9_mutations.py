@@ -5,6 +5,7 @@ and the three mutations that were never written were reported SURVIVED. Nothing 
 the gate was the first thing to notice. These cases make both halves cheap: an anchor that drifts fails here,
 and a mutation that does not apply can never be read as a surviving one.
 """
+import tests  # noqa: F401 — installs the suite's host boundary when this module runs alone (FB-118)
 import importlib.util
 import pathlib
 import shutil

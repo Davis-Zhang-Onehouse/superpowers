@@ -16,6 +16,7 @@ below exists rather than a comment:
    always-red check `OBS-21` deliberately avoided.
 3. **`repetitions` flags at TWO**, and every instance is cited. A repetition with no citation is an opinion.
 """
+import tests  # noqa: F401 — installs the suite's host boundary when this module runs alone (FB-118)
 import pathlib
 import shutil
 import tempfile

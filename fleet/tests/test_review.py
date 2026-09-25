@@ -15,6 +15,7 @@ a DIRECTORY so that any read at all raises.
 Nothing here writes outside a fresh temporary directory, and the only clock is injected, so `render()`
 is byte-comparable across calls without a freeze.
 """
+import tests  # noqa: F401 — installs the suite's host boundary when this module runs alone (FB-118)
 import pathlib
 import shutil
 import tempfile

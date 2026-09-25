@@ -5,6 +5,7 @@ release to `current`, which is the plugin marketplace source every session on th
 from. So the rule is fail-safe by construction — a path is inert only if it MATCHES something declared,
 never merely because it failed to match `fleet/`.
 """
+import tests  # noqa: F401 — installs the suite's host boundary when this module runs alone (FB-118)
 import unittest
 
 from fleet.release_scope import classify

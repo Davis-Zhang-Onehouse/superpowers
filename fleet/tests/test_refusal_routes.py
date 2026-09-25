@@ -16,6 +16,7 @@ every backticked `fleet <verb> --flag` anywhere in the source names a verb the p
 verb declares. Whether the route then succeeds in the state the refusal describes is a behavioural fact,
 and the cases that prove it live beside the verbs (`test_cli.TestB11RefusalsNameARouteThatRuns`).
 """
+import tests  # noqa: F401 — installs the suite's host boundary when this module runs alone (FB-118)
 import ast
 import pathlib
 import re

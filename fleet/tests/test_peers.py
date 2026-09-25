@@ -15,6 +15,7 @@ liveness probe is pointed at a synthetic tree, so the suite cannot depend on wha
 running on the box.
 """
 
+import tests  # noqa: F401 — installs the suite's host boundary when this module runs alone (FB-118)
 import json
 import os
 import shutil

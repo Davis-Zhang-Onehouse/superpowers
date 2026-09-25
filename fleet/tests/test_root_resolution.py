@@ -4,6 +4,7 @@ Every tier gets a case and so does the refusal. Tiers 1 and 3 are the REGRESSION
 such: 1291 occurrences across 238 files name the store with `--home` or `FLEET_HOME`, and none of them may
 move. A change here that breaks one of those is not a test failure, it is the whole IT suite going dark.
 """
+import tests  # noqa: F401 — installs the suite's host boundary when this module runs alone (FB-118)
 import io
 import json
 import pathlib

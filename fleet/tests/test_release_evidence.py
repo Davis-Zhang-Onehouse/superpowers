@@ -21,6 +21,7 @@ The rule the cases below hold the pipeline to is one sentence: **an attempt writ
 and what was there before is still readable under a name that says which attempt it was.** RI-11 is then
 not a second fix -- a run that starts empty cannot inherit a manifest that is no longer there.
 """
+import tests  # noqa: F401 — installs the suite's host boundary when this module runs alone (FB-118)
 import pathlib
 import shutil
 import tempfile

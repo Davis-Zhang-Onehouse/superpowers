@@ -1,5 +1,6 @@
 """Structural invariants. These are the assertions that make the architecture a fact rather than an
 intention: the import graph, the no-prose-parsing rule, and the isolation from the live stores."""
+import tests  # noqa: F401 — installs the suite's host boundary when this module runs alone (FB-118)
 import ast
 import pathlib
 import unittest

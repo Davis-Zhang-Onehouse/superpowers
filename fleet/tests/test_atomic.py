@@ -9,6 +9,7 @@ What is being killed here is a mutation that no single-threaded case can disting
 path that eight sites derived from their target (`path.with_suffix(".json.tmp")`) passes every sequential
 assertion about atomic write, byte for byte. It fails only when two writers meet.
 """
+import tests  # noqa: F401 — installs the suite's host boundary when this module runs alone (FB-118)
 import json
 import multiprocessing as mp
 import os

@@ -1,4 +1,5 @@
 # tests/test_identity.py
+import tests  # noqa: F401 — installs the suite's host boundary when this module runs alone (FB-118)
 import pathlib, tempfile, unittest
 from fleet.identity import InstantName, camel, resolve, same_instant, ROOT_BASE
 from fleet.errors import InstantNameError, AmbiguousId

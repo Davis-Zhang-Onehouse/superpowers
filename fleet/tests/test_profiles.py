@@ -4,6 +4,7 @@ Every case names the finding it encodes, because the finding is what stops the a
 weakened into something that is green and useless. The headline one: a kind-aware linter that picks
 the WRONG kind is worse than no linter, because it converts "unchecked" into "checked and fine".
 """
+import tests  # noqa: F401 — installs the suite's host boundary when this module runs alone (FB-118)
 import pathlib
 import unittest
 

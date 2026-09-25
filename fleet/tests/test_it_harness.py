@@ -5,6 +5,7 @@ cwd with every FLEET_* destination unset. Nothing here reads or writes the live 
 server or the tracked RESULTS.tsv. Each class names the defect it pins and the RED it was written against
 (the w2itharness instant's evidence/01-red/).
 """
+import tests  # noqa: F401 — installs the suite's host boundary when this module runs alone (FB-118)
 import atexit
 import os
 import pathlib

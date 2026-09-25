@@ -1,4 +1,5 @@
 """The release model: versions, layout, the history register, and the atomic flip."""
+import tests  # noqa: F401 — installs the suite's host boundary when this module runs alone (FB-118)
 import os
 import pathlib
 import tempfile
