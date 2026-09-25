@@ -8133,3 +8133,22 @@ class TestMilestoneRetitle(CliCase):
                 self.assertEqual(EXIT_BAD_INPUT, code, (operation, fields, err))
                 self.assertIn("cannot be combined", err.split("BadInput:", 1)[1])
                 self.assertEqual(before, roadmap.path.read_bytes(), (operation, fields))
+
+    def test_history_porcelain_keeps_pipe_in_title_and_reason_as_values(self):
+        fleet = self.loaded()
+        path = fleet.paths["readyWorker"]
+        Roadmap(path).add(Milestone(id="pipe", title="scope | detail", status="blocked",
+                                    deps=[], evidence=[]))
+        code, _, err = fleet.run(["milestone", "--instant", str(path), "--id", "pipe",
+                                  "--retitle", "new scope", "--reason", "why | now"])
+        self.assertEqual(EXIT_OK, code, err)
+        code, out, err = fleet.run(["milestone", "--instant", str(path), "--id", "pipe",
+                                    "--history", "--porcelain"])
+        self.assertEqual(EXIT_OK, code, err)
+        rows = [line.split("\t") for line in out.splitlines()]
+        self.assertTrue(all(len(row) == 2 for row in rows), out)
+        fields = dict(rows)
+        self.assertEqual("scope | detail", fields["history.1.old-title"])
+        self.assertEqual("why | now", fields["history.1.reason"])
+        self.assertTrue(fields["history.1.at"])
+        self.assertTrue(fields["history.1.actor"])
