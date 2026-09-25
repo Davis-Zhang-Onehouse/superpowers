@@ -207,10 +207,11 @@ def send(home, sessions, record, text, *, timeout_s=10.0, clock=time.monotonic,
                     confirmation = confirms(runtime, observation.draft, text) or ""
                     if confirmation:
                         break
-                # A TUI redraw can temporarily omit its prompt/footer. Observe
-                # through the existing deadline; never insert again or submit
-                # until the exact draft is visible.
-                if observation.state not in ('idle', 'queued', 'unknown') or clock() >= deadline:
+                # A TUI redraw can temporarily omit its prompt/footer, and a BUSY pane can still show its
+                # empty or partly drawn box right after the paste (S5 RV-F1). Observe through the existing
+                # deadline; only a dialog fails early. Never insert again or submit until the exact draft
+                # is visible.
+                if observation.state == 'dialog' or clock() >= deadline:
                     outcome = UNCERTAIN_AFTER_INSERTION
                     raise FleetError('Delivery uncertain after insertion; inspect the draft before retrying')
                 sleep(0.02)
