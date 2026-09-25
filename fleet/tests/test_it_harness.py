@@ -340,6 +340,12 @@ class HarnessTmuxBoundary(unittest.TestCase):
         out = self.lib("it_live_tmux_sessions")
         self.assertNotIn("dt-decoy-live", out.stdout, "it_live_tmux_sessions read the server $TMUX names")
 
+    def test_the_live_session_read_names_its_server_even_if_TMUX_comes_back(self):
+        """The read names `-L default` rather than trusting the `unset` above it: a runner that exports `$TMUX`
+        again after sourcing lib.sh must not redirect the isolation check to that server."""
+        out = self.lib(f'export TMUX="{self.decoy},1,0"\nit_live_tmux_sessions')
+        self.assertEqual(out.stdout.split(), ["leaked-here"], out.stderr)
+
     def test_the_live_session_read_still_watches_where_a_socketless_call_lands(self):
         """The control: stripping $TMUX must not blind the check. A socket-less tmux call from a section lands on
         `default` under TMUX_TMPDIR, and that is the server the read must still see."""
