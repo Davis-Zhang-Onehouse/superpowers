@@ -11,14 +11,21 @@ import subprocess
 import tempfile
 import unittest
 from pathlib import Path
+from unittest import mock
 
 from fleet import trust
 
 FIXTURES = Path(__file__).resolve().parents[1] / "it/fixtures/runtime"
 
 
+#: The repository-selecting variables a caller may have exported; each would point git at another repo.
+_GIT_SCRUB = ("GIT_DIR", "GIT_WORK_TREE", "GIT_COMMON_DIR", "GIT_INDEX_FILE", "GIT_CEILING_DIRECTORIES",
+              "GIT_DISCOVERY_ACROSS_FILESYSTEM")
+
+
 def _git(*argv):
-    subprocess.run(["git", "-c", "user.email=t@t", "-c", "user.name=t", *argv], check=True,
+    env = {k: v for k, v in os.environ.items() if k not in _GIT_SCRUB}
+    subprocess.run(["git", "-c", "user.email=t@t", "-c", "user.name=t", *argv], check=True, env=env,
                    stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
 
 
@@ -110,6 +117,29 @@ class PredictClaudeMatrixCase(unittest.TestCase):
         self.assertEqual(trust.git_layout(self.L.c2), (self.L.c2, self.L.c2))
         self.assertEqual(trust.git_layout(self.L.plain / "sub"), (None, None))
 
+    def test_an_exported_git_dir_does_not_change_the_layout(self):
+        """M1: GIT_DIR exported to another repo made `git_layout(plain/sub)` report THAT repo."""
+        with mock.patch.dict(os.environ, {"GIT_DIR": str(self.L.g / ".git"),
+                                          "GIT_WORK_TREE": str(self.L.g)}):
+            self.assertEqual(trust.git_layout(self.L.plain / "sub"), (None, None))
+            self.assertEqual(trust.git_layout(self.L.wt), (self.L.wt, self.L.g))
+
+    def test_a_dotdot_cwd_walks_its_normalised_parents(self):
+        """M2: `g/../plain/sub` lexically has `g` as a parent; Claude's cwd is `plain/sub`."""
+        got = self.predict(self.L.g / ".." / "plain" / "sub", self.L.g)
+        self.assertUntrusted(got, self.L.plain / "sub")
+
+    def test_git_failing_inside_a_work_tree_is_unknown_not_a_walk_to_root(self):
+        """I1: with git unable to answer inside g/sub, a walk to `/` would reach the trusted root and say
+        TRUSTED where Claude (bounded at g, case E2) shows the screen."""
+        for name, run in (("rc 128", lambda argv: (128, "")), ("did not run", lambda argv: None)):
+            with self.subTest(name), tempfile.TemporaryDirectory() as cfg:
+                (Path(cfg) / ".claude.json").write_text(json.dumps(
+                    {"projects": {str(self.L.root): {"hasTrustDialogAccepted": True}}}))
+                got = trust.predict_claude(cfg, self.L.g / "sub", environ={},
+                                           layout=lambda cwd: trust.git_layout(cwd, run=run))
+                self.assertEqual((got.state, got.key), (trust.UNKNOWN, ""), got)
+
 
 class PredictClaudeConfigCase(unittest.TestCase):
     """The config file's own failure modes. No git: the layout is injected as outside-git."""
@@ -187,6 +217,36 @@ class PredictClaudeConfigCase(unittest.TestCase):
         self.assertEqual(trust.git_layout(Path("/r/wt/x"), run=run), (Path("/r/wt"), Path("/r/g")))
         self.assertEqual(trust.git_layout(Path("/x"), run=lambda argv: (128, "")), (None, None))
         self.assertEqual(seen[0][0], "git")
+
+    def _predict_with_runner(self, run, *trusted):
+        self.write(json.dumps({"projects": {str(p): {"hasTrustDialogAccepted": True} for p in trusted}}))
+        return trust.predict_claude(self.cfg, self.cwd, environ={},
+                                    layout=lambda cwd: trust.git_layout(cwd, run=run))
+
+    def test_rc_128_in_a_plain_dir_still_walks_to_root(self):
+        root = Path(self._tmp.name).resolve()
+        got = self._predict_with_runner(lambda argv: (128, ""), root)
+        self.assertEqual((got.state, got.key), (trust.TRUSTED, str(root)))
+        got = self._predict_with_runner(lambda argv: (128, ""))
+        self.assertEqual(got.state, trust.UNTRUSTED)
+        self.assertIn("up to /", got.detail)
+
+    def test_rc_128_under_a_dot_git_entry_is_unknown(self):
+        """git answering rc≠0 while an ancestor holds `.git` (a dir, or a worktree's file) is git failing to
+        answer — dubious ownership, a ceiling, a broken repo — not "outside git"."""
+        root = Path(self._tmp.name).resolve()
+        dotgit = root / ".git"
+        for kind in ("dir", "file"):
+            with self.subTest(kind):
+                dotgit.mkdir() if kind == "dir" else dotgit.write_text("gitdir: /nowhere\n")
+                try:
+                    got = self._predict_with_runner(lambda argv: (128, ""), root)
+                finally:
+                    dotgit.rmdir() if kind == "dir" else dotgit.unlink()
+                self.assertEqual(got.state, trust.UNKNOWN, got)
+
+    def test_git_that_cannot_run_is_unknown_even_in_a_plain_dir(self):
+        self.assertEqual(self._predict_with_runner(lambda argv: None).state, trust.UNKNOWN)
 
 
 class TrustScreenCase(unittest.TestCase):
