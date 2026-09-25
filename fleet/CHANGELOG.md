@@ -1,5 +1,108 @@
 # fleet — changelog
 
+## fleet/v0.6.14 — 2026-09-25T15:34:23Z
+Cut from d39ee3b on `stack/0.6.14` (upstream base snapshot/2026-09-22-152849). 95 commit(s) since fleet/v0.6.13.
+
+Every release ships the whole repository — all skills, `commands/`, `hooks/` and the plugin manifest, not only `fleet/`.
+Payload: fleet (75 files), skills (4 files), scripts (6 files), docs (1 file).
+Skills changed: coordinating-instants, reviving-dead-panes, using-fleet, working-as-a-dispatched-instant.
+
+- 4392426 fleet: _cadence resolves --instant/--from with the verb's own resolver (V23-O, FB-123)
+- 793c41f fleet: the cadence walk's ceiling bounds only the ceiling's ancestors (V23-O RV-15)
+- e32b62e fleet: _cadence returns before scoping when nothing is overdue (V23-O RV-17)
+- b248db4 fleet tests: the contracts fixture runs verbs from its own tree (V23-O RV-14)
+- c742c08 fleet tests: one run_from helper that refuses a cwd outside the fixture (V23-O RV-18)
+- 98ef0c1 fleet tests: cadence cwd cases inside the fixture chdir for real (V23-O RV-16)
+- 8fd27b6 fleet tests: the contracts fixture keeps a cwd already inside its tree (V23-O RV-39)
+- 52146a0 fleet tests: the contracts fixture's cwd_ceiling is guarded under any TMPDIR (V23-O RV-38)
+- 2dac909 fleet tests: Fleet.run's comment says how cwd cases are modelled now (V23-O RV-40)
+- e0138e5 fleet/tests: the hermetic suite never execs a real runtime or reaches a tmux server it did not create (FB-118)
+- e1bb4b9 fleet/it: lib.sh strips the caller's $TMUX and its live-session read names -L default (FB-118)
+- 4ffb4d6 fleet: close and harvest of a codex worker sweep codex's sandbox mount residue from the store and instants tree (FB-117)
+- 85b76d0 fleet/CLAUDE.md: the hermetic suite's host boundary and tripwire (FB-118)
+- 5a07aa1 fleet/it: W1-4 and W1-5 prove blindness against a decoy server of their own, not the live one (FB-118)
+- 2fe12ff fleet/tests: lib.sh's live-session read names -L default even if a runner re-exports $TMUX (FB-118)
+- 4982f87 fleet/tests: a dry-run sweep never promises to remove a real repository (FB-117)
+- 77a0b61 fleet/tests: the tripwire resolves a missing TMUX_TMPDIR to /tmp, as tmux does (RV-25)
+- 0d963fb fleet/tests: the tripwire parses tmux's clustered short options as getopt does (RV-26)
+- 66cb225 fleet/tests: a child reuses the suite's boundary only when it is really there (RV-27)
+- 4d642d8 fleet/tests: the box's /tmp/tmux-<uid> is always foreign to the tripwire (RV-28)
+- 9fa92e6 fleet/tests: children that run claude or codex by name reach the refusing stub (RV-29)
+- 714271c fleet/tests: every test module installs the host boundary, even when run alone (RV-15)
+- 97abf65 fleet/tests: the tripwire judges a relative socket path from the callee's cwd (RV-30)
+- fc153a9 fleet/tests: a tripwire record written outside a test's run still fails something (RV-31)
+- e051a4b fleet/tests: only the process that owns the suite directory tears it down at exit (RV-32)
+- b3562ec fleet: the codex residue sweep asks again immediately before each rmdir (RV-33)
+- 46284a1 fleet: codex holder detection fails closed on unreadable, nested and respelled cases (RV-34)
+- e469dfa fleet: a codex record with no instant path never sweeps the caller's cwd (RV-35)
+- 4170075 fleet: close and harvest wait briefly for the killed codex to exit before sweeping (RV-36)
+- c85d44e fleet/it: run-w1 starts no decoy tmux unless its directory exists (RV-37)
+- 1aed708 fleet/it: the FB-73 guardian kills nothing when its directory is gone (RV-38)
+- 1fe0b16 fleet/it: A8a finds tmux kills inside quoted and heredoc code and accepts -S only with a private path (FB-119)
+- bbe9412 scripts/tests: release-postflight's no-root case bounds the root walk itself (FB-120a)
+- f4df50f scripts/tests: fleet-finished-pids renames the fixture's basename, not the first -inflight- in its path (FB-120b)
+- b1e53b5 fleet/it: A8a judges the tmux invocation that kills, not the first tmux on the line (CL-1)
+- 6536325 fleet/it: A8a judges -S on the normalised path and refuses an empty socket operand (CL-2)
+- 6d3a952 fleet/it: A8a joins an embedded call whose brackets stay open across lines (CL-3)
+- 54d7172 fleet/it: W1-5 runs no socketless probe when there is no decoy (CL-4)
+- 5825d54 fleet: the post-close codex wait reads holder pids and stops when none is leaving (CL-5)
+- c0dd9b7 fleet/tests: the tripwire's prose names /tmp/tmux-<uid> as always foreign (CL-6)
+- 2987d50 fleet/CLAUDE.md: state the tripwire's absolute-path limit for child processes (CL-7)
+- 0f6990b fleet/tests: a codex alive before the sweep is reported as alive, not as a late arrival (M12)
+- c95b7bf fleet/it: A8a judges every kill on a line against the tmux that issues it (CL2-2)
+- 442a1b1 fleet/it: A8a judges held text at every reset and at end of file instead of dropping it (CL2-1)
+- fc3dde3 fleet/it: A8a never takes a socket operand for the tmux command, and reads clustered options (CL2-3)
+- 3574e2e fleet/it: the A8a pass note names no absolute path, so §A stops exiting 1 on every run (CL2-5)
+- 84c30a1 fleet/it: revert A8a's multi-line join (CL-3), per coordinator decision D-82
+- f1d64ee S5 glue (v23-l x v23-n): the guardian's default-dir cases observe the victim instead of creating it
+- fa078de Expose board addresses and preserve parked and nested state
+- 0d69d76 Avoid inventing a socket for an unowned process without a pane
+- ebe17ef Distinguish missing records from failed directory enumeration
+- 41e15b1 RV-E-H1 Preserve foreign record slot holder evidence
+- 73c74c9 RV-E-L2 Keep parked note stable across pane activity
+- 1f67f9d RV-E-L3 Include progressing parked workers in fleet_running
+- 0f8d450 RV-E-L4 Describe pane guard excerpts without width claim
+- 71639d4 RV-E-N6a Count progressing parked workers during deploy
+- eac08b5 RV-E-N6b Correct pane width comment
+- e1d7ed2 RV-E-L3 Correct appended-column test positions and script mode
+- e9a6b29 RV-E-N1 Read runtime from declared board column in IT
+- 4b5a8cf Disregard an unhandled awaiting-ci attestation made before a relaunch (v2-10)
+- 0738fdb Add a reasoned, expiring `holding` phase outside the WIP cap (v3-06c)
+- 8fc8df9 Give an awaiting-ci claim a bounded grace after its declaration (v3-06a/b)
+- 52391a1 Teach the awaiting-ci grace, fresh-watcher renewal and the holding phase
+- 294680c Stamp a declaration from ctx.now, the clock hold_until uses (RV-22)
+- 8f27ca7 Bound a hold and the grace where they are read, not only where declared (RV-20)
+- 18da0f0 Make brief's phase row say what the board now does with a claim (RV-19)
+- b7d8716 Let the V23-G test module run on the base so each case fails on behaviour (RV-12)
+- 06def6d Teach the post-revive disregard, the GRACE row and HOLDING to both skills (RV-21)
+- 9d16cd4 Give brief the board's own reason when a claim has no grace (CL-1)
+- 2fc8a4a Qualify brief's promise that a live hold keeps a worker off the cap (CL-3)
+- b6a74fd S5 glue (v23-g x v23-j): grace and holding count as live for COMPLETE-BUT-WORKING; terminal stamps still win
+- ff26939 Allow queued sends to empty busy panes and report pane input accurately
+- 2d11cd3 Limit capture placeholder labels to the current input box
+- 098bd26 Clarify retry and annotated capture contracts
+- c3f8893 Report conflicting pane hints as indeterminate
+- 76e0afc Fix receive-pass-1 pane safety and delivery reporting
+- 35ef5ca Correct stripped-terminal placeholder control for receive pass 1
+- ae3a86c Correct empty-busy send doubles in runtime CLI tests
+- 8804985 Read plain box text as a draft and refuse a busy claude pane with no caret
+- bf103ee Record the Claude Code 2.1.282 frames in the runtime fixture manifest
+- 0cd7b7e Read a draft whose first row is blank (RV-18)
+- 98a0481 Refuse a claude pane whose input box cannot be located, idle or busy (RV-19)
+- 0187987 Read a bordered draft down to its bottom border (RV-20)
+- e9a8ad0 Label the claude capture box on the whole draft, as the guard decides (RV-22)
+- f55a364 Name the fixture that shows the queued-message chrome (RV-21)
+- 6445b7c Say that a send's outcome label reflects the pane at admission (RV-23)
+- ce5036e Drop runtime helpers session.py imports but never uses (RV-24)
+- aa091ba Name the 2.1.282 frame test by what it asserts (RV-16)
+- 93998fe State in using-fleet that an unlocatable input box reads 14 idle or busy (RV-19)
+- 4d81093 Scope the unlocatable-box rule in using-fleet to claude panes (RV-26)
+- 3469256 S5 fix-up (v23-e doc nit, coordinator D-86): using-fleet says the board's working column carries a busy PARKED worker, not its note
+- 989a5cb S5 receive (review RV-H1/H2/H3): a positive control for the guardian observation form; stale comments
+- 66c7e37 S5 fix-up (review RV-F1, coordinator D-108): a busy pane that draws the paste late is still submitted
+- 80abe79 S5 glue v2 (review RV-S2/RV-S3/RV-H5/RV-H6/RV-H7, coordinator D-108): one predicate for COMPLETE-BUT-WORKING
+- d39ee3b S5 receive (delta review RV-D1/D2/D3, coordinator D-108): pin the refusal's launched_at, the live half of the stamped rule, complete's message
+
 ## fleet/v0.6.13 — 2026-09-25T09:19:55Z
 Cut from 035b6d2 on `fix/rv-c1` (upstream base snapshot/2026-09-22-152849). 1 commit(s) since fleet/v0.6.12.
 
