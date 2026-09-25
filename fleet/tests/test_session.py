@@ -257,6 +257,8 @@ class TestTmuxTargetsAreExact(unittest.TestCase):
             lambda p: p.start_session("itfleet-x", pathlib.Path("/tmp"), "true"))
             if "new-session" in a][0]
         self.assertEqual(argv[argv.index("-s") + 1], "itfleet-x")
+        self.assertEqual(argv[argv.index("-x") + 1], "200")
+        self.assertEqual(argv[argv.index("-y") + 1], "50")
 
 
 class TestThePrivateTmuxServer(unittest.TestCase):

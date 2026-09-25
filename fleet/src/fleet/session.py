@@ -703,7 +703,8 @@ def default_probes(process_name: str = "claude", tmux_socket=_FROM_ENV, *,
         return run(tmux + ["has-session", "-t", exact_session_target(name)]).returncode == 0
 
     def start_session(name: str, cwd: Path, command: str) -> None:
-        done = run(tmux + ["new-session", "-d", "-s", name, "-c", str(cwd), command])
+        done = run(tmux + ["new-session", "-d", "-x", "200", "-y", "50", "-s", name,
+                           "-c", str(cwd), command])
         if done.returncode != 0:
             error = done.stderr.strip()
             route = ""

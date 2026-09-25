@@ -45,8 +45,9 @@ LABEL_MIN_LEN = 3
 #: `B04`: columns are only ever APPENDED. Every awk recipe in the skills and the IT runners reads by
 #: position, so `LEASE_COLUMNS` gained `note` and `ROADMAP_COLUMNS` gained `title` and `owner` at the end.
 #: pt2 appended `runtime`: each worker's runtime and, when one was chosen at dispatch, its model (`codex`,
-#: `claude/claude-fable-5-1`). Appended LAST so every positional reader of fields 1-7 is unmoved.
-BOARD_COLUMNS = ("identity", "kind", "state", "label", "slot", "milestone", "note", "runtime")
+#: `claude/claude-fable-5-1`). v23-e appends session, server and nested, preserving fields 1-8.
+BOARD_COLUMNS = ("identity", "kind", "state", "label", "slot", "milestone", "note", "runtime",
+                 "session", "server", "nested")
 STATUS_COLUMNS = ("field", "value")
 LEASE_COLUMNS = ("slot", "lease", "todo_id", "owner", "tmux", "claimed_at", "path", "note")
 #: `B03` appended `evidence`: each item as it resolves today, so a script can open what a milestone or a
@@ -169,6 +170,9 @@ def _board_cells(subjects) -> list:
             "milestone": subject.evidence.get("milestone", ""),
             "note": subject.note,
             "runtime": runtime_cell(subject.evidence),
+            "session": subject.evidence.get("tmux", subject.evidence.get("session", "")),
+            "server": subject.evidence.get("tmux_socket", ""),
+            "nested": subject.evidence.get("nested", ""),
         })
     return cells
 

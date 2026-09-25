@@ -52,6 +52,16 @@ class TestRecord(unittest.TestCase):
         self.store.read("fooBar-07300312")
         self.assertEqual((path.read_bytes(), path.stat().st_mtime_ns), before)
 
+    def test_records_path_that_is_a_file_is_not_an_empty_store(self):
+        (self.home / "records").write_text("inaccessible")
+        with self.assertRaises(BadInput):
+            self.store.all()
+
+    def test_broken_records_symlink_is_not_an_empty_store(self):
+        (self.home / "records").symlink_to(self.home / "missing")
+        with self.assertRaises(BadInput):
+            self.store.all()
+
     def test_resolve_id_accepts_a_unique_prefix_and_refuses_ambiguity(self):
         self.store.write(rec(todo_id="alphaOne-07300312"))
         self.store.write(rec(todo_id="alphaTwo-07300312"))

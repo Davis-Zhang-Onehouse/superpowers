@@ -311,7 +311,7 @@ def view_board(wide):
         if pid and f"pid {pid}" not in note:
             note = f"pid {pid} · {note}" if note.strip() else f"pid {pid}"
         if state == "UNREACHABLE":
-            found = _find_session(_session_name(r.get("identity", "")))
+            found = _find_session(r.get("session") or _session_name(r.get("identity", "")))
             if found:
                 note += (f"  →  FOUND IT on socket '{found}'. Run: "
                          f"export FLEET_TMUX_SOCKET={found}   (then re-run; "
@@ -319,7 +319,8 @@ def view_board(wide):
             else:
                 note += "  →  no tmux server on this box has that session; the work may be running outside tmux."
         entries.append({"state": state, "subject": r.get("identity", ""), "style": style, "glyph": glyph,
-                        "meta": [r.get("slot", ""), r.get("milestone", "")], "note": note})
+                        "meta": [r.get("slot", ""), r.get("milestone", ""), r.get("session", ""),
+                                 r.get("server", "")], "note": note})
     return blocks(entries) + scope, err
 
 

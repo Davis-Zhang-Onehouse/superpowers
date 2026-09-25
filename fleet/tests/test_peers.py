@@ -18,6 +18,7 @@ running on the box.
 import tests  # noqa: F401 — installs the suite's host boundary when this module runs alone (FB-118)
 import json
 import os
+import pathlib
 import shutil
 import tempfile
 import unittest
@@ -149,6 +150,14 @@ class PeersOwnership(unittest.TestCase):
         # reach that peer. Without this line the fix reverts silently.
         self.assertEqual({(r["milestone"], r["tmux"], r["instant"]) for r in got}, {("", "", "")})
 
+    def test_nested_child_does_not_contest_its_parents_slot(self):
+        _proc(self.proc, 101, self.slot)
+        rows = [dict(_row(100, self.slot), nested='false'),
+                dict(_row(101, self.slot, name='nested-child'), nested='true')]
+        got = peers.classify(rows, [_lease(self.slot)], self_pid=-1, proc_root=self.proc)
+        self.assertEqual([r['verdict'] for r in got], [peers.OURS, peers.FOREIGN])
+        self.assertIn('nested child', got[1]['why'])
+
     def test_two_rows_sharing_one_pid_cannot_launder_the_cwd_cross_check(self):
         """SHIPPED FAIL-OPEN, introduced while fixing another. Liveness was sampled into a dict keyed
         by PID, so with two rows on one pid the LAST decided for BOTH -- a stale row claiming our
@@ -277,6 +286,17 @@ class PeersPorcelain(unittest.TestCase):
     def _rows(self, name):
         return [{"verdict": peers.FOREIGN, "name": name, "pid": 1, "cwd": "/x", "status": "idle",
                  "instant": "", "milestone": "", "tmux": "", "todo_id": "", "why": "not ours"}]
+
+    def test_nested_process_is_visible_and_marked(self):
+        from fleet.session import LiveSession
+        child = LiveSession(204, pathlib.Path('/slot'), 'dt-coder', runtime='claude', nested=True)
+        rows = peers.from_live_sessions([child], socket='private')
+        self.assertEqual(len(rows), 1)
+        self.assertEqual(rows[0]['nested'], 'true')
+        self.assertEqual(peers.PEER_COLUMNS[-1], 'nested')
+        self.assertEqual(peers.porcelain([dict(rows[0], verdict=peers.FOREIGN,
+                                               milestone='', instant='', why='child')]).splitlines()[0].split('\t')[-1],
+                         'true')
 
     def test_a_tab_or_newline_in_a_cell_cannot_forge_a_row(self):
         """SHIPPED DEFECT. `name` is derived by the runtime from `basename(cwd)`, and POSIX paths may

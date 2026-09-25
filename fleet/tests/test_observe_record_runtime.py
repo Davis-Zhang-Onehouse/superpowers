@@ -27,6 +27,7 @@ from unittest.mock import patch
 
 from fleet.runtime import observe, plain
 from fleet.session import default_probes
+from fleet.store import Declarations
 from tests.test_cli import Fleet
 
 FRAMES = Path(__file__).resolve().parents[1] / 'it' / 'fixtures' / 'runtime'
@@ -150,10 +151,35 @@ class VerbsJudgeThePaneByItsOwningAgent(unittest.TestCase):
         row = self.board_row(record)
         self.assertNotIn('differs from record runtime', row)
         self.assertIn('\tRUNNING\t', row)
+        self.assertEqual(row.split('\t')[-1], '204', 'nested PID must remain visible on the worker row')
         code, out, err = self.f.run(['pane-guard', '--id', record.todo_id])
         self.assertEqual(code, 11, out + err)
         code, out, err = self.f.run(['close', '--id', record.todo_id])
         self.assertIn('mid-turn', out + err, 'close must refuse a busy codex pane as mid-turn, not as a mismatch')
+
+    def test_pane_guard_reads_busy_at_80_and_200_columns(self):
+        for width in (80, 200):
+            with self.subTest(width=width):
+                self.f = Fleet()
+                self.addCleanup(shutil.rmtree, self.f.tmp)
+                self.proc = self.f.tmp / 'proc'
+                frame = (FRAMES / f'v23e-codex-busy-{width}.frame').read_text()
+                record = self.worker('codex', codex_pane, frame, nested_claude=False)
+                code, out, err = self.f.run(['pane-guard', '--id', record.todo_id])
+                self.assertEqual(code, 11, out + err)
+
+    def test_board_and_brief_agree_on_busy_parked_worker(self):
+        record = self.worker('codex', codex_pane, (FRAMES / 'codex-busy.frame').read_text(),
+                             nested_claude=False)
+        question = 'which release carries this branch?'
+        Declarations(self.f.paths['coder']).park(question)
+        board = self.board_row(record)
+        code, brief, err = self.f.run(['brief', '--instant', str(self.f.paths['coder']), '--porcelain'])
+        self.assertEqual(code, 0, err)
+        phase = next(line for line in brief.splitlines() if line.startswith('phase\t'))
+        self.assertIn('\tPARKED\t', board)
+        self.assertIn(question, board)
+        self.assertIn('parked=' + question, phase)
 
     def refused_as_mid_turn(self, record, argv):
         code, out, err = self.f.run(argv)
@@ -215,6 +241,17 @@ class VerbsJudgeThePaneByItsOwningAgent(unittest.TestCase):
         code, out, err = self.f.run(['status', '--id', record.todo_id, '--porcelain'])
         self.assertEqual(code, 0, err)
         self.assertIn('pid\t201', out, out)
+
+    def test_unowned_pane_keeps_nested_child_visible_and_marked(self):
+        self.f.worker('holder', slot='ws1', live=False)
+        slot = self.f.pool.slot_path('ws1')
+        self.f.procs.extend(fake_inventory(self.proc, codex_pane(200, slot), {200: 'dt-unowned'}))
+        code, out, err = self.f.run(['board', '--porcelain'])
+        self.assertEqual(code, 0, err)
+        rows = [row.split('\t') for row in out.splitlines() if '\tunknown-session\t' in row]
+        self.assertEqual(len(rows), 1, out)
+        self.assertEqual(rows[0][-1], '204', 'child outside the slot is folded into its live parent row')
+        self.assertEqual(rows[0][-2], 'fixture-server', out)
 
     # --- the mismatch that IS real still reads as one -------------------------------------------------------------
 

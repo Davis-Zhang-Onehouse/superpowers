@@ -99,8 +99,8 @@ KINDS = (KIND_WORKER, KIND_UNKNOWN, KIND_STALE_LEASE)
 #: so a park always asks somebody something. Excluded, a parked child rendered its question on the board
 #: beside `0 needs you`, and it surfaced only by timing out into `IDLE` after 30 minutes, which turns a
 #: question into a stall. The remedy is an answer, which a human can give, so this stays inside "what a
-#: human can actually DO". A parked worker whose pane is still busy is not PARKED at all (`OBS-3`, in
-#: `_live_state`), so this does not make progressing work shout.
+#: human can actually DO". A parked worker whose pane is still busy stays PARKED with `working=true`;
+#: `needs_a_human` excludes that case, so progressing work does not make the banner shout.
 ACTIONABLE_STATES = (BLOCKED, IDLE, PARKED)
 
 
@@ -123,6 +123,8 @@ def needs_a_human(subject) -> bool:
     which is the same failure `FI-14` and `FI-12` are both instances of.
     """
     if subject.state in ACTIONABLE_STATES:
+        if subject.state == PARKED and subject.evidence.get("working") == "true":
+            return False
         #: `B24`. A pane-level BLOCKED with a human attached and giving it input is that human's to finish;
         #: `attended` is only ever set for that case (see `_attended`), so every other state is untouched.
         return not subject.attended
@@ -228,7 +230,7 @@ def reconcile(store, pool, sessions, instants_dir: Path, idle_after_s: int = 180
             slot = _slot_holding(pool, sess.cwd) or _slot_leased_to_pane(pool, sess, elsewhere)
             if slot:
                 accounted_slots.add(slot)
-            subjects.append(_unknown_subject(sess, slot))
+            subjects.append(_unknown_subject(sess, slot, live_sessions, sessions.socket))
 
     # --- pass 2: records with no live process. Still subjects — that is the point of the join. ----
     for rec in sorted(records, key=lambda r: r.todo_id):
@@ -241,7 +243,7 @@ def reconcile(store, pool, sessions, instants_dir: Path, idle_after_s: int = 180
         layer = layer_of(rec.tmux_socket)
         subject = _worker_subject(rec, pool, layer, instants_dir, idle_after_s,
                                   live=layer.alive(rec.tmux), sess=None,
-                                  live_sessions=live_sessions)
+                                  live_sessions=live_sessions if layer is sessions else ())
         if subject.holds_slot:
             accounted_slots.add(rec.slot)
         subjects.append(subject)
@@ -338,6 +340,10 @@ def _worker_subject(rec, pool, sessions, instants_dir: Path, idle_after_s: int, 
         #: which server this command was talking to either way, so "no session answers" can be read as the
         #: local claim it is.
         "tmux_socket": rec.tmux_socket,
+        "nested": ",".join(str(item.pid) for item in live_sessions
+                            if item.name == rec.tmux and getattr(item, "nested", False)
+                            and (not rec.tmux_socket or rec.tmux_socket == sessions.socket)),
+        "working": "true" if parked and state == PARKED and sessions.busy(pane) else "false",
         "asked_server": getattr(sessions, "socket", "") or "",
         "pid": str(sess.pid) if sess is not None else (str(holder) if holder else ""),
         #: FB-54. `unreadable` when a `/proc` read of the process holding this record's pane failed; "" otherwise.
@@ -573,10 +579,7 @@ def _live_state(phase, parked, pane, sessions, instant, idle_after_s, capture_fa
             # An actionable state is never masked by a standing note; the park is APPENDED.
             note = f"{note}; parked decision stands: {parked}"
         elif busy:
-            # OBS-3: "a parked note while still working is just a note". A permanently-red tick trains
-            # everyone to ignore red.
-            state, note = RUNNING, (f"declared parked and progressing anyway — a parked note while "
-                                    f"still working is just a note: {parked}")
+            state, note = PARKED, f"parked decision stands while work progresses: {parked}"
         else:
             state, note = PARKED, f"parked decision: {parked}"
     #: `and state == BLOCKED` is belt-and-braces, not load-bearing today: `on_pane` is only set beside a
@@ -757,7 +760,7 @@ def _holds_slot(pool, rec) -> bool:
 # --- unknown sessions ------------------------------------------------------------------------------
 
 
-def _unknown_subject(sess, slot: str):
+def _unknown_subject(sess, slot: str, live_sessions=(), server=""):
     """A live session no record claims. Reported, never acted on.
 
     `OBS-48` found one idle 8d20h, invisible to every records-first sweep. It carries no authorisation
@@ -771,6 +774,10 @@ def _unknown_subject(sess, slot: str):
         "cwd": str(sess.cwd),
         "runtime": sess.runtime,
         "session": sess.name or "",
+        "tmux_socket": server,
+        "nested": ("true" if getattr(sess, "nested", False) else
+                   ",".join(str(item.pid) for item in live_sessions
+                            if item.name == sess.name and getattr(item, "nested", False))),
         "record": "none",
         "slot": slot or "",
         "process": "unreadable" if unreadable else "",
