@@ -157,13 +157,14 @@ class VerbsJudgeThePaneByItsOwningAgent(unittest.TestCase):
         code, out, err = self.f.run(['close', '--id', record.todo_id])
         self.assertIn('mid-turn', out + err, 'close must refuse a busy codex pane as mid-turn, not as a mismatch')
 
-    def test_pane_guard_reads_busy_at_80_and_200_columns(self):
-        for width in (80, 200):
-            with self.subTest(width=width):
+    def test_pane_guard_reads_busy_in_short_and_long_excerpts(self):
+        """These are excerpts, not captures proving terminal width; test_session pins launch argv."""
+        for length in ("short", "long"):
+            with self.subTest(length=length):
                 self.f = Fleet()
                 self.addCleanup(shutil.rmtree, self.f.tmp)
                 self.proc = self.f.tmp / 'proc'
-                frame = (FRAMES / f'v23e-codex-busy-{width}.frame').read_text()
+                frame = (FRAMES / f'v23e-codex-busy-{length}-excerpt.frame').read_text()
                 record = self.worker('codex', codex_pane, frame, nested_claude=False)
                 code, out, err = self.f.run(['pane-guard', '--id', record.todo_id])
                 self.assertEqual(code, 11, out + err)
