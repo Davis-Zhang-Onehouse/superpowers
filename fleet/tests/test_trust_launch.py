@@ -240,6 +240,64 @@ class TestDispatchReportsTheTrustScreen(CliCase):
         self.assertIn("folder-trust screen", rows_of(out)["trust"])
 
 
+def admission_held(home) -> bool:
+    """RV-25. A non-blocking attempt at the store's admission lock, through runtime_config's own API: flock is
+    per open file, so a second open in this process is refused while main's `with admission_lock` holds it."""
+    from fleet.errors import Refused
+    from fleet.runtime_config import admission_lock
+    try:
+        with admission_lock(home, timeout_s=0):
+            return False
+    except Refused:
+        return True
+
+
+class TestTheWatchRunsOutsideTheAdmissionLock(CliCase):
+    """RV-25. The post-launch watch (up to FLEET_TRUST_WATCH_SECONDS) ran inside main's box-wide admission lock,
+    so a wave of slow launches could refuse a healthy dispatch at ADMISSION_WAIT_S."""
+
+    def probe(self, fleet, answer):
+        seen = []
+
+        def watch(tmux, runtime):
+            seen.append(admission_held(fleet.home))
+            return answer
+        return seen, watch
+
+    def test_the_probe_sees_the_lock_when_it_is_held(self):
+        from fleet.runtime_config import admission_lock
+        fleet = self.loaded()
+        fleet.home.mkdir(parents=True, exist_ok=True)
+        with admission_lock(fleet.home):
+            self.assertTrue(admission_held(fleet.home))
+        self.assertFalse(admission_held(fleet.home))
+
+    def test_the_dispatch_watch_runs_after_the_admission_lock_is_released(self):
+        fleet = self.loaded()
+        seen, watch = self.probe(fleet, cli.LaunchWatch("ready"))
+        inject(fleet, watch)
+        code, out, err = fleet.run(dispatch_argv(fleet, "outsideLock"))
+        self.assertEqual(0, code, out + err)
+        self.assertEqual([False], seen, "the watch ran while the admission lock was held")
+        self.assertTrue(rows_of(out)["trust_screen"].startswith("none"), out)
+
+    def test_the_revive_watch_runs_after_the_admission_lock_is_released(self):
+        fleet = self.loaded()
+        argv = fleet.revival_fixture()
+        seen, watch = self.probe(fleet, cli.LaunchWatch("ready"))
+        inject(fleet, watch)
+        code, out, err = fleet.run(["revive", "--porcelain", *argv])
+        self.assertEqual(0, code, out + err)
+        self.assertEqual([False], seen, "the revive watch ran while the admission lock was held")
+
+    def test_a_handler_run_without_main_still_watches_and_emits_inline(self):
+        ctx = type("C", (), {"after_admission": None})()
+        self.assertEqual(7, cli._after_admission(ctx, lambda: 7))
+        ctx.after_admission = []
+        self.assertEqual(cli.EXIT_OK, cli._after_admission(ctx, lambda: 7))
+        self.assertEqual(7, ctx.after_admission[0]())
+
+
 class TestReviveReportsTheTrustScreen(CliCase):
 
     def test_a_revive_at_the_trust_screen_says_observed(self):

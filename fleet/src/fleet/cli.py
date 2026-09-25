@@ -235,9 +235,9 @@ PANE_AWAITING_OPERATOR = 15
 #: only `runtime --set` keeps the short bounded refusal (`runtime_config.admission_lock`'s default), because
 #: a switch refused by a slow holder is the spec's intended outcome and a dispatch refused by one is not.
 #:
-#: V23-P: the admission lock is now also held through the read-only trust prediction and the post-launch watch
-#: (`FLEET_TRUST_WATCH_SECONDS`, default 8, which exits early on the first decisive frame; about 1 s measured for a
-#: trusted claude in §TS), so a queued launch can wait up to that window longer behind the holder.
+#: V23-P: the admission lock is also held through the read-only trust prediction. The post-launch watch
+#: (`FLEET_TRUST_WATCH_SECONDS`, default 8) is NOT: since RV-25 `main` runs it, and prints the final rows, after
+#: leaving the lock (`Ctx.after_admission`), so a wave of slow launches no longer queues behind each watch.
 ADMISSION_WAIT_S = 60.0
 
 PANE_GUARD_CODES = {
@@ -567,6 +567,10 @@ class Ctx:
     #: handlers leave this False and continue to sample when their guards run.
     share_read_census: bool = False
     process_census: object = None
+    #: RV-25. Where an admitted verb hands back the part of its work that must run AFTER `main` releases the
+    #: admission lock (and the pane lock): the post-launch watch and the final rows. `main` sets a list and runs
+    #: each continuation once it has left both locks; `None` (a handler called without `main`) runs it inline.
+    after_admission: object = None
 
     def live_work_now(self) -> bool:
         if self.live_work is not None:
@@ -1907,6 +1911,17 @@ def _watch_rows(watch, tmux, slot_path, runtime="claude") -> list:
                                        f"`fleet pane-guard --pane {tmux}`"))]
 
 
+def _after_admission(ctx, continuation) -> int:
+    """RV-25. Queue `continuation` (the watch plus the final rows) for `main` to run outside the admission lock,
+    and answer EXIT_OK for now; `main` takes the continuation's code as the verb's. Without a queue (a handler
+    called without `main`) it runs inline and its code is returned, so the output is the same either way."""
+    queue = getattr(ctx, "after_admission", None)
+    if queue is None:
+        return continuation()
+    queue.append(continuation)
+    return EXIT_OK
+
+
 def _launch_trust_rows(ctx, prediction, layer, tmux, runtime, slot_path) -> tuple:
     """V23-P. Called only after the launch is recorded, outside any rollback: the rows, plus one stderr line
     when the pane is waiting at the trust screen.
@@ -1994,13 +2009,16 @@ def _do_revive(ctx: Ctx, parsed: Parsed) -> int:
     ctx.store.write(record)
     #: V23-P (FB-126). `_verify_resume` read argv, which is right while the pane waits at the trust screen. Watched
     #: after the record is written, so an observation problem is a row and never a failed revive (D-3).
-    trust_rows, interrupt = _launch_trust_rows(ctx, prediction, layer, record.tmux, settings.runtime, lease.path)
-    _emit(ctx, 'revive', [('todo_id', record.todo_id), ('session_id', session_id), ('runtime', record.runtime),
-                          ('model', record.runtime_model or "(none — the CLI's configured default model)"),
-                          *policy_rows, *trust_rows])
-    if interrupt is not None:
-        raise interrupt
-    return EXIT_OK
+    #: RV-25. Watched and reported AFTER `main` leaves the admission and pane locks (`_after_admission`).
+    def finish() -> int:
+        trust_rows, interrupt = _launch_trust_rows(ctx, prediction, layer, record.tmux, settings.runtime, lease.path)
+        _emit(ctx, 'revive', [('todo_id', record.todo_id), ('session_id', session_id), ('runtime', record.runtime),
+                              ('model', record.runtime_model or "(none — the CLI's configured default model)"),
+                              *policy_rows, *trust_rows])
+        if interrupt is not None:
+            raise interrupt
+        return EXIT_OK
+    return _after_admission(ctx, finish)
 
 
 def _title_rows(title) -> list:
@@ -2556,22 +2574,26 @@ def _do_dispatch(ctx: Ctx, parsed: Parsed) -> int:
     #: argv, which is right while the pane waits at the trust screen, and an observation problem here must never
     #: roll a good launch back (D-3). `_launch_trust_rows` never raises: it hands back a KeyboardInterrupt from the
     #: watch, which is re-raised only AFTER the success rows are printed (final review I2, RV-C5).
-    trust_rows, interrupt = _launch_trust_rows(ctx, prediction, ctx.sessions, tmux, settings.runtime, lease.path)
-    _emit(ctx, "dispatch", [("todo_id", todo_id), ("instant", str(child)), ("slot", lease.slot),
-                            ("tmux", tmux), *_title_rows(title), ("watched_source", source.base),
-                            ("milestone", milestone_id or "(none)"),
-                            ("override_reason", record.override_reason or "(none — no rule was overridden)"),
-                            ("lineage_base", record.lineage_base or "(none)"),
-                            ("lineage_mode", record.lineage_mode or "(none)"),
-                            ("golden_base", record.golden_base or "(none recorded)"),
-                            ("coordinator", str(coordinator) if coordinator else
-                             "(none — this child has no origin.json, so its `propose` stays LOCAL)"),
-                            ("launched_at", record.launched_at), *_choice_rows(choice),
-                            *_codex_skills_rows(skills, parsed, _releases_of(ctx)),
-                            *_codex_policy_rows(settings.runtime, launch_env), *trust_rows])
-    if interrupt is not None:
-        raise interrupt
-    return EXIT_OK
+    #: RV-25. Watched and reported AFTER `main` leaves the admission lock (`_after_admission`), so a slow launch
+    #: no longer holds every other dispatch on the box behind it.
+    def finish() -> int:
+        trust_rows, interrupt = _launch_trust_rows(ctx, prediction, ctx.sessions, tmux, settings.runtime, lease.path)
+        _emit(ctx, "dispatch", [("todo_id", todo_id), ("instant", str(child)), ("slot", lease.slot),
+                                ("tmux", tmux), *_title_rows(title), ("watched_source", source.base),
+                                ("milestone", milestone_id or "(none)"),
+                                ("override_reason", record.override_reason or "(none — no rule was overridden)"),
+                                ("lineage_base", record.lineage_base or "(none)"),
+                                ("lineage_mode", record.lineage_mode or "(none)"),
+                                ("golden_base", record.golden_base or "(none recorded)"),
+                                ("coordinator", str(coordinator) if coordinator else
+                                 "(none — this child has no origin.json, so its `propose` stays LOCAL)"),
+                                ("launched_at", record.launched_at), *_choice_rows(choice),
+                                *_codex_skills_rows(skills, parsed, _releases_of(ctx)),
+                                *_codex_policy_rows(settings.runtime, launch_env), *trust_rows])
+        if interrupt is not None:
+            raise interrupt
+        return EXIT_OK
+    return _after_admission(ctx, finish)
 
 
 def _releases_of(ctx: Ctx):
@@ -8123,8 +8145,14 @@ def main(argv: list, *, stdout=None, stderr=None, context=None) -> int:
                     locked_record = _record_for(ctx, child)
             lock = (pane_lock(ctx.home, ctx.sessions_for(locked_record).socket, locked_record.tmux)
                     if locked_record and locked_record.tmux else nullcontext())
+            if admitted:
+                ctx.after_admission = []
             with lock:
                 code = spec.handler(ctx, parsed)
+        #: RV-25. The post-launch watch and the final rows, now that both locks are released. Inside this `try`
+        #: as they were when the handler ran them inline, so an error there is reported exactly as before.
+        for continuation in (getattr(ctx, "after_admission", None) or []) if admitted else []:
+            code = continuation()
     except FleetError as exc:
         _report_error(exc, err)
         code = exc.exit_code
