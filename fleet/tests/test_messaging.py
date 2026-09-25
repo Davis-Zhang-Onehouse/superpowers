@@ -103,6 +103,19 @@ class MessagingTests(unittest.TestCase):
                         send(Path(directory), layer, SimpleNamespace(tmux='worker'), 'hello')
                     self.assertEqual(events, [])
 
+    def test_escape_free_real_capture_lookalikes_refuse_send_when_idle_or_busy(self):
+        """D-85. The real 2.1.268 multiline capture carries no SGR; the four lookalike drafts on it must
+        refuse send before anything is typed, idle or mid-turn."""
+        from tests.test_runtime import LOOKALIKE_FIRST_LINES, escape_free_multiline
+        for busy in (False, True):
+            for first in LOOKALIKE_FIRST_LINES:
+                with self.subTest(busy=busy, first=first), tempfile.TemporaryDirectory() as directory:
+                    before = observe('claude', escape_free_multiline(first, busy=busy))
+                    layer, events = self.runtime_fixture('claude', [before, PaneObservation('busy')])
+                    with self.assertRaises(Refused):
+                        send(Path(directory), layer, SimpleNamespace(tmux='worker'), 'hello')
+                    self.assertEqual(events, [])
+
     def test_real_frames_gate_busy_and_protect_drafts_and_dialogs(self):
         root = Path(__file__).resolve().parents[1] / 'it/fixtures/runtime'
         cases = [('claude', 'claude-busy.frame', True),

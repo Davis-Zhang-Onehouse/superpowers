@@ -89,9 +89,10 @@ class TestPanePredicates(unittest.TestCase):
 
     def test_an_empty_box_with_placeholder_text_is_not_unsubmitted(self):
         s, _, _ = layer()
-        for placeholder in ('❯ Try "fix the bug"', "❯ / for commands", "❯ # for memory"):
+        #: D-85: a suggestion is SGR-dim; the same words in plain text are a draft (see the D-85 case below).
+        for placeholder in ('Try "fix the bug"', "/ for commands", "# for memory"):
             with self.subTest(p=placeholder):
-                self.assertIsNone(s.unsubmitted("output\n" + placeholder))
+                self.assertIsNone(s.unsubmitted("output\n❯\u00a0\x1b[2m" + placeholder + "\x1b[0m"))
 
     def test_a_placeholder_in_the_box_with_a_real_prompt_in_SCROLLBACK_is_not_queued(self):
         """Strengthens M-15 (whole-buffer scan). The plan's original fixture put the stale prompt FIRST
@@ -102,7 +103,8 @@ class TestPanePredicates(unittest.TestCase):
         looks outside the tail reports a queued instruction that does not exist — which would hold a
         resume forever on a pane nobody ever typed into. Filed as FI-12.
         """
-        buf = "\n".join(["❯ a real instruction from an hour ago"] + ["output"] * 40 + ['❯ Try "fix the bug"'])
+        buf = "\n".join(["❯ a real instruction from an hour ago"] + ["output"] * 40 +
+                        ['❯\u00a0\x1b[2mTry "fix the bug"\x1b[0m'])
         s, _, _ = layer()
         self.assertIsNone(s.unsubmitted(buf))
 
@@ -831,15 +833,18 @@ class TestTheDimGhostIsNotTypedText(unittest.TestCase):
             self.assertIsNone(self.sessions.unsubmitted(pane("output", row, LIVE_FOOTER)),
                               f"an empty box must read empty: {label}")
 
-    def test_the_five_legacy_placeholder_shapes_still_answer_for_a_terminal_that_STRIPS_attributes(self):
-        """`AC-6`: attribute-absence is the primary signal and these remain the fallback. A terminal or a
-        tmux that yields no SGR leaves the old shapes as the only evidence available, and deleting them
-        would trade one blind spot for another."""
+    def test_legacy_placeholder_shapes_without_sgr_are_drafts_D85(self):
+        """D-85 retires `AC-6`'s text fallback. It assumed an SGR-free capture came from a terminal that
+        stripped attributes; real `capture-pane -e` frames of Claude Code often carry no escape at all
+        (`claude-multiline.frame`, the 2.1.282 frames), and there the fallback hid REAL drafts that began
+        "Ask …" or "Try "…" — `send` typed onto them. Plain text in the box is a draft (a false `10` is the
+        safe direction); only measured whole-box chrome still reads empty."""
         for placeholder in ('❯ Try "fix the bug"', "❯ / for commands", "❯ # for memory",
                             "❯ new task?", "❯ ask about this repo"):
             stripped_capture = "\n".join(("output", placeholder, "footer"))
-            self.assertIsNone(self.sessions.unsubmitted(stripped_capture),
-                              f"the legacy fallback must still hold for {placeholder!r}")
+            self.assertEqual(self.sessions.unsubmitted(stripped_capture), placeholder[2:],
+                             f"plain text in the box is somebody's draft: {placeholder!r}")
+        self.assertIsNone(self.sessions.unsubmitted("\n".join(("output", "❯ Press up to edit queued messages", "footer"))))
 
 
 class TestTheCaptureKeepsWhatTheseCasesDependOn(unittest.TestCase):
