@@ -91,6 +91,7 @@ IT_RESULTS="$R" bash run-group5.sh             # §L §M §N in one process — 
 | `run-e9-leak` `run-m9-mutation` `run-rmw` | targeted regressions |
 | `run-OR` | §OR a real codex worker on a claude box read with its record's runtime (live; spends codex turns) |
 | `run-P` | §P the real dispatch — see below |
+| `run-TS` | §TS the folder-trust screen on the real binary: dispatch reports it (V23-P, FB-126). Runs claude logged out under a scratch config, so it spends no tokens and is in `--full` ungated |
 
 **The live-session baseline is per RUN** (FB-60). `lib.sh` mints `IT_RUN_ID` without exporting it, and `run-all.sh`
 exports it, so its runners share one while a standalone section, even one started from a shell that sourced
@@ -119,6 +120,13 @@ IT_RESULTS="$R" bash run-P.sh                  # ~10-15min; spends one real clau
 
 Optional: `P_REAL_CLAUDE=/path/to/claude` (default `/home/ubuntu/.local/bin/claude`),
 `P_TIMEOUT=900` (how long to poll for the worker to finish).
+
+**Real-agent sections run their cwd outside any git checkout** (V23-P, S4-I3). Claude's folder-trust walk-up
+stops at the enclosing git toplevel, so a slot inside this clone asks about the clone even when the workspace
+above it is trusted. §P therefore builds its slot under `it_outside_checkout_dir` (the first non-repo ancestor of
+the checkout; override with `IT_REAL_AGENT_PARENT=<a trusted, non-repo directory>`), and §SEND places its slot
+beside the checkout. If a dispatch still reports `trust_screen observed`, §P records P1 as `BLOCKED BY
+ENVIRONMENT` and stops instead of polling a pane nobody will answer.
 
 What it does: builds a slot whose lineage base is on a **diverged sibling** branch, dispatches a real
 `claude` from `skills/using-fleet/profiles/worker`, delivers the rendered seed, and polls until the worker

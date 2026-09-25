@@ -36,9 +36,13 @@ bash "$IT_ROOT/bin/source-pin.sh" before "$OUT" || exit 2
 REAL_CLAUDE="${P_REAL_CLAUDE:-/home/ubuntu/.local/bin/claude}"
 P_TIMEOUT="${P_TIMEOUT:-900}"
 
+P_DIR=""
 cleanup_P() {
   it_cleanup_tmux
   tmux -L "$IT_TMUX_SOCKET" kill-server 2>/dev/null
+  #: V23-P. The slot now lives OUTSIDE the checkout, so it is not swept with `$OUT`. Removed only when the path has
+  #: the shape `it_outside_checkout_dir` gives it: a bad or empty variable must never reach an `rm -rf`.
+  case "$P_DIR" in */fleet-it-P-*) rm -rf "$P_DIR" ;; esac
 }
 trap cleanup_P EXIT
 
@@ -51,7 +55,14 @@ fi
 # ---- the slot: a real git repo, with a lineage base on a DIVERGED sibling --------------------------
 # Same shape as §LB, because the worker must have something real to reposition onto and the gate on
 # `propose --status done` must have teeth. The worker lands here, at the golden, exactly as ws3 did.
-SLOT="$OUT/slot"; mkdir -p "$SLOT/alpha"
+#: V23-P (S4-I3). The slot sits OUTSIDE every git checkout. It was `$OUT/slot`, inside this clone, and Claude Code
+#: bounds its folder-trust walk-up at the enclosing git toplevel: the real claude asked "Is this a project you
+#: created or one you trust?" about the clone although the workspace above it was trusted, and waited 900s on a pane
+#: nobody answers. `it_outside_checkout_dir` picks the first non-repo ancestor (overridable: IT_REAL_AGENT_PARENT).
+P_DIR="$(it_outside_checkout_dir P)" || P_DIR=""
+case "$P_DIR" in */fleet-it-P-*) ;; *) echo "§P: no directory outside the checkout for the slot ('$P_DIR')" >&2; exit 2 ;; esac
+SLOT="$P_DIR/slot"; mkdir -p "$SLOT/alpha"
+echo "slot: $SLOT" > "$OUT/P-slot.txt"
 (
   cd "$SLOT/alpha" && git init -q . && git config user.email p@fleet && git config user.name p
   echo base > f.txt && git add -A && git commit -q -m "A: common ancestor"
@@ -127,6 +138,18 @@ if [ "$P_RC" != 0 ] || [ -z "$W" ] || [ ! -d "$W" ]; then
     "the real dispatch failed (exit $P_RC): $(head -3 "$OUT/P-dispatch.out" | tr '\n' ' ')"
   it_assert_isolation P-leave
   echo "§P done: IT_FAILED=1"; exit 1
+fi
+
+#: V23-P (FB-126). A dispatch that reports the folder-trust screen has launched a claude that will wait on a human
+#: forever: no verdict on followability is possible, so record WHY and stop, rather than spend P_TIMEOUT polling a
+#: pane nobody will answer. The rows are Task 2's: `trust_screen observed — …`, then the path on screen.
+P_SCREEN="$(awk -F'\t' '$1=="trust_screen"{print $2; exit}' "$OUT/P-dispatch.out")"
+if [ "${P_SCREEN%% *}" = observed ]; then
+  P_SCREEN_PATH="$(awk -F'\t' '$1=="trust_screen_path"{print $2; exit}' "$OUT/P-dispatch.out")"
+  it_fail P1 "fleet/it/P/out/P-dispatch.out" \
+    "BLOCKED BY ENVIRONMENT: the real claude stopped at the folder-trust screen, so no worker ran and nothing about followability was measured. dispatch printed trust_screen='$P_SCREEN' trust_screen_path='$P_SCREEN_PATH' (slot $SLOT). Trust that folder, or set IT_REAL_AGENT_PARENT to a trusted non-repo directory, and re-run"
+  it_assert_isolation P-leave
+  echo "§P done: IT_FAILED=1 (blocked at the trust screen)"; exit 1
 fi
 
 mkdir -p "$W/evidence"

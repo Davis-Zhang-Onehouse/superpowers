@@ -368,6 +368,21 @@ it_fresh_store() {
   mkdir -p "${FLEET_INSTANTS:-$FLEET_HOME/instants}"
 }
 
+it_outside_checkout_dir() {   # it_outside_checkout_dir <name> -> prints a FRESH dir outside every git checkout
+  #: V23-P (S4-I3). Claude Code bounds its trust walk-up at the enclosing git toplevel, so a real claude whose cwd is
+  #: under this checkout asks about the checkout even when the slot above it is trusted. The default parent is the
+  #: first directory above the checkout that is in no git work tree: the leased slot dir, which the operator trusts.
+  local parent="${IT_REAL_AGENT_PARENT:-}" top
+  if [ -z "$parent" ]; then
+    parent="$IT_ROOT"
+    while top="$(git -C "$parent" rev-parse --show-toplevel 2>/dev/null)" && [ -n "$top" ]; do
+      parent="$(cd "$top/.." && pwd)"
+    done
+  fi
+  local dir="$parent/fleet-it-$1-$$"
+  rm -rf "$dir" && mkdir -p "$dir" && printf '%s\n' "$dir"
+}
+
 # Never a bare `fleet` on PATH — FLEET_HOME must be explicit.
 #
 # The function form, for every site a function CAN reach. It delegates to the executable so the recording
