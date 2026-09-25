@@ -823,6 +823,26 @@ def _watcher_of(pane, sessions, instant, capture_failed=False, launched_at=None)
     return WATCHER_NONE, ""
 
 
+def grace_withheld(declarations, launched_at, now=None) -> str:
+    """CL-1. Why a claim is NOT inside a grace, in the same order `_grace_of` decides it, or "" when it is — so a
+    reader explaining the board (`brief`) gives the board's own reason, never a guessed one."""
+    if declarations is None:
+        return "no declaration was read"
+    stamp = declarations.declared_at()
+    claimed = _stamp_s(stamp)
+    now = now if now is not None else time.time()
+    if claimed is None:
+        return "the claim carries no readable stamp, so no grace is granted"
+    if claimed > now:
+        return f"the claim's stamp {stamp} is in the future, so no grace is granted"
+    if claim_predates_launch(declarations, launched_at):
+        return (f"the claim at {stamp} predates this record's session, relaunched at {launched_at}, so no grace "
+                f"is granted")
+    if now >= claimed + WATCHER_GRACE_S:
+        return "which have passed"
+    return ""
+
+
 def _grace_of(declarations, launched_at, now=None) -> str:
     """The sentence naming the grace a pane-watcher claim is inside, or "" when it is not in one.
 
