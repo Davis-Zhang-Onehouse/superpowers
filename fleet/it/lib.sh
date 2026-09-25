@@ -203,6 +203,7 @@ it_guard_server() {       # it_guard_server <runner-pid> <socket>
   pidfile="$IT_ROOT/.guardians/$sock.pid"        # a subdirectory of fleet/it: generated, git-ignored
   mkdir -p "$IT_ROOT/.guardians"
   dir="${TMUX_TMPDIR:-/tmp}"
+  dir="$(python3 -c 'import os,sys; print(os.path.abspath(sys.argv[1]))' "$dir")" || return 1
   [ -d "$dir" ] || return 1
   uid_dir="$dir/tmux-$(id -u)"
   mkdir -m 700 -p "$uid_dir" || return 1
