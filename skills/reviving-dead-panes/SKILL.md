@@ -131,7 +131,7 @@ me again* — before it is ready for input. Measured on a 435k-token session: **
 `pane-guard` polls, five seconds apart, all returned `10 queued-text`** while the pane was showing that
 menu (with the dialog rows now measured it may read `15 awaiting-operator` instead). `10` there does
 **not** mean a human left something in the box. **Read the pane before you believe the code**, and **do
-not submit a menu as if it were a message draft** — `fleet send` requires an observed idle input before
+not submit a menu as if it were a message draft** — `fleet send` requires an observed empty idle or busy input before
 insertion and the exact message afterward.
 
 **2. `capture-pane -t "=$SESSION"` fails on a session that EXISTS.** A pane target parses as

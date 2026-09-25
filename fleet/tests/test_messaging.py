@@ -55,7 +55,7 @@ class MessagingTests(unittest.TestCase):
                 layer, events = self.runtime_fixture(runtime, [PaneObservation('busy'),
                     PaneObservation('busy', 'hello'), PaneObservation('busy')])
                 self.assertEqual(send(Path(directory), layer, SimpleNamespace(tmux='worker'), 'hello'),
-                                 ('queued-behind-turn', CONFIRMED_BY_DRAFT))
+                                 ('queued-behind-turn' if runtime == 'claude' else 'submitted-mid-turn', CONFIRMED_BY_DRAFT))
                 self.assertEqual(events, [('literal', 'hello'), ('submit', None)])
 
     def test_busy_pane_with_draft_or_dialog_never_types(self):
@@ -64,6 +64,41 @@ class MessagingTests(unittest.TestCase):
                                  ('unknown', None), ('dialog', None)):
                 with self.subTest(runtime=runtime, state=state), tempfile.TemporaryDirectory() as directory:
                     layer, events = self.runtime_fixture(runtime, [PaneObservation(state, draft)])
+                    with self.assertRaises(Refused):
+                        send(Path(directory), layer, SimpleNamespace(tmux='worker'), 'hello')
+                    self.assertEqual(events, [])
+
+    def test_tall_busy_claude_draft_from_capture_refuses_before_typing(self):
+        root = Path(__file__).resolve().parents[1] / 'it/fixtures/runtime'
+        lines = (root / 'claude-busy.frame').read_text().splitlines()
+        caret = max(i for i, row in enumerate(lines) if row.startswith('❯'))
+        for count in (7, 12, 30):
+            frame = '\n'.join(lines[:caret] + ['❯ existing draft'] +
+                              [f'  continuation {i}' for i in range(count - 1)] +
+                              lines[caret + 1:]) + '\n'
+            with self.subTest(count=count), tempfile.TemporaryDirectory() as directory:
+                before = observe('claude', frame)
+                self.assertEqual(before.state, 'busy')
+                self.assertTrue(before.draft)
+                layer, events = self.runtime_fixture('claude', [before])
+                with self.assertRaises(Refused):
+                    send(Path(directory), layer, SimpleNamespace(tmux='worker'), 'hello')
+                self.assertEqual(events, [])
+
+    def test_styled_placeholder_lookalikes_refuse_send_when_idle_or_busy(self):
+        root = Path(__file__).resolve().parents[1] / 'it/fixtures/runtime'
+        for state in ('idle', 'busy'):
+            lines = (root / f'claude-{state}.frame').read_text().splitlines()
+            caret = max(i for i, row in enumerate(lines) if row.startswith('❯'))
+            for draft in ('ask the reviewer to rerun RV-3', 'Try "pytest -k foo" next',
+                          'Ask him first:\nthen proceed', 'new task? no, keep going'):
+                body = draft.splitlines()
+                frame = '\n'.join(lines[:caret] + ['❯\u00a0\x1b[1m' + body[0] + '\x1b[0m'] +
+                                  ['  ' + row for row in body[1:]] + lines[caret + 1:]) + '\n'
+                with self.subTest(state=state, draft=draft), tempfile.TemporaryDirectory() as directory:
+                    before = observe('claude', frame)
+                    self.assertEqual(before.draft, draft)
+                    layer, events = self.runtime_fixture('claude', [before])
                     with self.assertRaises(Refused):
                         send(Path(directory), layer, SimpleNamespace(tmux='worker'), 'hello')
                     self.assertEqual(events, [])
@@ -83,7 +118,7 @@ class MessagingTests(unittest.TestCase):
                     ([PaneObservation('busy', 'hello'), PaneObservation('busy')] if admitted else []))
                 if admitted:
                     self.assertEqual(send(Path(directory), layer, SimpleNamespace(tmux='worker'), 'hello')[0],
-                                     'queued-behind-turn')
+                                     'queued-behind-turn' if runtime == 'claude' else 'submitted-mid-turn')
                     self.assertEqual(events, [('literal', 'hello'), ('submit', None)])
                 else:
                     with self.assertRaises(Refused):
@@ -97,6 +132,7 @@ class MessagingTests(unittest.TestCase):
             with self.subTest(runtime=runtime, draft=draft), tempfile.TemporaryDirectory() as directory:
                 layer, events = self.runtime_fixture(runtime, [PaneObservation('idle'),
                     PaneObservation('queued', draft), PaneObservation('queued', draft),
+                    PaneObservation('queued', draft),
                     PaneObservation('queued', draft)])
                 recorded = []
                 with self.assertRaisesRegex(FleetError, 'inserted-not-submitted'):
@@ -104,6 +140,24 @@ class MessagingTests(unittest.TestCase):
                          recorder=lambda outcome, confirmation: recorded.append(outcome))
                 self.assertEqual(events, [('literal', text), ('submit', None), ('submit', None)])
                 self.assertEqual(recorded, ['inserted-not-submitted'])
+
+    def test_retry_reobserves_and_refuses_a_dialog_or_foreign_draft(self):
+        for changed in (PaneObservation('dialog'), PaneObservation('queued', 'someone else'),
+                        PaneObservation('unknown')):
+            with self.subTest(changed=changed), tempfile.TemporaryDirectory() as directory:
+                layer, events = self.fixture([PaneObservation('idle'), PaneObservation('queued', 'hello'),
+                                              PaneObservation('queued', 'hello'), changed])
+                with self.assertRaisesRegex(FleetError, 'retry refused'):
+                    send(Path(directory), layer, SimpleNamespace(tmux='worker'), 'hello', timeout_s=0)
+                self.assertEqual(events, [('literal', 'hello'), ('submit', None)])
+
+    def test_retry_observation_can_confirm_first_enter_landed(self):
+        with tempfile.TemporaryDirectory() as directory:
+            layer, events = self.fixture([PaneObservation('idle'), PaneObservation('queued', 'hello'),
+                                          PaneObservation('queued', 'hello'), PaneObservation('idle')])
+            self.assertEqual(send(Path(directory), layer, SimpleNamespace(tmux='worker'), 'hello', timeout_s=0),
+                             (SUBMITTED, CONFIRMED_BY_DRAFT))
+            self.assertEqual(events, [('literal', 'hello'), ('submit', None)])
 
     def test_transient_redraw_is_observed_without_reinserting_or_resubmitting(self):
         with tempfile.TemporaryDirectory() as directory:

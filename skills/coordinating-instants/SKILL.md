@@ -111,7 +111,8 @@ full, and `fleet compaction-status` for what is holding dispatch.
 **Delivering an operator's answer into a worker's pane: keep the pane note a pointer, put the substance in
 a file.** `fleet send --id <todo> --message-file <file>` is the verb that delivers a pane message, and it
 admits an empty input while the worker is idle or mid-turn. A mid-turn send reports
-`queued-behind-turn` after the box empties; `inserted-not-submitted` means the message remains in the
+`queued-behind-turn` on measured Claude Code, or `submitted-mid-turn` on codex until its queue semantics
+are captured; `inserted-not-submitted` means the message remains in the
 box after two Enter attempts and needs inspection. Guard codes `10` (another draft), `14` (unreadable)
 and `15` (operator dialog) refuse sends. `pane-guard --capture` marks dim suggestion lines
 `[placeholder]` and does not put those suggestions in `queued_text`. The verb
