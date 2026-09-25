@@ -28,6 +28,18 @@ out="$(FLEET_VIEW_WIDTH=100 python3 "$VIEW" 2>&1)"; rc=$?
 check "an empty fleet renders" "0" "$rc"
 printf '%s' "$out" | grep -q "SUBJECTS" || { note "FAIL no SUBJECTS heading on an empty fleet"; fails=1; }
 
+# Terminal historical states can still appear on the board during a stamp-before-release window.
+# Both need the same dim glyph as COMPLETE, rather than the blank fallback for unknown states.
+python3 - "$VIEW" <<'PY'
+import runpy, sys
+view = runpy.run_path(sys.argv[1])
+for state in ("HARVESTED", "CLOSED"):
+    style, glyph = view["STATE_STYLE"][state]
+    assert style is view["DIM"] and glyph == "✓", (state, glyph)
+PY
+style_rc=$?
+check "historical terminal states have a dim glyph" "0" "$style_rc"
+
 # --- build a real fleet ------------------------------------------------------------------------------
 "$FLEET" enroll --slot "$TMP/slots/wsA" >/dev/null 2>&1
 "$FLEET" enroll --slot "$TMP/slots/wsB" >/dev/null 2>&1
