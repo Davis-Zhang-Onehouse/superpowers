@@ -470,6 +470,7 @@ class TestBriefSaysWhatTheBoardDoes(unittest.TestCase):
         row = self.phase_row()
         self.assertIn('held until 2026-07-30T12:30:00Z', row)
         self.assertIn('told to wait', row)
+        self.assertIn('unless', row, "CL-3: a dialog outranks a hold; the row must not promise it unconditionally")
         row = self.phase_row('2026-07-30T12:30:00Z')
         self.assertIn('HOLD EXPIRED', row)
         self.assertIn('counts against the WIP cap', row)
