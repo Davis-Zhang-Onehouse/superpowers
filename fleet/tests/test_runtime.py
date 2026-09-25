@@ -40,6 +40,15 @@ class RuntimeTests(unittest.TestCase):
                 self.assertEqual(observe(runtime, frame).draft, None)
                 self.assertIn('[placeholder] ', annotate_placeholders(frame))
 
+    def test_capture_labels_only_the_current_input_box(self):
+        from fleet.runtime import annotate_placeholders
+        frame = ('❯\u00a0\x1b[2mold suggestion\x1b[0m\n'
+                 'finished answer\n'
+                 '❯\u00a0\x1b[2mcontinue\x1b[0m\n? for shortcuts\n')
+        marked = annotate_placeholders(frame)
+        self.assertEqual(marked.count('[placeholder] '), 1)
+        self.assertIn('[placeholder] ❯\u00a0\x1b[2mcontinue', marked)
+
     def test_invalid_runtime_is_always_bad_input(self):
         for value in (None, [], {}, True, 1, '', 'gpt', 'Claude'):
             with self.subTest(value=value), self.assertRaises(BadInput):
