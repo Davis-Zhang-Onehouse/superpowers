@@ -109,11 +109,17 @@ def _is_scrolled_tail(draft, text) -> bool:
     #: boundaries: every real scrolled frame re-wraps this way (80 columns -> width 76). Only a head lost in WHOLE
     #: rows still passes, and nothing in a frame can tell that from a scroll.
     rows = [" ".join(row.split()) for row in draft.split("\n")]
-    words = whole.split(" ")
-    #: A width at or past `row + space + next row's first word` would have pulled that word up, so only widths below
-    #: every such bound can draw these rows.
-    widest = min(len(row) + 1 + len(nxt.split(" ")[0]) for row, nxt in zip(rows, rows[1:]))
-    return any(_wrap(words, width)[-len(rows):] == rows for width in range(max(map(len, rows)), widest))
+    #: RV-24. Each hard line wraps on its own (measured: a tall 2-line box shows its last line's rows), so the
+    #: message's rows are its lines' rows, in order. A width past the longest line wraps nothing, so no wider one
+    #: can draw anything new.
+    lines = [line.split() for line in text.strip().split("\n")]
+    longest = max(len(" ".join(line)) for line in lines)
+    return any(_rows(lines, width)[-len(rows):] == rows for width in range(max(map(len, rows)), longest + 2))
+
+
+def _rows(lines, width) -> list:
+    """Every row of a message whose hard `lines` are each wrapped at `width`."""
+    return [row for words in lines for row in _wrap(words, width)]
 
 
 def _wrap(words, width) -> list:
