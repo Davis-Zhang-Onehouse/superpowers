@@ -234,10 +234,12 @@ class Fleet:
         #: passed on an ambient `FLEET_HOME` and failed inside `release-verify`, which runs with it unset.
         with hermetic_environment(self.instants, home=self.tmp):
             # V23-O RV-14. The verb runs from the fixture's own tree, as `tests.test_cli.Fleet.run` does, so the
-            # runner's checkout location cannot become "the caller's instant".
+            # runner's checkout location cannot become "the caller's instant". A cwd already inside the tree is
+            # the case's own anchor for a relative operand and is kept (RV-39).
             prior_cwd = os.getcwd()
             try:
-                os.chdir(self.tmp)
+                if not pathlib.Path(prior_cwd).resolve().is_relative_to(pathlib.Path(self.tmp).resolve()):
+                    os.chdir(self.tmp)
                 code = cli.main(list(argv), stdout=out, stderr=err, context=self.context())
             finally:
                 os.chdir(prior_cwd)
@@ -887,3 +889,17 @@ class TestTheFixtureCadenceStaysInsideItsTree(Loaded):
         finally:
             os.chdir(previous)
         self.assertIn(f"{cli.CADENCE_PREFIX} {fleet.instants / OURS}", err)
+
+    def test_a_cwd_inside_the_fixture_is_kept_for_a_relative_operand(self):
+        # V23-O RV-39. The fixture runs a verb from its own tree, but a cwd ALREADY inside that tree is the case's
+        # own anchor for a relative operand: re-anchoring it at tmp would read `.` as the tmp root (member 2).
+        fleet = self.loaded()
+        target = fleet.paths["readyWorker"]
+        previous = pathlib.Path.cwd()
+        try:
+            os.chdir(target)
+            code, out, err = fleet.run(["roadmap", "--instant", "."])
+        finally:
+            os.chdir(previous)
+        self.assertNotIn("not an instant on disk", err)
+        self.assertEqual(code, 0, err)
