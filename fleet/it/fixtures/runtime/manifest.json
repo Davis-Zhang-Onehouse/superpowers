@@ -151,5 +151,32 @@
     "columns": 80,
     "rows": 24,
     "evidence": "v23-f worker instant 09212227-09250240-complete-append-v23fsendbusypane, evidence/review/real-claude-midturn-after-1s.frame — the same send one second later: the message is listed above the box with `ctrl+x ctrl+s to send now`, and the box shows the chrome `Press up to edit queued messages` (runtime._EMPTY_BOX_CHROME); no escape codes"
+  },
+  {
+    "runtime": "claude",
+    "cli_version": "2.1.282",
+    "state": "dialog",
+    "frame": "claude-trust-2.1.282.frame",
+    "columns": 120,
+    "rows": 40,
+    "evidence": "v23ptrustscreen instant (09212227-09251051-inflight-append-v23ptrustscreen), evidence/01-trust-rule/frames/A.frame — case A of trust-matrix.sh: cwd plain/sub with no trust record, so the folder-trust screen names /tmp/v23p-m.YM7x/plain/sub — captured with `tmux capture-pane -p -e` from a real Claude Code 2.1.282 on a private tmux socket (v23p-matrix / v23p-wrap) with a scratch CLAUDE_CONFIG_DIR and HOME, never the operator's config (V23-P, FB-126)"
+  },
+  {
+    "runtime": "claude",
+    "cli_version": "2.1.282",
+    "state": "dialog",
+    "frame": "claude-trust-wrapped-2.1.282.frame",
+    "columns": 80,
+    "rows": 40,
+    "evidence": "v23ptrustscreen instant (09212227-09251051-inflight-append-v23ptrustscreen), evidence/01-trust-rule/frames/wrapped-80col.frame — the folder-trust screen at 80 columns for a long untrusted path, which the TUI wraps mid-word across two rows (the full path is in wrapped-80col.path) — captured with `tmux capture-pane -p -e` from a real Claude Code 2.1.282 on a private tmux socket (v23p-matrix / v23p-wrap) with a scratch CLAUDE_CONFIG_DIR and HOME, never the operator's config (V23-P, FB-126)"
+  },
+  {
+    "runtime": "claude",
+    "cli_version": "2.1.282",
+    "state": "idle",
+    "frame": "claude-tui-2.1.282.frame",
+    "columns": 120,
+    "rows": 40,
+    "evidence": "v23ptrustscreen instant (09212227-09251051-inflight-append-v23ptrustscreen), evidence/01-trust-rule/frames/F.frame — case F of trust-matrix.sh: a linked worktree whose main worktree is trusted, so no trust screen; the ordinary TUI after one turn (not logged in), the control for the recognizer — captured with `tmux capture-pane -p -e` from a real Claude Code 2.1.282 on a private tmux socket (v23p-matrix / v23p-wrap) with a scratch CLAUDE_CONFIG_DIR and HOME, never the operator's config (V23-P, FB-126)"
   }
 ]

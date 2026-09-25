@@ -1,0 +1,40 @@
+[38;5;174m ▐[48;5;16m▛███▛█[39m[49m   [1mClaude[0m[39m[49m [1mCode[0m[39m[49m [38;5;246mv2.1.282[39m
+[38;5;174m▝▜[48;5;16m█████[49m█▀[39m  [38;5;246mOpus[39m [38;5;246m5.5[39m [38;5;246m(1M[39m [38;5;246mcontext)[39m [38;5;246m·[39m [38;5;246mAPI[39m [38;5;246mUsage[39m [38;5;246mBilling[39m
+[38;5;174m ▝▝[39m   [38;5;174m▝▝[39m   [38;5;246m/tmp/v23p-m.YM7x/wt
+
+
+[38;5;239m[48;5;237m❯ [38;5;231mhi[39m
+[38;5;246m[49m  ⎿  [38;5;211mNot logged in · Please run /login[39m
+
+[38;5;246m✻[39m [38;5;246mBrewed for 0s · done 10:55 AM[39m
+
+[38;5;246m●[39m [38;5;246mAuto mode lets Claude handle permission prompts automatically — Claude checks each tool call for risky actions[39m
+  [38;5;246mand prompt injection before executing. Actions Claude identifies as safe are executed, while actions Claude [39m
+  [38;5;246midentifies as risky are blocked and Claude may try a different approach. Ideal for long-running tasks. [39m
+  [38;5;246mSessions are slightly more expensive. Claude can make mistakes that allow harmful commands to run, it's [39m
+  [38;5;246mrecommended to only use in isolated environments. Shift+Tab to change mode.[39m
+
+[38;5;244m────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+[39m❯ [7m [0m[39m[49m
+[38;5;244m────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+[39m  [38;5;220m⏵⏵[39m [38;5;220mauto[39m [38;5;220mmode[39m [38;5;220mon[38;5;246m (shift+tab[39m [38;5;246mto[39m [38;5;246mcycle)[39m [38;5;246m·[39m [38;5;246m←[39m [38;5;246mfor[39m [38;5;246magents[39m                                       [38;5;211mNot[39m [38;5;211mlogged[39m [38;5;211min[39m [38;5;211m·[39m [38;5;211mRun[39m [38;5;211m/login[39m
+                                                                                                    [38;5;246m◐[39m [38;5;246mmedium[39m [38;5;246m·[39m [38;5;246m/effort[39m
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
