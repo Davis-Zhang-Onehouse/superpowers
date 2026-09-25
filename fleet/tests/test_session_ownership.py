@@ -7,9 +7,11 @@ an older, harvested record read the new worker's pane: COMPLETE-BUT-WORKING (cou
 board, which shows slot holders only, hid it) or COMPLETE carrying the new worker's pid, which
 `scripts/fleet-finished-pids.sh` turns into "exclude from auto-resume".
 
-The rule (`reconcile.session_owner`): the record with the latest `launched_at` owns the session, because every
-successful start stamps it and no start succeeds while a same-named session is live. A never-launched record ranks
-below every launched one. Every other record reads exactly as if the session were gone.
+The rule (`reconcile.session_owner`, DECISIONS D-1/D-4): the record with the latest START owns the session. A start
+is its `launched_at`, which every successful start stamps. A start still in progress (unstamped, never launched,
+holding its own lease) counts by its `dispatched_at`. Any other never-launched record ranks below every start. No start
+is attempted while a same-named session is live (dispatch refuses before its claim, `revive` refuses an occupied pane,
+`resume` refuses a session an open record claims). Every other record reads exactly as if the session were gone.
 """
 import pathlib
 import shutil
