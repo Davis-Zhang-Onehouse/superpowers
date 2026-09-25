@@ -226,6 +226,19 @@ def _last(rows: list, test) -> Optional[int]:
     return next((i for i in range(len(rows) - 1, -1, -1) if test(rows[i])), None)
 
 
+def _joined_after(rows: list, header: int) -> str:
+    """The path block under `rows[header]`: the non-blank rows after it, up to the next blank row. No separator:
+    the TUI wraps a long path mid-word (claude-trust-wrapped-2.1.282.frame). RV-28: codex's path is read the same
+    way, so a wrapped codex path is not cut at its first row."""
+    parts = []
+    for later in rows[header + 1:]:
+        if later.strip():
+            parts.append(later.strip())
+        elif parts:
+            break
+    return "".join(parts)
+
+
 def _claude_path(rows: list) -> Optional[str]:
     #: The hint row, not merely the phrase: an answer that QUOTES the screen is not the screen.
     span = _dialog(rows, ("enter to confirm",), "Yes, I trust this folder")
@@ -238,14 +251,7 @@ def _claude_path(rows: list) -> Optional[str]:
     header = _last(screen, lambda row: row.strip() == "Accessing workspace:")
     if header is None:
         return ""
-    parts = []
-    for later in screen[header + 1:]:
-        if later.strip():
-            parts.append(later.strip())
-        elif parts:
-            break
-    #: No separator: the TUI wraps a long path mid-word (claude-trust-wrapped-2.1.282.frame).
-    return "".join(parts)
+    return _joined_after(screen, header)
 
 
 def _codex_path(rows: list) -> Optional[str]:
@@ -260,7 +266,7 @@ def _codex_path(rows: list) -> Optional[str]:
         header = _last(screen, lambda row: row.strip() == "Folder access")
         if header is None:
             return ""
-        return next((later.strip() for later in screen[header + 1:] if later.strip()), "")
+        return _joined_after(screen, header)
     span = _dialog(rows, ("press enter to continue",), "Yes, continue")
     if span is not None:
         screen = rows[span[0]:span[1]]
