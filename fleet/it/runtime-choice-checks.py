@@ -11,6 +11,7 @@ from pathlib import Path
 import subprocess
 
 from fleet.store import Store
+from fleet.render import BOARD_COLUMNS
 
 socket = os.environ.get('FLEET_TMUX_SOCKET', '')
 assert socket.startswith('itfleet-'), 'A private socket is mandatory'
@@ -87,8 +88,9 @@ assert fields(fleet('runtime'))['runtime'] == 'claude'
 assert 'attested' in fleet('seed-check', '--id', record.todo_id).lower()
 board = fleet('board')
 row = [line.split('\t') for line in board.splitlines() if line.startswith(record.todo_id)]
-assert row and row[0][-1] == 'codex', board
-results['b'] = dict(todo=record.todo_id, argv=argv[:-1] + ['<seed>'], board_runtime=row[0][-1])
+runtime_col = BOARD_COLUMNS.index('runtime')
+assert row and row[0][runtime_col] == 'codex', board
+results['b'] = dict(todo=record.todo_id, argv=argv[:-1] + ['<seed>'], board_runtime=row[0][runtime_col])
 
 # Tear down through the public path, like RT1.
 for todo in [results[k]['todo'] for k in ('a', 'b', 'c')]:
