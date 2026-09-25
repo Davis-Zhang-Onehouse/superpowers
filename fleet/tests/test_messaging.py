@@ -186,6 +186,11 @@ class MessagingTests(unittest.TestCase):
         for why, draft in cases.items():
             with self.subTest(why):
                 self.assertIsNone(confirms('claude', draft, text))
+        with self.subTest('KNOWN ACCEPT (RV-25): a head loss whose re-wrap re-converges before the visible rows'):
+            #: Greedy wrapping resynchronises: this message with its first 10 words lost, re-wrapped, ends in the SAME
+            #: 5 rows. No frame can tell that from a scroll, so it confirms. This is the residual the skill states.
+            self.assertEqual(self.wrapped(words[10:])[-5:], rows[-5:])
+            self.assertEqual(CONFIRMED_BY_DRAFT_TAIL, confirms('claude', '\n'.join(self.wrapped(words[10:])[-5:]), text))
         with self.subTest('codex is not measured to scroll, so it never confirms by tail'):
             self.assertIsNone(confirms('codex', tail3, text))
         with self.subTest('the whole text is still the strong kind'):
