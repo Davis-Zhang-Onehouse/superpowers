@@ -2797,7 +2797,8 @@ def _do_declare(ctx: Ctx, parsed: Parsed) -> int:
                               + attestation_rows + hold_rows
                               + ([("ungated", ungated_because)] if ungated_because else []))
         return EXIT_OK
-    Declarations(child).set_phase(phase)
+    #: RV-22. Stamped from `ctx.now`, the clock `hold_until` is computed from: the join compares the two.
+    Declarations(child).set_phase(phase, now=ctx.now())
     Declarations(child).set_hold(hold_reason, hold_until)
     #: Recorded, so the question can be answered AFTER the fact. FI-255's defect was not only that the claim
     #: was unchecked — it was that the store kept `{"phase": "awaiting-ci"}` and nothing else, so a stopped
