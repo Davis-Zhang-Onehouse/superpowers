@@ -894,37 +894,31 @@ class ServerGuardian(unittest.TestCase):
         self.assertTrue(started.exists(), "guardian was not armed")
         return p
 
-    def _default_server_up(self):
-        env = dict(self.env)
-        env.pop("TMUX_TMPDIR")
-        return subprocess.run(["tmux", "-L", self.socket, "ls"], capture_output=True, env=env).returncode == 0
-
-    def _cleanup_default_server(self, env):
-        subprocess.run(["tmux", "-L", self.socket, "kill-server"], capture_output=True, env=env)
-        (pathlib.Path("/tmp") / f"tmux-{os.getuid()}" / self.socket).unlink(missing_ok=True)
-
     def _assert_missing_armed_dir_preserves_default_server(self, move):
+        """FB-73 / v23-l: a guardian whose armed directory was deleted or moved must not fall back to the box's
+        default directory and kill a same-named server there.
+
+        S5 glue (v23-l x v23-n): this case used to START a real same-named server in `/tmp/tmux-<uid>` and check it
+        survived. Under v23-n's host boundary (FB-118) the hermetic suite may not reach the operator's default tmux
+        directory at all, so the victim is now observed rather than created, as v23-n's RV-38 case does: the
+        guardian runs `tmux` by name, the suite's PATH shim records every call it makes, and any call aimed at a
+        server outside this test (the default directory included) fails the case."""
         armed = self.tmp / "armed"
         armed.mkdir()
-        p = self._start_guarded_runner(armed)
-        if move:
-            armed.rename(self.tmp / "renamed")
-        else:
-            shutil.rmtree(armed)
-        env = dict(self.env)
-        env.pop("TMUX_TMPDIR")
-        self.addCleanup(self._cleanup_default_server, env)
-        started = subprocess.run(["tmux", "-L", self.socket, "new-session", "-d", "-s", "victim"],
-                                 capture_output=True, env=env)
-        self.assertEqual(started.returncode, 0, started.stderr)
-        p.kill()
-        p.wait()
-        guardian_pid = int((self.it / ".guardians" / f"{self.socket}.pid").read_text())
-        deadline = time.monotonic() + 10
-        while pathlib.Path(f"/proc/{guardian_pid}").exists() and time.monotonic() < deadline:
-            time.sleep(0.1)
-        self.assertFalse(pathlib.Path(f"/proc/{guardian_pid}").exists(), "guardian did not exit")
-        self.assertTrue(self._default_server_up(), "guardian killed a same-named default-dir server")
+        with tests.expect_tripwire() as seen:
+            p = self._start_guarded_runner(armed)
+            if move:
+                armed.rename(self.tmp / "renamed")
+            else:
+                shutil.rmtree(armed)
+            p.kill()
+            p.wait()
+            guardian_pid = int((self.it / ".guardians" / f"{self.socket}.pid").read_text())
+            deadline = time.monotonic() + 10
+            while pathlib.Path(f"/proc/{guardian_pid}").exists() and time.monotonic() < deadline:
+                time.sleep(0.1)
+            self.assertFalse(pathlib.Path(f"/proc/{guardian_pid}").exists(), "guardian did not exit")
+        self.assertEqual(seen, [], "the guardian ran tmux against a server outside this test's directory")
 
     def test_deleted_armed_directory_does_not_kill_default_server(self):
         self._assert_missing_armed_dir_preserves_default_server(move=False)
