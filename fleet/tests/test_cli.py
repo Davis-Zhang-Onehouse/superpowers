@@ -8152,3 +8152,13 @@ class TestMilestoneRetitle(CliCase):
         self.assertEqual("why | now", fields["history.1.reason"])
         self.assertTrue(fields["history.1.at"])
         self.assertTrue(fields["history.1.actor"])
+
+    def test_retitle_echoes_the_reason_it_stored(self):
+        fleet = self.loaded()
+        path = fleet.paths["readyWorker"]
+        code, out, err = fleet.run(["milestone", "--instant", str(path), "--id", "M1",
+                                    "--retitle", "new scope", "--reason", "  scope   clarified  ",
+                                    "--porcelain"])
+        self.assertEqual(EXIT_OK, code, err)
+        self.assertEqual("scope clarified", dict(line.split("\t", 1) for line in out.splitlines())["reason"])
+        self.assertEqual("scope clarified", Roadmap(path).milestone("M1").title_history[0]["reason"])
