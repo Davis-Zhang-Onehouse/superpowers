@@ -542,9 +542,18 @@ def claude_unsubmitted(pane_text: str) -> Optional[str]:
 
 
 def annotate_placeholders(frame: str) -> str:
-    """Make dim suggestion rows explicit in an exported pane capture."""
+    """Make a dim suggestion in the current input box explicit in an exported pane capture."""
     annotated = []
-    for row in frame.splitlines(keepends=True):
+    rows = frame.splitlines(keepends=True)
+    rendered_count = len(_rendered(frame))
+    current = None
+    for index in range(max(0, rendered_count - PROMPT_TAIL_LINES), rendered_count):
+        if _caret_content(rows[index]) is not None or _codex_caret_row(rows[index]):
+            current = index
+    for index, row in enumerate(rows):
+        if index != current:
+            annotated.append(row)
+            continue
         cells = _trim(_cells(row))
         while cells and cells[0][0] in _GUTTER:
             cells = _trim(cells[1:])
