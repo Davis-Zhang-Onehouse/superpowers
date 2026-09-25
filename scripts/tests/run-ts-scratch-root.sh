@@ -29,6 +29,11 @@ check() { if [ "$2" = "$3" ]; then note "ok   $1"; else note "FAIL $1 — wanted
 
 FN="$(awk '/^ts_scratch_parent\(\) *\{/,/^}/' "$REPO/fleet/it/run-TS.sh")"
 [ -n "$FN" ] || { echo "FAIL: ts_scratch_parent not found in fleet/it/run-TS.sh"; exit 1; }
+#: RV-35: the `.git`-entry predicate it calls lives in lib.sh (shared with `it_outside_checkout_dir`).
+PRED="$(awk '/^it_no_dot_git_above\(\) *\{/,/^}/' "$REPO/fleet/it/lib.sh")"
+[ -n "$PRED" ] || { echo "FAIL: it_no_dot_git_above not found in fleet/it/lib.sh"; exit 1; }
+FN="$PRED
+$FN"
 pick() { FN="$FN" bash -c 'eval "$FN"; ts_scratch_parent "$@"' _ "$@"; }
 
 # A scratch layout: a/ has a fake (empty) .git dir above the first candidate; f/ has a .git FILE on the

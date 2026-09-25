@@ -368,20 +368,52 @@ it_fresh_store() {
   mkdir -p "${FLEET_INSTANTS:-$FLEET_HOME/instants}"
 }
 
+#: RV-35. `it_no_dot_git_above <dir>`: succeeds when neither <dir> nor any ancestor has a `.git` entry; otherwise prints
+#: the nearest one and fails. Claude Code 2.1.282's root finder bounds its trust walk at ANY `.git` entry (a dir or a
+#: file, even an empty `/tmp/.git` that git itself rejects), so `git rev-parse` alone cannot say where it stops.
+#: Shared with run-TS.sh's `ts_scratch_parent`.
+it_no_dot_git_above() {
+  local a="$1"
+  while :; do
+    [ -e "$a/.git" ] && { printf '%s\n' "$a/.git"; return 1; }
+    [ "$a" = / ] && return 0
+    a="$(dirname "$a")"
+  done
+}
+
 it_outside_checkout_dir() {   # it_outside_checkout_dir <name> -> prints a FRESH <parent>/fleet-it-<name> outside every checkout
   #: V23-P (S4-I3). Claude Code bounds its trust walk-up at the enclosing git toplevel, so a real claude whose cwd is
   #: under this checkout asks about the checkout even when the slot above it is trusted. The default parent is the
   #: first directory above the checkout that is in no git work tree: the leased slot dir, which the operator trusts.
-  local parent="${IT_REAL_AGENT_PARENT:-}" top
+  local parent="${IT_REAL_AGENT_PARENT:-}" top hit
   if [ -z "$parent" ]; then
-    parent="$IT_ROOT"
+    parent="$(cd "$IT_ROOT" && pwd -P)"
     #: RV-30. Scrubbed: an exported GIT_DIR / GIT_WORK_TREE makes git describe THAT repository from any dir (the
     #: walk ran to `/`, or never ended), and a ceiling would hide the repository around the checkout.
-    while top="$(env -u GIT_DIR -u GIT_WORK_TREE -u GIT_COMMON_DIR -u GIT_CEILING_DIRECTORIES \
-                   git -C "$parent" rev-parse --show-toplevel 2>/dev/null)" && [ -n "$top" ]; do
-      [ "$top" = / ] && break
-      parent="$(cd "$top/.." && pwd)"
+    #: RV-35. Up until the parent is in no work tree AND has no `.git` entry on itself or any ancestor: past a
+    #: toplevel, and past any `.git`-bearing ancestor (which Claude bounds at even when git rejects it).
+    while :; do
+      if top="$(env -u GIT_DIR -u GIT_WORK_TREE -u GIT_COMMON_DIR -u GIT_CEILING_DIRECTORIES \
+                  git -C "$parent" rev-parse --show-toplevel 2>/dev/null)" && [ -n "$top" ]; then
+        [ "$top" = / ] && break
+        parent="$(cd "$top/.." && pwd -P)"
+      elif hit="$(it_no_dot_git_above "$parent")"; then
+        break
+      else
+        [ "$hit" = /.git ] && break
+        parent="$(dirname "$(dirname "$hit")")"
+      fi
     done
+  fi
+  if hit="$(it_no_dot_git_above "$parent")"; then
+    if env -u GIT_DIR -u GIT_WORK_TREE -u GIT_COMMON_DIR -u GIT_CEILING_DIRECTORIES \
+         git -C "$parent" rev-parse --show-toplevel >/dev/null 2>&1; then
+      echo "it_outside_checkout_dir: $parent is inside a git work tree; set IT_REAL_AGENT_PARENT to a trusted dir outside every checkout" >&2
+      return 3
+    fi
+  else
+    echo "it_outside_checkout_dir: $parent sits under the .git entry $hit, where Claude bounds its trust walk; set IT_REAL_AGENT_PARENT to a trusted dir under no .git entry" >&2
+    return 3
   fi
   #: RV-31. A STABLE name, not one per pid: Claude Code writes a `projects[<cwd>]` entry into the operator's config
   #: for every cwd it starts in, so a per-run path added one entry per §P run, and a SIGKILLed run left its dir

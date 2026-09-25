@@ -53,13 +53,8 @@ ts_scratch_parent() {
   for cand in "$@"; do
     [ -n "$cand" ] || continue
     d="$(cd "$cand" 2>/dev/null && pwd -P)" || { rejected="$rejected $cand (missing);"; continue; }
-    local a="$d" hit=""
-    while :; do
-      [ -e "$a/.git" ] && { hit="$a/.git"; break; }
-      [ "$a" = / ] && break
-      a="$(dirname "$a")"
-    done
-    if [ -n "$hit" ]; then rejected="$rejected $cand ($hit);"; continue; fi
+    local hit
+    hit="$(it_no_dot_git_above "$d")" || { rejected="$rejected $cand ($hit);"; continue; }   # RV-35: shared with lib.sh
     if env -u GIT_DIR -u GIT_WORK_TREE -u GIT_COMMON_DIR -u GIT_CEILING_DIRECTORIES \
          git -C "$d" rev-parse --show-toplevel >/dev/null 2>&1; then
       rejected="$rejected $cand (inside a git work tree);"; continue

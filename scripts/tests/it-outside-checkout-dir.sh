@@ -11,7 +11,16 @@
 set -uo pipefail
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]:-$0}")" && pwd)"
 REPO="$(cd "$HERE/../.." && pwd)"
-TMP="$(mktemp -d)"
+#: RV-35. The scratch layout must itself sit under no `.git` entry: Claude 2.1.282 bounds its trust walk at ANY
+#: `.git` entry (a stray empty `/tmp/.git` included), so the helper walks above one, and a layout under it would
+#: be walked out of. /var/tmp first, then the system temp dir.
+TMP=""
+for base in /var/tmp "${TMPDIR:-/tmp}"; do
+  d="$(cd "$base" 2>/dev/null && pwd -P)" || continue
+  under=no; while :; do [ -e "$d/.git" ] && under=yes; [ "$d" = / ] && break; d="$(dirname "$d")"; done
+  [ "$under" = no ] && TMP="$(mktemp -d -p "$base")" && break
+done
+[ -n "$TMP" ] || { echo "it-outside-checkout-dir: FAILED — no scratch base outside every .git entry (/var/tmp, ${TMPDIR:-/tmp})"; exit 1; }
 trap 'rm -rf "$TMP"' EXIT
 TMP="$(cd "$TMP" && pwd -P)"
 
@@ -21,7 +30,8 @@ check() { if [ "$2" = "$3" ]; then note "ok   $1"; else note "FAIL $1 — wanted
 git_q() { env -u GIT_DIR -u GIT_WORK_TREE -u GIT_COMMON_DIR -u GIT_CEILING_DIRECTORIES git "$@"; }
 in_work_tree() { [ "$(git_q -C "$1" rev-parse --is-inside-work-tree 2>/dev/null)" = true ] && echo yes || echo no; }
 
-FN="$(awk '/^it_outside_checkout_dir\(\) *\{/,/^}/' "$REPO/fleet/it/lib.sh")"
+#: RV-35: with the shared `.git`-entry predicate it calls.
+FN="$(awk '/^(it_no_dot_git_above|it_outside_checkout_dir)\(\) *\{/,/^}/' "$REPO/fleet/it/lib.sh")"
 [ -n "$FN" ] || { echo "FAIL: it_outside_checkout_dir not found in fleet/it/lib.sh"; exit 1; }
 
 # The nested layout: <T>/outer is a git repo; <T>/outer/checkout is a clone-like repo inside it, holding
@@ -39,6 +49,9 @@ helper() {   # helper <name> [VAR=value ...] -> prints the dir; rc passes throug
   env HOME="$TMP/home" IT_ROOT="$ITROOT" FN="$FN" "$@" timeout 20 bash -c 'eval "$FN"; it_outside_checkout_dir "$0"' "$name"
 }
 mkdir -p "$TMP/home"
+helper8() {   # helper8 <name>: `helper` with IT_ROOT taken from $ITROOT (case 8 lays out its own checkouts)
+  env HOME="$TMP/home" IT_ROOT="$ITROOT" FN="$FN" timeout 20 bash -c 'eval "$FN"; it_outside_checkout_dir "$0"' "$1"
+}
 
 # --- 1. the checkout's parent is a repository ----------------------------------------------------------
 dir="$(helper X)"; rc=$?
@@ -93,6 +106,31 @@ check "once that pid is gone the dir is taken over" "0|$p1|no" "$rc|$p3|$([ -e "
 grep -q 'case "$P_DIR" in \*/fleet-it-P) rm -rf "$P_DIR"' "$REPO/fleet/it/run-P.sh" \
   && ! grep -q 'fleet-it-P-\*' "$REPO/fleet/it/run-P.sh" \
   && note "ok   run-P.sh removes only */fleet-it-P" || { note "FAIL run-P.sh's rm guard is not the stable */fleet-it-P pattern"; fails=1; }
+
+# --- 8. RV-35: a `.git` ENTRY above the checkout's parent (an empty dir, or a file, that git itself rejects) --------
+# Claude 2.1.282's root finder bounds its trust walk at any `.git` entry, so a parent under one is bounded there, not
+# at the trusted slot. The helper must walk above it: its answer has no `.git` entry on itself or any ancestor.
+dot_git_above() {   # dot_git_above <dir> -> the nearest `.git` entry on <dir> or an ancestor, or "none"
+  local a="$1"
+  while :; do [ -e "$a/.git" ] && { echo "$a/.git"; return; }; [ "$a" = / ] && break; a="$(dirname "$a")"; done
+  echo none
+}
+for kind in dir file; do
+  B="$TMP/rv35-$kind"; ITROOT8="$B/mid/outer/checkout/fleet/it"
+  mkdir -p "$ITROOT8"; git_q init -q "$B/mid/outer"; git_q init -q "$B/mid/outer/checkout"
+  if [ "$kind" = dir ]; then mkdir "$B/.git"; else : > "$B/.git"; fi
+  d8="$(ITROOT="$ITROOT8" helper8 X)"; rc=$?
+  check "a .git $kind above the checkout's parent: the helper succeeds" 0 "$rc"
+  check "a .git $kind above: no .git entry on the answer or any ancestor" none "$(dot_git_above "$d8")"
+  check "a .git $kind above: the parent is the first dir above it" "$TMP" "$(dirname "$d8")"
+  check "a .git $kind above: the answer is in no git work tree" no "$(in_work_tree "$d8")"
+  rm -rf "$d8"
+done
+# The operator's override is held to the same rule: under a `.git` entry it fails loudly, one line on stderr.
+mkdir -p "$TMP/rv35-dir/under"
+out8="$(helper X IT_REAL_AGENT_PARENT="$TMP/rv35-dir/under" 2>"$TMP/err8")"; rc=$?
+check "IT_REAL_AGENT_PARENT under a .git entry: non-zero, no dir printed" "nonzero|" "$([ "$rc" != 0 ] && echo nonzero || echo zero)|$out8"
+check "IT_REAL_AGENT_PARENT under a .git entry: one line on stderr" 1 "$(grep -c . "$TMP/err8")"
 
 if [ "$fails" = 0 ]; then echo "it-outside-checkout-dir: all ok"; else echo "it-outside-checkout-dir: FAILED"; fi
 exit "$fails"
