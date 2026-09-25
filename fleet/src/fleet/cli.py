@@ -3858,7 +3858,7 @@ def _slot_watchers(ctx: Ctx, child: Path) -> list:
         found = orphans.naming_holders(ctx.pool.cwd_holders(record.slot), layer.proc_facts,
                                        orphans.instant_spellings(record.child_instant, child),
                                        exclude=_caller_lineage(layer))
-    except (FleetError, OSError):
+    except Exception:                      # RV-36: any failure to read is no warning, never a stopped rename
         return []
     if not found:
         return []
