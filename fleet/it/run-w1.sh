@@ -24,8 +24,19 @@ it_own_cases 'W1-[0-9]+|W1-7-restored|W1-11-restored|ISOLATION-W1-(enter|leave)'
 it_section W1
 S="itfleet-W1-probe-$$"
 
-# Whatever happens after this point, this section's sessions die on the private server only.
-trap 'it_cleanup_tmux' EXIT
+# W1-4/W1-5 need a `dt-` session on a server that is NOT the section's. They used to borrow the live server's,
+# read-only, and SKIP when it had none — and from a worker pane "the live server" was the fleet server `$TMUX`
+# named (FB-118). A decoy of this runner's own stands in: a real server, reachable only by the path below.
+# Named the way the FB-73 guardian names a server (`TMUX_TMPDIR=<dir> tmux -L <name>`), which A8a recognises as private.
+DECOY_DIR="$OUT/decoy"
+DECOY="$DECOY_DIR/tmux-$(id -u)/w1-decoy"
+DT="dt-w1-decoy-$$"
+mkdir -p "$DECOY_DIR"      # tmux falls back to /tmp — the operator's directory — when TMUX_TMPDIR does not exist
+TMUX_TMPDIR="$DECOY_DIR" tmux -L w1-decoy kill-server 2>/dev/null
+TMUX_TMPDIR="$DECOY_DIR" tmux -L w1-decoy new-session -d -s "$DT" "sleep 300" 2>/dev/null
+
+# Whatever happens after this point, this section's sessions die on the private server only, and the decoy dies.
+trap 'it_cleanup_tmux; TMUX_TMPDIR="$DECOY_DIR" tmux -L w1-decoy kill-server 2>/dev/null; rm -rf "$DECOY_DIR"' EXIT
 
 # ---------------------------------------------------------------------------------------------------
 # The pre-image of the live server, captured through the same helper the isolation check uses.
@@ -74,37 +85,33 @@ fi
 
 # W1-4 · and it is not visible from the private server either — the other direction, which is the one an
 #        isolation assertion actually reads. A section that can SEE `dt-…` can also match it by prefix.
-if [ "$(grep -c '^dt-' "$OUT/live-sessions-after.txt")" -eq 0 ]; then
-  it_skip W1-4 "" "no dt- session exists on the live server right now, so this cell cannot distinguish blindness from an empty world"
+if ! TMUX_TMPDIR="$DECOY_DIR" tmux -L w1-decoy has-session -t "=$DT" 2>/dev/null; then
+  it_fail W1-4 "" "the decoy $DT did not come up on $DECOY, so this cell cannot distinguish blindness from an empty world"
 elif grep -q '^dt-' "$OUT/W1-2-private-sessions.txt"; then
   it_fail W1-4 "fleet/it/W1/out/W1-2-private-sessions.txt" \
     "a dt- session is VISIBLE from the private server: $(grep '^dt-' "$OUT/W1-2-private-sessions.txt" | tr '\n' ' ')"
 else
   it_pass W1-4 "fleet/it/W1/out/W1-2-private-sessions.txt" \
-    "the $(grep -c '^dt-' "$OUT/live-sessions-after.txt") dt- session(s) live on the default server are NOT visible from socket $IT_TMUX_SOCKET"
+    "$DT, live on another server (the decoy $DECOY), is NOT visible from socket $IT_TMUX_SOCKET"
 fi
 
-# W1-5 · the product is blind to them too, which is the claim a section relies on. `alive()` must say no
-#        about a session that demonstrably exists — on the other server.
-DT="$(grep '^dt-' "$OUT/live-sessions-after.txt" | head -1)"
-if [ -z "$DT" ]; then
-  it_skip W1-5 "" "no dt- session to be blind to"
-else
-  python3 - "$DT" > "$OUT/W1-5-blindness.txt" 2>&1 <<'PY'
+# W1-5 · the product is blind to it too, which is the claim a section relies on. `alive()` must say no about a
+#        session that demonstrably exists — on the other server. The "default" probe (no socket) reaches the decoy
+#        the way a bare tmux in a pane reaches that pane's server: through `$TMUX`, set for this one call.
+TMUX="$DECOY,0,0" python3 - "$DT" > "$OUT/W1-5-blindness.txt" 2>&1 <<'PY'
 from fleet.session import SessionLayer, default_probes
 import sys
 name = sys.argv[1]
 print("private:", SessionLayer(default_probes()).alive(name))
 print("default:", SessionLayer(default_probes(tmux_socket=None)).alive(name))
 PY
-  # READ-ONLY on both servers: `alive` is has-session, and the name is never passed to anything else.
-  if grep -q '^private: False$' "$OUT/W1-5-blindness.txt" && grep -q '^default: True$' "$OUT/W1-5-blindness.txt"; then
-    it_pass W1-5 "fleet/it/W1/out/W1-5-blindness.txt" \
-      "the product reports $DT alive on the default server and NOT alive on $IT_TMUX_SOCKET — the same call, the same name, two servers, so the blindness is the socket's and not a lookup failure"
-  else
-    it_fail W1-5 "fleet/it/W1/out/W1-5-blindness.txt" \
-      "want private:False + default:True, got: $(tr '\n' ' ' < "$OUT/W1-5-blindness.txt")"
-  fi
+# READ-ONLY on both servers: `alive` is has-session, and the name is never passed to anything else.
+if grep -q '^private: False$' "$OUT/W1-5-blindness.txt" && grep -q '^default: True$' "$OUT/W1-5-blindness.txt"; then
+  it_pass W1-5 "fleet/it/W1/out/W1-5-blindness.txt" \
+    "the product reports $DT alive through the socketless probe (the decoy) and NOT alive on $IT_TMUX_SOCKET — the same call, the same name, two servers, so the blindness is the socket's and not a lookup failure"
+else
+  it_fail W1-5 "fleet/it/W1/out/W1-5-blindness.txt" \
+    "want private:False + default:True, got: $(tr '\n' ' ' < "$OUT/W1-5-blindness.txt")"
 fi
 
 # W1-6 · cleanup kills this section's session by exact name on the private server, and nothing else.
