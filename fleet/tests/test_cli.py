@@ -5480,6 +5480,14 @@ class TestCompleteRefusesBrokenPointers(CliCase):
         self.assertIn("pid:999", err)
         self.assertTrue(env.instant.exists())
 
+    def test_complete_requires_a_report_for_a_claimed_milestone(self):
+        env = self.ready_to_complete()
+        Roadmap(env.fleet.paths["readyWorker"]).withdraw("M9", reason="report withdrawn for control")
+        code, out, err = env.fleet.run(["complete", "--instant", str(env.instant)])
+        self.assertEqual(EXIT_REFUSED, code, out + err)
+        self.assertIn("(none)", err)
+        self.assertTrue(env.instant.exists())
+
     def test_complete_refuses_a_claimed_milestone_with_a_running_last_report(self):
         env = self.ready_to_complete()
         (env.instant / "evidence" / "INDEX.md").parent.mkdir(exist_ok=True)
