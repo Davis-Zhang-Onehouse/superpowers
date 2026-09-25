@@ -8110,3 +8110,18 @@ class TestMilestoneRetitle(CliCase):
         self.assertIn("propose", own)
         self.assertIn("apply --reopen", own)
         self.assertIn("clears who: the coordinator", own)
+
+    def test_retire_and_disown_refuse_other_row_fields(self):
+        fleet = self.loaded()
+        path = fleet.paths["readyWorker"]
+        roadmap = Roadmap(path)
+        before = roadmap.path.read_bytes()
+        base = ["milestone", "--instant", str(path), "--id", "M1"]
+        for operation in ("--retire", "--disown"):
+            for fields in (("--title", "different"), ("--status", "running"),
+                           ("--owner", "another"), ("--dep", "M1"),
+                           ("--evidence", "missing.log")):
+                code, _, err = fleet.run(base + [operation, "--reason", "why", *fields])
+                self.assertEqual(EXIT_BAD_INPUT, code, (operation, fields, err))
+                self.assertIn("cannot be combined", err.split("BadInput:", 1)[1])
+                self.assertEqual(before, roadmap.path.read_bytes(), (operation, fields))
