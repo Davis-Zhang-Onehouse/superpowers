@@ -24,7 +24,7 @@ REPO = pathlib.Path(__file__).resolve().parents[2]
 IT = REPO / "fleet" / "it"
 FLEET_DESTINATIONS = ("FLEET_HOME", "FLEET_INSTANTS", "FLEET_ROOT", "FLEET_INSTANT", "FLEET_RELEASES",
                       "FLEET_TMUX_SOCKET",              # the product's `-L`: inherited, it names the operator's server
-                      "IT_ASKED_NAMES", "IT_RESULTS",   # an IT section runs this suite (M13)
+                      "IT_ASKED_NAMES", "IT_RESULTS", "IT_TMUX_REAL",  # an IT section runs this suite (M13)
                       "TMUX", "TMUX_PANE")              # a bare `tmux` inside a pane follows $TMUX, not TMUX_TMPDIR
 #: One private tmux directory per test process for ordinary cases. ServerGuardian's missing-directory
 #: regression cases start no server outside it: they observe, through the suite's tripwire (FB-118), that the
@@ -975,9 +975,11 @@ class NestedSelftestTmuxBoundary(unittest.TestCase):
             os.environ["IT_TMUX_AUDIT_BIN"] = "/outer/it/bin"
             os.environ["IT_TMUX_AUDIT_LEDGER"] = "/outer/calls.jsonl"
             os.environ["IT_TMUX_AUDIT_CASE_SECTION"] = "OUTER"
+            os.environ["IT_TMUX_REAL"] = "/usr/bin/tmux"
             env = clean_env()
             self.assertEqual(env["PATH"], "/usr/bin")
-            self.assertFalse(any(k.startswith("IT_TMUX_AUDIT_") for k in env), env)
+            self.assertFalse(any(k.startswith("IT_TMUX_AUDIT_") for k in env))
+            self.assertFalse("IT_TMUX_REAL" in env)
         finally:
             os.environ.clear()
             os.environ.update(before)
