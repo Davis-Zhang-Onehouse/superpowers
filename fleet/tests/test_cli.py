@@ -8061,3 +8061,13 @@ class TestMilestoneRetitle(CliCase):
                                   "--retitle", "revised scope", "--reason", "old row"])
         self.assertEqual(EXIT_OK, code, err)
         self.assertEqual("land the cli", roadmap.milestone("M1").title_history[0]["old_title"])
+
+    def test_retitle_refuses_a_normalized_duplicate_title(self):
+        fleet = self.loaded()
+        path = fleet.paths["readyWorker"]
+        before = Roadmap(path).path.read_bytes()
+        code, _, err = fleet.run(["milestone", "--instant", str(path), "--id", "M1",
+                                  "--retitle", "  land   the cli  ", "--reason", "spacing only"])
+        self.assertEqual(EXIT_BAD_INPUT, code)
+        self.assertIn("already has that title", err)
+        self.assertEqual(before, Roadmap(path).path.read_bytes())
