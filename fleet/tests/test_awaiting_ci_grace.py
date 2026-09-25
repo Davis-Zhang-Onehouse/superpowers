@@ -16,11 +16,18 @@ from tests.test_cli import DIALOG_PANE, Fleet, IDLE_PANE, NOW, WATCHED_PANE
 from tests.test_guards import Fleet as GuardFleet
 from fleet.guards import CAP_EXCLUDED_STATES, WipCap
 from tests.test_reconcile import SyntheticFleet
-from fleet.reconcile import AWAITING_CI, HOLD_DEFAULT_S, HOLD_MAX_S, HOLDING, needs_a_human, reconcile
-try:                                   # absent at the base: the RED run reads the grace as zero seconds
+from fleet.reconcile import AWAITING_CI, needs_a_human, reconcile
+#: RV-12. Every name this bucket adds is imported under a guard with the value it has here, so the module runs
+#: on the base (1a2842f2) and each case fails there on BEHAVIOUR (a state, a note, an exit code), never on an
+#: ImportError that would fail every case for one reason and prove nothing about any of them.
+try:
     from fleet.reconcile import WATCHER_GRACE_S
 except ImportError:
     WATCHER_GRACE_S = 300
+try:
+    from fleet.reconcile import HOLD_DEFAULT_S, HOLD_MAX_S, HOLDING
+except ImportError:
+    HOLD_DEFAULT_S, HOLD_MAX_S, HOLDING = 60 * 60, 4 * 60 * 60, "HOLDING"
 from fleet.store import Declarations
 from fleet.session import LiveSession
 
