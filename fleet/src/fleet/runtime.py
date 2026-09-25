@@ -105,7 +105,9 @@ def observe(runtime: RuntimeName, frame: str) -> PaneObservation:
             return PaneObservation("busy" if caret is not None else "unknown", draft, watcher)
         if draft:
             return PaneObservation("queued", draft, watcher)
-        prompt = any(_caret_content(row) is not None for row in rows[-PROMPT_TAIL_LINES:])
+        #: RV-19: idle needs the LOCATED caret, exactly as busy does — a caret echoed in the transcript above a
+        #: box whose caret row cannot be read is not evidence of an empty box.
+        prompt = caret is not None
         chrome = any(any(marker in row.lower() for marker in _STATUS_LINE_MARKERS)
                      for row in visible[-PROMPT_TAIL_LINES:])
         return PaneObservation("idle" if prompt and chrome else "unknown", watcher=watcher)
