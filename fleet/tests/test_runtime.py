@@ -150,6 +150,15 @@ class RuntimeTests(unittest.TestCase):
                     actual = observe('claude', box_variant(rows, busy=busy))
                     self.assertEqual(('busy' if busy else 'queued', draft), (actual.state, actual.draft))
 
+    def test_capture_label_agrees_with_the_guard_on_chrome_followed_by_text(self):
+        """RV-22. The [placeholder] label is decided on the whole box, like the guard."""
+        from fleet.runtime import annotate_placeholders
+        frame = box_variant(['\u276f\u00a0Press up to edit queued messages', '  more text'])
+        self.assertTrue(observe('claude', frame).draft)
+        self.assertNotIn('[placeholder]', annotate_placeholders(frame))
+        chrome_only = box_variant(['\u276f\u00a0Press up to edit queued messages'])
+        self.assertIn('[placeholder] ', annotate_placeholders(chrome_only))
+
     def test_dim_suggestions_are_marked_in_capture_and_never_drafts(self):
         from fleet.runtime import annotate_placeholders
         frames = (('claude', '❯\u00a0\x1b[2mfix RV-29 too\x1b[0m\n? for shortcuts\n'),

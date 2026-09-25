@@ -569,8 +569,12 @@ def annotate_placeholders(frame: str) -> str:
     """Mark the current box when it holds only a dim suggestion or measured empty-box chrome."""
     annotated = []
     rows = frame.splitlines(keepends=True)
-    rendered_count = len(_rendered(frame))
-    current = _claude_caret_index(_rendered(frame))
+    rendered = _rendered(frame)
+    rendered_count = len(rendered)
+    current = claude_box = _claude_caret_index(rendered)
+    #: RV-22. The claude box is labelled on the SAME decision the guard makes — the whole joined draft — so a
+    #: caret row of chrome with real text below it is not labelled while pane-guard says 10.
+    claude_empty = _claude_draft(rendered, frame) is None
     for index in range(max(0, rendered_count - PROMPT_TAIL_LINES), rendered_count):
         if _codex_caret_row(rows[index]):
             current = index
@@ -583,8 +587,11 @@ def annotate_placeholders(frame: str) -> str:
             cells = _trim(cells[1:])
         if cells and cells[0][0] in ('❯', '›'):
             body = _trim(cells[1:])
-            if body and ((any(dim and not char.isspace() for char, dim in body) and not _undim(body))
-                         or _is_placeholder(_caret_content(row) or '')):
+            if cells[0][0] == '❯' and index == claude_box:
+                empty = claude_empty
+            else:
+                empty = any(dim and not char.isspace() for char, dim in body) and not _undim(body)
+            if body and empty:
                 row = '[placeholder] ' + row
         annotated.append(row)
     return ''.join(annotated)
