@@ -515,6 +515,50 @@ class HarvestReapsAttributed(CliCase):
             self.assertEqual(facts.sent, [], f"{argv[0]} signalled a process in a slot leased to someone else")
         self.assertEqual(fleet.pool.lease("ws1").todo_id, "successor-0001")
 
+    def launch_bound_case(self, offset):
+        """A detached, closed, named orphan carrying the worker's FLEET_INSTANT, started `offset` s after launched_at."""
+        from datetime import datetime, timezone
+        from tests.test_cli import NOW
+        launched = datetime.strptime(NOW, "%Y-%m-%dT%H:%M:%SZ").replace(tzinfo=timezone.utc).timestamp()
+        fleet = self.fleet()
+        facts = FactsFixture(fleet)
+        path = self.harvestable(fleet)
+        procs = self.pipeline_for(path)
+        facts.hold("ws1", Proc(500, 1, "s500", procs[0].argv, sid=500, children=(501, 502),
+                               started_at=launched + offset, fleet_instant=procs[0].fleet_instant), *procs[1:])
+        code, out, err = fleet.run(["harvest", "--id", fleet.ids["doneWorker"]])
+        return code, out + err, facts
+
+    def test_an_orphan_that_started_before_the_launch_is_named_by_the_verb(self):
+        """RV-29. The D-9 bound as the verb wires it (`_launch_bound(record.launched_at)`), not only as the rule reads it."""
+        code, text, facts = self.launch_bound_case(-5)
+        self.assertEqual((code, facts.sent), (EXIT_REFUSED, []), text)
+        self.assertIn("did not start after this worker was launched", text)
+
+    def test_an_orphan_inside_the_launch_margin_is_named_by_the_verb(self):
+        """RV-29. `LAUNCH_MARGIN_S`: one second after `launched_at` is still inside the 2 s margin."""
+        code, text, facts = self.launch_bound_case(1)
+        self.assertEqual((code, facts.sent), (EXIT_REFUSED, []), text)
+
+    def test_control_an_orphan_past_the_launch_margin_is_reaped_by_the_verb(self):
+        code, text, facts = self.launch_bound_case(3)
+        self.assertEqual(code, EXIT_OK, text)
+        self.assertEqual(sorted(pid for pid, _ in facts.sent), [500, 501, 502])
+
+    def test_the_callers_own_process_is_never_signalled_by_the_verb(self):
+        """RV-29. The caller-lineage exclusion as `_attribution` wires it: a holder that IS this process, shaped exactly
+        like a reapable watcher, is refused and never signalled."""
+        fleet = self.fleet()
+        facts = FactsFixture(fleet)
+        path = self.harvestable(fleet)
+        me = os.getpid()
+        inflight = str(path).replace("-complete-", "-inflight-")
+        facts.hold("ws1", Proc(me, 1, "me", ("tail", "-F", f"{inflight}/evidence/INDEX.md"), sid=me, children=(),
+                               started_at=LATER, fleet_instant=inflight))
+        for argv in (["close", "--id", fleet.ids["doneWorker"]], ["harvest", "--id", fleet.ids["doneWorker"]]):
+            fleet.run(argv)
+            self.assertNotIn(me, [pid for pid, _ in facts.sent], f"{argv[0]} signalled its own process")
+
     def test_abort_is_unchanged(self):
         """D-4: abort keeps today's refusal for an orphan it could attribute."""
         fleet = self.fleet()
