@@ -1262,11 +1262,6 @@ def kill_verdicts(text):
     return verdicts
 
 
-def open_brackets(text):
-    """CL-3. More `(`/`[` than `)`/`]`: an argv list or call that continues on the next line."""
-    return text.count("(") + text.count("[") - text.count(")") - text.count("]")
-
-
 def strip_comment(text):
     """A `#` that starts a word (and is not tmux's `#{format}`) begins a comment, in shell and in python alike."""
     return re.sub(r"(^|\s)#(?!\{).*$", "", text)
@@ -1329,32 +1324,13 @@ for path in sys.argv[1:]:
     report["files"] += 1
     name = os.path.basename(path)
     pending = None
-    def judge(joined, start, tag):
-        for found in EMBED_KILL.finditer(joined):          # CL2-2: every call-position kill, each judged alone
+    def judge(text, start, tag):
+        """FB-119 embedded kills on ONE line. A call whose argv continues on the next line is not joined (the CL-3 join was
+        reverted by coordinator decision D-82); ISSUES I-11 routes that gap, and the in-string gaps, to the coordinator."""
+        for found in EMBED_KILL.finditer(text):            # CL2-2: every call-position kill, each judged alone
             report["kill_all"].append(f"{name}:{start} [{tag}] {found.group(0).strip()[:130]}")
             if not kill_verdicts(found.group(0))[-1]:
                 report["kill_unsafe"].append(f"{name}:{start} [{tag}] {found.group(0).strip()[:130]}")
-
-    def embedded(text, lineno, tag):
-        """Join `text` onto an open call from the previous lines, and judge it once its brackets close (or after 8
-        lines, so an unbalanced line cannot swallow the file)."""
-        held, held_at, held_n, _ = embedded.state
-        joined = (held + " " + text) if held else text
-        start = held_at if held else lineno
-        if open_brackets(joined) > 0 and held_n < 8:
-            embedded.state = [joined, start, held_n + 1, tag]
-            return
-        embedded.state = ["", 0, 0, ""]
-        judge(joined, start, tag)
-
-    def flush():
-        """CL2-2's join must never DROP what it holds (CL2-1): at a heredoc's end or start, before a shell-level kill
-        line, and at end of file, held text is judged as it stands, open brackets and all."""
-        held, held_at, _, tag = embedded.state
-        embedded.state = ["", 0, 0, ""]
-        if held:
-            judge(held, held_at, tag)
-    embedded.state = ["", 0, 0, ""]
 
     for lineno, raw in enumerate(open(path, encoding="utf-8", errors="replace"), start=1):
         raw = raw.rstrip("\n")
@@ -1362,10 +1338,9 @@ for path in sys.argv[1:]:
             report["heredoc_data_lines"] += 1
             if raw.strip() == pending:
                 pending = None
-                flush()
                 continue
             #: FB-119. A heredoc body is data to the shell, but python it feeds can still kill a server.
-            embedded(strip_comment(raw), lineno, "heredoc")
+            judge(strip_comment(raw), lineno, "heredoc")
             continue
         code, masked, plain = lex(raw)
         where = f"{name}:{lineno}"
@@ -1373,7 +1348,6 @@ for path in sys.argv[1:]:
             if pattern.search(code):
                 report["forbidden"].append(f"{where} [{label}] {code.strip()[:120]}")
         if KILL.search(code):
-            flush()
             # One site per kill word on the line (CL2-2); each is safe iff the tmux that issues it names a private server
             # (`kill_verdicts`) or is `it_tmux`.
             #: A line KILL matched but no kill word could be read from is a site too, judged unsafe (fail closed).
@@ -1383,7 +1357,7 @@ for path in sys.argv[1:]:
                     report["kill_unsafe"].append(f"{where} {masked.strip()[:130]}")
         else:
             #: FB-119: inside a string on this line (a `python3 -c`/`bash -c` body, a multi-line quoted script).
-            embedded(plain, lineno, "embedded")
+            judge(plain, lineno, "embedded")
         if RM_CMD.search(code):
             m = RM_TGT.search(masked)
             target = m.group("target") if m else "(none)"
@@ -1405,9 +1379,7 @@ for path in sys.argv[1:]:
         # skipped-line count is printed and was what made this visible.
         m_here = HEREDOC.search(plain)
         if m_here:
-            flush()
             pending = m_here.group(1)
-    flush()                                                  # end of file (CL2-1)
 
 print(f"=== heredoc data lines skipped: {report['heredoc_data_lines']}")
 for key in ("forbidden", "kill_all", "kill_unsafe", "rm_all", "rm_unrooted",
