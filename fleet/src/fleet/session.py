@@ -46,7 +46,7 @@ from fleet.errors import BadInput, FleetError
 
 from fleet.runtime import (
     PROMPT_TAIL_LINES, BUSY_TAIL_LINES, plain, _cells, _undim, _caret_content,
-    _rendered, _tail, _trim, _is_placeholder, claude_unsubmitted, claude_busy,
+    _rendered, claude_unsubmitted, claude_busy,
     claude_watchers, observe, validate_runtime, PaneObservation, recognizes_process,
 )
 
