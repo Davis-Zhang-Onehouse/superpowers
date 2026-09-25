@@ -18,6 +18,7 @@ never sets `CLAUDE_CODE_SANDBOXED`, and never accepts a screen: whether to trust
 decision, and a tool that quietly granted it would be the bug this milestone exists to surface.
 """
 import json
+import os
 import re
 import subprocess
 from dataclasses import dataclass
@@ -41,26 +42,61 @@ class TrustPrediction:
     detail: str  #: one line, for a human
 
 
-Runner = Callable[[list], "tuple[int, str]"]
+#: `run(argv)` answers `(rc, stdout)`, or None when git could not be run at all (missing, timed out).
+Runner = Callable[[list], "Optional[tuple[int, str]]"]
+
+#: V23-P (review M1). Variables that make git describe a repository other than the one around `-C <cwd>`. A
+#: caller that exported GIT_DIR (a hook, a script run under `git rebase -x`) must not change the answer.
+_GIT_SCRUB = ("GIT_DIR", "GIT_WORK_TREE", "GIT_COMMON_DIR", "GIT_INDEX_FILE", "GIT_CEILING_DIRECTORIES",
+              "GIT_DISCOVERY_ACROSS_FILESYSTEM")
 
 
-def _run(argv: list) -> "tuple[int, str]":
+#: V23-P (review I1). Raised rather than returned so `layout(cwd) -> (top, canonical)` keeps its shape for injected
+#: layouts, and `predict_claude` maps it to UNKNOWN. Collapsing it to (None, None), "outside git", let the parent
+#: walk run past the real toplevel to `/` and predict TRUSTED from an ancestor where Claude, bounded at the toplevel
+#: (cases C/E2/G/I), shows the screen: a guess, where D-4 asks for UNKNOWN.
+class GitLayoutUnknown(Exception):
+    """git could not say where the work tree is, although `cwd` may be inside one."""
+
+
+def _run(argv: list) -> "Optional[tuple[int, str]]":
+    env = {k: v for k, v in os.environ.items() if k not in _GIT_SCRUB}
     try:
-        done = subprocess.run(argv, stdout=subprocess.PIPE, stderr=subprocess.DEVNULL, text=True, timeout=5)
+        done = subprocess.run(argv, stdout=subprocess.PIPE, stderr=subprocess.DEVNULL, text=True, timeout=5,
+                              env=env)
     except (OSError, subprocess.SubprocessError):
-        return 1, ""
+        return None
     return done.returncode, done.stdout
+
+
+def _under_dot_git(cwd: Path) -> Optional[Path]:
+    """The nearest `.git` entry (a repo's dir, or a linked worktree's file) at `cwd` or above it, else None."""
+    for d in (cwd, *cwd.parents):
+        if os.path.lexists(d / ".git"):
+            return d / ".git"
+    return None
 
 
 def git_layout(cwd: Path, run: Optional[Runner] = None) -> "tuple[Optional[Path], Optional[Path]]":
     """(toplevel, canonical_root) or (None, None) outside git. canonical_root = parent of
     `git rev-parse --path-format=absolute --git-common-dir` when that ends in `.git` (the MAIN worktree for a linked
     worktree), else the toplevel. `run(argv) -> (rc, stdout)` is injectable; the default is subprocess.run, 5s
-    timeout."""
-    rc, out = (run or _run)(["git", "-C", str(cwd), "rev-parse", "--path-format=absolute",
-                             "--show-toplevel", "--git-common-dir"])
+    timeout, with the repository-selecting GIT_* variables scrubbed.
+
+    Raises `GitLayoutUnknown` when git could not run, or answered rc != 0 while a `.git` entry sits at or above
+    `cwd` (dubious ownership, a ceiling, a broken repo): "not a repository" is only believed where none is visible.
+    """
+    cwd = Path(cwd)
+    answer = (run or _run)(["git", "-C", str(cwd), "rev-parse", "--path-format=absolute",
+                            "--show-toplevel", "--git-common-dir"])
+    if answer is None:
+        raise GitLayoutUnknown(f"git could not be run in {cwd}")
+    rc, out = answer
     lines = [line for line in out.splitlines() if line.strip()]
     if rc != 0 or len(lines) != 2:
+        dotgit = _under_dot_git(cwd)
+        if dotgit is not None:
+            raise GitLayoutUnknown(f"git rev-parse failed (rc {rc}) in {cwd} although {dotgit} exists")
         return None, None
     top, common = Path(lines[0]), Path(lines[1])
     return top, (common.parent if common.name == ".git" else top)
@@ -78,6 +114,13 @@ def _spellings(p: Path) -> list:
     return out
 
 
+def _resolved(p: Path) -> Path:
+    try:
+        return p.resolve()
+    except OSError:
+        return p
+
+
 def predict_claude(config_dir, cwd, *, environ: Optional[Mapping] = None, layout=git_layout) -> TrustPrediction:
     """Will Claude Code (2.1.282 rule) start in `cwd` without the folder-trust screen?
 
@@ -92,7 +135,8 @@ def predict_claude(config_dir, cwd, *, environ: Optional[Mapping] = None, layout
     if environ.get("CLAUDE_CODE_SANDBOXED"):
         return TrustPrediction(TRUSTED, "", "CLAUDE_CODE_SANDBOXED is set, so Claude skips the folder-trust check")
     path = Path(config_dir) / ".claude.json"
-    cwd = Path(cwd).absolute()
+    #: V23-P (review M2). normpath, not just absolute(): `g/../plain/sub` must not list `g` among its parents.
+    cwd = Path(os.path.normpath(Path(cwd).absolute()))
     if not path.exists():
         return TrustPrediction(UNTRUSTED, str(cwd), f"{path} does not exist, so no trust record exists")
     try:
@@ -108,11 +152,17 @@ def predict_claude(config_dir, cwd, *, environ: Optional[Mapping] = None, layout
     def granted(d: Path) -> Optional[str]:
         for key in _spellings(d):
             record = projects.get(key, {})
+            #: V23-P (review M3). Strictly `is True`. 2.1.282 is mixed: `_Ee` compares `===true` while `wb`/`pI`
+            #: test truthiness, so a non-boolean record errs toward UNTRUSTED, which the post-launch observation of
+            #: the screen corrects. Not modelled either: `pI`'s session-level bypass `jle()`.
             if isinstance(record, dict) and record.get("hasTrustDialogAccepted") is True:
                 return key
         return None
 
-    top, canonical = layout(cwd)
+    try:
+        top, canonical = layout(cwd)
+    except GitLayoutUnknown as exc:
+        return TrustPrediction(UNKNOWN, "", f"cannot bound the trust walk: {exc}")
     if canonical is not None:
         key = granted(canonical)
         if key is not None:
@@ -123,7 +173,7 @@ def predict_claude(config_dir, cwd, *, environ: Optional[Mapping] = None, layout
         if key is not None:
             return TrustPrediction(TRUSTED, key, f"{key} is trusted and covers {cwd}")
         #: V23-P. Measured cases C/E2/G/I: trust never crosses UP out of a git toplevel.
-        if top is not None and (d == top or d.resolve() == top):
+        if top is not None and (d == top or _resolved(d) == top):
             break
         if d.parent == d:
             break
