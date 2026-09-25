@@ -584,7 +584,9 @@ class Fleet:
                            layer_for=self.layer_for,
                            #: `I-27`. `abort`'s bounded wait reads `ctx.sleep` rather than `time.sleep`
                            #: directly, so this suite never actually sleeps for it.
-                           sleep=self.sleep)
+                           sleep=self.sleep,
+                           #: V23-O. The cadence walk from cwd stays inside this fixture's private tree.
+                           cwd_ceiling=self.tmp)
 
         return build
 
@@ -1634,6 +1636,21 @@ class TestCadence(CliCase):
         with mock.patch.object(cli.Path, "cwd", return_value=outside):
             code, out, err = self.run_with_derived_instants(
                 fleet, ["pane-guard", "--porcelain", "--pane", "dt-solo"])
+        self.assertIn(f"{cli.CADENCE_PREFIX} {fleet.instants / OURS}", err)
+        self.assertNotIn(cli.CADENCE_PREFIX, out)
+
+    def test_tmp_under_an_instant_named_folder_keeps_the_walk_inside_the_fixture(self):
+        # V23-O (FB-123 member 3). The cwd walk that finds the caller's instant climbed out of the
+        # fixture's tmp: with TMPDIR under a folder whose name parses as an instant, that folder became
+        # "the caller's effort" and every alarm for ours was dropped. The walk stops at `ctx.cwd_ceiling`.
+        outer = pathlib.Path(tempfile.mkdtemp(prefix="fleet-cli-outer-"))
+        self.addCleanup(shutil.rmtree, outer, True)
+        named = outer / "00000000-09250300-inflight-append-tmpProbe"
+        named.mkdir()
+        with mock.patch.object(tempfile, "tempdir", str(named)):
+            fleet = self.loaded()
+        self.assertTrue(fleet.tmp.is_relative_to(named), fleet.tmp)
+        code, out, err = fleet.run(["pane-guard", "--porcelain", "--pane", "dt-solo"])
         self.assertIn(f"{cli.CADENCE_PREFIX} {fleet.instants / OURS}", err)
         self.assertNotIn(cli.CADENCE_PREFIX, out)
 
