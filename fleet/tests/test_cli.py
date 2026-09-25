@@ -5532,6 +5532,50 @@ class TestCompleteRefusesBrokenPointers(CliCase):
         self.assertEqual(EXIT_REFUSED, code, err)
         self.assertIn("running", err)
 
+    def test_live_watcher_blocks_close_and_harvest_on_a_complete_folder(self):
+        for verb in ("close", "harvest"):
+            with self.subTest(verb=verb):
+                env = self.ready_to_complete()
+                record = next(r for r in env.fleet.store.all() if pathlib.Path(r.child_instant) == env.instant)
+                code, _, err = env.fleet.run(["complete", "--instant", str(env.instant)])
+                self.assertEqual(EXIT_OK, code, err)
+                child = pathlib.Path(record.child_instant)
+                child = child.with_name(child.name.replace("-inflight-", "-complete-"))
+                declaration = Declarations(child)
+                declaration.set_phase("awaiting-ci")
+                declaration.set_watchers(ATTESTED_PREFIX + "gate pid:999", pid={"pid": 999, "start": "1"})
+                with mock.patch("fleet.reconcile.pid_start", return_value=("pid-running", "1")):
+                    code, out, err = env.fleet.run([verb, "--id", record.todo_id])
+                self.assertEqual(EXIT_REFUSED, code, out + err)
+                self.assertIn("watcher", out + err)
+                self.assertIn("fleet declare --phase done", out + err)
+                self.assertEqual([], env.fleet.killed)
+                with mock.patch("fleet.reconcile.pid_start", return_value=("pid-running", "1")):
+                    forced, _, forced_err = env.fleet.run([verb, "--id", record.todo_id, "--force"])
+                self.assertEqual(EXIT_REFUSED, forced, forced_err)
+                self.assertEqual([], env.fleet.killed)
+                self.assertIsNone(env.fleet.store.read(record.todo_id).harvested_at)
+                declaration.set_phase("done")
+                code, out, err = env.fleet.run([verb, "--id", record.todo_id])
+                self.assertNotEqual(EXIT_REFUSED, code, out + err)
+                self.assertIn(record.tmux, env.fleet.killed)
+
+    def test_dead_watcher_allows_close_and_harvest_on_a_complete_folder(self):
+        for verb in ("close", "harvest"):
+            with self.subTest(verb=verb):
+                env = self.ready_to_complete()
+                record = next(r for r in env.fleet.store.all() if pathlib.Path(r.child_instant) == env.instant)
+                code, _, err = env.fleet.run(["complete", "--instant", str(env.instant)])
+                self.assertEqual(EXIT_OK, code, err)
+                child = env.instant.with_name(env.instant.name.replace("-inflight-", "-complete-"))
+                declaration = Declarations(child)
+                declaration.set_phase("awaiting-ci")
+                declaration.set_watchers(ATTESTED_PREFIX + "gate pid:999", pid={"pid": 999, "start": "1"})
+                with mock.patch("fleet.reconcile.pid_start", return_value=("pid-gone", "")):
+                    code, out, err = env.fleet.run([verb, "--id", record.todo_id])
+                self.assertNotEqual(EXIT_REFUSED, code, out + err)
+                self.assertIn(record.tmux, env.fleet.killed)
+
     def test_a_busy_complete_pane_is_still_refused_by_close_and_harvest(self):
         env = self.ready_to_complete()
         record = next(r for r in env.fleet.store.all() if pathlib.Path(r.child_instant) == env.instant)
