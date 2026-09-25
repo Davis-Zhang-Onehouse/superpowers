@@ -3608,6 +3608,19 @@ def _do_review(ctx: Ctx, parsed: Parsed) -> int:
     return exit_code_for(gate)
 
 
+def _last_worker_report(roadmap: Roadmap, child: Path, milestone: str):
+    """The worker's last pending word, else its latest applied or superseded word."""
+    def mine(rows):
+        return [p for p in rows if p.milestone == milestone and _proposed_by(child, p)]
+
+    fields = {f.name for f in dataclass_fields(Proposal)}
+    superseded = [Proposal(**{k: v for k, v in row.items() if k in fields})
+                  for row in roadmap.closed() if row.get("closed_as") == SUPERSEDED]
+    arrived = sorted([(p.at, 1, p) for p in mine(roadmap.applied())]
+                     + [(p.at, 0, p) for p in mine(superseded)], key=lambda row: row[:2])
+    return (mine(roadmap.proposals()) or [p for _, _, p in arrived] or [None])[-1]
+
+
 def _last_claim_report(ctx: Ctx, child: Path):
     """The claimed milestone and this worker's last report, including reports already applied."""
     origin = origin_mod.read(child)
@@ -3622,15 +3635,7 @@ def _last_claim_report(ctx: Ctx, child: Path):
     if not milestone.owner or resolve(Path(milestone.owner)) != child:
         return None
 
-    def mine(rows):
-        return [p for p in rows if p.milestone == origin.milestone and _proposed_by(child, p)]
-
-    fields = {f.name for f in dataclass_fields(Proposal)}
-    superseded = [Proposal(**{k: v for k, v in row.items() if k in fields})
-                  for row in roadmap.closed() if row.get("closed_as") == SUPERSEDED]
-    arrived = sorted([(p.at, 1, p) for p in mine(roadmap.applied())]
-                     + [(p.at, 0, p) for p in mine(superseded)], key=lambda row: row[:2])
-    last = (mine(roadmap.proposals()) or [p for _, _, p in arrived] or [None])[-1]
+    last = _last_worker_report(roadmap, child, origin.milestone)
     return origin.milestone, last.status if last is not None else None
 
 
@@ -4269,14 +4274,7 @@ def _unreported_to_coordinator(ctx: Ctx, child: Path):
     #: superseded rows. Across two lists position cannot order them, so `at` does; on a same-second tie the
     #: applied row wins, because an apply only ever supersedes rows that arrived before it. Withdrawn and
     #: retired rows are not a report of the outcome and never count.
-    def by_this_worker(rows):
-        return [p for p in rows if p.milestone == recorded.milestone and _proposed_by(child, p)]
-    fields = {f.name for f in dataclass_fields(Proposal)}
-    superseded = [Proposal(**{k: v for k, v in c.items() if k in fields})
-                  for c in roadmap.closed() if c.get("closed_as") == SUPERSEDED]
-    arrived = sorted([(p.at, 1, p) for p in by_this_worker(roadmap.applied())]
-                     + [(p.at, 0, p) for p in by_this_worker(superseded)], key=lambda t: t[:2])
-    last = (by_this_worker(roadmap.proposals()) or [p for _, _, p in arrived] or [None])[-1]
+    last = _last_worker_report(roadmap, child, recorded.milestone)
     if last is not None and last.status != IN_PROGRESS:
         return None
     reported = ("NO report from this instant pending or applied" if last is None else

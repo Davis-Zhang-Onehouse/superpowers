@@ -5528,6 +5528,18 @@ class TestCompleteRefusesBrokenPointers(CliCase):
         code, _, err = env.fleet.run(["complete", "--instant", str(env.instant)])
         self.assertEqual(EXIT_OK, code, err)
 
+    def test_terminal_milestone_with_new_pending_running_still_blocks_complete(self):
+        env = self.ready_to_complete()
+        roadmap = Roadmap(env.fleet.paths["readyWorker"])
+        roadmap.apply([p for p in roadmap.proposals() if p.milestone == "M9"][-1])
+        code, _, err = env.fleet.run(["propose", "--instant", str(env.instant),
+                                     "--milestone", "M9", "--status", "running",
+                                     "--evidence", "evidence/INDEX.md"])
+        self.assertEqual(EXIT_OK, code, err)
+        code, out, err = env.fleet.run(["complete", "--instant", str(env.instant)])
+        self.assertEqual(EXIT_REFUSED, code, out + err)
+        self.assertIn("running", err)
+
     def test_complete_accepts_applied_done_with_nothing_pending(self):
         env = self.ready_to_complete()
         roadmap = Roadmap(env.fleet.paths["readyWorker"])
