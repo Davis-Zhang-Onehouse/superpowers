@@ -817,3 +817,25 @@ class CompleteWarns(CliCase):
         self.assertIn("awaiting-ci", err)
         self.assertNotIn("stop your watchers", out + err)
         self.assertTrue(path.exists())
+
+
+class SignalSeamAudit(unittest.TestCase):
+    """RV-30. Widening the exact `.kill` audit to admit `default_probes` gave up its guarantee for the new edge; this
+    takes it back. `signal_pid` may be referenced only where it is defined and in the ONE attributed reap path — a new
+    caller in abort, reap, dispatch or anywhere else fails here and has to be argued for in writing."""
+
+    def test_signal_pid_is_reached_only_through_the_attributed_reap(self):
+        import ast
+        from tests.test_cli import package_functions
+        users = set()
+        for site, node in package_functions().items():
+            for child in ast.walk(node):
+                if (isinstance(child, ast.Attribute) and child.attr == "signal_pid") or \
+                        (isinstance(child, ast.Name) and child.id == "signal_pid"):
+                    users.add(site)
+                    break
+        self.assertEqual(users, {("cli", "_reap_attributed"),   # hands the layer's seam to orphans.reap
+                                 ("orphans", "reap"),            # the one caller: TERM/KILL after start re-checks
+                                 ("session", "signal_pid"),      # SessionLayer.signal_pid, the wrapper
+                                 ("session", "default_probes")},  # the definition, os.kill on one pid
+                         f"signal_pid is referenced from {sorted(users)}")
