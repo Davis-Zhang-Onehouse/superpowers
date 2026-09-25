@@ -110,6 +110,18 @@ class SweepCase(unittest.TestCase):
         self.sweep()
         self.assertEqual(left(self.root), [])
 
+    def test_a_codex_that_starts_between_the_census_and_the_rmdir_keeps_the_rest(self):
+        """RV-33. The census is repeated immediately before each rmdir: a sandbox that starts after the first look has
+        just made these directories its live mount targets."""
+        from unittest import mock
+        from fleet import runtime_launch
+        plant(self.root)
+        answers = iter([[], [], [4300], [4300]])
+        with mock.patch.object(runtime_launch, "codex_sandboxes_under", side_effect=lambda *a, **k: next(answers)):
+            rows = self.sweep()
+        self.assertEqual(len(left(self.root)), 2, rows)
+        self.assertEqual(sum(v.startswith("kept") and "4300" in v for _, v in rows), 2, rows)
+
     def test_an_unreadable_process_table_keeps_everything(self):
         plant(self.root)
         from fleet.runtime_launch import sweep_mount_residue
