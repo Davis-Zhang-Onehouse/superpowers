@@ -208,7 +208,20 @@ CLAUDE_AGENTS_STUB = str(_FIXTURES / "bin" / "claude-agents-stub")
 _TMUX_SHIM_DIR = str(_FIXTURES / "tmux-tripwire")
 RUNTIME_BINS = ("FLEET_CLAUDE_BIN", "FLEET_CODEX_BIN")
 TMUX_HANDLES = ("TMUX", "TMUX_PANE", "FLEET_TMUX_SOCKET")
-_OWNER = "FLEET_SUITE_TRIPWIRE" not in os.environ
+
+
+def _inherits_a_live_boundary(environ) -> bool:
+    """RV-27. Reuse the parent suite's boundary only when it is really there: its log exists, its foreign set is
+    non-empty, and TMUX_TMPDIR is an existing directory beside that log. A marker alone (leaked into a shell or a
+    tmux server's global environment) would otherwise leave nothing foreign, no log to charge, and a TMUX_TMPDIR
+    that tmux replaces with /tmp."""
+    log, tmpdir = environ.get("FLEET_SUITE_TRIPWIRE", ""), environ.get("TMUX_TMPDIR", "")
+    return bool(log and os.path.isfile(log) and environ.get("FLEET_SUITE_FOREIGN_TMUX") and tmpdir
+                and os.path.isdir(tmpdir)
+                and os.path.dirname(os.path.realpath(tmpdir)) == os.path.dirname(os.path.realpath(log)))
+
+
+_OWNER = not _inherits_a_live_boundary(os.environ)
 
 
 def _ambient_path():
