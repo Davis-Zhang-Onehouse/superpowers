@@ -579,6 +579,20 @@ class A8KillSiteAudit(unittest.TestCase):
                 counts, out = self.audit(**{"run-X.sh": text})
                 self.assertEqual((counts["kill_all"], counts["kill_unsafe"]), (1, unsafe), out)
 
+    def test_held_text_is_judged_at_every_reset_and_at_end_of_file(self):
+        """CL2-1. A line whose brackets stay open is held for the next; it was DROPPED unjudged when a heredoc ended, when
+        a shell-level kill line came next, and at end of file — a regression from 08e0ba7b."""
+        held = 'subprocess.run([\"tmux\", \"kill-server\"]); print(\"(\")'
+        for label, (text, want) in {
+            "heredoc end": (f"python3 - <<'PY'\nimport subprocess\n{held.replace(chr(92), '')}\nPY\n", (1, 1)),
+            "end of file": (f"python3 -c 'import subprocess; {held}'", (1, 1)),
+            "before a shell-level kill line": (f"python3 -c 'import subprocess; {held}'\ntmux -L priv kill-server\n",
+                                               (2, 1)),
+        }.items():
+            with self.subTest(label):
+                counts, out = self.audit(**{"run-X.sh": text})
+                self.assertEqual((counts["kill_all"], counts["kill_unsafe"]), want, out)
+
     def test_every_kill_on_a_line_is_judged_against_its_own_tmux(self):
         """CL2-2. Only the first kill word on a line (or joined call) was judged, so a private kill followed by a bare one
         passed. Each kill is a site of its own, judged against the nearest tmux before it."""
