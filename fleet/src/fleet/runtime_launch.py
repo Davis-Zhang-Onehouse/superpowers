@@ -144,7 +144,9 @@ def sweep_mount_residue(roots, proc_root=Path('/proc'), dry_run=False) -> list:
     """FB-117. Remove the codex mount-point residue from each writable root fleet gave a codex worker (the store and
     the instants tree). `[(path, verdict)]`, one row per candidate and one for a root with none, so an empty answer
     is never silence. A root is left alone while any codex naming it is alive, since an rmdir there would detach a
-    live sandbox's protection mount; `os.rmdir` itself refuses a directory that gained an entry."""
+    live sandbox's protection mount — which `os.path.ismount` cannot see, being in the sandbox's namespace — so the
+    census is repeated immediately before each rmdir. That narrows the race; it cannot close it. `os.rmdir` itself
+    refuses a directory that gained an entry."""
     rows = []
     for root in dict.fromkeys(str(Path(r).resolve()) for r in roots):
         found = [Path(root) / name for name in MOUNT_RESIDUE if os.path.lexists(Path(root) / name)]
@@ -164,6 +166,12 @@ def sweep_mount_residue(roots, proc_root=Path('/proc'), dry_run=False) -> list:
                 rows.append((str(path), f'kept: {reason}'))
             elif dry_run:
                 rows.append((str(path), 'would remove: empty codex mount residue'))
+            elif (late := codex_sandboxes_under(root, proc_root)) != []:
+                #: RV-33. Asked again immediately before the rmdir: a sandbox that started after the first look has just
+                #: made this directory its mount target, and the host's `os.path.ismount` cannot see a mount in the
+                #: sandbox's namespace, while an rmdir there would lazily detach it.
+                rows.append((str(path), 'kept: a codex naming this root started during the sweep'
+                             + (f' (pid {", ".join(map(str, late))})' if late else ' (process table unreadable)')))
             else:
                 try:
                     os.rmdir(path)
