@@ -71,6 +71,10 @@ class SweepCase(unittest.TestCase):
         (self.root / ".codex").mkdir()
         (self.root / ".codex" / "config.toml").write_text("")
         (self.root / ".agents").symlink_to(self.tmp)            # an EMPTY-looking target is not the point: it is a link
+        #: The dry run first: rmdir would refuse a non-empty directory anyway, so the emptiness check is what keeps
+        #: the dry run from promising to remove a real repository.
+        planned = self.sweep(dry_run=True)
+        self.assertFalse(any(v.startswith("would remove") for _, v in planned), planned)
         rows = self.sweep()
         self.assertEqual(left(self.root), sorted(RESIDUE))
         self.assertTrue((self.root / ".git" / "HEAD").exists())
