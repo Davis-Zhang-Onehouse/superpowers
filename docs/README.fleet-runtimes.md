@@ -190,6 +190,8 @@ private `CODEX_HOME` inside the attempt directory: the credential is copied in a
 source configuration's top-level settings are copied so "no `-m`" still means that root's configured model, and the
 checkout is pre-trusted there. `RTC_CODEX_HOME` names the source (default `/home/ubuntu/davis_root/.codex`) and is only
 read. The harness never answers a folder-trust screen, because the answer persists into the CLI's configuration.
+`fleet dispatch` and `fleet revive` likewise only predict the screen (a read-only `trust` row) and observe it
+after launch (`trust_screen`); they never answer it, and the operator answers it once on the pane.
 For real model coverage, point `RT_LIVE_CONFIG` at a private, authenticated configuration where the
 native plugin is installed, then explicitly select the runtime:
 
