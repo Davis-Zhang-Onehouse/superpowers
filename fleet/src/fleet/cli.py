@@ -1545,7 +1545,7 @@ def _runtime_record_blocker(ctx: Ctx, record: Record) -> str:
     held = ctx.pool.lease(record.slot) if record.slot else None
     lease_is_its = held is not None and held.todo_id == record.todo_id
     try:
-        alive = bool(record.tmux) and ctx.sessions_for(record).alive(record.tmux)
+        alive = _owns_live_session(ctx, record)
     except (FleetError, OSError):
         alive = True                                         # unobservable is not dead
     if not record.closed_at and alive:
@@ -2646,8 +2646,11 @@ def _watcher_for_claim(ctx: Ctx, child: Path, attested=None) -> tuple:
         return "", ("no dispatch record names a session for this instant, so there is no pane to read; "
                     "an instant that was never dispatched into a session is outside this gate's subject")
     layer = ctx.sessions_for(record)
-    if not layer.alive(pane):
-        return "", (f"no live session {pane!r}; this gate reads a running pane and there is not one")
+    if not _owns_live_session(ctx, record, layer):
+        taken = _session_taken_by(ctx, record)
+        return "", (f"{pane!r} is live but belongs to {taken.todo_id}, a later dispatch of this title, so this "
+                    f"instant has no running pane of its own" if taken is not None else
+                    f"no live session {pane!r}; this gate reads a running pane and there is not one")
     captured = layer.capture(pane)
     text = captured or ""
     if captured is None and not layer.is_claude_process(pane):
@@ -3769,7 +3772,7 @@ def _do_complete(ctx: Ctx, parsed: Parsed) -> int:
     if declarations.phase() == PHASE_AWAITING_CI:
         record = _record_for(ctx, child)
         session = ctx.sessions if record is None else ctx.sessions_for(record)
-        pane = session.capture(record.tmux) if record is not None and session.alive(record.tmux) else ""
+        pane = session.capture(record.tmux) if _owns_live_session(ctx, record, session) else ""
         kind, watcher = _watcher_of(pane or "", session, child, capture_failed=pane is None,
                                     launched_at=record.launched_at if record is not None else None)
         live = kind in WATCHER_LIVE
@@ -4039,6 +4042,15 @@ def _session_taken_by(ctx: Ctx, record):
     here = getattr(ctx.sessions, "socket", "") or ""
     owner = session_owner(ctx.store.all(), here, ctx.pool).get((record.tmux_socket or here, record.tmux))
     return owner if owner is not None and owner.todo_id != record.todo_id else None
+
+
+def _owns_live_session(ctx: Ctx, record, layer=None) -> bool:
+    """V23-T (RV-35). Whether `record`'s session is alive AND its own: the per-record readers' one liveness question,
+    so none reads a re-dispatch's session as a dead record's."""
+    if record is None or not record.tmux:
+        return False
+    layer = layer if layer is not None else ctx.sessions_for(record)
+    return _session_taken_by(ctx, record) is None and bool(layer.alive(record.tmux))
 
 
 def _session_left_note(record, owner) -> str:
