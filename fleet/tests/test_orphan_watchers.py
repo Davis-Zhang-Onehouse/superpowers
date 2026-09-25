@@ -141,13 +141,14 @@ class AttributionRule(unittest.TestCase):
         self.assertNotIn(501, att.pids(REAP), "a unit with a child outside it was reaped")
 
     def test_an_orphan_that_is_not_a_session_leader_is_named(self):
-        facts = table(Proc(700, 1, "s", ("tail", "-F", f"{INST}/x"), sid=650, children=(), started_at=LATER))
+        facts = table(Proc(700, 1, "s", ("tail", "-F", f"{INST}/x"), sid=650, children=(), started_at=LATER,
+                           fleet_instant=INST))
         att = orphans.attribute([700], facts.get, self.spell(), not_before=LAUNCHED)
         self.assertEqual(att.pids(NAME), [700])
 
     def test_an_orphan_with_a_terminal_is_named(self):
         facts = table(Proc(700, 1, "s", ("tail", "-F", f"{INST}/x"), sid=700, tty=34817, children=(),
-                           started_at=LATER))
+                           started_at=LATER, fleet_instant=INST))
         att = orphans.attribute([700], facts.get, self.spell(), not_before=LAUNCHED)
         self.assertEqual(att.pids(NAME), [700])
 
