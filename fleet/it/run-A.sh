@@ -1224,7 +1224,13 @@ def socket_is_private(opts):
     normalised path, CL-2), a path rooted in a variable (`"$DIR/..."`, as A8b accepts for rm targets), or python's
     `os.path.join(<variable>, ...)`. No socket option at all is the default server."""
     for i, t in enumerate(opts):
-        flag, value = (t[:2], t[2:]) if t[:2] in ("-L", "-S") and len(t) > 2 else (t, opts[i + 1] if i + 1 < len(opts) else "")
+        if not t.startswith("-") or t.startswith("--"):
+            continue
+        #: A getopt cluster (`-uS path`, `-2Lname`): the first of c/f/L/S/T takes the rest of it, or the next token.
+        at = next((j for j, ch in enumerate(t[1:], start=1) if ch in "cfLST"), None)
+        if at is None:
+            continue
+        flag, value = "-" + t[at], (t[at + 1:] or (opts[i + 1] if i + 1 < len(opts) else ""))
         if value.startswith("-"):
             value = ""                               # `-L ""` / `-S ""` — the empty operand was split away
         if flag == "-L":
