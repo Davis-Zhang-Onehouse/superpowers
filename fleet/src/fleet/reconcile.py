@@ -222,7 +222,8 @@ def reconcile(store, pool, sessions, instants_dir: Path, idle_after_s: int = 180
                 continue                     # one record, one subject, even with two processes on it
             seen_records.add(rec.todo_id)
             subject = _worker_subject(rec, pool, sessions, instants_dir, idle_after_s,
-                                      live=True, sess=sess, live_sessions=live_sessions)
+                                      live=True, sess=sess, live_sessions=live_sessions,
+                                      local_nested_sessions=live_sessions)
             if subject.holds_slot:
                 accounted_slots.add(rec.slot)
             subjects.append(subject)
@@ -243,7 +244,8 @@ def reconcile(store, pool, sessions, instants_dir: Path, idle_after_s: int = 180
         layer = layer_of(rec.tmux_socket)
         subject = _worker_subject(rec, pool, layer, instants_dir, idle_after_s,
                                   live=layer.alive(rec.tmux), sess=None,
-                                  live_sessions=live_sessions if layer is sessions else ())
+                                  live_sessions=live_sessions,
+                                  local_nested_sessions=live_sessions if layer is sessions else ())
         if subject.holds_slot:
             accounted_slots.add(rec.slot)
         subjects.append(subject)
@@ -262,7 +264,7 @@ def reconcile(store, pool, sessions, instants_dir: Path, idle_after_s: int = 180
 
 
 def _worker_subject(rec, pool, sessions, instants_dir: Path, idle_after_s: int, live: bool, sess,
-                    live_sessions=()):
+                    live_sessions=(), local_nested_sessions=()):
     if sessions.runtime != rec.runtime:
         sessions = SessionLayer(sessions.probes, rec.runtime)
     instant = _instant_on_disk(rec, instants_dir)
@@ -340,7 +342,7 @@ def _worker_subject(rec, pool, sessions, instants_dir: Path, idle_after_s: int, 
         #: which server this command was talking to either way, so "no session answers" can be read as the
         #: local claim it is.
         "tmux_socket": rec.tmux_socket,
-        "nested": ",".join(str(item.pid) for item in live_sessions
+        "nested": ",".join(str(item.pid) for item in local_nested_sessions
                             if item.name == rec.tmux and getattr(item, "nested", False)
                             and (not rec.tmux_socket or rec.tmux_socket == sessions.socket)),
         "working": "true" if parked and state == PARKED and sessions.busy(pane) else "false",
