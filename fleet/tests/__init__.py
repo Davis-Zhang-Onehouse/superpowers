@@ -276,7 +276,9 @@ def tmux_server(argv, env):
         elif arg == "--" or not arg.startswith("-"):
             break
     if server is None:
-        base = pathlib.Path(env.get("TMUX_TMPDIR") or "/tmp") / f"tmux-{os.getuid()}"
+        #: RV-25. tmux uses TMUX_TMPDIR only when it names an existing directory, and /tmp otherwise.
+        tmpdir = env.get("TMUX_TMPDIR") or ""
+        base = pathlib.Path(tmpdir if tmpdir and os.path.isdir(tmpdir) else "/tmp") / f"tmux-{os.getuid()}"
         if name is not None:
             server = base / name
         elif env.get("TMUX"):
