@@ -26,6 +26,7 @@ the injected `Probes`, an injected git and an injected command runner, and every
 `cli` actually wrote to the streams it was handed (`OBS-62` — never a model of the output).
 """
 import ast
+import contextlib
 import dataclasses
 import io
 import json
@@ -285,6 +286,19 @@ class HeadsFakeGit(FakeGit):
                 return 128, ""
             return 0, sha + "\n"
         return super().__call__(args, cwd)
+
+
+@contextlib.contextmanager
+def working_directory(path):
+    """Run a block FROM `path` (a real chdir). V23-O RV-16: a case about cwd inside the fixture tree uses this
+    rather than mocking `cli.Path.cwd`, because `_resolve_instant` reads a relative operand through
+    `os.getcwd`, which the mock does not reach — one call would then see two different cwds."""
+    previous = os.getcwd()
+    os.chdir(path)
+    try:
+        yield
+    finally:
+        os.chdir(previous)
 
 
 class Fleet:
@@ -1619,12 +1633,13 @@ class TestCadence(CliCase):
                 self.assertNotIn(str(fleet.instants / OURS), err)
                 self.assertNotIn(cli.CADENCE_PREFIX, out)
 
-        with mock.patch.object(cli.Path, "cwd", return_value=foreign):
+        with working_directory(foreign):
             code, out, err = fleet.run(["pane-guard", "--porcelain", "--pane", "dt-solo"])
         self.assertIn(f"{cli.CADENCE_PREFIX} {foreign}", err)
         self.assertNotIn(cli.CADENCE_PREFIX, out)
 
-        with mock.patch.object(cli.Path, "cwd", return_value=foreign / "nested"):
+        (foreign / "nested").mkdir()
+        with working_directory(foreign / "nested"):
             code, out, err = fleet.run(["pane-guard", "--porcelain", "--pane", "dt-solo"])
         self.assertIn(f"{cli.CADENCE_PREFIX} {foreign}", err)
         self.assertNotIn(cli.CADENCE_PREFIX, out)
@@ -1633,7 +1648,7 @@ class TestCadence(CliCase):
         fleet = self.loaded()
         outside = fleet.tmp / "outside"
         outside.mkdir()
-        with mock.patch.object(cli.Path, "cwd", return_value=outside):
+        with working_directory(outside):
             code, out, err = self.run_with_derived_instants(
                 fleet, ["pane-guard", "--porcelain", "--pane", "dt-solo"])
         self.assertIn(f"{cli.CADENCE_PREFIX} {fleet.instants / OURS}", err)
@@ -1670,6 +1685,9 @@ class TestCadence(CliCase):
             source["registered_at"] = LONG_AGO
             source["last_run"] = LONG_AGO
         fleet.harvest.path.write_text(json.dumps(data))
+        # The one Path.cwd mock left here, and on purpose: `Fleet.run` chdirs back into its tmp from a cwd
+        # outside it, so a cwd OUTSIDE the fixture can only be modelled for the walk. No relative operand rides
+        # along, so the resolver's os.getcwd anchor is never consulted (RV-16).
         with mock.patch.object(cli.Path, "cwd", return_value=foreign):
             code, out, err = fleet.run(["pane-guard", "--porcelain", "--pane", "dt-solo"])
         self.assertIn(f"{cli.CADENCE_PREFIX} {foreign}", err)
