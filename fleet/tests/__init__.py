@@ -274,8 +274,10 @@ if not os.environ.get("PATH", "").startswith(_TRIPWIRE_PATH_DIR + os.pathsep):
     os.environ["PATH"] = _TRIPWIRE_PATH_DIR + os.pathsep + AMBIENT_PATH
 
 
-def tmux_server(argv, env):
-    """The socket a tmux argv reaches under `env`, resolved the way tmux resolves it."""
+def tmux_server(argv, env, cwd=None):
+    """The socket a tmux argv reaches under `env`, resolved the way tmux resolves it — relative paths from `cwd`,
+    the directory the call runs in (RV-30), not this process's."""
+    here = os.fsdecode(cwd) if cwd else os.getcwd()
     server = name = None
     args = list(argv[1:])
     while args:
@@ -292,7 +294,7 @@ def tmux_server(argv, env):
                 break
     if server is None:
         #: RV-25. tmux uses TMUX_TMPDIR only when it names an existing directory, and /tmp otherwise.
-        tmpdir = env.get("TMUX_TMPDIR") or ""
+        tmpdir = os.path.join(here, env["TMUX_TMPDIR"]) if env.get("TMUX_TMPDIR") else ""
         base = pathlib.Path(tmpdir if tmpdir and os.path.isdir(tmpdir) else "/tmp") / f"tmux-{os.getuid()}"
         if name is not None:
             server = base / name
@@ -300,7 +302,7 @@ def tmux_server(argv, env):
             server = env["TMUX"].split(",")[0]
         else:
             server = base / "default"
-    return os.path.realpath(server)
+    return os.path.realpath(os.path.join(here, server))
 
 
 def _is_foreign(server):
@@ -321,9 +323,9 @@ def _trip(kind, what, argv):
 
 def _exec_guard(event, args):
     if event == "subprocess.Popen":
-        executable, argv, _cwd, env = args
+        executable, argv, cwd, env = args
     elif event in ("os.exec", "os.posix_spawn"):          # RV-29: os.execv*/os.posix_spawn* raise these
-        executable, argv, env = args
+        (executable, argv, env), cwd = args, None
     else:
         return
     if isinstance(argv, (str, bytes)):
@@ -338,7 +340,7 @@ def _exec_guard(event, args):
     if resolved in REAL_RUNTIMES:
         _trip("runtime", f"{resolved} is the box's real runtime", argv)
     if os.path.basename(first) == "tmux" or (resolved and resolved == os.path.realpath(REAL_TMUX)):
-        server = tmux_server(argv or [first], env)
+        server = tmux_server(argv or [first], env, cwd)
         if _is_foreign(server):
             _trip("tmux", f"it would reach {server}, a server this suite did not create", argv)
 

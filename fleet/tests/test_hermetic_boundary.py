@@ -189,6 +189,16 @@ class TheTripwire(unittest.TestCase):
         self.assertFalse((self.tmp / "claude.reached").exists(), "the 'real' runtime ran")
         self.assertEqual(len(seen), 1, seen)
 
+    def test_a_relative_socket_path_is_judged_from_the_callees_cwd(self):
+        """RV-30. `subprocess.run(["tmux", "-S", "live", ...], cwd=<dir>)` reaches <dir>/live; judging the relative path
+        from the TEST's cwd would call a foreign server private."""
+        self.assertEqual(tests.tmux_server(["tmux", "-S", "live", "ls"], {}, cwd=str(self.decoy_dir)),
+                         os.path.realpath(self.decoy))
+        with tests.expect_tripwire() as seen:
+            with self.assertRaises(tests.HostReached):
+                subprocess.run([tests.REAL_TMUX, "-S", "live", "ls"], cwd=self.decoy_dir, capture_output=True)
+        self.assertEqual(len(seen), 1, seen)
+
     def test_a_child_that_runs_claude_or_codex_by_name_reaches_the_stub(self):
         """RV-29. FLEET_CLAUDE_BIN covers fleet's own resolution; a child that runs `claude`/`codex` by NAME — a
         script, `env`, `timeout`, `bash -c` — resolves PATH, and the tripwire's PATH directory answers first."""
