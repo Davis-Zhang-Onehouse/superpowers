@@ -580,8 +580,6 @@ def _live_state(phase, parked, pane, sessions, instant, idle_after_s, capture_fa
         if state in ACTIONABLE_STATES:
             # An actionable state is never masked by a standing note; the park is APPENDED.
             note = f"{note}; parked decision stands: {parked}"
-        elif busy:
-            state, note = PARKED, f"parked decision stands while work progresses: {parked}"
         else:
             state, note = PARKED, f"parked decision: {parked}"
     #: `and state == BLOCKED` is belt-and-braces, not load-bearing today: `on_pane` is only set beside a
