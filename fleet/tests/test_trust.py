@@ -343,6 +343,20 @@ class TrustScreenCase(unittest.TestCase):
         self.assertEqual(trust.trust_screen_path("codex", self.frame("codex-trust-0156.frame")),
                          "/home/ubuntu/.fb110-trust.N3eo/untrusted")
 
+    def test_RV28_codex_0156_wrapped_path_is_joined(self):
+        """RV-28. SYNTHETIC: no real codex frame with a wrapped path is committed. This takes the real 0.156 frame
+        (118 columns wide) and replaces its path row with a path longer than the frame, split at the frame width
+        into two rows of the same shape. Joined without a separator, as Claude's measured wrap is."""
+        long_path = ("/home/ubuntu/.fb110-trust.N3eo/" + "a-deliberately-long-slot-directory-name/" * 3
+                     + "untrusted")
+        width = 118
+        first, rest = long_path[:width - 2], long_path[width - 2:]
+        rows = self.frame("codex-trust-0156.frame").splitlines()
+        self.assertIn("/home/ubuntu/.fb110-trust.N3eo/untrusted", rows[2])
+        rows[2:3] = [f"  \x1b[2m{first}\x1b[0m\x1b[39m\x1b[49m", f"  \x1b[2m{rest}\x1b[0m\x1b[39m\x1b[49m"]
+        self.assertEqual(len(trust._ANSI.sub("", rows[2])), width)
+        self.assertEqual(trust.trust_screen_path("codex", "\n".join(rows)), long_path)
+
     def test_codex_older_trust_screen(self):
         self.assertEqual(trust.trust_screen_path("codex", self.frame("codex-trust.frame")),
                          "/tmp/fleet-runtime-probe-8x14rwii/coordinator-probe/slot2")
