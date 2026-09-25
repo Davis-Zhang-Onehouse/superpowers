@@ -629,7 +629,20 @@ def _hold_of(instant, now=None) -> tuple:
     if until_s is None:
         return False, (f"NO HOLD EXPIRY recorded ({until!r}), so nothing bounds it; it was held for: {reason}"
                        if until else f"NO HOLD EXPIRY recorded, so nothing bounds it; it was held for: {reason}")
-    if (now if now is not None else time.time()) >= until_s:
+    now = now if now is not None else time.time()
+    #: RV-20. The bound is enforced where the hold is READ, not only where `declare` writes it: `declare.json`
+    #: is a file in the worker's own folder, and a `hold_until` edited to 2099 would otherwise be a permanent
+    #: cap escape. A hold stands until `min(hold_until, at + HOLD_MAX_S)`; with no readable `at`, or an `at`
+    #: in the future, nothing bounds it and it backs nothing.
+    claimed_at = declarations.declared_at()
+    claimed = _stamp_s(claimed_at)
+    if claimed is None or claimed > now:
+        return False, (f"the hold's claim stamp {claimed_at!r} is missing or in the future, so nothing bounds "
+                       f"it; it was held for: {reason}")
+    if claimed + HOLD_MAX_S < until_s:
+        until_s = claimed + HOLD_MAX_S
+        until = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime(until_s))
+    if now >= until_s:
         return False, f"HOLD EXPIRED at {until}; it was held for: {reason}"
     return True, f"held until {until}: {reason}"
 
@@ -809,13 +822,15 @@ def _grace_of(declarations, launched_at, now=None) -> str:
     if declarations is None:
         return ""
     claimed = _stamp_s(declarations.declared_at())
-    if claimed is None:
+    now = now if now is not None else time.time()
+    #: RV-20. No stamp, or one in the future (a hand edit, a clock stepped back), bounds nothing: no grace.
+    if claimed is None or claimed > now:
         return ""
     launched = _stamp_s(launched_at)
     if launched is not None and claimed < launched:
         return ""
     ends = claimed + WATCHER_GRACE_S
-    if (now if now is not None else time.time()) >= ends:
+    if now >= ends:
         return ""
     return (f"inside the {WATCHER_GRACE_S // 60}-minute GRACE after the claim at {declarations.declared_at()} "
             f"(until {time.strftime('%Y-%m-%dT%H:%M:%SZ', time.gmtime(ends))})")

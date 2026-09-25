@@ -241,6 +241,31 @@ class TestTheHoldingPhase(unittest.TestCase):
         self.assertIn('HOLD EXPIRED', note)
         self.assertIn('disregarded', note)
 
+    def test_a_hand_written_far_future_hold_is_bounded_by_the_maximum(self):
+        """RV-20. The 4 h bound is enforced where the hold is READ, not only where `declare` writes it: a
+        `hold_until` edited to 2099 stands only until `at + HOLD_MAX_S`, like any declared hold."""
+        _declare(self.path, phase='holding', at='2026-07-30T11:00:00Z', hold_reason='edited by hand',
+                 hold_until='2099-01-01T00:00:00Z')
+        state, note = self.row('2026-07-30T14:59:59Z')
+        self.assertEqual(state, HOLDING, note)
+        state, note = self.row('2026-07-30T15:00:00Z')
+        self.assertNotIn(state, CAP_EXCLUDED_STATES, note)
+        self.assertIn('disregarded', note)
+
+    def test_a_hold_with_no_claim_stamp_is_disregarded(self):
+        """RV-20. Without `at` nothing bounds `hold_until`, so the hold backs nothing."""
+        _declare(self.path, phase='holding', hold_reason='r', hold_until='2026-07-30T12:30:00Z')
+        state, note = self.row()
+        self.assertNotIn(state, CAP_EXCLUDED_STATES, note)
+        self.assertIn('disregarded', note)
+
+    def test_a_hold_within_the_maximum_is_untouched_by_the_bound(self):
+        """Neighbour: exactly `at + HOLD_MAX_S` is a legal declared hold and stands until then."""
+        _declare(self.path, phase='holding', at='2026-07-30T11:00:00Z', hold_reason='r',
+                 hold_until='2026-07-30T15:00:00Z')
+        state, note = self.row('2026-07-30T14:59:59Z')
+        self.assertEqual(state, HOLDING, note)
+
     def test_a_hand_written_hold_with_no_expiry_is_disregarded(self):
         """No new REQUIRED field, and no escape by editing the file: `phase: holding` alone backs nothing."""
         _declare(self.path, phase='holding', at='2026-07-30T11:59:00Z')
@@ -355,6 +380,11 @@ class TestTheGraceAfterTheClaim(unittest.TestCase):
         s = self.subject(1, launched_at="2026-07-30T12:00:01Z", watchers="attested: a peer session")
         self.assertNotEqual(s.state, AWAITING_CI, s.note)
         s = self.subject(1, launched_at="2026-07-30T12:00:01Z")
+        self.assertNotEqual(s.state, AWAITING_CI, s.note)
+
+    def test_a_claim_stamped_in_the_future_gets_no_grace(self):
+        """RV-20. A future `at` (hand edit, or a clock stepped back) would stretch the grace by the skew."""
+        s = self.subject(-600, at="2026-07-30T12:00:00Z")
         self.assertNotEqual(s.state, AWAITING_CI, s.note)
 
     def test_a_fresh_watcher_renews_after_the_grace(self):
