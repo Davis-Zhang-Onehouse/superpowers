@@ -67,7 +67,7 @@ BUSY_PANE = "\n".join(["working", "  esc to interrupt"])
 #: A quiet claude pane: the input box holds its placeholder, which is not a swallowed submit. `close`
 #: refuses a busy pane, so the verb needs a pane it is ALLOWED to close or its generated cases assert a
 #: refusal and nothing else.
-IDLE_PANE = "\n".join(["done", "", '❯ try "fix the failing test"', "  ? for shortcuts"])
+IDLE_PANE = "\n".join(["done", "", '❯\u00a0\x1b[2mtry "fix the failing test"\x1b[0m', "  ? for shortcuts"])
 RUNBOOK = "# RUNBOOK\n\n```bash\necho verified\n```\n"
 
 #: The release area every release verb's argv row is driven against: one RELEASED version, one CANDIDATE

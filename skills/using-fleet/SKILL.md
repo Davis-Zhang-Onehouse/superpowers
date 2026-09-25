@@ -163,6 +163,9 @@ stays an interrupt, with no row.
 `fleet pane-guard` has its own codes because it is a contract for an external monitor: `0` safe, `10`
 queued-text, `11` mid-turn, `12` not-claude, `13` unknown-pane, `14` indeterminate, `15` awaiting-operator.
 Branch on the code before any send: `0` and `11` admit `fleet send` only when its own observation confirms an empty input; `10`, `14` and `15` refuse.
+An input box is empty only when it is blank, holds a DIM (SGR 2) suggestion, or shows measured chrome such as
+`Press up to edit queued messages`; any other plain text there is somebody's draft and reads `10`, even when it
+looks like a suggestion (D-85). A busy Claude pane whose input box cannot be located reads `14`, not `11`.
 
 `14` means the pane is alive and nothing about it could be READ — a failed observation, not a negative one.
 Treat it as wait, never as permission: before a send `14` waits, but before a CLOSE the

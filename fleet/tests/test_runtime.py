@@ -8,6 +8,23 @@ from fleet.errors import BadInput
 from fleet.runtime import observe, paste_placeholder, recognizes_process, validate_runtime
 
 
+#: D-85: the four drafts review 2 of fix/v23-f found reading as an EMPTY box on an escape-free real capture.
+LOOKALIKE_FIRST_LINES = ('Ask him first:', 'ask the reviewer to rerun RV-3', 'Try "pytest -k foo" next',
+                         'new task? no, keep going')
+
+
+def escape_free_multiline(first: str, busy: bool = False) -> str:
+    """`claude-multiline.frame` (a real 2.1.268 capture with no escape codes) with only the draft's first line
+    changed; `busy` adds the live-turn hint to its status row, the way 2.1.282 draws it."""
+    root = Path(__file__).resolve().parents[1] / 'it/fixtures/runtime'
+    frame = (root / 'claude-multiline.frame').read_text()
+    assert '\x1b' not in frame
+    frame = frame.replace('Reply with these two words only:', first, 1)
+    if busy:
+        frame = frame.replace('auto mode on (shift+tab to cycle)', 'auto mode on (shift+tab to cycle) \u00b7 esc to interrupt', 1)
+    return frame
+
+
 class RuntimeTests(unittest.TestCase):
     def test_captured_frames(self):
         root = Path(__file__).resolve().parents[1] / 'it/fixtures/runtime'
@@ -69,6 +86,28 @@ class RuntimeTests(unittest.TestCase):
                     self.assertEqual((state if state == 'busy' else 'queued', draft),
                                      (actual.state, actual.draft))
 
+    def test_escape_free_real_capture_lookalike_drafts_are_drafts(self):
+        """D-85. Real `capture-pane -e` frames often carry NO escape at all (claude-multiline.frame, 2.1.268;
+        both 2.1.282 frames). A suggestion is SGR-dim; plain text in the box is somebody's draft, whatever it
+        looks like, so a stripped capture never makes a lookalike vanish."""
+        for state in ('idle', 'busy'):
+            for first in LOOKALIKE_FIRST_LINES:
+                with self.subTest(state=state, first=first):
+                    actual = observe('claude', escape_free_multiline(first, busy=state == 'busy'))
+                    self.assertEqual((state if state == 'busy' else 'queued', first + '\nMULTILINE READY'),
+                                     (actual.state, actual.draft))
+
+    def test_only_exact_measured_chrome_reads_as_an_empty_box_without_sgr(self):
+        root = Path(__file__).resolve().parents[1] / 'it/fixtures/runtime'
+        lines = (root / 'claude-multiline.frame').read_text().splitlines()
+        caret = max(i for i, row in enumerate(lines) if row.startswith('\u276f'))
+        for body, draft in (('Press up to edit queued messages', None),
+                            ('press up to edit queued messages', None),
+                            ('Press up to edit queued messages, then rerun', 'Press up to edit queued messages, then rerun')):
+            with self.subTest(body=body):
+                frame = '\n'.join(lines[:caret] + ['\u276f\u00a0' + body] + lines[caret + 2:]) + '\n'
+                self.assertEqual(draft, observe('claude', frame).draft)
+
     def test_dim_suggestions_are_marked_in_capture_and_never_drafts(self):
         from fleet.runtime import annotate_placeholders
         frames = (('claude', '❯\u00a0\x1b[2mfix RV-29 too\x1b[0m\n? for shortcuts\n'),
@@ -87,10 +126,15 @@ class RuntimeTests(unittest.TestCase):
         self.assertEqual(marked.count('[placeholder] '), 1)
         self.assertIn('[placeholder] ❯\u00a0\x1b[2mcontinue', marked)
 
-    def test_capture_labels_only_sgr_free_fallback_placeholders(self):
+    def test_capture_labels_measured_chrome_but_not_plain_lookalikes(self):
+        """D-85: without SGR only measured whole-box chrome is labelled; a plain lookalike is a draft."""
         from fleet.runtime import annotate_placeholders
         legacy = '❯ try "fix the failing test"\n? for shortcuts\n'
-        self.assertIn('[placeholder] ❯', annotate_placeholders(legacy))
+        self.assertNotIn('[placeholder]', annotate_placeholders(legacy))
+        self.assertEqual(observe('claude', legacy).draft, 'try "fix the failing test"')
+        root = Path(__file__).resolve().parents[1] / 'it/fixtures/runtime'
+        queued = (root / 'claude-queued-behind-turn-282.frame').read_text()
+        self.assertIn('[placeholder] ❯\u00a0Press up to edit queued messages', annotate_placeholders(queued))
         styled = '❯\x1b[1mTry "pytest -k foo" next\x1b[0m\n? for shortcuts\n'
         self.assertNotIn('[placeholder]', annotate_placeholders(styled))
         self.assertEqual(observe('claude', styled).draft, 'Try "pytest -k foo" next')

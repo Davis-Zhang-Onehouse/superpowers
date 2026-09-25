@@ -97,7 +97,8 @@ BUSY_PANE = "\n".join(["editing src/fleet/cli.py", "Thinking...", "❯ ",
 #: Text sitting in the input box that nobody submitted, with nothing working: "queued text".
 QUEUED_PANE = "\n".join(["wrote tests/test_cli.py", "", "❯ now run the suite again"])
 #: An idle claude pane: the input box renders its placeholder, which is NOT a swallowed submit.
-IDLE_PANE = "\n".join(["done", "", '❯ try "fix the failing test"', "  ? for shortcuts"])
+#: D-85: the suggestion is SGR-dim, the shape `i7-ghost-box.frame` measured; plain text there would be a draft.
+IDLE_PANE = "\n".join(["done", "", '❯\u00a0\x1b[2mtry "fix the failing test"\x1b[0m', "  ? for shortcuts"])
 #: A plain shell. Nothing here is claude, and sending keys to it is a different mistake.
 SHELL_PANE = "\n".join(["ubuntu@box:~$ ls", "src  tests", "ubuntu@box:~$ "])
 
@@ -2314,6 +2315,38 @@ class TestPaneGuard(CliCase):
         printed = dict(line.split("\t", 1) for line in out.splitlines())
         self.assertTrue(printed.get("queued_text"),
                         f"the queued text field is empty on the --id path: {out!r}")
+
+    def test_escape_free_real_capture_lookalike_drafts_are_queued_text_and_refuse_send(self):
+        """D-85. `claude-multiline.frame` as captured (no SGR) with only its first draft line changed: every
+        lookalike is somebody's draft — pane-guard 10, and send refuses without typing — idle or busy."""
+        from tests.test_runtime import LOOKALIKE_FIRST_LINES, escape_free_multiline
+        fleet = self.loaded()
+        sent = fleet.tmp / 'lookalike-msg.txt'
+        sent.write_text('hello\n')
+        for busy in (False, True):
+            for first in LOOKALIKE_FIRST_LINES:
+                with self.subTest(busy=busy, first=first):
+                    fleet.panes['dt-solo'] = escape_free_multiline(first, busy=busy)
+                    code, out, err = fleet.run(['pane-guard', '--porcelain', '--pane', 'dt-solo'])
+                    self.assertEqual(cli.PANE_QUEUED_TEXT, code, (out, err))
+                    self.assertEqual(dict(row.split('\t', 1) for row in out.splitlines())['queued_text'],
+                                     first + ' MULTILINE READY')
+                    before = fleet.panes['dt-solo']
+                    code, out, err = fleet.run(['send', '--id', fleet.ids['solo'], '--message-file', str(sent)])
+                    self.assertEqual(EXIT_REFUSED, code, (out, err))
+                    self.assertEqual(before, fleet.panes['dt-solo'], 'a refused send typed into the pane')
+
+    def test_unattributed_busy_claude_pane_without_a_caret_is_indeterminate(self):
+        """A busy claude pane whose input caret cannot be located is 14 whether or not a process is attributed
+        to it: 11 admits a send, and without the caret nobody knows what the box holds."""
+        fleet = self.loaded()
+        lines = (ROOT / 'it/fixtures/runtime/claude-busy.frame').read_text().splitlines()
+        caret = max(i for i, row in enumerate(lines) if row.startswith('\u276f'))
+        lines[caret] = '  editor redraw in progress'
+        fleet.tmux_live.add('dt-unattributedBusy')
+        fleet.panes['dt-unattributedBusy'] = '\n'.join(lines) + '\n'
+        code, out, err = fleet.run(['pane-guard', '--porcelain', '--pane', 'dt-unattributedBusy'])
+        self.assertEqual(cli.PANE_INDETERMINATE, code, (out, err))
 
     def test_multiline_box_reports_all_queued_text(self):
         fleet = self.loaded()

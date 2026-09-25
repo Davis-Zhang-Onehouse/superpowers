@@ -161,8 +161,6 @@ def _dialog_row(runtime: RuntimeName, visible: list[str]) -> bool:
 def _claude_draft(rows, frame):
     index = _claude_caret_index(rows)
     draft = _caret_content(rows[index]) if index is not None else None
-    if draft and not _SGR.search(frame) and _is_placeholder(draft):
-        draft = None
     if not draft:
         return None
     # The measured multiline editor has a caret row followed by indented
@@ -174,11 +172,37 @@ def _claude_draft(rows, frame):
                 or visible.lstrip().startswith(('⏵⏵', '? for shortcuts'))):
             break
         content.append(_undim(_cells(row)[2:]))
-    return '\n'.join(content).strip()
+    draft = '\n'.join(content).strip()
+    return None if _is_placeholder(draft) else draft
 
 
 def _claude_caret_index(rows):
-    """Find the current caret from the lower input border, including tall wrapped drafts."""
+    """The row of the CURRENT input caret, or None.
+
+    The current box is located from its lower border, walking up through any number of indented
+    continuation rows (a tall or wrapped draft, v23-f), or by the last caret in a short borderless capture.
+
+    The earlier bounded window was a correction of measured false answers (`FI-24`), and they fail in
+    opposite directions:
+
+    * **The last caret, not the first.** A real shell — and Claude's own transcript — leaves the
+      *submitted* prompt on screen and draws the new empty box BELOW it. `N4` submitted its
+      message and the predicate still reported `draft message`, read off the echo above the new
+      box, so `pane-guard` stayed at 10 and `status` at BLOCKED: an alarm that cannot be cleared
+      by doing the thing it asks for, for the sixth time in this build. The first caret in a
+      window is not the box; it is the most recent thing the box FINISHED with.
+    * **Anchored to the last non-blank row, not to a raw line index.** See `_rendered` — `M11b`'s
+      box sat 31 blank padding rows above the bottom of the capture and read as safe.
+
+    `N8` — a stale caret with output below it and an empty box at the bottom — is safe under this
+    rule because the empty box is the LAST caret, which is why it holds at 13 rows up and at 3.
+    Under the previous rule it held only because 13 > 8: an eight-line accident, not a property,
+    and the 3-row fixture is the one that says so.
+
+    An empty box is not a swallowed submit: an empty caret answers None outright rather than
+    falling back to an earlier caret (falling back IS the `N4` defect); what an empty box renders (a dim
+    suggestion, measured chrome) is filtered by `_caret_content` and `_is_placeholder`, not here.
+    """
     border = next((i for i in range(len(rows) - 1, max(-1, len(rows) - PROMPT_TAIL_LINES - 1), -1)
                    if plain(rows[i]).strip().startswith(('────', '━━━━'))), None)
     if border is not None:
@@ -379,19 +403,21 @@ def _undim(cells: list) -> str:
     return "".join(char for char, dim in cells if not dim).strip()
 
 
-#: Shapes an EMPTY input box renders. None of these is a swallowed submit, and alarming on them is a
-#: false positive on every idle session in the fleet at once.
+#: What an EMPTY input box renders as PLAIN text: TUI chrome, matched as the WHOLE box, exactly, and nothing else.
 #:
-#: These are the FALLBACK, not the primary signal (`FI-208`). They are five fixed legacy strings and the
-#: thing they need to catch today is *model-generated prose* — a denylist of suggestion texts can never be
-#: completed, so the attribute decides first and these only answer for a terminal that stripped it.
-_PLACEHOLDERS = (
-    re.compile(r'^try\s+["“]', re.I),
-    re.compile(r"^ask\b", re.I),
-    re.compile(r"^/\s*for\s+commands\b", re.I),
-    re.compile(r"^#\s*for\s+memory\b", re.I),
-    re.compile(r"^new\s+task\?", re.I),
-    re.compile(r"^press up to edit queued messages$", re.I),
+#: D-85. This was a regex list of suggestion shapes (`^try "`, `^ask\b`, `^new task?`, ...) used as a fallback
+#: for a capture with no SGR, on the theory that such a capture came from a terminal that stripped attributes.
+#: Measured false: real `capture-pane -e` frames of Claude Code often carry NO escape at all
+#: (`claude-multiline.frame`, 2.1.268; `claude-queued-behind-turn-282.frame` and `claude-after-busy-enter-282.frame`,
+#: 2.1.282), and fleet always captures with `-e`. On those frames a REAL draft whose first line was
+#: "Ask him first:" or `Try "pytest -k foo" next` read as an empty box: pane-guard 0 or 11, and `send` typed onto
+#: it. A model-generated suggestion is SGR-dim (`_undim` drops it); plain text in the box is somebody's draft.
+#: The cost of dropping the fallback is the safe direction: an old-style plain suggestion reads `10`, a refusal.
+#:
+#: Only chrome MEASURED on a real frame belongs here: 2.1.282 draws "Press up to edit queued messages" in the
+#: box while a message waits behind the turn (`claude-after-busy-enter-282.frame`).
+_EMPTY_BOX_CHROME = (
+    re.compile(r"press up to edit queued messages", re.I),
 )
 
 #: A pane is busy when it is still offering a way to interrupt the work.
@@ -498,9 +524,9 @@ def _caret_content(line: str) -> Optional[str]:
       `None` for that exact live row.
     * **Deciding what the body IS.** `_undim` drops the DIM cells, so a body drawn entirely in SGR 2 —
       Claude Code's ghost suggestion in an EMPTY box — collapses to `''` and a body with any normal-
-      intensity character keeps it. Attribute first, `_PLACEHOLDERS` only as the fallback for a terminal
-      that stripped attributes (`AC-6`): the suggestion is model-generated prose, so no list of texts
-      could ever have matched it.
+      intensity character keeps it. The attribute alone decides (D-85 retired the `AC-6` text fallback:
+      real captures with no SGR at all are common, and there it hid real drafts); the suggestion is
+      model-generated prose, so no list of texts could ever have matched it.
     """
     cells = _trim(_cells(line))
     while cells and cells[0][0] in _GUTTER:
@@ -515,42 +541,8 @@ def _caret_content(line: str) -> Optional[str]:
 
 
 def _is_placeholder(content: str) -> bool:
-    return any(pattern.search(content) for pattern in _PLACEHOLDERS)
-
-
-def _claude_first_line(pane_text: str) -> Optional[str]:
-    """Text sitting in the input box that was never submitted, or None.
-
-    The current box is located from its lower border, walking up through any number of
-    indented continuation rows, or by the last caret in a short borderless capture. This corrects
-    the tall busy-draft false empty observation in receive pass 1. The earlier bounded window was a
-    correction of measured
-    false answers (`FI-24`), and they fail in opposite directions:
-
-    * **The last caret, not the first.** A real shell — and Claude's own transcript — leaves the
-      *submitted* prompt on screen and draws the new empty box BELOW it. `N4` submitted its
-      message and the predicate still reported `draft message`, read off the echo above the new
-      box, so `pane-guard` stayed at 10 and `status` at BLOCKED: an alarm that cannot be cleared
-      by doing the thing it asks for, for the sixth time in this build. The first caret in a
-      window is not the box; it is the most recent thing the box FINISHED with.
-    * **Anchored to the last non-blank row, not to a raw line index.** See `_rendered` — `M11b`'s
-      box sat 31 blank padding rows above the bottom of the capture and read as safe.
-
-    `N8` — a stale caret with output below it and an empty box at the bottom — is safe under this
-    rule because the empty box is the LAST caret, which is why it holds at 13 rows up and at 3.
-    Under the previous rule it held only because 13 > 8: an eight-line accident, not a property,
-    and the 3-row fixture is the one that says so.
-
-    An empty box is not a swallowed submit: an empty caret answers None outright rather than
-    falling back to an earlier caret (falling back IS the `N4` defect), and the placeholder shapes
-    a pane renders when the box is empty are filtered out rather than reported.
-    """
-    rows = _rendered(pane_text)
-    index = _claude_caret_index(rows)
-    box = _caret_content(rows[index]) if index is not None else None
-    if not box or (not _SGR.search(pane_text) and _is_placeholder(box)):
-        return None
-    return box
+    """Whether the WHOLE box content is measured empty-box chrome (`_EMPTY_BOX_CHROME`), whatever the SGR."""
+    return any(pattern.fullmatch(content.strip()) for pattern in _EMPTY_BOX_CHROME)
 
 
 def claude_unsubmitted(pane_text: str) -> Optional[str]:
@@ -559,7 +551,7 @@ def claude_unsubmitted(pane_text: str) -> Optional[str]:
 
 
 def annotate_placeholders(frame: str) -> str:
-    """Mark dim suggestions, or legacy plain suggestions in an SGR-free capture."""
+    """Mark the current box when it holds only a dim suggestion or measured empty-box chrome."""
     annotated = []
     rows = frame.splitlines(keepends=True)
     rendered_count = len(_rendered(frame))
@@ -577,7 +569,7 @@ def annotate_placeholders(frame: str) -> str:
         if cells and cells[0][0] in ('❯', '›'):
             body = _trim(cells[1:])
             if body and ((any(dim and not char.isspace() for char, dim in body) and not _undim(body))
-                         or (not _SGR.search(frame) and _is_placeholder(_caret_content(row) or ''))):
+                         or _is_placeholder(_caret_content(row) or '')):
                 row = '[placeholder] ' + row
         annotated.append(row)
     return ''.join(annotated)
