@@ -5425,7 +5425,9 @@ def _do_brief(ctx: Ctx, parsed: Parsed) -> int:
     if declarations.phase() == PHASE_HOLDING:
         #: RV-19. The hold's reason and bound, from the reader the board uses (`reconcile._hold_of`).
         live, said = _hold_of(child)
-        detail += (f", hold: {said} — `fleet board` keeps you out of the WIP cap until then" if live else
+        #: CL-3. `_live_state` ranks a dialog or unsubmitted text (BLOCKED) above HOLDING, so the promise is qualified.
+        detail += (f", hold: {said} — `fleet board` keeps you out of the WIP cap until then, unless a dialog or "
+                   f"unsubmitted text on your pane makes the row BLOCKED" if live else
                    f", hold: {said} — so `fleet board` disregards it and the worker counts against the WIP cap")
     rows.append(Row(kind="phase", subject=child.name, severity=INFO, detail=detail))
 
