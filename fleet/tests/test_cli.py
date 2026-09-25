@@ -5486,6 +5486,7 @@ class TestCompleteRefusesBrokenPointers(CliCase):
         code, out, err = env.fleet.run(["complete", "--instant", str(env.instant)])
         self.assertEqual(EXIT_REFUSED, code, out + err)
         self.assertIn("(none)", err)
+        self.assertIn("fleet propose --instant", err)
         self.assertTrue(env.instant.exists())
 
     def test_complete_refuses_a_claimed_milestone_with_a_running_last_report(self):
