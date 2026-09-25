@@ -3,6 +3,7 @@ import json
 import os
 from pathlib import Path
 import re
+from unittest import mock
 
 from fleet import cli
 from fleet.origin import Origin, write as write_origin
@@ -241,3 +242,17 @@ class TestCadenceResolvesTheOperandLikeTheVerb(CliCase):
         self.assertEqual(code, 2, err)
         self.assertIn('not an instant on disk', err)
         self.assert_nags_only(err, foreign, fleet)
+
+    def test_nothing_overdue_resolves_the_operand_only_for_the_verb(self):
+        # V23-O RV-17. With no overdue source the alarm has nothing to scope, so `_cadence` must not resolve the
+        # operand a second time (a refused operand costs a full store read inside the resolver).
+        fleet = self.loaded()
+        data = json.loads(fleet.harvest.path.read_text())
+        for source in data["sources"]:
+            source["last_run"] = NOW
+        fleet.harvest.path.write_text(json.dumps(data))
+        with mock.patch.object(cli, '_resolve_instant', wraps=cli._resolve_instant) as spy:
+            code, out, err = self.run_from(fleet, fleet.tmp, ['roadmap', '--instant', './missing-instant'])
+        self.assertEqual(code, 2, err)
+        self.assertNotIn(cli.CADENCE_PREFIX, err)
+        self.assertEqual(spy.call_count, 1, spy.call_args_list)
