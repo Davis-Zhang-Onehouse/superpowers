@@ -204,6 +204,16 @@ class AttributionRule(unittest.TestCase):
         att = orphans.attribute([300], facts.get, self.spell(), not_before=LAUNCHED)
         self.assertEqual(att.pids(REAP), [300])
 
+    def test_a_foreign_environment_value_cannot_split_the_one_line_kill_command(self):
+        """RV-35. The reason embeds another process's FLEET_INSTANT; a newline in it must not make the printed one-line
+        command two lines when pasted."""
+        facts = table(Proc(300, 1, "t", ("tail", "-F", f"{INST}/x"), sid=300, children=(), started_at=LATER,
+                           fleet_instant="/other\nrm -rf ~"))
+        att = orphans.attribute([300], facts.get, self.spell(), not_before=LAUNCHED)
+        command = att.of(NAME)[0].kill_command()
+        self.assertNotIn("\n", command)
+        self.assertTrue(command.startswith("kill -TERM 300  # "), command)
+
     def test_provenance_of_a_prefix_sharing_sibling_is_not_this_instant(self):
         facts = table(*pipeline())
         facts[500] = Proc(500, 1, "s500", facts[500].argv, sid=500, children=(501, 502), started_at=LATER,
