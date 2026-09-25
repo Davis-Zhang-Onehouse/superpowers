@@ -1,5 +1,13 @@
 # fleet — changelog
 
+## fleet/v0.6.15 — 2026-09-25T19:47:07Z
+Cut from 2caf55e on `stack/0.6.15` (upstream base snapshot/2026-09-22-152849). 1 commit(s) since fleet/v0.6.14.
+
+Every release ships the whole repository — all skills, `commands/`, `hooks/` and the plugin manifest, not only `fleet/`.
+Payload: fleet (2 files).
+
+- 2caf55e S5 fix-up (gate 0.6.14 attempt 1, coordinator D-112): W1's decoy socket is short; M10's busy pane has its input box
+
 ## fleet/v0.6.14 — 2026-09-25T15:34:23Z
 Cut from d39ee3b on `stack/0.6.14` (upstream base snapshot/2026-09-22-152849). 95 commit(s) since fleet/v0.6.13.
 
