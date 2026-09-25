@@ -757,6 +757,52 @@ class RuntimeTmuxKillAudit(unittest.TestCase):
         self.assertEqual(subprocess.run([self.real, "-S", str(socket), "has-session"],
                                         capture_output=True).returncode, 0)
 
+    def test_missing_recorded_server_pid_refuses_kill(self):
+        socket = self.private / f"tmux-{os.getuid()}" / "own"
+        self.assertEqual(self.tmux("-L", "own", "new-session", "-d", "-s", "mine", "sleep 30").returncode, 0)
+        self.addCleanup(subprocess.run, [self.real, "-S", str(socket), "kill-server"], capture_output=True)
+        rows = [json.loads(line) for line in self.ledger.read_text().splitlines()]
+        self.assertTrue(rows[0].get("server_pid"), rows)
+        rows[0]["server_pid"] = None
+        self.ledger.write_text("".join(json.dumps(row) + "\n" for row in rows))
+        result = self.tmux("-L", "own", "kill-server")
+        self.assertEqual(result.returncode, 97, result.stderr)
+        self.assertEqual(subprocess.run([self.real, "-S", str(socket), "has-session"],
+                                        capture_output=True).returncode, 0)
+
+    def test_unreadable_current_server_pid_refuses_kill(self):
+        socket = self.private / f"tmux-{os.getuid()}" / "own"
+        self.assertEqual(self.tmux("-L", "own", "new-session", "-d", "-s", "mine", "sleep 30").returncode, 0)
+        self.addCleanup(subprocess.run, [self.real, "-S", str(socket), "kill-server"], capture_output=True)
+        wrapper = self.tmp / "tmux-without-pid"
+        wrapper.write_text(f'#!/bin/sh\ncase "$*" in *display-message*) exit 1;; esac\nexec "{self.real}" "$@"\n')
+        wrapper.chmod(0o755)
+        result = self.tmux("-L", "own", "kill-server", env=dict(self.env, IT_TMUX_REAL=str(wrapper)))
+        self.assertEqual(result.returncode, 97, result.stderr)
+        self.assertEqual(subprocess.run([self.real, "-S", str(socket), "has-session"],
+                                        capture_output=True).returncode, 0)
+
+    def test_unverified_existing_server_does_not_gain_ownership_from_new_session(self):
+        socket = self.private / f"tmux-{os.getuid()}" / "own"
+        self.assertEqual(self.tmux("-L", "own", "new-session", "-d", "-s", "mine", "sleep 30").returncode, 0)
+        self.addCleanup(subprocess.run, [self.real, "-S", str(socket), "kill-server"], capture_output=True)
+        rows = [json.loads(line) for line in self.ledger.read_text().splitlines()]
+        rows[0]["server_pid"] = "not-the-recorded-server"
+        self.ledger.write_text("".join(json.dumps(row) + "\n" for row in rows))
+        counter = self.tmp / "pid-queries"
+        wrapper = self.tmp / "tmux-one-missing-pid"
+        wrapper.write_text(f'#!/bin/sh\ncase "$*" in *display-message*) '
+                           f'if [ ! -e "{counter}" ]; then : > "{counter}"; exit 1; fi;; esac\n'
+                           f'exec "{self.real}" "$@"\n')
+        wrapper.chmod(0o755)
+        created = self.tmux("-L", "own", "new-session", "-d", "-s", "second", "sleep 30",
+                            env=dict(self.env, IT_TMUX_REAL=str(wrapper)))
+        self.assertEqual(created.returncode, 0, created.stderr)
+        killed = self.tmux("-L", "own", "kill-server")
+        self.assertEqual(killed.returncode, 97, killed.stderr)
+        self.assertEqual(subprocess.run([self.real, "-S", str(socket), "has-session"],
+                                        capture_output=True).returncode, 0)
+
     def test_compound_command_cannot_hide_a_server_kill(self):
         socket = self.private / f"tmux-{os.getuid()}" / "foreign"
         socket.parent.mkdir(mode=0o700)
@@ -927,6 +973,19 @@ class NestedSelftestTmuxBoundary(unittest.TestCase):
             self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
         rows = [line for line in results.read_text().splitlines() if line.startswith("KILL-AUDIT-")]
         self.assertEqual(len(rows), 1, rows)
+
+    def test_fresh_results_file_claims_its_kill_audit_row(self):
+        tmp = pathlib.Path(tempfile.mkdtemp(prefix="it-audit-fresh-"))
+        self.addCleanup(shutil.rmtree, tmp, True)
+        it = harness_copy(tmp)
+        results = tmp / "new-results.tsv"
+        body = (f'. "{it}/lib.sh"\nIT_FAILED=0\nit_own_cases "ISOLATION-X-.*"\n'
+                'it_section X\nit_assert_isolation X-leave\ntest "$IT_FAILED" = 0\n')
+        result = run_bash(body, tmp, env={"IT_RESULTS": str(results)}, home=tmp / "home")
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr + results.read_text())
+        rows = results.read_text()
+        self.assertIn("KILL-AUDIT-X\tPASS", rows)
+        self.assertNotIn("OWN-KILL-AUDIT-X", rows)
 
     def test_deep_checkout_uses_short_private_socket_root(self):
         tmp = pathlib.Path(tempfile.mkdtemp(prefix="it-deep-audit-"))

@@ -349,11 +349,13 @@ it_section() {            # it_section <name> -> own FLEET_HOME, own slots, own 
   export IT_TMUX_AUDIT_CASE_SECTION
   # Runners declare their legacy rows before entering a section. Extend that ownership with this
   # section's audit row and remove its prior verdict, without touching another section's rows.
-  if [ -n "${IT_OWN_RE:-}" ] && [ "$RESULTS" = "${IT_OWN_FILE:-}" ] && [ -f "$RESULTS" ]; then
-    local audit_tmp
-    audit_tmp="$(mktemp "$(dirname "$RESULTS")/.$(basename "$RESULTS").XXXXXX")" || return 1
-    IT_AUDIT_CASE="KILL-AUDIT-$IT_TMUX_AUDIT_CASE_SECTION" awk -F '\t' 'NR==1 || $1 != ENVIRON["IT_AUDIT_CASE"]' "$RESULTS" > "$audit_tmp" \
-      && mv "$audit_tmp" "$RESULTS" || return 1
+  if [ -n "${IT_OWN_RE:-}" ] && [ "$RESULTS" = "${IT_OWN_FILE:-}" ]; then
+    if [ -f "$RESULTS" ]; then
+      local audit_tmp
+      audit_tmp="$(mktemp "$(dirname "$RESULTS")/.$(basename "$RESULTS").XXXXXX")" || return 1
+      IT_AUDIT_CASE="KILL-AUDIT-$IT_TMUX_AUDIT_CASE_SECTION" awk -F '\t' 'NR==1 || $1 != ENVIRON["IT_AUDIT_CASE"]' "$RESULTS" > "$audit_tmp" \
+        && mv "$audit_tmp" "$RESULTS" || return 1
+    fi
     IT_OWN_RE="$IT_OWN_RE|KILL-AUDIT-$IT_TMUX_AUDIT_CASE_SECTION"
   fi
   export FLEET_HOME="$IT_ROOT/$SECTION/home"

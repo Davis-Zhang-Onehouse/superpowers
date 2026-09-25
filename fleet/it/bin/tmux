@@ -167,6 +167,8 @@ def main():
                 current_inode = None
             current_pid = server_pid(real, socket) if private and created and current_inode \
                 and (destructive or creates) else None
+            unverified_existing = creates and created and current_inode and (
+                owned_pid is None or current_pid is None)
             session_ids = next((r["session_ids"] for r in reversed(history)
                                 if r.get("socket") == socket and "session_ids" in r), {})
             if destructive or creates:
@@ -176,9 +178,11 @@ def main():
                     row.update(decision="deny", reason="server existed before section created it")
                 elif destructive and not created:
                     row.update(decision="deny", reason="server not created by section")
+                elif destructive and (owned_pid is None or current_pid is None):
+                    row.update(decision="deny", reason="created server PID cannot be verified")
                 elif (destructive or creates) and created and current_inode and (
                         current_inode != owned_inode or
-                        (owned_pid is not None and current_pid is not None and current_pid != owned_pid)):
+                        (current_pid is not None and owned_pid is not None and current_pid != owned_pid)):
                     row.update(decision="deny", reason="socket was replaced after section created it")
                 elif destructive and current_inode is None:
                     row.update(decision="deny", reason="created socket no longer exists")
@@ -215,7 +219,12 @@ def main():
                 os.execv(real, [real, *argv])
             result = subprocess.run([real, *argv])
             row["status"] = result.returncode
-            if result.returncode == 0 and private and (creates or created):
+            if result.returncode == 0 and unverified_existing:
+                # A stale socket may let tmux start a new server, but a new-session on an existing
+                # socket cannot prove which server accepted it when the pre-call PID was unreadable.
+                # Do not let the post-call PID turn that uncertain server into an owned one.
+                row.update(created=False, reason="existing server PID was not verified before new-session")
+            elif result.returncode == 0 and private and (creates or created):
                 row["created"] = True
                 if creates:
                     try:
