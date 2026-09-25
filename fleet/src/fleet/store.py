@@ -278,6 +278,26 @@ class Declarations:
             data["watcher_pid"] = pid
         self._save(data)
 
+    def hold_reason(self) -> str | None:
+        """`V23-G`. Why a `holding` phase was declared, verbatim, or `None`."""
+        return self._load().get("hold_reason")
+
+    def hold_until(self) -> str | None:
+        """`V23-G`. When a `holding` phase stops keeping the worker out of the cap, or `None`. Optional: a
+        declaration without it (every one written before this field, or by hand) is an unbounded hold, which
+        `reconcile` disregards rather than trusts."""
+        return self._load().get("hold_until")
+
+    def set_hold(self, reason: str | None, until: str | None) -> None:
+        """Replace or clear the hold with the phase it belongs to — never left standing from an earlier claim."""
+        data = self._load()
+        if reason is None or until is None:
+            data.pop("hold_reason", None)
+            data.pop("hold_until", None)
+        else:
+            data["hold_reason"], data["hold_until"] = reason, until
+        self._save(data)
+
     def parked(self) -> str | None:
         return self._load().get("parked")
 

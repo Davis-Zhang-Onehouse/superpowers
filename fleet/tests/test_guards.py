@@ -59,7 +59,7 @@ PROSE_HANDOFF = "## Phase: AWAITING-CI\n\n`Phase: AWAITING-CI` is declared above
 
 #: States the cap excludes, written out as literals rather than imported from `reconcile`, so the
 #: assertion is anchored to the rule and not to whatever the implementation currently exports.
-CAP_EXCLUDED = ("AWAITING-CI", "COMPLETE", "HARVESTED", "CLOSED")
+CAP_EXCLUDED = ("AWAITING-CI", "HOLDING", "COMPLETE", "HARVESTED", "CLOSED")
 
 
 def snapshot(root: pathlib.Path) -> dict:

@@ -4,14 +4,20 @@ Kept in its own module on purpose: `test_reconcile.py` and `test_cli.py` are edi
 and every case here is about one question — does the WIP-cap exemption stand for exactly as long as something
 backs it? Each positive has its control beside it, and each guard has a named mutation it kills.
 """
+import calendar
 import json
 import pathlib
 import shutil
+import time
 import unittest
+from unittest import mock
 
-from tests.test_cli import Fleet, WATCHED_PANE
+from tests.test_cli import DIALOG_PANE, Fleet, IDLE_PANE, NOW, WATCHED_PANE
+from tests.test_guards import Fleet as GuardFleet
+from fleet.guards import CAP_EXCLUDED_STATES, WipCap
 from tests.test_reconcile import SyntheticFleet
-from fleet.reconcile import AWAITING_CI, reconcile
+from fleet.reconcile import AWAITING_CI, HOLD_DEFAULT_S, HOLD_MAX_S, HOLDING, needs_a_human, reconcile
+from fleet.store import Declarations
 from fleet.session import LiveSession
 
 #: The pane the revived session shows: a claude frame with nothing armed on its status line.
@@ -142,6 +148,140 @@ class TestTheRelaunchBoundary(unittest.TestCase):
             with self.subTest(launched_at=bad):
                 s = self.subject("2026-07-30T03:12:00Z", bad)
                 self.assertEqual(s.state, AWAITING_CI, s.note)
+
+
+
+def _epoch(stamp):
+    return calendar.timegm(time.strptime(stamp, "%Y-%m-%dT%H:%M:%SZ"))
+
+
+class TestTheHoldingPhase(unittest.TestCase):
+    """v3-06(c). A worker told to hold, with nothing to watch, used to have two choices: declare awaiting-ci
+    and be disregarded (no watcher), or count against the cap. `holding` is the honest third: it needs no
+    watcher, it is excluded from the cap, and it needs a REASON and an EXPIRY so it cannot become a
+    permanent cap escape (D-3)."""
+
+    def setUp(self):
+        self.f = Fleet()
+        self.addCleanup(shutil.rmtree, self.f.tmp, True)
+        self.path = self.f.worker('holder', slot='ws1', pane=IDLE_PANE)
+        self.todo = self.f.ids['holder']
+
+    def declare(self, *extra):
+        return self.f.run(['declare', '--instant', str(self.path), '--phase', 'holding', *extra,
+                           '--porcelain'])
+
+    def row(self, at=None):
+        clock = _epoch(at or NOW)
+        with mock.patch('fleet.reconcile.time.time', return_value=clock):
+            code, out, err = self.f.run(['board', '--porcelain'])
+        self.assertEqual(code, 0, err)
+        for line in out.splitlines():
+            cells = line.split('\t')
+            if cells[0] == self.todo:
+                return cells[2], cells[6]
+        self.fail(f"no row for {self.todo}:\n{out}")
+
+    def test_a_hold_with_a_reason_is_holding_and_off_the_cap(self):
+        code, out, err = self.declare('--reason', 'operator said hold until the S4 stack lands')
+        self.assertEqual(code, 0, err)
+        self.assertIn('hold_until\t2026-07-30T13:00:00Z', out, 'the default expiry is one hour from now')
+        state, note = self.row()
+        self.assertEqual(state, HOLDING, note)
+        self.assertIn('operator said hold until the S4 stack lands', note)
+        self.assertIn('2026-07-30T13:00:00Z', note)
+        self.assertIn(HOLDING, CAP_EXCLUDED_STATES)
+
+    def test_a_hold_without_a_reason_is_refused(self):
+        for extra in ((), ('--reason', ''), ('--reason', '   ')):
+            with self.subTest(extra=extra):
+                code, out, err = self.declare(*extra)
+                self.assertEqual(code, 2, out + err)
+                self.assertIsNone(Declarations(self.path).phase(), 'a refused hold was stored')
+
+    def test_an_expiry_beyond_the_maximum_is_refused(self):
+        code, out, err = self.declare('--reason', 'r', '--for', f'{HOLD_MAX_S + 1}s')
+        self.assertEqual(code, 2, out + err)
+        self.assertIsNone(Declarations(self.path).phase())
+        code, out, err = self.declare('--reason', 'r', '--for', f'{HOLD_MAX_S // 3600}h')
+        self.assertEqual(code, 0, err)
+
+    def test_a_malformed_expiry_is_refused(self):
+        for bad in ('', '0m', '-5m', '30', 'soon', '1d', '1h30m'):
+            with self.subTest(expiry=bad):
+                code, out, err = self.declare('--reason', 'r', '--for', bad)
+                self.assertEqual(code, 2, out + err)
+
+    def test_reason_and_expiry_belong_to_holding_only(self):
+        for extra in (('--reason', 'r'), ('--for', '30m')):
+            with self.subTest(extra=extra):
+                code, out, err = self.f.run(['declare', '--instant', str(self.path), '--phase', 'reviewing',
+                                             *extra])
+                self.assertEqual(code, 2, out + err)
+
+    def test_the_hold_expires_at_its_boundary(self):
+        """One second before `hold_until` the hold stands; at it, it is disregarded and counts again."""
+        self.assertEqual(self.declare('--reason', 'waiting for the operator', '--for', '30m')[0], 0)
+        state, note = self.row('2026-07-30T12:29:59Z')
+        self.assertEqual(state, HOLDING, note)
+        state, note = self.row('2026-07-30T12:30:00Z')
+        self.assertNotIn(state, CAP_EXCLUDED_STATES, note)
+        self.assertIn('HOLD EXPIRED', note)
+        self.assertIn('disregarded', note)
+
+    def test_a_hand_written_hold_with_no_expiry_is_disregarded(self):
+        """No new REQUIRED field, and no escape by editing the file: `phase: holding` alone backs nothing."""
+        _declare(self.path, phase='holding', at='2026-07-30T11:59:00Z')
+        state, note = self.row()
+        self.assertNotIn(state, CAP_EXCLUDED_STATES, note)
+        self.assertIn('disregarded', note)
+
+    def test_a_dialog_outranks_the_hold(self):
+        self.assertEqual(self.declare('--reason', 'r')[0], 0)
+        self.f.panes['dt-holder'] = DIALOG_PANE
+        state, note = self.row()
+        self.assertEqual(state, 'BLOCKED', note)
+
+    def test_redeclaring_another_phase_clears_the_hold(self):
+        self.assertEqual(self.declare('--reason', 'r')[0], 0)
+        code, out, err = self.f.run(['declare', '--instant', str(self.path), '--phase', 'reviewing'])
+        self.assertEqual(code, 0, err)
+        stored = json.loads((self.path / '.fleet' / 'declare.json').read_text())
+        self.assertNotIn('hold_until', stored)
+        self.assertNotIn('hold_reason', stored)
+
+    def test_complete_refuses_while_holding(self):
+        self.assertEqual(self.declare('--reason', 'r')[0], 0)
+        code, out, err = self.f.run(['complete', '--instant', str(self.path)])
+        self.assertNotEqual(code, 0, out)
+        self.assertIn('holding', out + err)
+        self.assertTrue(self.path.exists(), 'the folder was renamed while holding')
+
+    def test_a_hold_is_not_a_question_for_a_human(self):
+        self.assertEqual(self.declare('--reason', 'r')[0], 0)
+        with mock.patch('fleet.reconcile.time.time', return_value=_epoch(NOW)):
+            subject = [s for s in reconcile(self.f.store, self.f.pool, self.f.sessions, self.f.instants)
+                       if s.identity == self.todo][0]
+        self.assertEqual(subject.state, HOLDING, subject.note)
+        self.assertFalse(needs_a_human(subject))
+
+
+class TestAHoldFreesTheCap(unittest.TestCase):
+    """The cap itself, at 1: a live hold frees it, an expired one holds it again."""
+
+    def test_the_cap(self):
+        fleet = GuardFleet()
+        self.addCleanup(shutil.rmtree, fleet.tmp, True)
+        fleet.worker("holder", slot="ws1", pane=QUIET_PANE)
+        path = fleet.paths["holder"]
+        self.assertFalse(WipCap().evaluate(fleet.ctx()).allowed, "precondition: the worker holds the cap")
+        now = time.time()
+        until = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime(now + 600))
+        _declare(path, phase="holding", at=time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime(now)),
+                 hold_reason="told to hold", hold_until=until)
+        self.assertTrue(WipCap().evaluate(fleet.ctx()).allowed, "a live hold did not free the cap")
+        with mock.patch('fleet.reconcile.time.time', return_value=now + 601):
+            self.assertFalse(WipCap().evaluate(fleet.ctx()).allowed, "an expired hold kept the cap free")
 
 
 if __name__ == '__main__':
