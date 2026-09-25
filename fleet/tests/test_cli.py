@@ -8049,6 +8049,10 @@ class TestMilestoneRetitle(CliCase):
         code, _, err = fleet.run(base + ["--retitle", "new", "--reason", "why"])
         self.assertEqual(EXIT_BAD_INPUT, code)
         self.assertIn("terminal", err)
+        # FB-124 nit: every command the refusal names carries the flags that verb requires, so it pastes.
+        self.assertIn(f"fleet propose --instant <proposing instant> --to {path} --milestone M1 --status ready "
+                      "--evidence <path>", err)
+        self.assertIn(f"fleet apply --instant {path} --milestone M1 --reopen", err)
         self.assertEqual("land the cli", Roadmap(path).milestone("M1").title)
         Roadmap(path).add(Milestone(id="done-row", title="finished scope", status="done",
                                     deps=[], evidence=[]))

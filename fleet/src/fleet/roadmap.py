@@ -483,8 +483,9 @@ class Roadmap:
                     raise BadInput(f"milestone {milestone_id!r} is {entry['status']}, which is terminal; "
                                    "reopen it through apply --reopen before retitling",
                                    clears_when=(f"a nonterminal proposal is pending on {self.instant} "
-                                                f"(fleet propose --to {self.instant} --milestone "
-                                                f"{milestone_id} ...), then the coordinator changes its "
+                                                f"(fleet propose --instant <proposing instant> --to "
+                                                f"{self.instant} --milestone {milestone_id} --status ready "
+                                                f"--evidence <path>), then the coordinator changes its "
                                                 f"status with fleet apply --instant {self.instant} "
                                                 f"--milestone {milestone_id} --reopen"),
                                    clears_who="the coordinator")
