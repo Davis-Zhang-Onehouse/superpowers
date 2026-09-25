@@ -11,8 +11,16 @@ a callable, signals as a callable, time as a callable. `pool` knows WHICH pids h
 wrapper's argv carries `$INSTANT` unexpanded and the grep stage names nothing — so a holder is judged together with
 the holders it descends from, up to the topmost one (the ROOT).
 
-**A unit is REAPED** when its root is a process the recorded session owned before this call killed it (same pid, same
-start time), or when its root is ORPHANED (ppid 1) and some member's argv names the instant (D-2). **NAMED** — a kill
+**A unit is a CLOSED, DETACHED session** (D-8). Members are grouped only with an in-slot parent in the same Linux
+session, and a unit is reapable only when no member has a live child outside it, so ending it ends nothing else. The
+first version grouped by parentage alone, and its reviewer showed the hole: a tmux server started from inside the slot
+(ppid 1) with one pane running `less <instant>/…` would have been reaped whole — every session on that server with it.
+The harness's watcher is exactly the shape this admits: `setsid`, no controlling tty, a closed pipeline (measured,
+`evidence/01-repro/harness-shape.txt` in the v23-h instant).
+
+**A unit is REAPED** when it is closed and either its root is a process the recorded session owned before this call
+killed it (same pid, same start time), or its root is ORPHANED (ppid 1), leads its own session with no controlling
+tty, and some member's argv names the instant (D-2). **NAMED** — a kill
 command printed, nothing signalled — when a member names the instant but the root has a live parent: an operator's
 shell running `tail -F <instant>/…` from inside the slot is exactly that. **REFUSED** otherwise, and always for an
 unreadable holder, a holder whose facts cannot be read, and any unit containing the caller or one of its ancestors.
@@ -35,12 +43,16 @@ _PATH_CHARS = frozenset("ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz012
 
 @dataclass(frozen=True)
 class Proc:
-    """What `/proc/<pid>/{stat,cmdline}` says about one live process. `start` is stat field 22: pid + start names
-    one process, so a recycled pid is never read as the one attributed."""
+    """What `/proc/<pid>/{stat,cmdline,task/*/children}` says about one live process. `start` is stat field 22: pid +
+    start names one process, so a recycled pid is never read as the one attributed. `sid` and `tty` are stat fields 6
+    and 7; `children` every live child pid. `None` for any of them is NOT OBSERVED, and fails closed."""
     pid: int
     ppid: int
     start: str
     argv: tuple
+    sid: Optional[int] = None
+    tty: int = 0
+    children: Optional[tuple] = None
 
 
 @dataclass(frozen=True)
@@ -121,8 +133,11 @@ def attribute(holders, facts: Callable, spellings, *, session_own=None, exclude=
     groups = {}
     for pid in procs:
         root, steps = pid, 0
-        while procs[root].ppid in procs and procs[root].ppid != root and steps < 256:
-            root, steps = procs[root].ppid, steps + 1
+        while steps < 256:
+            parent = procs.get(procs[root].ppid)
+            if parent is None or parent.pid == root or parent.sid is None or parent.sid != procs[root].sid:
+                break
+            root, steps = parent.pid, steps + 1
         groups.setdefault(root, []).append(pid)
     own = dict(session_own or {})
     lineage = set(exclude)
@@ -131,21 +146,45 @@ def attribute(holders, facts: Callable, spellings, *, session_own=None, exclude=
         head = procs[root]
         named = next(((pid, spelled) for pid in members
                       if (spelled := names_instant(procs[pid].argv, spellings))), None)
+        outside = _outside_children(members, procs)
+        detached = head.ppid == INIT_PID and head.sid == root and head.tty == 0
         if lineage & set(members):
             units.append(Unit(root, members, REFUSE, "the unit contains the process running this command or one of "
                                                      "its ancestors"))
+        elif outside is None and (named or own.get(root) is not None):
+            units.append(Unit(root, members, NAME, f"its children could not be read, so ending it might end processes "
+                                                   f"nothing attributed; not ended automatically"))
+        elif outside and (named or own.get(root) is not None):
+            units.append(Unit(root, members, NAME, f"it has live children outside the unit ({_pids(outside)}), which "
+                                                   f"ending it would take down too; not ended automatically"))
         elif own.get(root) is not None and own.get(root) == head.start:
             units.append(Unit(root, members, REAP, f"pid {root} was the recorded session's own process before the "
                                                    f"kill and survived it"))
-        elif named and head.ppid == INIT_PID:
-            units.append(Unit(root, members, REAP, f"orphaned (pid {root}'s parent is init) and pid {named[0]}'s "
-                                                   f"argv names {named[1]}"))
+        elif named and detached:
+            units.append(Unit(root, members, REAP, f"orphaned (pid {root}'s parent is init, it leads its own session "
+                                                   f"with no terminal) and pid {named[0]}'s argv names {named[1]}"))
         elif named:
-            units.append(Unit(root, members, NAME, f"pid {named[0]}'s argv names {named[1]}, but pid {root}'s parent "
-                                                   f"{head.ppid} is alive, so it is not ended automatically"))
+            units.append(Unit(root, members, NAME, f"pid {named[0]}'s argv names {named[1]}, but pid {root} is not a "
+                                                   f"detached orphan (parent {head.ppid}, session {head.sid}, tty "
+                                                   f"{head.tty}), so it is not ended automatically"))
         else:
             units.append(Unit(root, members, REFUSE, "nothing ties it to this instant"))
     return Attribution(units=units, procs=procs)
+
+
+def _pids(pids) -> str:
+    return ", ".join(str(pid) for pid in sorted(pids))
+
+
+def _outside_children(members, procs) -> Optional[set]:
+    """Live children of any member that are not members; None when any member's children were not observed."""
+    inside, outside = set(members), set()
+    for pid in members:
+        children = procs[pid].children
+        if children is None:
+            return None
+        outside |= set(children) - inside
+    return outside
 
 
 def naming_holders(holders, facts: Callable, spellings, *, exclude=()) -> list:

@@ -504,6 +504,15 @@ class SessionLayer:
         return self.probes.pane_pid(name)
 
 
+def _live_state(proc: Path) -> bool:
+    """`V23-H`. Whether `/proc/<pid>` is a process that is neither gone nor a zombie."""
+    try:
+        state = (proc / "stat").read_text(encoding="utf-8", errors="surrogateescape").rsplit(")", 1)[1].split()[0]
+    except (OSError, IndexError):
+        return False
+    return state not in ("Z", "X")
+
+
 def default_probes(process_name: str = "claude", tmux_socket=_FROM_ENV, *,
                    both_runtimes=False, proc_root=Path("/proc")) -> Probes:
     """The real probes: `pgrep -x <process_name>`, `/proc/<pid>/{cwd,cmdline}` and `tmux`.
@@ -571,11 +580,23 @@ def default_probes(process_name: str = "claude", tmux_socket=_FROM_ENV, *,
         if not fields or fields[0] in ("Z", "X"):
             return None
         try:
-            ppid, start = int(fields[1]), fields[19]
+            ppid, sid, tty, start = int(fields[1]), int(fields[3]), int(fields[4]), fields[19]
         except (IndexError, ValueError):
             return None
         argv = tuple(part.decode("utf-8", "surrogateescape") for part in raw.split(b"\0") if part)
-        return Proc(pid=pid, ppid=ppid, start=start, argv=argv)
+        #: Every THREAD's `children` file: a child belongs to the thread that forked it, and node (claude) forks from
+        #: worker threads. Any unreadable file makes the whole set NOT OBSERVED (None), which fails closed.
+        children = set()
+        try:
+            for task in (base / "task").iterdir():
+                children.update(int(token) for token in (task / "children").read_text().split())
+        except (OSError, ValueError):
+            children = None
+        if children:
+            #: A zombie (or a child reaped since) holds nothing and ends with nothing; only live children count.
+            children = {child for child in children if _live_state(Path(proc_root) / str(child))}
+        return Proc(pid=pid, ppid=ppid, start=start, argv=argv, sid=sid, tty=tty,
+                    children=None if children is None else tuple(sorted(children)))
 
     def signal_pid(pid: int, sig: int) -> bool:
         """`V23-H`. One signal to one pid. Its callers pass only pids `orphans.attribute` attributed to the instant
