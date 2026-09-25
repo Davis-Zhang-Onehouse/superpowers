@@ -2224,8 +2224,8 @@ class TestPaneGuard(CliCase):
                              f"pane-guard {pane} does not name its verdict: {out!r}")
         self.assertEqual(cli.PANE_GUARD_CODES[cli.PANE_SAFE], "safe")
 
-    def test_pane_guard_refuses_dialog_hints_before_admitting_busy_send(self):
-        """A pane whose hint may be a dialog cannot get the send-admitting code 11."""
+    def test_pane_guard_refuses_conflicting_dialog_and_busy_hints(self):
+        """Conflicting current hints are indeterminate, never a send-admitting code or a claimed dialog."""
         trust = "\n".join([
             "Quick safety check: Is this a project you created or one you trust?",
             "❯ No, exit", "  Yes, I trust this folder", "Enter to confirm · Esc to cancel"])
@@ -2240,7 +2240,7 @@ class TestPaneGuard(CliCase):
         for pane, code in (("dt-attributedAsk", cli.PANE_AWAITING_OPERATOR),
                            ("dt-attributedTrust", cli.PANE_AWAITING_OPERATOR),
                            ("dt-glyphTrust", cli.PANE_AWAITING_OPERATOR),
-                           ("dt-attributedBusy", cli.PANE_AWAITING_OPERATOR)):
+                           ("dt-attributedBusy", cli.PANE_INDETERMINATE)):
             got, out, err = fleet.run(["pane-guard", "--porcelain", "--pane", pane])
             self.assertEqual(got, code, f"{pane}: {out}{err}")
 
