@@ -408,6 +408,14 @@ class TestReconcile(unittest.TestCase):
         self.assertTrue(s.note.strip(), "the park must survive as a note")
         self.assertIn(PARK_BUSY_Q, s.note)
 
+    def test_parked_note_does_not_flap_when_pane_turns_idle(self):
+        busy = self.subject("parkedBusy-07300306")
+        self.fleet.panes["dt-parkedBusy"] = QUIET_PANE
+        idle = next(s for s in self.fleet.reconcile() if s.identity == busy.identity)
+        self.assertEqual((busy.state, idle.state), (PARKED, PARKED))
+        self.assertEqual((busy.evidence["working"], idle.evidence["working"]), ("true", "false"))
+        self.assertEqual(busy.note, idle.note)
+
     def test_an_actionable_state_is_never_masked_by_a_standing_note(self):
         s = self.subject("parkedBlocked-07300307")
         self.assertEqual(s.state, "BLOCKED")
