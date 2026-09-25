@@ -51,7 +51,10 @@ title anticipated, and the moment of applying `done` is the last moment anybody 
 Correct a wrong title on the same id with `fleet milestone --instant <coordinator> --id <id>
 --retitle "<new title>" --reason "<why>"`. Read prior wording with `fleet milestone --instant
 <coordinator> --id <id> --history`. The row keeps its status, deps, owner and evidence. Retitle refuses
-done or dropped rows; reopen one through `apply --reopen` before correcting its title.
+done or dropped rows. First place a nonterminal status proposal on the coordinator's roadmap with
+`fleet propose --instant <proposer> --to <coordinator> --milestone <id> --status <status> --evidence <path>`;
+then the coordinator runs `fleet apply --instant <coordinator> --milestone <id> --reopen`. That application
+changes the row's status. Retitle only after the row is no longer terminal.
 
 ## 2. Readiness is derived — never store it
 
