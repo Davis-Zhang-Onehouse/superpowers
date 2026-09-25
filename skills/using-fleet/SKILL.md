@@ -93,7 +93,7 @@ Mutating. Each has `--dry-run`.
 | Verb | What it does |
 |---|---|
 | `fleet runtime` | read the saved runtime — the DEFAULT for dispatches that choose none; `--set claude` or `--set codex` changes it between completed runs |
-| `fleet send` | deliver a message file to an owned worker after observing an empty idle input |
+| `fleet send` | deliver a message file to an owned worker after observing an empty input, idle or mid-turn |
 | `fleet revive` | resume an explicit session UUID using the record’s runtime, model, workspace and configuration |
 | `fleet init` | bootstrap a new instant from the layout matrix |
 | `fleet dispatch` | evaluate every gate, then dispatch one worker |
@@ -162,10 +162,10 @@ stays an interrupt, with no row.
 
 `fleet pane-guard` has its own codes because it is a contract for an external monitor: `0` safe, `10`
 queued-text, `11` mid-turn, `12` not-claude, `13` unknown-pane, `14` indeterminate, `15` awaiting-operator.
-Branch on the code before any send.
+Branch on the code before any send: `0` and `11` admit `fleet send` only when its own observation confirms an empty input; `10`, `14` and `15` refuse.
 
 `14` means the pane is alive and nothing about it could be READ — a failed observation, not a negative one.
-Treat it as wait, never as permission: before a send everything but `0` waits anyway, but before a CLOSE the
+Treat it as wait, never as permission: before a send `14` waits, but before a CLOSE the
 difference is a live pane mid-turn being torn down (`FI-7`).
 
 `15` means the pane is showing an operator dialog — `AskUserQuestion`, the folder-trust screen (Codex 0.156's
@@ -232,10 +232,12 @@ fleet send --id "$ID" --message-file "$MESSAGE_FILE" --dry-run
 fleet send --id "$ID" --message-file "$MESSAGE_FILE"
 ```
 
-The command locks that pane, checks its ownership and empty idle input, pastes once, observes the draft,
-sends Enter once, and observes consumption. Busy, queued, modal and unfamiliar panes refuse.
-If delivery becomes uncertain, inspect the pane; do not retry automatically, clear a human's draft,
-or send an extra Enter. Immediate text-plus-Enter can lose the Enter on a real TUI (`FI-15`).
+The command locks that pane, checks its ownership and empty input (idle or mid-turn), pastes once,
+observes the draft, sends Enter and verifies that the input box empties. An empty busy pane queues
+the message behind its current turn and reports `queued-behind-turn`; idle delivery reports `submitted`.
+Queued text, an operator dialog and an indeterminate pane refuse. If the confirmed inserted draft
+remains after Enter, the command retries Enter once, then reports `inserted-not-submitted` if it still
+remains. If delivery is uncertain, inspect the pane before another send. Never clear another draft.
 
 **Multi-line messages are delivered whole (`FB-27`).** Both TUIs replace a large paste with a count summary —
 Claude Code draws `[Pasted text #N +M lines]` for four or more lines, codex `[Pasted Content C chars]` above
@@ -247,7 +249,7 @@ single-line `[Pasted text #N]`, which states no length at all), and the record s
 
 **Every send that reached the pane is recorded (`B13`)** in the worker's `.fleet/sends.jsonl`: when, by whom
 (`--by`, else the sender's own `FLEET_INSTANT`), the message's sha256, size and first line, the outcome
-(`submitted`; `uncertain-after-insertion` / `uncertain-after-enter` when the draft or its consumption could not
+(`submitted`, `queued-behind-turn`, `inserted-not-submitted`; `uncertain-after-insertion` / `uncertain-after-enter` when the draft or its consumption could not
 be confirmed; plain `uncertain` when the paste or the Enter could not be issued at all, so the pane may hold
 nothing) and how it was confirmed. A refusal before the paste wrote nothing into the pane and is not a row. `fleet brief --instant <worker>` reads it
 back on its `messages` row, so "who wrote into this pane" has a subject to join against. `--dry-run`
