@@ -168,6 +168,25 @@ attestation: `declare` says so, and it is only as good as your honesty.
 A watcher this tool OBSERVED on your pane is re-checked the same way: once it is no longer on the status
 line, the board reads NO WATCHER OBSERVABLE and disregards the claim — it is never relabelled ATTESTED.
 
+**Re-arming a Monitor needs no re-declare.** A FRESH watcher on your status line backs the claim you already
+made, so the board reads `AWAITING-CI` again the moment the new Monitor is drawn. Between two Monitors the
+claim is disregarded for the seconds nothing is on the pane, and it comes back on the next read — so re-arm
+promptly, in the same turn the old one's expiry woke you. For the first **5 minutes** after you declare
+(`WATCHER_GRACE_S`, measured from the declaration's own stamp and never renewed) a missing watcher does not
+void the claim: the board says `GRACE` and when it ends. After that it is voided at once, however the watcher
+went; a grace never keeps a dead watcher out of the cap.
+
+**Told to wait with nothing to watch? Declare `holding`, not `awaiting-ci`.**
+
+```bash
+fleet declare --instant "$INSTANT" --phase holding --reason "coordinator: hold until S4 lands" --for 2h
+```
+
+The reason is required and shown on the board; `--for` defaults to 1 h and may not exceed 4 h. While it
+stands your row reads `HOLDING` and you do not count against the WIP cap; once it passes the hold is
+disregarded (`HOLD EXPIRED`) and you count again. Renewing is another typed `declare` with a reason. `complete`
+refuses while you are holding, as it does while you are `awaiting-ci`.
+
 **A claim nothing backs is disregarded, not believed.** With no watcher on your pane and no genuine
 attestation standing — nothing recorded, an observed watcher since gone, or an attested pid that exited —
 `reconcile` sets the phase aside: your row is not `AWAITING-CI`, you count

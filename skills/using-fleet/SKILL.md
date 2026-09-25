@@ -102,7 +102,7 @@ Mutating. Each has `--dry-run`.
 | `fleet propose` | the worker's status proposal; never a roadmap write |
 | `fleet apply` | the coordinator applies a proposal; the single writer of a status. Lands the NEWEST pending row for the milestone (`--at <stamp>` picks one) and closes the earlier ones as superseded; moving a done/dropped milestone needs a pending nonterminal proposal on the coordinator's roadmap and `--reopen`, which changes the row's status |
 | `fleet withdraw` | close pending proposals without applying them (`--at` for one row, `--reason` required); writes the inbox, never the roadmap |
-| `fleet declare` | declare a phase, and print what the consumer now reads; `awaiting-ci` is REFUSED unless a watcher is armed or named with `--watcher` (add `pid:<n>` so the board drops the claim once that process exits) |
+| `fleet declare` | declare a phase, and print what the consumer now reads; `awaiting-ci` is REFUSED unless a watcher is armed or named with `--watcher` (add `pid:<n>` so the board drops the claim once that process exits); a fresh watcher renews an old claim, and a missing one is tolerated only in the 5 min after the claim (`GRACE`). `holding` needs `--reason` and lasts `--for` (default 1h, max 4h): the cap excludes it until then |
 | `fleet park` / `fleet unpark` | record or clear a parked decision as structured state |
 | `fleet review` | record a structured round and report the gate |
 | `fleet complete` | pass the gate, then rename the folder `-complete-` |
