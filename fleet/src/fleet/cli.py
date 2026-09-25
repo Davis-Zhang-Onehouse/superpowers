@@ -1845,10 +1845,18 @@ def _predict_trust(ctx, settings, cwd, environ=None) -> "trust.TrustPrediction":
     """`trust.predict` for this launch, under the environment the worker will be started with (`environ`, the
     launcher's own overlay, else `ctx.launch_environment`) over this process's. Read-only; never raises."""
     try:
-        #: Final review M3. `CLAUDE_CODE_SANDBOXED` is read from fleet's OWN environment plus the launch overlay, not
-        #: the tmux server's environment the pane inherits, so the prediction may say trusted while the pane still
-        #: shows the screen (or the reverse). The post-launch watch is the ground truth; this row is advice.
+        #: Final review M3. fleet cannot read the tmux server's environment the pane inherits, so the prediction is
+        #: advice and the post-launch watch is the ground truth. A variable set on the server only (not in fleet's
+        #: environment) can still make the pane skip a screen the prediction expects.
         overlay = environ if environ is not None else (ctx.launch_environment or {})
+        #: RV-27. The pane's environment is the tmux server's plus what the launcher exports
+        #: (`runtime_launch.EXPORTED_FROM_ENVIRON`). A CLAUDE_CODE_SANDBOXED the launcher does not export — only in
+        #: fleet's own environment, or in an overlay copied from it — cannot predict the pane either way.
+        sandbox = "CLAUDE_CODE_SANDBOXED"
+        exported = sandbox in runtime_launch.EXPORTED_FROM_ENVIRON and overlay.get(sandbox)
+        if settings.runtime != "codex" and (os.environ.get(sandbox) or overlay.get(sandbox)) and not exported:
+            return trust.TrustPrediction(trust.UNKNOWN, "", f"{sandbox} is set in fleet's environment; the pane's "
+                                                            f"is the tmux server's")
         return trust.predict(settings.runtime, settings.config_dir, cwd, environ={**os.environ, **overlay})
     except Exception as exc:  # noqa: BLE001 - a prediction is advice; it must never refuse or fail a launch
         return trust.TrustPrediction(trust.UNKNOWN, "", _one_line(f"{type(exc).__name__}: {exc}"))

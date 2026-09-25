@@ -298,6 +298,61 @@ class TestTheWatchRunsOutsideTheAdmissionLock(CliCase):
         self.assertEqual(7, ctx.after_admission[0]())
 
 
+class TestTheSandboxVariableIsTheLaunchers(unittest.TestCase):
+    """RV-27. The pane's environment is the tmux server's plus what the launcher exports, so a
+    CLAUDE_CODE_SANDBOXED that only fleet's own process carries says nothing about the pane."""
+
+    REASON = "CLAUDE_CODE_SANDBOXED is set in fleet's environment; the pane's is the tmux server's"
+
+    def setUp(self):
+        import shutil
+        import tempfile
+        self.cfg = pathlib.Path(tempfile.mkdtemp())
+        self.addCleanup(shutil.rmtree, self.cfg, True)
+        self.settings = LaunchSettings("claude", "/test/bin/claude", str(self.cfg))
+        self.ctx = type("C", (), {"launch_environment": None})()
+
+    def predict(self, os_env, overlay):
+        with mock.patch.dict(os.environ, os_env, clear=False):
+            if "CLAUDE_CODE_SANDBOXED" not in os_env:
+                os.environ.pop("CLAUDE_CODE_SANDBOXED", None)
+            return cli._predict_trust(self.ctx, self.settings, str(self.cfg), environ=overlay)
+
+    def test_set_only_in_fleets_environment_is_unknown(self):
+        got = self.predict({"CLAUDE_CODE_SANDBOXED": "1"}, {"FLEET_HOME": "/h"})
+        self.assertEqual((cli.trust.UNKNOWN, "", self.REASON), (got.state, got.key, got.detail))
+
+    def test_inherited_into_the_overlay_but_not_exported_by_the_launcher_is_unknown(self):
+        """The production shape: `launch_environment` is a copy of os.environ, and the launcher exports only
+        its allowlist, which does not carry the variable."""
+        got = self.predict({"CLAUDE_CODE_SANDBOXED": "1"}, {"CLAUDE_CODE_SANDBOXED": "1", "FLEET_HOME": "/h"})
+        self.assertEqual((cli.trust.UNKNOWN, self.REASON), (got.state, got.detail))
+
+    def test_exported_by_the_launcher_is_trusted(self):
+        from fleet import runtime_launch
+        with mock.patch.object(runtime_launch, "EXPORTED_FROM_ENVIRON",
+                               (*runtime_launch.EXPORTED_FROM_ENVIRON, "CLAUDE_CODE_SANDBOXED")):
+            got = self.predict({}, {"CLAUDE_CODE_SANDBOXED": "1"})
+        self.assertEqual(cli.trust.TRUSTED, got.state, got)
+
+    def test_unset_everywhere_reads_the_config_as_before(self):
+        got = self.predict({}, {"FLEET_HOME": "/h"})
+        self.assertEqual(cli.trust.UNTRUSTED, got.state, got)
+
+    def test_codex_is_still_not_predicted(self):
+        settings = LaunchSettings("codex", "/test/bin/codex", str(self.cfg))
+        with mock.patch.dict(os.environ, {"CLAUDE_CODE_SANDBOXED": "1"}):
+            got = cli._predict_trust(self.ctx, settings, str(self.cfg), environ={})
+        self.assertEqual(cli.trust.NOT_PREDICTED, got.state)
+
+    def test_the_launcher_exports_exactly_its_allowlist_from_the_environment(self):
+        """The constant the rule reads is the one `prepare` uses."""
+        from fleet import runtime_launch
+        import inspect
+        self.assertIn("EXPORTED_FROM_ENVIRON", inspect.getsource(runtime_launch.prepare))
+        self.assertNotIn("CLAUDE_CODE_SANDBOXED", runtime_launch.EXPORTED_FROM_ENVIRON)
+
+
 class TestReviveReportsTheTrustScreen(CliCase):
 
     def test_a_revive_at_the_trust_screen_says_observed(self):
