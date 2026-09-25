@@ -546,6 +546,29 @@ class ServerGuardian(unittest.TestCase):
             time.sleep(0.1)
         self.assertFalse(self.server_up(), "private server survived its runner's SIGKILL")
 
+    def test_a_guardian_whose_directory_is_gone_touches_no_other_server(self):
+        """RV-38. The guardian kills `TMUX_TMPDIR=<dir> tmux -L <sock>`. When <dir> is gone first (a hermetic test's
+        tmp removed before the 2 s poll notices the runner died), tmux falls back to /tmp, so the kill reached
+        `/tmp/tmux-<uid>/<sock>` — the operator's directory; the suite's tripwire caught it charged to other tests."""
+        sockdir = self.tmp / "sockdir"
+        sockdir.mkdir()
+        self.env["TMUX_TMPDIR"] = str(sockdir)
+        #: setUp's kill-server cleanup shares this dict; point it back before it runs, not at the removed directory.
+        self.addCleanup(self.env.__setitem__, "TMUX_TMPDIR", str(self.tmp))
+        with tests.expect_tripwire() as seen:
+            p = self.start_runner()
+            guardian = int((self.it / ".guardians" / f"{self.socket}.pid").read_text())
+            subprocess.run(["tmux", "-L", self.socket, "kill-server"], capture_output=True, env=self.env)
+            shutil.rmtree(sockdir)
+            p.kill()
+            p.wait()
+            for _ in range(100):                      # the guardian polls every 2 s, then acts and exits
+                if not pathlib.Path(f"/proc/{guardian}").exists():
+                    break
+                time.sleep(0.1)
+            self.assertFalse(pathlib.Path(f"/proc/{guardian}").exists(), "the guardian never finished")
+        self.assertEqual(seen, [], "the guardian ran tmux against a server in another directory")
+
     def test_server_is_not_reaped_while_the_runner_lives(self):
         self.start_runner()
         time.sleep(5)
