@@ -151,7 +151,7 @@ class VerbsJudgeThePaneByItsOwningAgent(unittest.TestCase):
         row = self.board_row(record)
         self.assertNotIn('differs from record runtime', row)
         self.assertIn('\tRUNNING\t', row)
-        self.assertEqual(row.split('\t')[-1], '204', 'nested PID must remain visible on the worker row')
+        self.assertEqual(row.split('\t')[-2], '204', 'nested PID must remain visible on the worker row')
         code, out, err = self.f.run(['pane-guard', '--id', record.todo_id])
         self.assertEqual(code, 11, out + err)
         code, out, err = self.f.run(['close', '--id', record.todo_id])
