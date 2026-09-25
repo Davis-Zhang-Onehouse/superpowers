@@ -141,12 +141,13 @@ class AttributionRule(unittest.TestCase):
         self.assertNotIn(501, att.pids(REAP), "a unit with a child outside it was reaped")
 
     def test_an_orphan_that_is_not_a_session_leader_is_named(self):
-        facts = table(Proc(700, 1, "s", ("tail", "-F", f"{INST}/x"), sid=650, children=()))
+        facts = table(Proc(700, 1, "s", ("tail", "-F", f"{INST}/x"), sid=650, children=(), started_at=LATER))
         att = orphans.attribute([700], facts.get, self.spell(), not_before=LAUNCHED)
         self.assertEqual(att.pids(NAME), [700])
 
     def test_an_orphan_with_a_terminal_is_named(self):
-        facts = table(Proc(700, 1, "s", ("tail", "-F", f"{INST}/x"), sid=700, tty=34817, children=()))
+        facts = table(Proc(700, 1, "s", ("tail", "-F", f"{INST}/x"), sid=700, tty=34817, children=(),
+                           started_at=LATER))
         att = orphans.attribute([700], facts.get, self.spell(), not_before=LAUNCHED)
         self.assertEqual(att.pids(NAME), [700])
 
@@ -447,6 +448,22 @@ class HarvestReapsAttributed(CliCase):
         self.assertEqual(code, EXIT_OK, out + err)
         self.assertEqual([pid for pid, _ in facts.sent], [501])
         self.assertIsNone(fleet.pool.lease("ws1"))
+
+    def test_a_slot_re_leased_to_another_worker_is_never_reaped_from(self):
+        """FB-89's shape: the record's slot now belongs to a successor, whose own process may well tail its
+        predecessor's evidence from that slot. Neither close nor harvest may attribute anything there."""
+        from tests.test_cli import FOREIGN_BASE
+        fleet = self.fleet()
+        facts = FactsFixture(fleet)
+        path = self.harvestable(fleet)
+        fleet.pool.release("ws1", force=True)
+        fleet.pool.claim(todo_id="successor-0001", tmux="dt-successor", base_instant=FOREIGN_BASE,
+                         child_instant="/elsewhere", slot="ws1")
+        facts.hold("ws1", *self.pipeline_for(path))
+        for argv in (["close", "--id", fleet.ids["doneWorker"]], ["harvest", "--id", fleet.ids["doneWorker"]]):
+            fleet.run(argv)
+            self.assertEqual(facts.sent, [], f"{argv[0]} signalled a process in a slot leased to someone else")
+        self.assertEqual(fleet.pool.lease("ws1").todo_id, "successor-0001")
 
     def test_abort_is_unchanged(self):
         """D-4: abort keeps today's refusal for an orphan it could attribute."""
