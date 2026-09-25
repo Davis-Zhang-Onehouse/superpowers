@@ -13,6 +13,7 @@ Two structural rules run through the whole file:
 * **The input subjects are the only source of a state value.** `reconcile` is the one producer; these
   tests treat its output as given and check that the views transport it unchanged.
 """
+import tests  # noqa: F401 — installs the suite's host boundary when this module runs alone (FB-118)
 import ast
 import pathlib
 import re

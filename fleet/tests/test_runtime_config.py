@@ -1,3 +1,4 @@
+import tests  # noqa: F401 — installs the suite's host boundary when this module runs alone (FB-118)
 import json
 import multiprocessing
 from pathlib import Path

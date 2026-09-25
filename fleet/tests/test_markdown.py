@@ -5,6 +5,7 @@ Two gates used to scan `HANDOFF.md` line by line with no fence / comment state, 
 lint violation. `recipes_of` and `lint-skill.py` each carried a private fence tracker. This module is the
 single copy, and these tests pin the grammar every consumer now shares.
 """
+import tests  # noqa: F401 — installs the suite's host boundary when this module runs alone (FB-118)
 import unittest
 
 from fleet.markdown import COMMENT, FENCE, PROSE, fenced, lines, prose

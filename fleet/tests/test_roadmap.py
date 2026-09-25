@@ -17,6 +17,7 @@ coordinator about updating roadmap status."* Three properties carry the weight a
    either an existing register **or** a declared future owner with a creation condition; an unclaimed
    deferred owner is *reported with its clearing actor*, and claiming it clears the report.
 """
+import tests  # noqa: F401 — installs the suite's host boundary when this module runs alone (FB-118)
 import json
 import pathlib
 import shutil

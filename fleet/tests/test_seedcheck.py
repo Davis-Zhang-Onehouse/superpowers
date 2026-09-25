@@ -10,6 +10,7 @@ The two measurement errors that inverted the answer while this was being written
 below — `test_argv_is_split_on_nul_not_newline` and `test_not_delivered_is_not_a_pass` — because both read
 exactly like "no defect" and both were believed for a while.
 """
+import tests  # noqa: F401 — installs the suite's host boundary when this module runs alone (FB-118)
 import pathlib
 import shutil
 import unittest

@@ -1,3 +1,4 @@
+import tests  # noqa: F401 — installs the suite's host boundary when this module runs alone (FB-118)
 import json, pathlib, shutil, tempfile, unittest
 from fleet.store import SCHEMA_VERSION, Record, Store, Declarations
 from fleet.errors import AmbiguousId, BadInput

@@ -18,6 +18,7 @@ This is a dev-time check written in stdlib. No linter is installed on this box, 
 no-third-party-imports rule is about what `fleet` needs at RUNTIME — but writing it in stdlib means it runs
 anywhere the suite runs, which is the only way it actually gets run.
 """
+import tests  # noqa: F401 — installs the suite's host boundary when this module runs alone (FB-118)
 import builtins
 import pathlib
 import symtable

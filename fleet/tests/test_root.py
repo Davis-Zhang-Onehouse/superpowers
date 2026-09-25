@@ -4,6 +4,7 @@ The walk is the whole of "which fleet am I in", so its boundaries are asserted r
 especially the one that does NOT fire (a marker at `$HOME`), because a deliberate non-effect that nobody
 tests is indistinguishable from a bug.
 """
+import tests  # noqa: F401 — installs the suite's host boundary when this module runs alone (FB-118)
 import json
 import pathlib
 import tempfile

@@ -1,4 +1,5 @@
 """Runtime decisions against attributed captures and hostile lookalikes."""
+import tests  # noqa: F401 — installs the suite's host boundary when this module runs alone (FB-118)
 import json
 from pathlib import Path
 import unittest

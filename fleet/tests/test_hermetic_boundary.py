@@ -62,6 +62,25 @@ class TheSuiteBoundary(unittest.TestCase):
                 self.assertEqual(value, str(FIXTURES / "bin" / "no-real-runtime"), f"{name} {where}")
 
 
+class EveryModuleInstallsTheBoundary(unittest.TestCase):
+    """RV-15. The boundary is installed when the `tests` package is imported. `discover -s tests -p <one module>`
+    without `-t .` imports the module as a top-level name, so a module that never imports `tests` ran with none —
+    and test_root_resolution's fixture root `davis` derives the socket `fleet-davis`, the live server's name."""
+
+    def test_every_test_module_imports_the_tests_package_at_top_level(self):
+        import ast
+        missing = []
+        for path in sorted(FIXTURES.parent.glob("test_*.py")):
+            tree = ast.parse(path.read_text())
+            imports = [node for node in tree.body if isinstance(node, (ast.Import, ast.ImportFrom))]
+            if not any((isinstance(n, ast.Import) and any(a.name == "tests" or a.name.startswith("tests.")
+                                                         for a in n.names))
+                       or (isinstance(n, ast.ImportFrom) and (n.module or "").split(".")[0] == "tests")
+                       for n in imports):
+                missing.append(path.name)
+        self.assertEqual(missing, [], "these modules run with no host boundary when run alone")
+
+
 class TheBoundaryInAChild(unittest.TestCase):
     """RV-27. A child that inherits the suite's environment reuses it; one that inherits only a stale marker (a leaked
     FLEET_SUITE_TRIPWIRE, say from a tmux server's global environment) must build its own boundary, not trust it."""

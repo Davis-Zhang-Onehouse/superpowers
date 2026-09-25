@@ -1,6 +1,7 @@
 """B25: the mutation runner's extractor takes the ONE anchored block or refuses, and every injection anchor
 is unique in the tree it targets. RED: the w2itharness instant's evidence/01-red/b25-decoy-*-base.txt (a
 1-line decoy certified as the audit; mutants 3/4 SURVIVED without being injected)."""
+import tests  # noqa: F401 — installs the suite's host boundary when this module runs alone (FB-118)
 import importlib.util
 import pathlib
 import re

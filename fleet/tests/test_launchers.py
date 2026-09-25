@@ -12,6 +12,7 @@ FB-31. `scripts/release-postflight.sh` was committed at mode 100644, so the docu
 `scripts/release-postflight.sh X.Y.Z` failed with rc=126 for two release workers in a row. Nothing checked
 the bit.
 """
+import tests  # noqa: F401 — installs the suite's host boundary when this module runs alone (FB-118)
 import os
 import pathlib
 import runpy

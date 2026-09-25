@@ -6,6 +6,7 @@ cases pin the one resolver every stage now asks: a URL passes untouched, a relat
 instant's folder (re-resolved through the rename), and an absolute item re-resolves every instant folder it
 names that was renamed.
 """
+import tests  # noqa: F401 — installs the suite's host boundary when this module runs alone (FB-118)
 import os
 import pathlib
 import shutil

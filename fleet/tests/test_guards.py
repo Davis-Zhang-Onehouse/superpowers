@@ -14,6 +14,7 @@ delta across the filesystem, the record store AND the pool.
 The whole fleet is built through the injected probes (`Probes`, `cwd_probe`, `alive`): nothing here starts
 a process, a tmux or a repository, and nothing reads a `.md` file for a control signal.
 """
+import tests  # noqa: F401 — installs the suite's host boundary when this module runs alone (FB-118)
 import json
 import os
 import pathlib

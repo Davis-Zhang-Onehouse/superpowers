@@ -1,3 +1,4 @@
+import tests  # noqa: F401 — installs the suite's host boundary when this module runs alone (FB-118)
 import pathlib, tempfile, unittest
 from fleet.identity import InstantName
 from fleet.layout import (DUE_LATER, FORBIDDEN, OPTIONAL, REQUIRED, SPEC_VERSION,

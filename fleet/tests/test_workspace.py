@@ -1,4 +1,5 @@
 # tests/test_workspace.py
+import tests  # noqa: F401 — installs the suite's host boundary when this module runs alone (FB-118)
 import pathlib, tempfile, unittest
 from fleet.workspace import BaseCheck, Workspace
 from fleet.errors import BadInput

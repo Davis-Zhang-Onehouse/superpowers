@@ -1,3 +1,4 @@
+import tests  # noqa: F401 — installs the suite's host boundary when this module runs alone (FB-118)
 import os, pathlib, re, shutil, subprocess, sys, time, unittest, uuid
 from fleet.session import (TMUX_SOCKET_ENV, LiveSession, Probes, SessionLayer, default_probes,
                            exact_pane_target, exact_session_target)
