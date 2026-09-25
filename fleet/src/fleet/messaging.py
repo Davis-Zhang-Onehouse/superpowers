@@ -108,30 +108,35 @@ def _is_scrolled_tail(draft, text) -> bool:
     #: must be exactly the last rows of the whole message wrapped at one width. Claude Code wraps greedily at word
     #: boundaries: every real scrolled frame re-wraps this way (80 columns -> width 76). Only a head lost in WHOLE
     #: rows still passes, and nothing in a frame can tell that from a scroll.
-    rows = [" ".join(row.split()) for row in draft.split("\n")]
+    #: RV-27. Rows are compared as drawn, spacing kept: Claude Code draws a run of spaces as typed (measured:
+    #: "nine.  Two"), and its rows break earlier than a squashed wrap would.
+    rows = [row.strip() for row in draft.split("\n")]
     #: RV-24. Each hard line wraps on its own (measured: a tall 2-line box shows its last line's rows), so the
     #: message's rows are its lines' rows, in order. A width past the longest line wraps nothing, so no wider one
     #: can draw anything new.
-    lines = [line.split() for line in text.strip().split("\n")]
-    longest = max(len(" ".join(line)) for line in lines)
+    lines = text.strip().split("\n")
+    longest = max(map(len, lines))
     return any(_rows(lines, width)[-len(rows):] == rows for width in range(max(map(len, rows)), longest + 2))
 
 
 def _rows(lines, width) -> list:
     """Every row of a message whose hard `lines` are each wrapped at `width`."""
-    return [row for words in lines for row in _wrap(words, width)]
+    return [row for line in lines for row in _wrap(line, width)]
 
 
-def _wrap(words, width) -> list:
-    """`words` wrapped greedily at `width`, the way Claude Code draws a paste in its box."""
-    rows, row = [], ""
-    for word in words:
-        if row and len(row) + 1 + len(word) > width:
+def _wrap(line, width) -> list:
+    """One hard `line` wrapped the way Claude Code draws it in its box: split at single spaces (a run of spaces leaves
+    empty tokens, so the spacing keeps its width), greedy, each row trimmed."""
+    rows, row = [], None
+    for token in line.split(" "):
+        if row is None:
+            row = token
+        elif row.strip() and len(row) + 1 + len(token) > width:
             rows.append(row)
-            row = word
+            row = token
         else:
-            row = f"{row} {word}" if row else word
-    return rows + [row]
+            row = f"{row} {token}"
+    return [r.strip() for r in rows + [row or ""]]
 
 
 def digest(text: str) -> str:

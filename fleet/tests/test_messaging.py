@@ -98,6 +98,35 @@ class MessagingTests(unittest.TestCase):
         with self.subTest('a head-lost first line re-wrapped into the last line is still refused'):
             self.assertIsNone(confirms('claude', '\n'.join(self.wrapped(('Reply OK. ' + long).split())[-5:]), text))
 
+    @staticmethod
+    def drawn(line, width=76):
+        """Rows as Claude Code 2.1.282 draws one hard line with its spacing kept: split at single spaces (a run of spaces
+        leaves empty tokens), greedy, each row trimmed. Checked below against the real double-spaced frame."""
+        rows, row = [], None
+        for token in line.split(' '):
+            if row is None:
+                row = token
+            elif row.strip() and len(row) + 1 + len(token) > width:
+                rows.append(row)
+                row = token
+            else:
+                row = f'{row} {token}'
+        return [r.strip() for r in rows + [row or '']]
+
+    def test_a_tall_double_spaced_message_confirms_by_its_drawn_rows(self):
+        """RV-27. Claude Code draws runs of spaces as typed (measured on 2.1.282: "nine.  Two"), so its rows break
+        earlier than a squashed wrap predicts. The row check must wrap the raw spacing."""
+        real = '  '.join('Two spaces follow each sentence here, sentence %d of nine.' % i for i in range(1, 10))
+        tail = self.scrolled('claude-scrolled-box-2spaces-282.frame')
+        self.assertIn('nine.  Two', tail.draft)
+        self.assertEqual([r.strip() for r in tail.draft.split('\n')], self.drawn(real)[-5:])   # the model is the real one
+        self.assertEqual(CONFIRMED_BY_DRAFT_TAIL, confirms('claude', tail.draft, real + '\n'))
+        #: One of the messages whose drawn rows a squashed wrap never reproduces at any width (found by search).
+        words = 'alpha beta gamma delta epsilon zeta eta theta iota kappa lambda mu nu xi omicron pi rho sigma tau'.split()
+        text = '  '.join('%s %s sentence number %d of the list.' % (words[i * 2 % 19], words[i * 3 % 19], i)
+                         for i in range(1, 12))
+        self.assertEqual(CONFIRMED_BY_DRAFT_TAIL, confirms('claude', '\n'.join(self.drawn(text)[-5:]), text))
+
     def test_a_tail_seen_once_is_never_submitted(self):
         """The tail cannot show the head, so it must agree across two consecutive frames before any Enter."""
         tail = self.scrolled('claude-scrolled-box-282.frame')
