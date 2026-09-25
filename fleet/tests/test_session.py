@@ -516,6 +516,31 @@ class TestAgainstRealTmux(unittest.TestCase):
         self.assertIs(self.probes.panes_dead(self.long), False)
         self.assertIsNone(self.probes.panes_dead(f"{self.long}-missing"))
 
+    def test_panes_dead_needs_every_pane_dead(self):
+        """FB-130 RV-21. One dead pane beside a live one is NOT a dead session: the live pane may be the agent, and a
+        teardown that short-circuited on it would skip the observation of a live box."""
+        mixed = f"{self.long}-mixed"
+        started = subprocess.run(self.TMUX + ["new-session", "-d", "-s", mixed, "exec sleep 60"],
+                                 capture_output=True, text=True)
+        self.assertEqual(started.returncode, 0, started.stderr)
+        self.addCleanup(subprocess.run, self.TMUX + ["kill-session", "-t", exact_session_target(mixed)],
+                        capture_output=True)
+        subprocess.run(self.TMUX + ["set-option", "-w", "-t", f"={mixed}:", "remain-on-exit", "on"], check=True,
+                       capture_output=True)
+        subprocess.run(self.TMUX + ["split-window", "-t", f"={mixed}:", "exec sleep 61"], check=True,
+                       capture_output=True)
+        first = int(subprocess.run(self.TMUX + ["list-panes", "-s", "-t", exact_session_target(mixed), "-F",
+                                                "#{pane_pid}"], capture_output=True, text=True).stdout.split()[0])
+        os.kill(first, 15)
+        deadline = time.monotonic() + 5
+        flags = ""
+        while "1" not in flags.split() and time.monotonic() < deadline:
+            time.sleep(0.05)
+            flags = subprocess.run(self.TMUX + ["list-panes", "-s", "-t", exact_session_target(mixed), "-F",
+                                                "#{pane_dead}"], capture_output=True, text=True).stdout
+        self.assertEqual(sorted(flags.split()), ["0", "1"], "the fixture is not one dead pane beside a live one")
+        self.assertIs(self.probes.panes_dead(mixed), False)
+
     def test_pane_commands_reads_every_panes_foreground(self):
         """FB-130 RV-13. tmux's `pane_current_command` for every pane: a two-pane session lists both, the fixture's own
         session reads its shell, and a session that does not exist is unobservable (None), never `[]`."""
