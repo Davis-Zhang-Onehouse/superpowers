@@ -158,7 +158,7 @@ def _dialog_row(runtime: RuntimeName, visible: list[str]) -> bool:
 
 
 def _claude_draft(rows, frame):
-    draft = claude_unsubmitted(frame)
+    draft = _claude_first_line(frame)
     if not draft:
         return draft
     # The measured multiline editor has a caret row followed by indented
@@ -168,7 +168,8 @@ def _claude_draft(rows, frame):
             content = [draft]
             for row in rows[index + 1:]:
                 visible = plain(row)
-                if not visible.startswith('  ') or any(c in visible for c in '─━'):
+                if (not visible.startswith('  ') or any(c in visible for c in '─━')
+                        or visible.lstrip().startswith(('⏵⏵', '? for shortcuts'))):
                     break
                 content.append(_undim(_cells(row)[2:]))
             return '\n'.join(content).strip()
@@ -500,7 +501,7 @@ def _is_placeholder(content: str) -> bool:
     return any(pattern.search(content) for pattern in _PLACEHOLDERS)
 
 
-def claude_unsubmitted(pane_text: str) -> Optional[str]:
+def _claude_first_line(pane_text: str) -> Optional[str]:
     """Text sitting in the input box that was never submitted, or None.
 
     The input box is identified STRUCTURALLY: it is the **last** caret among the rendered rows,
@@ -533,6 +534,26 @@ def claude_unsubmitted(pane_text: str) -> Optional[str]:
     if not box or _is_placeholder(box):
         return None
     return box
+
+
+def claude_unsubmitted(pane_text: str) -> Optional[str]:
+    """The complete current draft, including continuation rows inside the input box."""
+    return _claude_draft(_rendered(pane_text), pane_text)
+
+
+def annotate_placeholders(frame: str) -> str:
+    """Make dim suggestion rows explicit in an exported pane capture."""
+    annotated = []
+    for row in frame.splitlines(keepends=True):
+        cells = _trim(_cells(row))
+        while cells and cells[0][0] in _GUTTER:
+            cells = _trim(cells[1:])
+        if cells and cells[0][0] in ('❯', '›'):
+            body = _trim(cells[1:])
+            if body and any(dim and not char.isspace() for char, dim in body) and not _undim(body):
+                row = '[placeholder] ' + row
+        annotated.append(row)
+    return ''.join(annotated)
 
 
 def claude_busy(pane_text: str) -> bool:

@@ -17,6 +17,8 @@ SEND_SCHEMA_VERSION = 1
 #: The outcomes a send can end in once it has pasted. A refusal BEFORE the paste is not one of these: it
 #: wrote nothing into the pane, and the record is a record of what was written there.
 SUBMITTED = "submitted"
+QUEUED_BEHIND_TURN = "queued-behind-turn"
+INSERTED_NOT_SUBMITTED = "inserted-not-submitted"
 UNCERTAIN_AFTER_INSERTION = "uncertain-after-insertion"
 UNCERTAIN_AFTER_ENTER = "uncertain-after-enter"
 UNCERTAIN = "uncertain"
@@ -38,12 +40,12 @@ def validate_message(text):
 
 
 def not_idle(record) -> Refused:
-    """The one refusal for a pane that is not observed idle, raised by the real send and by `send --dry-run`
+    """The one refusal for a pane without a known empty idle or busy input, raised by real and dry-run
     alike (RV-24): two copies had already drifted to different words and a different actor."""
-    return Refused('Message not sent: the worker must have an observed empty idle input',
-                   clears_when=f'`fleet pane-guard --pane {record.tmux}` exits 0 (idle, empty input), '
+    return Refused('Message not sent: the worker must have an observed empty input, idle or mid-turn; queued text, an operator dialog and an unreadable pane are refused',
+                   clears_when=f'`fleet pane-guard --pane {record.tmux}` exits 0 (idle) or 11 (mid-turn), with an empty input, '
                                f'then `fleet send` is re-run',
-                   clears_who=f'the worker in {record.tmux}, by finishing its turn')
+                   clears_who=f'the owner of {record.tmux}, by resolving its draft or dialog or restoring a readable pane')
 
 
 def _squash(text) -> str:
@@ -190,7 +192,8 @@ def send(home, sessions, record, text, *, timeout_s=10.0, clock=time.monotonic,
     with pane_lock(home, sessions.socket, record.tmux):
         if validate:
             validate()
-        if sessions.observe(record.tmux).state != 'idle':
+        before = sessions.observe(record.tmux)
+        if before.state not in ('idle', 'busy') or before.draft:
             raise not_idle(record)
         outcome, confirmation = UNCERTAIN, ""
         failed_record = None
@@ -199,7 +202,7 @@ def send(home, sessions, record, text, *, timeout_s=10.0, clock=time.monotonic,
             deadline = clock() + timeout_s
             while True:
                 observation = sessions.observe(record.tmux)
-                if observation.state == 'queued':
+                if observation.state in ('queued', 'busy'):
                     confirmation = confirms(runtime, observation.draft, text) or ""
                     if confirmation:
                         break
@@ -212,12 +215,24 @@ def send(home, sessions, record, text, *, timeout_s=10.0, clock=time.monotonic,
                 sleep(0.02)
             sessions.submit(record.tmux)
             deadline = clock() + timeout_s
+            retried = False
             while True:
                 observation = sessions.observe(record.tmux)
                 if observation.state in ('busy', 'idle') and not observation.draft:
-                    outcome = SUBMITTED
+                    outcome = QUEUED_BEHIND_TURN if before.state == 'busy' else SUBMITTED
                     break
-                if observation.state == 'dialog' or clock() >= deadline:
+                if observation.state == 'dialog':
+                    outcome = UNCERTAIN_AFTER_ENTER
+                    raise FleetError('Delivery uncertain after Enter; inspect the worker before retrying')
+                if clock() >= deadline:
+                    if observation.draft and confirms(runtime, observation.draft, text):
+                        if not retried:
+                            sessions.submit(record.tmux)
+                            retried = True
+                            deadline = clock() + timeout_s
+                            continue
+                        outcome = INSERTED_NOT_SUBMITTED
+                        raise FleetError('Message inserted-not-submitted after two Enter attempts; the input box still holds it')
                     outcome = UNCERTAIN_AFTER_ENTER
                     raise FleetError('Delivery uncertain after Enter; inspect the worker before retrying')
                 sleep(0.02)

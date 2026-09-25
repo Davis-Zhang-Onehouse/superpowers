@@ -26,6 +26,20 @@ class RuntimeTests(unittest.TestCase):
                 self.assertEqual(actual.state, 'queued')
                 self.assertEqual(actual.draft, 'Reply with these two words only:\nMULTILINE READY')
 
+    def test_claude_guard_reads_full_multiline_draft(self):
+        from fleet.runtime import claude_unsubmitted
+        frame = (Path(__file__).resolve().parents[1] / 'it/fixtures/runtime/claude-multiline.frame').read_text()
+        self.assertEqual(claude_unsubmitted(frame), 'Reply with these two words only:\nMULTILINE READY')
+
+    def test_dim_suggestions_are_marked_in_capture_and_never_drafts(self):
+        from fleet.runtime import annotate_placeholders
+        frames = (('claude', '❯\u00a0\x1b[2mfix RV-29 too\x1b[0m\n? for shortcuts\n'),
+                  ('codex', '\x1b[1m›\x1b[0m \x1b[2mcontinue\x1b[0m\n\n  gpt-6-sol medium · /tmp/project\n'))
+        for runtime, frame in frames:
+            with self.subTest(runtime=runtime):
+                self.assertEqual(observe(runtime, frame).draft, None)
+                self.assertIn('[placeholder] ', annotate_placeholders(frame))
+
     def test_invalid_runtime_is_always_bad_input(self):
         for value in (None, [], {}, True, 1, '', 'gpt', 'Claude'):
             with self.subTest(value=value), self.assertRaises(BadInput):

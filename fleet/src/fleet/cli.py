@@ -1687,7 +1687,8 @@ def _do_send(ctx: Ctx, parsed: Parsed) -> int:
     child = _child_of(ctx, record)
     sha = messaging.digest(text)
     if ctx.dry_run:
-        if layer.observe(record.tmux).state != 'idle':
+        observation = layer.observe(record.tmux)
+        if observation.state not in ('idle', 'busy') or observation.draft:
             raise messaging.not_idle(record)
         #: RV-45 (RV-24's shape, one row along): the dry-run and the real call emit the SAME row set.
         _emit(ctx, 'send', [('todo_id', record.todo_id), ('delivery', 'would-submit'),
@@ -6112,15 +6113,12 @@ def _do_pane_guard(ctx: Ctx, parsed: Parsed) -> int:
         elif not _is_claude(layer, text, pane, live):
             code, detail = PANE_NOT_CLAUDE, (f"{pane} is alive and nothing in its tail is claude; a send "
                                              "here goes to somebody else's shell")
-        elif layer.busy(text):
-            code, detail = PANE_MID_TURN, (f"{pane} is still offering a way to interrupt, so it is "
-                                           "mid-turn; a send now is queued behind the current turn")
         elif layer.asking(text):
             #: A POSITIVELY identified operator dialog on either runtime — Claude's trust modal or
             #: `AskUserQuestion`, Codex's approval prompt or directory-trust screen (`runtime.CLAUDE_DIALOG_ROWS`
             #: / `CODEX_DIALOG_ROWS`) — is `15`, live's `I-16` ruling, not `14`: `14` says "wait and re-poll",
-            #: and no amount of waiting answers a dialog. Checked AFTER `busy` (a live turn keeps its stronger
-            #: answer; a stale hint row in the tail must not outrank it) and BEFORE `unsubmitted`, because the
+            #: and no amount of waiting answers a dialog. Checked BEFORE `busy` now that `11` admits send:
+            #: a pane with a possible dialog must never be a send target. Also before `unsubmitted`, because the
             #: trust modal's selected row carries a caret and would otherwise read as somebody's typed text
             #: — ONE ordering, whether or not a process is attributed to the pane.
             code, detail = PANE_AWAITING_OPERATOR, (
@@ -6131,6 +6129,9 @@ def _do_pane_guard(ctx: Ctx, parsed: Parsed) -> int:
             queued = layer.unsubmitted(text)
             code, detail = PANE_QUEUED_TEXT, (f"{pane} holds unsubmitted text in its input box "
                                               f"({queued!r}); a send would concatenate onto it")
+        elif layer.busy(text):
+            code, detail = PANE_MID_TURN, (f"{pane} is mid-turn with an empty input box; "
+                                           "fleet send can queue a message behind this turn")
         else:
             code, detail = PANE_SAFE, f"{pane} is a quiet claude pane with an empty input box"
     #: `queued_text` is a FIELD, not a sentence to be parsed back out of `detail`.
@@ -6162,7 +6163,8 @@ def _do_pane_guard(ctx: Ctx, parsed: Parsed) -> int:
         #: directory is the caller's mistake, not this verb's, and it must not cost the verdict this flag
         #: exists to back up. Reported, never swallowed: silence here would be its own false-safe.
         try:
-            Path(capture_to).write_text(captured)
+            from fleet.runtime import annotate_placeholders
+            Path(capture_to).write_text(annotate_placeholders(captured))
         except OSError as exc:
             print(f"WARNING: --capture {capture_to!r} could not be written ({exc.strerror or exc}); "
                   f"the verdict below is unaffected.", file=ctx.err)

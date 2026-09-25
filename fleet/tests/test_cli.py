@@ -2224,10 +2224,8 @@ class TestPaneGuard(CliCase):
                              f"pane-guard {pane} does not name its verdict: {out!r}")
         self.assertEqual(cli.PANE_GUARD_CODES[cli.PANE_SAFE], "safe")
 
-    def test_pane_guard_orders_dialog_after_busy_and_before_queued_text_on_both_paths(self):
-        """Round-2 finding: the dialog check must not depend on whether a process is attributed to the
-        pane, and it sits after `busy` (a live turn wins) and before `unsubmitted` (the trust modal's
-        caret row is a dialog, not somebody's draft) — ONE ordering."""
+    def test_pane_guard_refuses_dialog_hints_before_admitting_busy_send(self):
+        """A pane whose hint may be a dialog cannot get the send-admitting code 11."""
         trust = "\n".join([
             "Quick safety check: Is this a project you created or one you trust?",
             "❯ No, exit", "  Yes, I trust this folder", "Enter to confirm · Esc to cancel"])
@@ -2242,7 +2240,7 @@ class TestPaneGuard(CliCase):
         for pane, code in (("dt-attributedAsk", cli.PANE_AWAITING_OPERATOR),
                            ("dt-attributedTrust", cli.PANE_AWAITING_OPERATOR),
                            ("dt-glyphTrust", cli.PANE_AWAITING_OPERATOR),
-                           ("dt-attributedBusy", cli.PANE_MID_TURN)):
+                           ("dt-attributedBusy", cli.PANE_AWAITING_OPERATOR)):
             got, out, err = fleet.run(["pane-guard", "--porcelain", "--pane", pane])
             self.assertEqual(got, code, f"{pane}: {out}{err}")
 
@@ -2303,6 +2301,15 @@ class TestPaneGuard(CliCase):
         printed = dict(line.split("\t", 1) for line in out.splitlines())
         self.assertTrue(printed.get("queued_text"),
                         f"the queued text field is empty on the --id path: {out!r}")
+
+    def test_multiline_box_reports_all_queued_text(self):
+        fleet = self.loaded()
+        frame = (pathlib.Path(__file__).resolve().parents[1] /
+                 'it/fixtures/runtime/claude-multiline.frame').read_text()
+        fleet.panes['dt-solo'] = frame
+        code, out, err = fleet.run(['pane-guard', '--porcelain', '--pane', 'dt-solo'])
+        self.assertEqual(code, cli.PANE_QUEUED_TEXT, err)
+        self.assertIn('MULTILINE READY', dict(line.split('\t', 1) for line in out.splitlines())['queued_text'])
 
     def test_a_record_that_names_no_session_says_so_instead_of_answering_13(self):
         """`13` means *this pane does not exist*. A record with no session at all is a different fact with
@@ -2430,6 +2437,15 @@ class TestPaneGuard(CliCase):
         self.assertEqual(code, cli.PANE_SAFE, "preserving the capture must not change the verdict")
         self.assertEqual(target.read_text(), IDLE_PANE,
                          "the preserved capture is not what the verdict was computed from")
+
+    def test_capture_labels_a_dim_suggestion_without_queued_text(self):
+        fleet = self.loaded()
+        fleet.panes['dt-solo'] = '❯\u00a0\x1b[2mfix RV-C1 in a fix branch\x1b[0m\n? for shortcuts\n'
+        target = fleet.tmp / 'dim-capture.txt'
+        code, out, err = fleet.run(['pane-guard', '--porcelain', '--pane', 'dt-solo', '--capture', str(target)])
+        self.assertEqual(code, cli.PANE_SAFE, err)
+        self.assertEqual(dict(line.split('\t', 1) for line in out.splitlines())['queued_text'], '')
+        self.assertIn('[placeholder] ', target.read_text())
 
     def test_capture_does_not_perturb_any_verdict(self):
         """Step 4: the flag must be inert for EVERY code, not just `0` — a diagnostic that changes the
@@ -7663,6 +7679,7 @@ class TestB11RefusalsNameARouteThatRuns(CliCase):
         `messaging`, with different words and a different actor: a dry-run that answers differently
         from the real call."""
         fleet = self.loaded()
+        fleet.panes['dt-solo'] = QUEUED_PANE
         sent = fleet.tmp / "msg.txt"
         sent.write_text("hello\n")
         argv = ["send", "--id", fleet.ids["solo"], "--message-file", str(sent)]
@@ -7957,7 +7974,8 @@ class TestSendKeepsARecord(CliCase):
         self.assertEqual(EXIT_OK, code, err)
         self.assertIn("nothing recorded", out)
         self.assertFalse((fleet.paths["closable"] / ".fleet" / "sends.jsonl").exists())
-        #: `solo`'s pane is BUSY_PANE: refused before anything is typed, so nothing to record.
+        #: A real queued draft refuses before anything is typed, so nothing is recorded.
+        fleet.panes['dt-solo'] = QUEUED_PANE
         code, _, err = fleet.run(["send", "--id", fleet.ids["solo"], "--message-file", str(sent)])
         self.assertEqual(EXIT_REFUSED, code, err)
         self.assertFalse((fleet.paths["solo"] / ".fleet" / "sends.jsonl").exists())
