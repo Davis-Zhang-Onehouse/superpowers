@@ -78,6 +78,7 @@ from fleet.markdown import fenced, prose
 from fleet.pool import Pool, ReapReport
 from fleet.profiles import Profile
 from fleet import root as root_mod
+from fleet.reconcile import (HOLD_DEFAULT_S, HOLD_MAX_S, PHASE_HOLDING)
 from fleet.reconcile import (COMPLETE, COMPLETE_BUT_WORKING, KIND_WORKER, PARKED, PHASE_AWAITING_CI, PID_GONE,
                              PID_RUNNING, RUNNING, WATCHER_ATTESTED, WATCHER_OBSERVED, _watcher_of,
                              attested_pid_status, needs_a_human, pid_start, reconcile)
@@ -2693,6 +2694,47 @@ def _attestation_rows(pid_handle) -> list:
                              "it exits")]
 
 
+#: `V23-G`. `--for` is ONE integer and ONE unit. A compound (`1h30m`) or a bare number is refused rather than
+#: guessed at: a hold's length is the only thing that bounds it, so it is never inferred.
+_HOLD_FOR = re.compile(r"^([1-9][0-9]*)([smh])$")
+
+
+def _hold_for_claim(ctx: Ctx, parsed: Parsed, phase: str) -> tuple:
+    """`(reason, until)` for a `holding` claim, or `(None, None)` for any other phase. Raises `BadInput` for a
+    hold with no reason, an expiry that is malformed or past `HOLD_MAX_S`, or either flag on another phase.
+
+    D-3: the reason is the control, as `--watcher`'s text is — an empty one is refused, never defaulted — and
+    the expiry is what stops a hold becoming a permanent WIP-cap escape."""
+    reason, asked_for = parsed.get("reason"), parsed.get("for")
+    if phase != PHASE_HOLDING:
+        if reason is not None or asked_for is not None:
+            raise BadInput(
+                f"--reason and --for describe a hold, and only `--phase {PHASE_HOLDING}` is one. Declaring "
+                f"{phase!r} would store them where nothing reads them. Drop the flags.")
+        return None, None
+    if reason is None or not str(reason).strip():
+        raise BadInput(
+            f"`--phase {PHASE_HOLDING}` takes this worker out of the WIP cap with nothing watching, so it needs "
+            f"a reason: --reason '<who told you to hold, and for what>'. An empty reason is not a reason.")
+    seconds = HOLD_DEFAULT_S
+    if asked_for is not None:
+        match = _HOLD_FOR.match(str(asked_for).strip())
+        if not match:
+            raise BadInput(f"--for {asked_for!r} is not a duration: give one integer and one unit, e.g. 30m, 2h, "
+                           f"900s (at most {HOLD_MAX_S // 3600}h).")
+        seconds = int(match.group(1)) * {"s": 1, "m": 60, "h": 3600}[match.group(2)]
+        if seconds > HOLD_MAX_S:
+            raise BadInput(
+                f"--for {asked_for} is longer than a hold may stand ({HOLD_MAX_S // 3600}h). A longer wait is "
+                f"renewed by declaring again when this one ends, so every extension is a stated decision.")
+    import calendar
+    import time
+    #: Arithmetic on `ctx.now`, the verb's one clock seam; no wall clock is read here.
+    start = calendar.timegm(time.strptime(ctx.now(), "%Y-%m-%dT%H:%M:%SZ"))
+    until = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime(start + seconds))
+    return " ".join(str(reason).split()), until
+
+
 def _do_declare(ctx: Ctx, parsed: Parsed) -> int:
     """Write the declaration, then RE-READ IT THROUGH THE CONSUMER and print what the consumer sees.
 
@@ -2727,6 +2769,8 @@ def _do_declare(ctx: Ctx, parsed: Parsed) -> int:
     #: milestone` exited 0 on a dry run where the real call exited 2, until the `B10` sweep); reproducing it
     #: in a gate whose whole purpose is to be consulted before acting would be inexcusable.
     watchers, ungated_because, pid_handle, attestation_rows = "", "", None, []
+    hold_reason, hold_until = _hold_for_claim(ctx, parsed, phase)
+    hold_rows = [("hold_until", hold_until), ("hold_reason", hold_reason)] if hold_until else []
     if phase == PHASE_AWAITING_CI:
         watchers, ungated_because = _watcher_for_claim(ctx, child, parsed.get("watcher"))
         if parsed.get("watcher") is not None:
@@ -2750,10 +2794,11 @@ def _do_declare(ctx: Ctx, parsed: Parsed) -> int:
         _emit(ctx, "declare", [("dry-run", "nothing was declared"), ("would-declare", phase),
                                ("asked", asked)]
                               + ([("watchers", watchers)] if watchers else [])
-                              + attestation_rows
+                              + attestation_rows + hold_rows
                               + ([("ungated", ungated_because)] if ungated_because else []))
         return EXIT_OK
     Declarations(child).set_phase(phase)
+    Declarations(child).set_hold(hold_reason, hold_until)
     #: Recorded, so the question can be answered AFTER the fact. FI-255's defect was not only that the claim
     #: was unchecked — it was that the store kept `{"phase": "awaiting-ci"}` and nothing else, so a stopped
     #: worker and a self-waking one were indistinguishable in the record as well as on the board.
@@ -2793,7 +2838,7 @@ def _do_declare(ctx: Ctx, parsed: Parsed) -> int:
     _emit(ctx, "declare", [("phase", value), ("asked", asked), ("consumer", str(consumer.path)),
                            ("instant", str(child))]
                           + ([("watchers", watchers)] if watchers else [])
-                          + attestation_rows
+                          + attestation_rows + hold_rows
                           + ([("ungated", ungated_because)] if ungated_because else [])
                           + review_row)
     return EXIT_OK
@@ -3694,6 +3739,13 @@ def _do_complete(ctx: Ctx, parsed: Parsed) -> int:
             f"{GUARD_COMPLETE_PHASE}: the declared phase is still awaiting-ci"
             + (f" with a live watcher ({watcher})" if live else "")
             + ", and an instant that is completing is not waiting on CI.",
+            clears_when=f"fleet declare --phase done --instant {child}",
+            clears_who="this worker")
+    #: `V23-G`. A hold is a claim that the work is waiting, so a completing instant is not holding either.
+    if declarations.phase() == PHASE_HOLDING:
+        raise Refused(
+            f"{GUARD_COMPLETE_PHASE}: the declared phase is still {PHASE_HOLDING}, and an instant that is "
+            f"completing is not holding. A stale hold outlives the instruction that justified it.",
             clears_when=f"fleet declare --phase done --instant {child}",
             clears_who="this worker")
     claim = _last_claim_report(ctx, child)
@@ -6997,7 +7049,8 @@ VERBS = {spec.name: spec for spec in (
     )),
     _verb("declare", _do_declare, False, "declare a phase and print what the CONSUMER now reads", (
         Flag("--instant", True, True, "the declaring instant"),
-        Flag("--phase", True, True, "the phase; awaiting-ci is the one the WIP cap excludes"),
+        Flag("--phase", True, True, "the phase; awaiting-ci (with a watcher) and holding (with --reason, "
+             "until --for ends) are the two the WIP cap excludes"),
         Flag("--watcher", True, False,
              "NAME what is watching, when it is real but this tool cannot see it (a cron, an external "
              "watchdog, a peer session). The test is whether you can TRUTHFULLY name it — not whether "
@@ -7005,6 +7058,13 @@ VERBS = {spec.name: spec for spec in (
              "and `fleet brief` label it ATTESTED. Include `pid:<n>` of the process whose exit ends the "
              "wait and the board disregards the claim by itself once it exits; without one, nothing "
              "re-checks it"),
+        Flag("--reason", True, False,
+             "`--phase holding` only, and required there: who told you to hold and for what. Stored verbatim "
+             "and shown on the board"),
+        Flag("--for", True, False,
+             f"`--phase holding` only: how long the hold stands, one integer and one unit (30m, 2h, 900s); "
+             f"default {HOLD_DEFAULT_S // 3600}h, at most {HOLD_MAX_S // 3600}h. After it the board "
+             f"disregards the hold and the worker counts against the cap again"),
     )),
     _verb("park", _do_park, False, "record a parked decision as structured state", (
         Flag("--instant", True, True, "the instant"),

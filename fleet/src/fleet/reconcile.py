@@ -40,6 +40,9 @@ IDLE = "IDLE"
 BLOCKED = "BLOCKED"
 PARKED = "PARKED"
 AWAITING_CI = "AWAITING-CI"
+#: `V23-G` (v3-06c). A declared, reasoned, EXPIRING hold: the worker was told to wait and has nothing to
+#: watch. Excluded from the WIP cap like AWAITING-CI, and only until its `hold_until` (D-3).
+HOLDING = "HOLDING"
 COMPLETE = "COMPLETE"
 COMPLETE_BUT_WORKING = "COMPLETE-BUT-WORKING"
 HARVESTED = "HARVESTED"
@@ -59,8 +62,8 @@ UNREACHABLE = "UNREACHABLE"
 UNKNOWN_SESSION = "UNKNOWN-SESSION"
 STALE_LEASE = "STALE-LEASE"
 
-STATES = (PENDING_LAUNCH, RUNNING, IDLE, BLOCKED, PARKED, AWAITING_CI, COMPLETE, COMPLETE_BUT_WORKING, HARVESTED, CLOSED,
-          DEAD, UNREACHABLE, UNKNOWN_SESSION, STALE_LEASE)
+STATES = (PENDING_LAUNCH, RUNNING, IDLE, BLOCKED, PARKED, AWAITING_CI, HOLDING, COMPLETE, COMPLETE_BUT_WORKING,
+          HARVESTED, CLOSED, DEAD, UNREACHABLE, UNKNOWN_SESSION, STALE_LEASE)
 
 KIND_WORKER = "worker"
 KIND_UNKNOWN = "unknown-session"
@@ -136,6 +139,18 @@ TERMINAL_FOLDER_STATES = ("complete", "abort")
 
 #: The declared phase that means "not consuming attention, waiting on CI".
 PHASE_AWAITING_CI = "awaiting-ci"
+
+#: `V23-G` (v3-06c). The declared phase that means "told to hold; nothing to watch". It needs a reason and an
+#: expiry (`declare --reason`, `--for`), and it stands only while `hold_until` is in the future.
+PHASE_HOLDING = "holding"
+
+#: One hour: the default life of a hold when `--for` is not given.
+HOLD_DEFAULT_S = 60 * 60
+
+#: 4 h, the same bound as `STALE_WAIT_S`: the longest a single `declare --phase holding` can keep a worker out
+#: of the cap. Renewing takes another typed declaration with a reason, visible on the board, so a hold never
+#: becomes a permanent cap escape by standing still (D-3).
+HOLD_MAX_S = 4 * 60 * 60
 
 #: 4 h. The slowest required pair in the source effort is 3 h 20 m, so a shorter threshold would flag
 #: every healthy wait and a flag that fires on correct work gets ignored.
@@ -525,6 +540,8 @@ def _live_state(phase, parked, pane, sessions, instant, idle_after_s, capture_fa
         _watcher_of(pane, sessions, instant, capture_failed=capture_failed, launched_at=launched_at)
         if phase == PHASE_AWAITING_CI and sessions.runtime != 'codex' else (None, ""))
     unwatched = watcher_kind in WATCHER_UNBACKED
+    hold_live, hold_text = _hold_of(instant) if phase == PHASE_HOLDING else (None, "")
+    unheld = hold_live is False
     on_pane = False
     if not busy and sessions.asking(pane):
         #: `B06`/`FI-55`. `pane-guard` has answered `15 awaiting-operator` for this frame since `I-16`, and
@@ -546,6 +563,8 @@ def _live_state(phase, parked, pane, sessions, instant, idle_after_s, capture_fa
         state, note = AWAITING_CI, _awaiting_note(pane, sessions, instant,
                                                   capture_failed=capture_failed,
                                                   watcher=(watcher_kind, watcher_text))
+    elif phase == PHASE_HOLDING and hold_live:
+        state, note = HOLDING, f"declared {PHASE_HOLDING}; {hold_text}"
     elif busy:
         state, note = RUNNING, ""
     elif _idle_for(instant) > idle_after_s:
@@ -576,6 +595,15 @@ def _live_state(phase, parked, pane, sessions, instant, idle_after_s, capture_fa
                        f"cap again")
         note = f"{note}; {disregarded}" if note else disregarded
 
+    if unheld:
+        #: `V23-G` (D-3). The same bargain as an unwatched CI claim: an expired hold, or a `holding` phase with
+        #: no readable expiry (hand-written), backs nothing, so the ordinary detector decides and the worker
+        #: counts against the cap again. The phase stays visible in `evidence.declared_phase`.
+        disregarded = (f"declared {PHASE_HOLDING}; {hold_text}, so the declaration is disregarded and the "
+                       f"ordinary detector decides this row — which means the worker counts against the WIP "
+                       f"cap again")
+        note = f"{note}; {disregarded}" if note else disregarded
+
     if parked:
         if state in ACTIONABLE_STATES:
             # An actionable state is never masked by a standing note; the park is APPENDED.
@@ -586,6 +614,24 @@ def _live_state(phase, parked, pane, sessions, instant, idle_after_s, capture_fa
     #: BLOCKED, and the park rewrite above leaves an actionable state alone. It keeps `on_pane` meaning "a
     #: BLOCKED read off the pane" if a later branch ever rewrites the state after it is set (`RV-34`).
     return state, note, on_pane and state == BLOCKED
+
+
+def _hold_of(instant, now=None) -> tuple:
+    """`(live, text)` for a `holding` declaration: live is True while `hold_until` is in the future, False when
+    it has passed or cannot be read (nothing then backs the exemption), and the text says which and why.
+
+    Read against `time.time()` at the moment of the join, like `STALE-WAIT`: a hold is a claim about a window,
+    and the window is the whole of what it licenses."""
+    declarations = Declarations(instant) if instant is not None else None
+    until = declarations.hold_until() if declarations is not None else None
+    reason = (declarations.hold_reason() if declarations is not None else None) or "(no reason recorded)"
+    until_s = _stamp_s(until)
+    if until_s is None:
+        return False, (f"NO HOLD EXPIRY recorded ({until!r}), so nothing bounds it; it was held for: {reason}"
+                       if until else f"NO HOLD EXPIRY recorded, so nothing bounds it; it was held for: {reason}")
+    if (now if now is not None else time.time()) >= until_s:
+        return False, f"HOLD EXPIRED at {until}; it was held for: {reason}"
+    return True, f"held until {until}: {reason}"
 
 
 def _declared_age_s(instant, now):
