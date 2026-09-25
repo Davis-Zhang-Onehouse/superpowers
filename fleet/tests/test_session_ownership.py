@@ -459,6 +459,25 @@ class ResumeDoesNotAdoptASessionAnotherRecordOwns(unittest.TestCase):
         code, out, err = fleet.run(["resume", "--instant", str(new)])
         self.assertEqual(code, 0, err)
 
+
+class SeedCheckAsksEachRecordOfItsOwnSession(unittest.TestCase):
+
+    def test_a_dead_unstamped_record_is_not_checked_against_the_re_dispatchs_pane(self):
+        """RV-33. seed-check skipped only stamped records, so a dead, never-closed record A was compared (seed, pid,
+        argv) with the pane of B, the re-dispatch that owns `dt-mile`: a false FOREIGN verdict, or A's own delivery
+        reported VERIFIED on B's pid. Here neither folder holds a seed, so each record it reads yields a row naming its
+        own seed path, and A's must not appear."""
+        fleet = Fleet()
+        self.addCleanup(shutil.rmtree, fleet.tmp, True)
+        old = fleet.worker("mile", slot="ws1", live=False)
+        rec = fleet.store.read(fleet.ids["mile"])
+        rec.launched_at = "2026-07-29T09:00:00Z"
+        fleet.store.write(rec)
+        new = fleet.worker("mile", slot="ws2", pane=IDLE_PANE)
+        code, out, err = fleet.run(["seed-check", "--porcelain"])
+        self.assertNotIn(old.name, out + err, "the old record was checked against a session it does not own")
+        self.assertIn(new.name, out + err, "the owner is still checked (the case is not vacuous)")
+
 class TheApplyWarningAsksTheProposersOwnSession(unittest.TestCase):
 
     def test_a_done_proposal_by_the_old_record_does_not_warn_about_the_new_workers_session(self):

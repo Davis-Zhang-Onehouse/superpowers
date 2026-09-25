@@ -1361,10 +1361,17 @@ def _do_seed_check(ctx: Ctx, parsed: Parsed) -> int:
     clears = ("the launcher that delivers the seed is corrected — usually a stale `claude` shim first on "
               "the tmux SERVER's PATH holding a hardcoded seed file — and the worker is dispatched again")
     clears_who = "the coordinator that dispatched it, with whoever owns the tmux server's PATH"
-    for record in ctx.store.all():
+    records = ctx.store.all()
+    #: V23-T (RV-33). One owner per session name: a dead record whose `dt-<name>` a re-dispatch now holds is not
+    #: checked against that worker's pane, pid and argv (a false FOREIGN, or its own delivery read on another pid).
+    here = getattr(ctx.sessions, "socket", "") or ""
+    owners = session_owner(records, here, ctx.pool)
+    for record in records:
         if record.harvested_at or record.closed_at:
             continue
         if wanted and wanted not in record.todo_id:
+            continue
+        if record.tmux and owners.get((record.tmux_socket or here, record.tmux)) is not record:
             continue
         session = record.tmux
         layer = ctx.sessions_for(record)
