@@ -11,16 +11,20 @@ from fleet.roadmap import Milestone, Roadmap
 from tests.test_cli import FRESH_BASE, LONG_AGO, NOW, OURS, CliCase
 
 
-class TestInstantPaths(CliCase):
-    def run_in(self, fleet, cwd, argv):
-        """Run a verb FROM `cwd`, which must lie inside the fixture's tree (`Fleet.run` keeps it then)."""
-        previous = Path.cwd()
-        try:
-            os.chdir(cwd)
-            return fleet.run(argv)
-        finally:
-            os.chdir(previous)
+def run_from(case, fleet, cwd, argv):
+    """Run a verb FROM `cwd`, which must lie inside the fixture's tree: `Fleet.run` keeps such a cwd, and
+    chdirs back into its tmp from any other, which would read a relative operand from the wrong anchor."""
+    case.assertTrue(Path(cwd).resolve().is_relative_to(Path(fleet.tmp).resolve()),
+                    f"{cwd} is outside the fixture tree {fleet.tmp}")
+    previous = Path.cwd()
+    try:
+        os.chdir(cwd)
+        return fleet.run(argv)
+    finally:
+        os.chdir(previous)
 
+
+class TestInstantPaths(CliCase):
     def test_symlinked_instants_dir_preserves_open_owner_route(self):
         fleet = self.loaded()
         coordinator = fleet.paths['readyWorker']
@@ -103,8 +107,8 @@ class TestInstantPaths(CliCase):
                 argv.append('--dry-run')
                 absolute.append('--dry-run')
             with self.subTest(verb=name):
-                expected_code, expected_out, expected_err = self.run_in(fleet, verb_cwd, [name, *absolute])
-                code, out, err = self.run_in(fleet, verb_cwd, [name, *argv])
+                expected_code, expected_out, expected_err = run_from(self, fleet, verb_cwd, [name, *absolute])
+                code, out, err = run_from(self, fleet, verb_cwd, [name, *argv])
                 self.assertEqual(code, expected_code, err)
                 if name == 'verify':
                     # Each run owns a fresh sandbox; its random directory is reported.
@@ -119,9 +123,9 @@ class TestInstantPaths(CliCase):
         coordinator = fleet.paths['readyWorker']
         verb_cwd = fleet.paths['solo']
         base = ['dispatch', *self.argv_for(fleet)['dispatch'], '--dry-run']
-        expected = self.run_in(fleet, verb_cwd, [*base, '--from', str(coordinator)])
+        expected = run_from(self, fleet, verb_cwd, [*base, '--from', str(coordinator)])
         argv = [*base, '--from', os.path.relpath(coordinator, verb_cwd)]
-        code, out, err = self.run_in(fleet, verb_cwd, argv)
+        code, out, err = run_from(self, fleet, verb_cwd, argv)
         self.assertEqual((code, out, err), expected)
 
     def test_propose_to_relative_path_reaches_the_destination_inbox(self):
@@ -195,14 +199,6 @@ class TestCadenceResolvesTheOperandLikeTheVerb(CliCase):
         fleet.harvest.path.write_text(json.dumps(data))
         return foreign
 
-    def run_from(self, fleet, cwd, argv):
-        previous = Path.cwd()
-        try:
-            os.chdir(cwd)
-            return fleet.run(argv)
-        finally:
-            os.chdir(previous)
-
     def assert_nags_only(self, err, foreign, fleet):
         self.assertIn(f"{cli.CADENCE_PREFIX} {foreign}", err)
         self.assertNotIn(str(fleet.instants / OURS), err)
@@ -210,7 +206,7 @@ class TestCadenceResolvesTheOperandLikeTheVerb(CliCase):
     def test_dot_inside_a_foreign_effort_nags_that_effort(self):
         fleet = self.loaded()
         foreign = self.overdue_foreign(fleet)
-        code, out, err = self.run_from(fleet, foreign, ['roadmap', '--porcelain', '--instant', '.'])
+        code, out, err = run_from(self, fleet, foreign, ['roadmap', '--porcelain', '--instant', '.'])
         self.assert_nags_only(err, foreign, fleet)
         self.assertNotIn(cli.CADENCE_PREFIX, out)
 
@@ -220,7 +216,7 @@ class TestCadenceResolvesTheOperandLikeTheVerb(CliCase):
         ours = fleet.paths['readyWorker']
         relative = os.path.relpath(foreign, ours)
         self.assertTrue(relative.startswith('..'), relative)
-        code, out, err = self.run_from(fleet, ours, ['roadmap', '--porcelain', '--instant', relative])
+        code, out, err = run_from(self, fleet, ours, ['roadmap', '--porcelain', '--instant', relative])
         self.assert_nags_only(err, foreign, fleet)
 
     def test_dispatch_from_relative_foreign_coordinator_nags_that_effort(self):
@@ -228,7 +224,7 @@ class TestCadenceResolvesTheOperandLikeTheVerb(CliCase):
         foreign = self.overdue_foreign(fleet)
         ours = fleet.paths['readyWorker']
         base = ['dispatch', '--porcelain', *self.argv_for(fleet)['dispatch'], '--dry-run']
-        code, out, err = self.run_from(fleet, ours,
+        code, out, err = run_from(self, fleet, ours,
                                        [*base, '--from', os.path.relpath(foreign, ours)])
         self.assert_nags_only(err, foreign, fleet)
 
@@ -237,7 +233,7 @@ class TestCadenceResolvesTheOperandLikeTheVerb(CliCase):
         # is scoped as if no operand were named — never silenced, never a crash.
         fleet = self.loaded()
         foreign = self.overdue_foreign(fleet)
-        code, out, err = self.run_from(fleet, foreign,
+        code, out, err = run_from(self, fleet, foreign,
                                        ['roadmap', '--porcelain', '--instant', './missing-instant'])
         self.assertEqual(code, 2, err)
         self.assertIn('not an instant on disk', err)
@@ -252,7 +248,16 @@ class TestCadenceResolvesTheOperandLikeTheVerb(CliCase):
             source["last_run"] = NOW
         fleet.harvest.path.write_text(json.dumps(data))
         with mock.patch.object(cli, '_resolve_instant', wraps=cli._resolve_instant) as spy:
-            code, out, err = self.run_from(fleet, fleet.tmp, ['roadmap', '--instant', './missing-instant'])
+            code, out, err = run_from(self, fleet, fleet.tmp, ['roadmap', '--instant', './missing-instant'])
         self.assertEqual(code, 2, err)
         self.assertNotIn(cli.CADENCE_PREFIX, err)
         self.assertEqual(spy.call_count, 1, spy.call_args_list)
+
+
+class TestRunFromRefusesACwdOutsideTheFixture(CliCase):
+    def test_a_cwd_outside_the_fixture_tree_is_refused_not_silently_replaced(self):
+        # V23-O RV-18. `Fleet.run` chdirs back into its tmp when the cwd lies outside it, so a relative operand
+        # computed from an outside cwd would be read from the wrong anchor again (member 2). The helper refuses.
+        fleet = self.loaded()
+        with self.assertRaises(AssertionError):
+            run_from(self, fleet, Path('/'), ['roadmap', '--instant', '.'])
