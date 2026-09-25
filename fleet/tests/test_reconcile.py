@@ -72,6 +72,12 @@ PARK_BUSY_Q = "should the shim land before the rebase, or after?"
 PARK_BLOCKED_Q = "is merging #441 mine to do?"
 
 
+def _past_the_grace() -> str:
+    """A claim stamp one hour old: past `reconcile.WATCHER_GRACE_S` (`V23-G`), so a case about a claim nothing
+    backs measures the claim itself rather than the minutes after it, when a Monitor may still be arming."""
+    return time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime(time.time() - 3600))
+
+
 def _record(**kw) -> Record:
     base = dict(todo_id="", child_instant="", base_instant=OURS, slot="", tmux="",
                 profile="/p/worker", golden="/ws0", lineage_base="", title="a title",
@@ -890,7 +896,7 @@ class TestNeedsAHumanUsesKnownFacts(unittest.TestCase):
 
     def ci_worker(self, todo_id, tmux, pid, pane=QUIET_PANE, recorded=None):
         path = self.worker(todo_id, tmux, pid, pane=pane)
-        Declarations(path).set_phase("awaiting-ci")
+        Declarations(path).set_phase("awaiting-ci", now=_past_the_grace())
         if recorded is not None:
             Declarations(path).set_watchers(recorded)
         return path
@@ -1103,7 +1109,7 @@ class TestTheWatcherIsClassifiedFromWhatIsTrue(unittest.TestCase):
                             "ws9", tmux)
         self.fleet.launch(tmux, pid, "ws9", pane)
         path = self.fleet.paths[todo_id]
-        Declarations(path).set_phase("awaiting-ci")
+        Declarations(path).set_phase("awaiting-ci", now=_past_the_grace())
         _declare_json(path, **declared)
         return path
 

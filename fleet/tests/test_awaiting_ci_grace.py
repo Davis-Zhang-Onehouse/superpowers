@@ -17,6 +17,10 @@ from tests.test_guards import Fleet as GuardFleet
 from fleet.guards import CAP_EXCLUDED_STATES, WipCap
 from tests.test_reconcile import SyntheticFleet
 from fleet.reconcile import AWAITING_CI, HOLD_DEFAULT_S, HOLD_MAX_S, HOLDING, needs_a_human, reconcile
+try:                                   # absent at the base: the RED run reads the grace as zero seconds
+    from fleet.reconcile import WATCHER_GRACE_S
+except ImportError:
+    WATCHER_GRACE_S = 300
 from fleet.store import Declarations
 from fleet.session import LiveSession
 
@@ -282,6 +286,74 @@ class TestAHoldFreesTheCap(unittest.TestCase):
         self.assertTrue(WipCap().evaluate(fleet.ctx()).allowed, "a live hold did not free the cap")
         with mock.patch('fleet.reconcile.time.time', return_value=now + 601):
             self.assertFalse(WipCap().evaluate(fleet.ctx()).allowed, "an expired hold kept the cap free")
+
+
+
+class TestTheGraceAfterTheClaim(unittest.TestCase):
+    """v3-06(a), as the coordinator decided it (D-90, option B): the join never writes, so the only moment a
+    grace can be anchored to is the declaration's own `at`. For `WATCHER_GRACE_S` after the claim, a watcher
+    missing from the pane does not void it (a Monitor being armed or re-armed); from then on it is voided
+    exactly as before. A dead watcher can therefore never keep a record out of the cap past `at + grace`."""
+
+    AT = "2026-07-30T12:00:00Z"
+
+    def subject(self, seconds_after, watchers="1 monitor", pane=QUIET_PANE, launched_at="2026-07-30T03:13:00Z",
+                at=AT, **extra):
+        fleet = SyntheticFleet()
+        self.addCleanup(shutil.rmtree, fleet.tmp, True)
+        fleet.dispatch("grace-07300801", "00000000-07300801-inflight-append-grace", "ws9", "dt-grace",
+                       launched_at=launched_at)
+        fleet.launch("dt-grace", 5501, "ws9", pane)
+        fields = {"phase": "awaiting-ci", **extra}
+        if at is not None:
+            fields["at"] = at
+        if watchers is not None:
+            fields["watchers"] = watchers
+        _declare(fleet.paths["grace-07300801"], **fields)
+        with mock.patch("fleet.reconcile.time.time", return_value=_epoch(self.AT) + seconds_after):
+            return {s.identity: s for s in reconcile(fleet.store, fleet.pool, fleet.sessions,
+                                                     fleet.instants)}["grace-07300801"]
+
+    def test_a_watcher_gone_inside_the_grace_keeps_the_claim(self):
+        s = self.subject(WATCHER_GRACE_S - 1)
+        self.assertEqual(s.state, AWAITING_CI, s.note)
+        self.assertIn("GRACE", s.note)
+        self.assertIn("2026-07-30T12:05:00Z", s.note, "the note does not say when the grace ends")
+
+    def test_the_grace_ends_at_its_boundary(self):
+        s = self.subject(WATCHER_GRACE_S)
+        self.assertNotEqual(s.state, AWAITING_CI, s.note)
+        self.assertIn("disregarded", s.note)
+
+    def test_a_dead_watcher_never_outlives_the_grace(self):
+        """The fence the dispatch set: however old, a gone watcher is voided once the grace has passed."""
+        for later in (WATCHER_GRACE_S + 1, 3600, 30 * 3600):
+            with self.subTest(seconds_after=later):
+                s = self.subject(later)
+                self.assertNotEqual(s.state, AWAITING_CI, s.note)
+
+    def test_a_claim_with_no_stamp_gets_no_grace(self):
+        """An exemption needs a bound; a claim with no `at` has none, so it gets exactly today's treatment."""
+        s = self.subject(1, at=None)
+        self.assertNotEqual(s.state, AWAITING_CI, s.note)
+
+    def test_a_pid_that_exited_gets_no_grace(self):
+        """Grace is for a watcher on the PANE being armed. An attested pid that exited is a measured end."""
+        s = self.subject(1, watchers="attested: gate pid:4194311",
+                         watcher_pid={"pid": 4194311, "start": "777"})
+        self.assertNotEqual(s.state, AWAITING_CI, s.note)
+
+    def test_a_claim_from_before_a_relaunch_gets_no_grace(self):
+        s = self.subject(1, launched_at="2026-07-30T12:00:01Z", watchers="attested: a peer session")
+        self.assertNotEqual(s.state, AWAITING_CI, s.note)
+        s = self.subject(1, launched_at="2026-07-30T12:00:01Z")
+        self.assertNotEqual(s.state, AWAITING_CI, s.note)
+
+    def test_a_fresh_watcher_renews_after_the_grace(self):
+        """v3-06(b): the re-arm gap closes itself — a new Monitor on the pane backs the old claim, no re-declare."""
+        s = self.subject(3600, pane=WATCHED_PANE)
+        self.assertEqual(s.state, AWAITING_CI, s.note)
+        self.assertIn("watcher observed", s.note)
 
 
 if __name__ == '__main__':
