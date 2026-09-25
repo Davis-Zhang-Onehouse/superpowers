@@ -1,0 +1,16 @@
+[40m  [97mThe hold is LIFTED: finish your remaining steps (full hermetic, [39m
+  [97mscripts/tests, IT near your change, closure), then propose done and complete.[39m
+  [97mYour branch stays on its lineage base 334fb1d5 (0.6.13); the next stack [39m
+  [97mrebases it onto 0.6.15. If you re-run anything against the installed fleet, [39m
+  [97mit is now 0.6.15, whose hermetic suite no longer spawns real claude.[39m
+
+[97m[49m●[39m OK
+
+[37m✻[39m [37mSautéed for 2s · done 9:51 PM[39m
+                                        [96m✔ Update installed · Restart to update[39m
+[37m────────────────────────────────────────────────────────────────────────────────
+[39m❯ from before the reboot are GONE: re-launch anything you still need and do
+  not wait on them. Re-check your slot's git state before continuing. Fences
+  unchanged.
+[37m────────────────────────────────────────────────────────────────────────────────
+[39m  [93m⏵⏵ auto mode on[37m (shift+tab to cycle)[39m

@@ -14,6 +14,8 @@
 #   SEND-3  every send that reached the pane is recorded in the worker's `.fleet/sends.jsonl` with the sender,
 #           the time, the message digest and the outcome, and `fleet brief` reads it back
 #   SEND-4  a pane already holding a draft is still REFUSED (the guarded-messaging rule survives the fix)
+#   SEND-6  FB-134: a ONE-line message taller than an 80x20 pane's input box (Claude Code then shows only the box's
+#           last rows) is submitted by the verb on its own, confirmed as `draft-tail`, and recorded
 #   SENDC-1..3  the same on a CODEX pane: one line; EIGHT lines (an inline draft taller than the observer's
 #           old 8-row window); a > 1000-char message (codex's placeholder). Opt-in: needs an authenticated
 #           PRIVATE codex home in SEND_CODEX_HOME (FB-102: never the root's shared ~/.codex).
@@ -276,6 +278,26 @@ if record_check "$W" 2 'submitted' 'draft,placeholder' > "$OUT/SEND-5-record.txt
   it_pass SEND-5 "fleet/it/SEND/out/SEND-5-record.txt" "the refused send added NO row: the log records what was written into the pane, and a refusal before the paste wrote nothing"
 else
   it_fail SEND-5 "fleet/it/SEND/out/SEND-5-record.txt" "the send log changed on a refused send: $(head -1 "$OUT/SEND-5-record.txt")"
+fi
+
+# ---- SEND-6: FB-134 — a one-line message taller than the input box ------------------------------------
+#: Claude Code's box shows only its LAST rows once a message is taller than the box, and the box's height follows
+#: the pane's (measured on 2.1.282 at 80 columns: every row at 24 lines, 5 at 20, 3 at 16). Before the fix the verb
+#: read a strict suffix of its own paste, never confirmed it, never pressed Enter, and ended
+#: `uncertain-after-insertion` — every 380-510-char coordinator send to an 80-column worker on 2026-09-25. The
+#: pane is made 80x20 for this case, so the box scrolls; `draft-tail` in the verdict is what proves it did.
+M6="$OUT/m6.txt"; python3 -c "print('Reply OK. ' + ' '.join('This single line is longer than the input box on purpose, sentence %d of nine.' % i for i in range(1, 10)))" > "$M6"
+send_wait_idle "$TMUXN" >/dev/null
+it_tmux resize-window -t "$TMUXN" -x 80 -y 20 > "$OUT/SEND-6-resize.out" 2>&1; sleep 2
+send_case SEND-6 "$M6"; s6=$?
+s6_idle=0; send_wait_idle "$TMUXN" && s6_idle=1
+if [ "$s6" = 0 ] && grep -q $'^delivery\tsubmitted$' "$OUT/SEND-6-send.out" \
+   && grep -q $'^confirmation\tdraft-tail$' "$OUT/SEND-6-send.out" && [ "$s6_idle" = 1 ] \
+   && record_check "$W" 3 'submitted' 'draft,placeholder,draft-tail' > "$OUT/SEND-6-record.txt" 2>&1; then
+  it_pass SEND-6 "fleet/it/SEND/out/SEND-6-send.out" "a $(wc -c < "$M6")-byte ONE-line \`fleet send\` into a real claude pane resized to 80x20 exited 0 with delivery=submitted, confirmation=draft-tail (the box showed only its last rows, and they were the message's last words, seen twice) and the pane returned to idle; the record's third row says draft-tail (FB-134: before the fix this ended uncertain-after-insertion with no Enter sent)"
+else
+  it_fail SEND-6 "fleet/it/SEND/out/SEND-6-send.out" "the over-tall one-line send was not submitted as draft-tail: rc=$s6 idle_after=$s6_idle — $(tr '\n' ' ' < "$OUT/SEND-6-send.out" | cut -c1-200)"
+  send_clear_box || true
 fi
 
 send_teardown; trap - EXIT
