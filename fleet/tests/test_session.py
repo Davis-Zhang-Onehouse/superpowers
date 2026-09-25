@@ -516,6 +516,26 @@ class TestAgainstRealTmux(unittest.TestCase):
         self.assertIs(self.probes.panes_dead(self.long), False)
         self.assertIsNone(self.probes.panes_dead(f"{self.long}-missing"))
 
+    def test_pane_commands_reads_every_panes_foreground(self):
+        """FB-130 RV-13. tmux's `pane_current_command` for every pane: a two-pane session lists both, the fixture's own
+        session reads its shell, and a session that does not exist is unobservable (None), never `[]`."""
+        two = f"{self.long}-two"
+        started = subprocess.run(self.TMUX + ["new-session", "-d", "-s", two, "exec sleep 60"],
+                                 capture_output=True, text=True)
+        self.assertEqual(started.returncode, 0, started.stderr)
+        self.addCleanup(subprocess.run, self.TMUX + ["kill-session", "-t", exact_session_target(two)],
+                        capture_output=True)
+        subprocess.run(self.TMUX + ["split-window", "-t", f"={two}:", "exec sleep 61"], check=True, capture_output=True)
+        deadline = time.monotonic() + 5
+        while self.probes.pane_commands(two) != ["sleep", "sleep"] and time.monotonic() < deadline:
+            time.sleep(0.05)
+        self.assertEqual(self.probes.pane_commands(two), ["sleep", "sleep"])
+        self.assertEqual(len(self.probes.pane_commands(self.long)), 1)
+        self.assertIsNone(self.probes.pane_commands(f"{self.long}-missing"))
+        layer = SessionLayer(self.probes)
+        self.assertIs(layer.agent_in_foreground(two), False)
+        self.assertIsNone(layer.agent_in_foreground(f"{self.long}-missing"))
+
     def test_a_one_character_prefix_does_not_resolve_to_a_longer_live_session(self):
         self.assertTrue(self.probes.has_session(self.long),
                         "the fixture session is not live, so every assertion below is vacuous")

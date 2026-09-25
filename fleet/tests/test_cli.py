@@ -358,6 +358,10 @@ class Fleet:
             #: put `elsewhere` answers with that socket and with nothing on this one, which is exactly the
             #: shape a record dispatched before a socket rename has.
             socket=self.socket,
+            #: FB-130 RV-13. A recording of tmux's `#{pane_current_command}`: the attributed agent's runtime, else
+            #: `bash` (what a shell pane reports, measured) — a case modelling an attribution miss sets it itself.
+            pane_commands=lambda name: ([p.runtime for p in self.procs if p.name == name] or ["bash"])
+                                       if name in self.tmux_live else None,
             session_servers=lambda name: ([self.socket] if name in self.tmux_live else [])
                                          + sorted(s for s, names in self.elsewhere.items()
                                                   if name in names))
