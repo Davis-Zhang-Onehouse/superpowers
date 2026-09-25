@@ -146,6 +146,23 @@ fi
 rm -f "$W1/.fleet/declare.json"
 fleet declare --instant "$W1" --phase AWAITING-CI --porcelain > "$OUT/F2b-declare.out" 2>&1
 f2b_declare_rc=$?
+#: `V23-G` (D-90). For `WATCHER_GRACE_S` after its `at` an unbacked claim stands, labelled GRACE (F2g measures
+#: that half). F2b is about the claim itself, so the claim is moved past the grace first. Only `at` changes —
+#: the one field the grace reads — through the store's own JSON, never a second writer of any other field.
+f2_backdate() {  # $1 = seconds: move W1's claim stamp that far into the past
+  python3 - "$W1/.fleet/declare.json" "$1" <<'PY_BACKDATE'
+import json, sys, time
+path, seconds = sys.argv[1], int(sys.argv[2])
+data = json.load(open(path))
+data["at"] = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime(time.time() - seconds))
+json.dump(data, open(path, "w"))
+PY_BACKDATE
+}
+fleet board --porcelain > "$OUT/F2g-board-in-grace.out" 2>&1
+f2g_board_rc=$?
+f2g_state="$(awk -F'\t' -v id="$W1_ID" '$1==id {print $3; exit}' "$OUT/F2g-board-in-grace.out")"
+f2g_note="$(awk -F'\t' -v id="$W1_ID" '$1==id {print $7; exit}' "$OUT/F2g-board-in-grace.out")"
+f2_backdate 301
 fleet dispatch --profile "$OUT/profile" --title "secondD" --base 00000000 --optype append \
       --porcelain > "$OUT/F2b-dispatch.out" 2>&1
 f2b_rc=$?
@@ -250,7 +267,12 @@ fleet declare --instant "$W1" --phase AWAITING-CI --porcelain > "$OUT/F2d-declar
 f2d_declare_rc=$?
 f2_row F2d_live
 f2d_render "$OUT/F2d-unwatched.txt"
+f2_backdate 301                                  # past the grace (`V23-G`): F2d is about the vanished watcher
 f2_row F2d_gone
+#: `V23-G` v3-06(b). The SAME old claim, a FRESH monitor drawn on the pane, no re-declare: renewed.
+f2d_render "$OUT/F2d-watched.txt"
+f2_row F2d_renewed
+f2d_render "$OUT/F2d-unwatched.txt"
 f2d_ok=1
 [ -d "$W1_CWD" ] || f2d_ok=0
 [ "$f2d_declare_rc" = 0 ] && command grep -q "^watchers	1 monitor" "$OUT/F2d-declare.out" || f2d_ok=0
@@ -260,12 +282,68 @@ case "$F2d_live_note" in *"watcher observed (1 monitor)"*) ;; *) f2d_ok=0 ;; esa
 case "$F2d_gone_state" in RUNNING|IDLE) ;; *) f2d_ok=0 ;; esac
 case "$F2d_gone_note" in *"NO WATCHER OBSERVABLE"*"1 monitor"*disregarded*) ;; *) f2d_ok=0 ;; esac
 case "$F2d_gone_note" in *ATTESTED*) f2d_ok=0 ;; esac
+[ "$F2d_renewed_board_rc" = 0 ] && [ "$F2d_renewed_state" = AWAITING-CI ] || f2d_ok=0
+case "$F2d_renewed_note" in *"watcher observed (1 monitor)"*) ;; *) f2d_ok=0 ;; esac
 if [ "$f2d_ok" = 1 ]; then
   it_pass F2d "fleet/it/F/out/F2d_gone-board.out" \
-    "a watcher OBSERVED at the claim (declare stored '1 monitor', board AWAITING-CI 'watcher observed') and then gone from the status line reads $F2d_gone_state with NO WATCHER OBSERVABLE naming it and 'disregarded' — never 'ATTESTED'"
+    "a watcher OBSERVED at the claim (declare stored '1 monitor', board AWAITING-CI 'watcher observed') and then gone from the status line past the grace reads $F2d_gone_state with NO WATCHER OBSERVABLE naming it and 'disregarded' — never 'ATTESTED'; a FRESH monitor on the pane then renews the same claim with no re-declare (AWAITING-CI, 'watcher observed')"
 else
   it_fail F2d "fleet/it/F/out/F2d_gone-board.out" \
-    "cwd='$W1_CWD' declare_rc=$f2d_declare_rc live: rc=$F2d_live_board_rc state='$F2d_live_state' note='$F2d_live_note' | gone: rc=$F2d_gone_board_rc state='$F2d_gone_state' note='$F2d_gone_note'"
+    "cwd='$W1_CWD' declare_rc=$f2d_declare_rc live: rc=$F2d_live_board_rc state='$F2d_live_state' note='$F2d_live_note' | gone: rc=$F2d_gone_board_rc state='$F2d_gone_state' note='$F2d_gone_note' | renewed: rc=$F2d_renewed_board_rc state='$F2d_renewed_state' note='$F2d_renewed_note'"
+fi
+
+# ==================================================================================================
+# F2g — THE GRACE AFTER A CLAIM IS BOUNDED BY THE CLAIM.  `V23-G` v3-06(a), D-90: the join never writes, so
+#      the grace is anchored to the declaration's own `at` and nothing else. Measured on F2b's claim, which
+#      nothing backs: inside the grace the board read AWAITING-CI naming the GRACE and its end; the same
+#      claim moved 301 s into the past is F2b's disregarded, counted row. Both halves on one worker.
+# ==================================================================================================
+f2g_ok=1
+[ "$f2g_board_rc" = 0 ] && [ "$f2g_state" = AWAITING-CI ] || f2g_ok=0
+case "$f2g_note" in *GRACE*until*) ;; *) f2g_ok=0 ;; esac
+case "$f2b_state" in RUNNING|IDLE) ;; *) f2g_ok=0 ;; esac
+if [ "$f2g_ok" = 1 ]; then
+  it_pass F2g "fleet/it/F/out/F2g-board-in-grace.out" \
+    "an unbacked awaiting-ci claim read AWAITING-CI inside its grace ('$f2g_note') and $f2b_state (disregarded, counted — F2b) once its stamp was 301 s old: the grace is bounded by the claim, so a dead watcher cannot keep the record out of the cap past it"
+else
+  it_fail F2g "fleet/it/F/out/F2g-board-in-grace.out" \
+    "in grace: rc=$f2g_board_rc state='$f2g_state' note='$f2g_note' | past it (F2b): state='$f2b_state'"
+fi
+
+# ==================================================================================================
+# F2h — A HOLD NEEDS A REASON, FREES THE CAP, AND EXPIRES.  `V23-G` v3-06(c), D-3. A worker told to hold with
+#      nothing to watch declares `holding`: refused with no --reason, HOLDING on the board and excluded from
+#      the cap while `hold_until` is ahead, and counted again (HOLD EXPIRED) once it has passed.
+# ==================================================================================================
+rm -f "$W1/.fleet/declare.json"
+fleet declare --instant "$W1" --phase holding --porcelain > "$OUT/F2h-noreason.out" 2>&1
+f2h_noreason_rc=$?
+fleet declare --instant "$W1" --phase holding --reason "operator: hold until the stack lands" --for 30m \
+      --porcelain > "$OUT/F2h-declare.out" 2>&1
+f2h_declare_rc=$?
+f2_row F2h_live
+python3 - "$W1/.fleet/declare.json" <<'PY_EXPIRE'
+import json, sys, time
+path = sys.argv[1]
+data = json.load(open(path))
+data["hold_until"] = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime(time.time() - 1))
+json.dump(data, open(path, "w"))
+PY_EXPIRE
+f2_row F2h_expired
+f2h_ok=1
+[ "$f2h_noreason_rc" = 2 ] || f2h_ok=0
+[ "$f2h_declare_rc" = 0 ] && command grep -q "^hold_until	" "$OUT/F2h-declare.out" || f2h_ok=0
+[ "$F2h_live_board_rc" = 0 ] && [ "$F2h_live_state" = HOLDING ] || f2h_ok=0
+case "$F2h_live_note" in *"operator: hold until the stack lands"*) ;; *) f2h_ok=0 ;; esac
+[ "$F2h_expired_board_rc" = 0 ] || f2h_ok=0
+case "$F2h_expired_state" in RUNNING|IDLE) ;; *) f2h_ok=0 ;; esac
+case "$F2h_expired_note" in *"HOLD EXPIRED"*disregarded*) ;; *) f2h_ok=0 ;; esac
+if [ "$f2h_ok" = 1 ]; then
+  it_pass F2h "fleet/it/F/out/F2h_expired-board.out" \
+    "a hold with no --reason was refused (exit 2); with one it read HOLDING naming the reason, and once hold_until passed the same declaration read $F2h_expired_state with 'HOLD EXPIRED' and 'disregarded' — counted again"
+else
+  it_fail F2h "fleet/it/F/out/F2h_expired-board.out" \
+    "noreason_rc=$f2h_noreason_rc declare_rc=$f2h_declare_rc live: rc=$F2h_live_board_rc state='$F2h_live_state' note='$F2h_live_note' | expired: rc=$F2h_expired_board_rc state='$F2h_expired_state' note='$F2h_expired_note'"
 fi
 #: W1's pane back to what the stub draws — nothing — so no later case reads a claude frame it did not ask for.
 f2d_render /dev/null

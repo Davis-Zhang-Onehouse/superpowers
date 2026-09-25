@@ -655,6 +655,21 @@ WATCHER_ATTESTED = "attested"
 WATCHER_UNREADABLE = "unreadable"
 WATCHER_GONE = "gone"
 WATCHER_NONE = "none"
+#: `V23-G` (v3-06a, coordinator D-90 option B). No watcher is on the pane, but the claim is younger than
+#: `WATCHER_GRACE_S`: a Monitor being armed. It backs the claim until `at + WATCHER_GRACE_S` and never after.
+WATCHER_GRACE = "grace"
+
+#: 5 min, anchored ONLY to the declaration's own `at`. The join never writes (property 2), so no later moment —
+#: "when the watcher was last seen" — can be remembered, and none is: a watcher that dies at minute 20 is
+#: voided at once, exactly as before. What closes a Monitor RE-ARM gap is renewal, not grace: a fresh watcher
+#: on the pane is OBSERVED and backs the old claim with no new `declare` (`_watcher_of`'s first branch), so the
+#: residual void is the seconds between two Monitors, and it clears on the next read. A worker that KNOWS it
+#: will be watcher-less declares `holding` instead.
+WATCHER_GRACE_S = 5 * 60
+
+#: The kinds that back a claim right now — what `v23-j`'s COMPLETE-BUT-WORKING refusal should read as a live
+#: watcher (fail safe: a claim inside its grace counts as live).
+WATCHER_LIVE = (WATCHER_OBSERVED, WATCHER_ATTESTED, WATCHER_GRACE)
 
 #: The kinds that leave nothing backing the claim, so `_live_state` disregards it.
 WATCHER_UNBACKED = (WATCHER_NONE, WATCHER_GONE)
@@ -776,10 +791,34 @@ def _watcher_of(pane, sessions, instant, capture_failed=False, launched_at=None)
     #: same reason: a watcher observed at the claim cannot be called gone from a pane nobody read.
     if capture_failed:
         return WATCHER_UNREADABLE, ""
+    graced = _grace_of(declarations, launched_at)
+    if graced:
+        return WATCHER_GRACE, (f"{graced}; the watcher OBSERVED at the claim ({recorded}) is not on the pane"
+                               if recorded else f"{graced}; nothing is on the pane yet")
     if recorded:
         return WATCHER_GONE, (f"the watcher OBSERVED on the pane at the claim ({recorded}) is no longer "
                               f"on it")
     return WATCHER_NONE, ""
+
+
+def _grace_of(declarations, launched_at, now=None) -> str:
+    """The sentence naming the grace a pane-watcher claim is inside, or "" when it is not in one.
+
+    Only the claim's own `at` anchors it (D-90): no stamp, no grace — an exemption with no bound is not
+    granted. A claim older than the record's launch was an earlier session's, and gets none either."""
+    if declarations is None:
+        return ""
+    claimed = _stamp_s(declarations.declared_at())
+    if claimed is None:
+        return ""
+    launched = _stamp_s(launched_at)
+    if launched is not None and claimed < launched:
+        return ""
+    ends = claimed + WATCHER_GRACE_S
+    if (now if now is not None else time.time()) >= ends:
+        return ""
+    return (f"inside the {WATCHER_GRACE_S // 60}-minute GRACE after the claim at {declarations.declared_at()} "
+            f"(until {time.strftime('%Y-%m-%dT%H:%M:%SZ', time.gmtime(ends))})")
 
 
 def _awaiting_note(pane, sessions, instant, stale_after_s=STALE_WAIT_S, now=None,
@@ -802,6 +841,8 @@ def _awaiting_note(pane, sessions, instant, stale_after_s=STALE_WAIT_S, now=None
         note = f"declared awaiting-ci; watcher observed ({watcher})"
     elif kind == WATCHER_ATTESTED:
         note = f"declared awaiting-ci; watcher ATTESTED, not observable: {watcher}"
+    elif kind == WATCHER_GRACE:
+        note = f"declared awaiting-ci; no watcher observable yet, {watcher}"
     elif kind == WATCHER_UNREADABLE:
         note = ("declared awaiting-ci; the pane CAPTURE FAILED, so nothing was observed about a watcher "
                 "either way — NOT MEASURED, and the declaration stands until a pane can be read")
