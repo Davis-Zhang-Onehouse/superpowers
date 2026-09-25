@@ -191,6 +191,9 @@ def main():
                                                     or session_id(real, socket, row["target"][1:]) !=
                                                     session_ids.get(row["target"][1:])):
                     row.update(decision="deny", reason="session target is not an exact created session")
+                elif command == "kill-session" and rest not in (["-t", row["target"]],
+                                                                ["-t" + row["target"]]):
+                    row.update(decision="deny", reason="session kill has unaudited options")
                 elif creates and not option(rest, "-s"):
                     row.update(decision="deny", reason="new session has no auditable name")
             if indirect:

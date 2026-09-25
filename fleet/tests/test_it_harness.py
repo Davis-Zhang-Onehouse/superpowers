@@ -49,7 +49,9 @@ def clean_env(extra=None, home=None) -> dict:
     """The operator's environment minus every fleet destination and tmux handle; `home` (a tmp dir) replaces
     HOME for callers that reach it_section, whose isolation check lists $HOME/.fleet/instants and hashes
     $HOME/.claude-* files — read-only, and still not this suite's to read."""
-    env = {k: v for k, v in os.environ.items() if k not in FLEET_DESTINATIONS}
+    env = {k: v for k, v in os.environ.items()
+           if k not in FLEET_DESTINATIONS and not k.startswith("IT_TMUX_AUDIT_")}
+    env["PATH"] = tests._ambient_path()
     env["TMUX_TMPDIR"] = PRIVATE_TMUX_DIR
     if home is not None:
         env["HOME"] = str(home)
@@ -715,7 +717,8 @@ class RuntimeTmuxKillAudit(unittest.TestCase):
         self.ledger = self.tmp / "calls.jsonl"
         self.real = shutil.which("tmux", path=os.environ.get("FLEET_SUITE_AMBIENT_PATH", os.environ["PATH"]))
         self.assertTrue(self.real)
-        self.env = dict(os.environ, IT_TMUX_AUDIT_LEDGER=str(self.ledger),
+        self.env = {k: v for k, v in os.environ.items() if not k.startswith("IT_TMUX_AUDIT_")}
+        self.env.update(IT_TMUX_AUDIT_LEDGER=str(self.ledger),
                         IT_TMUX_AUDIT_PRIVATE_DIRS=str(self.private), IT_TMUX_REAL=self.real,
                         TMUX_TMPDIR=str(self.private), TMUX="")
         self.shim = pathlib.Path(os.environ.get("IT_TMUX_AUDIT_SHIM", IT / "bin" / "tmux"))
@@ -841,6 +844,19 @@ class RuntimeTmuxKillAudit(unittest.TestCase):
         self.assertEqual(subprocess.run([self.real, "-S", str(socket), "has-session", "-t", "=foreign"],
                                         capture_output=True).returncode, 0)
 
+    def test_kill_session_all_other_sessions_is_refused(self):
+        socket = self.private / f"tmux-{os.getuid()}" / "own"
+        self.assertEqual(self.tmux("-L", "own", "new-session", "-d", "-s", "mine", "sleep 30").returncode, 0)
+        self.addCleanup(subprocess.run, [self.real, "-S", str(socket), "kill-server"], capture_output=True)
+        self.assertEqual(subprocess.run([self.real, "-S", str(socket), "new-session", "-d", "-s", "foreign", "sleep 30"],
+                                        capture_output=True).returncode, 0)
+        result = self.tmux("-L", "own", "kill-session", "-a", "-t", "=mine")
+        self.assertEqual(result.returncode, 97, result.stderr)
+        self.assertEqual(subprocess.run([self.real, "-S", str(socket), "has-session", "-t", "=foreign"],
+                                        capture_output=True).returncode, 0)
+        rows = [json.loads(line) for line in self.ledger.read_text().splitlines()]
+        self.assertEqual(rows[-1]["decision"], "deny")
+
     def test_replaced_session_name_is_not_still_owned(self):
         socket = self.private / f"tmux-{os.getuid()}" / "own"
         for name in ("mine", "stay"):
@@ -948,6 +964,20 @@ class NestedSelftestTmuxBoundary(unittest.TestCase):
             os.environ["PATH"] = "/outer/it/bin:/usr/bin"
             os.environ["IT_TMUX_AUDIT_BIN"] = "/outer/it/bin"
             self.assertEqual(tests._ambient_path(), "/usr/bin")
+        finally:
+            os.environ.clear()
+            os.environ.update(before)
+
+    def test_harness_fixture_excludes_outer_it_audit_environment(self):
+        before = dict(os.environ)
+        try:
+            os.environ["PATH"] = "/outer/it/bin:/usr/bin"
+            os.environ["IT_TMUX_AUDIT_BIN"] = "/outer/it/bin"
+            os.environ["IT_TMUX_AUDIT_LEDGER"] = "/outer/calls.jsonl"
+            os.environ["IT_TMUX_AUDIT_CASE_SECTION"] = "OUTER"
+            env = clean_env()
+            self.assertEqual(env["PATH"], "/usr/bin")
+            self.assertFalse(any(k.startswith("IT_TMUX_AUDIT_") for k in env), env)
         finally:
             os.environ.clear()
             os.environ.update(before)
