@@ -79,7 +79,8 @@ from fleet.pool import Pool, ReapReport
 from fleet.profiles import Profile
 from fleet import root as root_mod
 from fleet.reconcile import (HOLD_DEFAULT_S, HOLD_MAX_S, PHASE_HOLDING, WATCHER_GRACE_S, _grace_of, _hold_of,
-                             claim_predates_launch, complete_work_is_live, grace_withheld)
+                             claim_predates_launch, complete_work_is_live, grace_withheld,
+                             session_owner)
 from fleet.reconcile import (COMPLETE, COMPLETE_BUT_WORKING, KIND_WORKER, PARKED, PHASE_AWAITING_CI, PID_GONE,
                              PID_RUNNING, RUNNING, WATCHER_ATTESTED, WATCHER_LIVE, WATCHER_OBSERVED, _watcher_of,
                              attested_pid_status, needs_a_human, pid_start, reconcile)
@@ -3545,7 +3546,7 @@ def _live_session_warning(ctx: Ctx, proposal) -> str:
     if proposal.status not in TERMINAL:
         return ""
     record = _record_for(ctx, Path(proposal.instant))
-    if record is None or not record.tmux:
+    if record is None or not record.tmux or _session_taken_by(ctx, record) is not None:
         return ""
     if not ctx.sessions_for(record).alive(record.tmux):
         return ""
@@ -4004,14 +4005,33 @@ def _slot_gate_before_kill(ctx: Ctx, record, child: Path, verb: str) -> str:
     )
 
 
+def _session_taken_by(ctx: Ctx, record):
+    """V23-T (RV-S1). The record that OWNS `record`'s session when that is ANOTHER record, else `None`.
+
+    A re-dispatch reuses `dt-<name>`, so an old record and the new one name the same session, and the session is the
+    new worker's (`reconcile.session_owner`, DECISIONS D-1: the latest launch started it). A verb aimed at the old
+    record used to kill it — `close` rc=0 on a quiet pane, `--force` on any pane (evidence/02-kill-verbs). The same
+    rule as the board's, so a verb never ends a session the board attributes to somebody else."""
+    if record is None or not record.tmux:
+        return None
+    here = getattr(ctx.sessions, "socket", "") or ""
+    owner = session_owner(ctx.store.all(), here).get((record.tmux_socket or here, record.tmux))
+    return owner if owner is not None and owner.todo_id != record.todo_id else None
+
+
+def _session_left_note(record, owner) -> str:
+    return (f"left {record.tmux} running: it belongs to {owner.todo_id}, launched {owner.launched_at}, after this "
+            f"record's launch ({record.launched_at or 'never'}) — its own session is already gone (V23-T)")
+
+
 def _refuse_a_guarded_pane(ctx: Ctx, record, child: Path, verb: str, parsed: Parsed, override: str) -> None:
     """`FB-88`. Raise `close`'s own pane refusal — busy, queued text, awaiting an operator, indeterminate — for a
     verb that is about to kill the record's session, BEFORE it writes or kills anything. `abort` and `harvest --id`
     end the same pane `close` ends and used to kill it unasked, discarding a turn in progress, a message somebody
     typed, or a decision on screen. `--force` is the override, as for `close`; it overrides this judgement about
     work in progress and nothing else — never the server check nor the cwd-holder gate (`B10`)."""
-    if record is None or parsed.on("force"):
-        return
+    if record is None or parsed.on("force") or _session_taken_by(ctx, record) is not None:
+        return                  # V23-T: a pane that is somebody else's is not this verb's to judge, nor to end
     refusal = _pane_refusal(ctx, record, override)
     if refusal is None:
         return
@@ -4124,6 +4144,7 @@ def _do_abort(ctx: Ctx, parsed: Parsed) -> int:
     #: session kill — so a dry-run reports the refusal the real call would hit, and the real call refuses
     #: before its first irreversible step instead of after it.
     undecided = _slot_gate_before_kill(ctx, record, child, "abort")
+    taken = _session_taken_by(ctx, record)
 
     if ctx.dry_run:
         _emit(ctx, "abort", [
@@ -4132,7 +4153,8 @@ def _do_abort(ctx: Ctx, parsed: Parsed) -> int:
                                    f"processes" if record is not None and record.slot else "(no slot)")),
             ("would-rename", f"{child.name} -> {target.name}"),
             ("would-record", f"{ABORT_FILE}: {reason}"),
-            ("would-close", (record.tmux if record is not None and record.tmux else "(no session)")),
+            ("would-close", (f"no — {_session_left_note(record, taken)}" if taken is not None else
+                             record.tmux if record is not None and record.tmux else "(no session)")),
             ("would-release", (record.slot if record is not None and record.slot else "(no slot)")),
             ("milestone", milestone_id or "(none)"),
             ("would-disown", (f"{milestone_id} on {coordinator}" if coordinator is not None
@@ -4142,8 +4164,10 @@ def _do_abort(ctx: Ctx, parsed: Parsed) -> int:
     reason_path = child / ".fleet" / ABORT_FILE
     reason_path.parent.mkdir(parents=True, exist_ok=True)
     reason_path.write_text(json.dumps(body, indent=2, ensure_ascii=False))
-    if record is not None and record.tmux:
+    if record is not None and record.tmux and taken is None:
         ctx.sessions_for(record).kill(record.tmux)
+    elif taken is not None:
+        print(f"abort: {_session_left_note(record, taken)}", file=ctx.err)
     released = "(no slot)"
     if record is not None and record.slot:
         released = _release_slot_or_name_the_partial_state(ctx, record, child)
@@ -4253,7 +4277,8 @@ def _refuse_live_complete_watcher(ctx: Ctx, record: Record, child: Path, verb: s
     if phase not in (PHASE_AWAITING_CI, PHASE_HOLDING):
         return
     sessions = ctx.sessions_for(record)
-    live = bool(record.tmux) and sessions.alive(record.tmux)
+    #: V23-T: the board's liveness, so a session another record owns is not this record's live work.
+    live = bool(record.tmux) and _session_taken_by(ctx, record) is None and sessions.alive(record.tmux)
     captured = sessions.capture(record.tmux) if live else ""
     kind, watcher = (_watcher_of(captured or "", sessions, child, capture_failed=captured is None,
                                  launched_at=record.launched_at) if phase == PHASE_AWAITING_CI else ("", ""))
@@ -4342,13 +4367,15 @@ def _do_close(ctx: Ctx, parsed: Parsed) -> int:
     _refuse_a_session_on_another_server(ctx, record)
     child, _ = _child_or_why(ctx, record)
     _refuse_live_complete_watcher(ctx, record, child, "close")
-    refusal = None if parsed.on("force") else _pane_refusal(ctx, record)
+    taken = _session_taken_by(ctx, record)
+    refusal = None if parsed.on("force") or taken is not None else _pane_refusal(ctx, record)
 
     if ctx.dry_run:
         rows = [("dry-run", "nothing was closed, stamped or released"),
                 ("record", record.todo_id),
                 ("session", record.tmux or "(none)"),
-                ("would-close", "false — refused" if refusal else "true")]
+                ("would-close", "false — refused" if refusal else
+                 f"false — {_session_left_note(record, taken)}" if taken is not None else "true")]
         if refusal:
             rows += [("refused", refusal[0]), ("reason", refusal[1]),
                      ("clears_when", refusal[2]), ("clears_who", refusal[3] or "the operator")]
@@ -4361,7 +4388,7 @@ def _do_close(ctx: Ctx, parsed: Parsed) -> int:
         raise Refused(f"close: {refusal[0]} — {refusal[1]}. Override: {FORCE}.",
                       clears_when=refusal[2], clears_who=refusal[3] or "the operator")
 
-    if record.tmux:
+    if record.tmux and taken is None:
         ctx.sessions_for(record).kill(record.tmux)
     record.closed_at = ctx.now()
     ctx.store.write(record)
@@ -4377,7 +4404,7 @@ def _do_close(ctx: Ctx, parsed: Parsed) -> int:
              f"once nothing is sitting in it"))
     _emit(ctx, "close", [
         ("record", record.todo_id),
-        ("closed", record.tmux or "(no session)"),
+        ("closed", _session_left_note(record, taken) if taken is not None else record.tmux or "(no session)"),
         ("closed_at", record.closed_at),
         ("forced", "true" if parsed.on("force") else "false"),
         ("slot_still_held", held),
@@ -4654,6 +4681,7 @@ def _do_harvest(ctx: Ctx, parsed: Parsed) -> int:
                 left = [p.status for p in mine if recorded is not None and p.milestone == recorded.milestone]
                 stranded = _stranded_claim(roadmap, recorded, child, status=(left[-1] if left else None))
                 superseding = _superseded_by(roadmap, mine)
+                taken = _session_taken_by(ctx, record)
                 rows.append(Row(kind="would-harvest", subject=record.todo_id, severity=INFO,
                                 detail=(f"the gate allows ({gate.guard}) and the folder is {child.name}; a "
                                         f"real run would apply {len(mine)} proposal(s) this instant wrote to "
@@ -4662,8 +4690,9 @@ def _do_harvest(ctx: Ctx, parsed: Parsed) -> int:
                                         + (f", give back the claim on {stranded.id} (it would be left at "
                                            f"status={left[-1] if left else stranded.status})"
                                            if stranded is not None else "")
-                                        + f", close {record.tmux}, "
-                                        f"release {record.slot or '(no slot)'} and stamp the record. "
+                                        + (f", leave {record.tmux} running (it is {taken.todo_id}'s), "
+                                           if taken is not None else f", close {record.tmux}, ")
+                                        + f"release {record.slot or '(no slot)'} and stamp the record. "
                                         f"Nothing was changed.")))
                 rows += _held_rows(record, roadmap, held)
                 rows += [Row(kind="codex-residue", subject=path, severity=INFO, detail=verdict)
@@ -4680,7 +4709,8 @@ def _do_harvest(ctx: Ctx, parsed: Parsed) -> int:
                     roadmap.disown(stranded.id, expect_owner=stranded.owner,
                                    reason=(f"harvested: {child.name} was closed with {stranded.id} at "
                                            f"status={stranded.status}"))
-                if record.tmux:
+                taken = _session_taken_by(ctx, record)
+                if record.tmux and taken is None:
                     ctx.sessions_for(record).kill(record.tmux)
                 # `SI-31`. STAMP BEFORE RELEASING. The order used to be release-then-stamp, and `J9` measured
                 # what that costs: `SIGKILL` between the two left `slot_held: False` with `harvested_at: None` —
@@ -4713,8 +4743,9 @@ def _do_harvest(ctx: Ctx, parsed: Parsed) -> int:
                                            if superseding else "")
                                         + (f", claim on {stranded.id} given back (status={stranded.status})"
                                            if stranded is not None else "")
-                                        + f", session "
-                                        f"{record.tmux} closed, slot released: {released}, "
+                                        + (f", session {_session_left_note(record, taken)}"
+                                           if taken is not None else f", session {record.tmux} closed")
+                                        + f", slot released: {released}, "
                                         f"record stamped at {record.harvested_at}; the row has left the "
                                         f"board (FD-5)")))
                 rows += _held_rows(record, roadmap, held)
