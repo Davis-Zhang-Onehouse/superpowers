@@ -6113,6 +6113,12 @@ def _do_pane_guard(ctx: Ctx, parsed: Parsed) -> int:
         elif not _is_claude(layer, text, pane, live):
             code, detail = PANE_NOT_CLAUDE, (f"{pane} is alive and nothing in its tail is claude; a send "
                                              "here goes to somebody else's shell")
+        elif layer.asking(text) and layer.busy(text):
+            #: D-49 makes 11 send-admitting. A stale dialog hint above a live busy row, or a stale busy
+            #: hint above a real dialog, cannot safely be distinguished here. Say 14 rather than claim
+            #: 15 is certainly a dialog or allow 11 to type into one.
+            code, detail = PANE_INDETERMINATE, (f"{pane} shows both operator-dialog and mid-turn hints; "
+                                                 "inspect the pane before sending or closing")
         elif layer.asking(text):
             #: A POSITIVELY identified operator dialog on either runtime — Claude's trust modal or
             #: `AskUserQuestion`, Codex's approval prompt or directory-trust screen (`runtime.CLAUDE_DIALOG_ROWS`
