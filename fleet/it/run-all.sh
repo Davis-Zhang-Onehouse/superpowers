@@ -129,6 +129,10 @@ done
 
 if [ "$IT_FULL" = yes ]; then
   RUNNERS+=("${FULL_EXTRA[@]}")
+  #: §TS (V23-P, FB-126): dispatch reports the folder-trust screen, measured on the REAL binary. UNGATED by
+  #: FLEET_IT_ALLOW_CLAUDE: it runs claude logged out under a scratch config, so it spends no tokens. It needs
+  #: /home/ubuntu/.local/bin/claude (or P_REAL_CLAUDE) and records a SKIP without it.
+  RUNNERS+=("TS:bash $IT_ROOT/run-TS.sh")
   if [ "${FLEET_IT_ALLOW_CLAUDE:-0}" = 1 ]; then
     RUNNERS+=("P:bash $IT_ROOT/run-P.sh")
     #: §SEND: `fleet send` against a real pane (B13/FB-27) — one fixture worker that only answers; gated with §P.
