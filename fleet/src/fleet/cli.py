@@ -81,7 +81,7 @@ from fleet import root as root_mod
 from fleet.reconcile import (HOLD_DEFAULT_S, HOLD_MAX_S, PHASE_HOLDING, WATCHER_GRACE_S, _grace_of, _hold_of,
                              claim_predates_launch, grace_withheld)
 from fleet.reconcile import (COMPLETE, COMPLETE_BUT_WORKING, KIND_WORKER, PARKED, PHASE_AWAITING_CI, PID_GONE,
-                             PID_RUNNING, RUNNING, WATCHER_ATTESTED, WATCHER_OBSERVED, _watcher_of,
+                             PID_RUNNING, RUNNING, WATCHER_ATTESTED, WATCHER_LIVE, WATCHER_OBSERVED, _watcher_of,
                              attested_pid_status, needs_a_human, pid_start, reconcile)
 from fleet.release import (CANDIDATE, DEV, HISTORY_COLUMNS, META_DIR, RELEASE_RETENTION, RELEASED, Releases, Version,
                            actor, tree_sha, utc_now)
@@ -4234,12 +4234,21 @@ def _refuse_live_complete_watcher(ctx: Ctx, record: Record, child: Path, verb: s
         return          # not an instant name, so not a `-complete-` folder: as `_record_for` answers
     if state != "complete":
         return
-    if Declarations(child).phase() != PHASE_AWAITING_CI:
+    phase = Declarations(child).phase()
+    #: S5 (v23-g x v23-j, coordinator D-90): a `holding` phase and a claim inside its grace count as live, fail safe.
+    if phase == PHASE_HOLDING:
+        raise Refused(
+            f"{verb} refused: {child.name} is {COMPLETE_BUT_WORKING}; it is still declared {PHASE_HOLDING}. "
+            "Nothing was closed, released, renamed, applied or written.",
+            clears_when=f"fleet declare --phase done --instant {child} once the hold is over",
+            clears_who="the dispatched instant or the coordinator on its behalf")
+    if phase != PHASE_AWAITING_CI:
         return
     sessions = ctx.sessions_for(record)
     captured = sessions.capture(record.tmux) if record.tmux and sessions.alive(record.tmux) else ""
-    kind, watcher = _watcher_of(captured or "", sessions, child, capture_failed=captured is None)
-    if kind not in (WATCHER_OBSERVED, WATCHER_ATTESTED):
+    kind, watcher = _watcher_of(captured or "", sessions, child, capture_failed=captured is None,
+                                launched_at=record.launched_at)
+    if kind not in WATCHER_LIVE:
         return
     raise Refused(
         f"{verb} refused: {child.name} is {COMPLETE_BUT_WORKING}; its watcher is alive: {watcher}. "
