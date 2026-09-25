@@ -1,85 +1,131 @@
 """S5 stack glue (fleet 0.6.14): v23-g's awaiting-ci GRACE and `holding` phase meet v23-j's COMPLETE-BUT-WORKING.
 
-v23-j decides "is work still live on a `-complete-` folder" in two places — the board state (`_worker_subject`) and
-the close/harvest refusal (`_refuse_live_complete_watcher`) — both keyed on an OBSERVED or ATTESTED watcher. v23-g adds
-a third live watcher kind (a claim inside its 5-minute grace) and a `holding` phase. The coordinator's ruling (D-90,
-fail safe): a claim inside its grace, or any `holding` phase, counts as LIVE for j. And v23-m's terminal stamps
-(RV-C1, 0.6.13) still win: a harvested or closed record with no live session is over, grace or holding notwithstanding.
-Each case sits beside its control, on the real fixtures j's and RV-C1's own cases use.
+v23-j decides "is work still live on a `-complete-` folder" in two places: the board state (`_worker_subject`, and so
+the WIP cap) and the close/harvest refusal (`_refuse_live_complete_watcher`). Both now ask ONE predicate,
+`reconcile.complete_work_is_live`, under the coordinator's ruling D-108 (it supersedes D-90's "expired or not"):
+- a claim inside its 5-minute grace counts as live, like an observed or attested watcher;
+- `holding` counts only while the hold stands (`_hold_of`);
+- a harvested or closed record with no live session is OVER, whatever its stale claim says (RV-C1);
+- a claim made before the record's (re)launch is not live (v2-10).
+Each case sits beside its control, on the fixtures j's and RV-C1's own cases use.
 """
+import io
 import json
 import pathlib
 import time
+import types
 import unittest
 
 import tests  # noqa: F401 — installs the hermetic host boundary (v23-n, FB-118)
 from tests import test_cli
 from tests.test_cli import EXIT_OK, EXIT_REFUSED
 from tests.test_guards import GuardCase, QUIET_PANE
+from fleet import cli
+from fleet.errors import Refused
 from fleet.guards import WipCap
-from fleet.store import Declarations
+from fleet.store import ATTESTED_PREFIX, Declarations
 
 
-def _age_the_claim(path, seconds):
-    """Move the declaration's `at` into the past, as `_grace_of` measures it (the claim's own stamp, D-90)."""
+def _stamp(seconds_ago):
+    return time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime(time.time() - seconds_ago))
+
+
+def _declare(path, **fields):
+    """The declaration as `declare` leaves it on disk, written directly so each shape is exact."""
     target = pathlib.Path(path) / ".fleet" / "declare.json"
-    data = json.loads(target.read_text())
-    data["at"] = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime(time.time() - seconds))
+    target.parent.mkdir(parents=True, exist_ok=True)
+    data = json.loads(target.read_text()) if target.exists() else {}
+    data.update(fields)
     target.write_text(json.dumps(data))
 
 
-class TestGraceAndHoldingOnACompleteFolder(GuardCase):
-    def subject_for(self, phase, *, age=0, stamp=None, live=False):
+#: Each shape: the fields of declare.json. `age` is how long ago the claim was made.
+def grace(age=60):
+    return {"phase": "awaiting-ci", "at": _stamp(age)}
+
+
+def standing_hold(age=60):
+    return {"phase": "holding", "at": _stamp(age), "hold_reason": "told to wait for the gate",
+            "hold_until": _stamp(age - 3600)}
+
+
+def expired_hold(age=2 * 3600):
+    return {"phase": "holding", "at": _stamp(age), "hold_reason": "told to wait for the gate",
+            "hold_until": _stamp(age - 3600)}
+
+
+def unbounded_hold(age=60):
+    return {"phase": "holding", "at": _stamp(age), "hold_reason": "no expiry recorded"}
+
+
+def pidless_attested(age=3600):
+    return {"phase": "awaiting-ci", "at": _stamp(age), "watchers": ATTESTED_PREFIX + "a monitor, no pid handle"}
+
+
+class TestTheBoardOnACompleteFolder(GuardCase):
+    def subject_for(self, fields, *, stamp=None, live=False, launched_at=None):
         fleet = self.fleet()
-        fleet.worker("glue", state="complete", slot="ws1", pane=QUIET_PANE, phase=phase, live=live)
-        if age:
-            _age_the_claim(fleet.paths["glue"], age)
+        fleet.worker("glue", state="complete", slot="ws1", pane=QUIET_PANE, live=live)
+        _declare(fleet.paths["glue"], **fields)
+        record = fleet.store.all()[0]
         if stamp:
-            record = fleet.store.all()[0]
             setattr(record, stamp, "2026-08-12T01:36:49Z")
-            fleet.store.write(record)
+        if launched_at:
+            record.launched_at = launched_at
+        fleet.store.write(record)
         return fleet, fleet.subjects()[0]
 
-    def test_a_claim_inside_its_grace_keeps_a_complete_folder_working(self):
+    def assertWorking(self, fleet, subject, words):
+        self.assertEqual("COMPLETE-BUT-WORKING", subject.state, subject.note)
+        self.assertIn(words, subject.note)
+        self.assertFalse(WipCap().evaluate(fleet.ctx()).allowed, "live work on a complete folder left the cap")
+
+    def assertOver(self, fleet, subject):
+        self.assertEqual("COMPLETE", subject.state, subject.note)
+        self.assertTrue(WipCap().evaluate(fleet.ctx()).allowed, f"finished work held the cap: {subject.note}")
+
+    def test_a_claim_inside_its_grace_is_live_work(self):
         for live in (False, True):
             with self.subTest(live=live):
-                fleet, subject = self.subject_for("awaiting-ci", age=60, live=live)
-                self.assertEqual("COMPLETE-BUT-WORKING", subject.state, subject.note)
-                self.assertIn("GRACE", subject.note)
-                self.assertFalse(WipCap().evaluate(fleet.ctx()).allowed)
+                self.assertWorking(*self.subject_for(grace(), live=live), "GRACE")
 
-    def test_control_a_claim_past_its_grace_is_complete(self):
-        fleet, subject = self.subject_for("awaiting-ci", age=301)
-        self.assertEqual("COMPLETE", subject.state, subject.note)
-        self.assertTrue(WipCap().evaluate(fleet.ctx()).allowed)
+    def test_control_a_claim_past_its_grace_is_over(self):
+        self.assertOver(*self.subject_for(grace(age=301)))
 
-    def test_a_holding_phase_keeps_a_complete_folder_working(self):
-        for age in (0, 5 * 60 * 60):          # a standing hold, and one past HOLD_MAX_S: both count (D-90, fail safe)
-            with self.subTest(age=age):
-                fleet, subject = self.subject_for("holding", age=age)
-                self.assertEqual("COMPLETE-BUT-WORKING", subject.state, subject.note)
-                self.assertIn("holding", subject.note)
-                self.assertFalse(WipCap().evaluate(fleet.ctx()).allowed)
+    def test_a_standing_hold_is_live_work(self):
+        self.assertWorking(*self.subject_for(standing_hold()), "holding")
 
-    def test_control_a_done_phase_is_complete(self):
-        fleet, subject = self.subject_for("done")
-        self.assertEqual("COMPLETE", subject.state, subject.note)
-        self.assertTrue(WipCap().evaluate(fleet.ctx()).allowed)
+    def test_an_expired_or_unbounded_hold_is_over(self):
+        """D-108: a hold counts only while it stands. D-90's "expired or not" made an expired hold on a complete folder
+        with no session a phantom cap holder forever (review RV-S3)."""
+        for name, fields in (("expired", expired_hold()), ("unbounded", unbounded_hold())):
+            with self.subTest(hold=name):
+                self.assertOver(*self.subject_for(fields))
 
-    def test_neither_grace_nor_holding_resurrects_a_stamped_record(self):
-        """RV-C1's rule, extended: a harvested or closed record with no live session is over."""
-        for phase in ("awaiting-ci", "holding"):
-            for stamp in ("harvested_at", "closed_at"):
-                with self.subTest(phase=phase, stamp=stamp):
-                    fleet, subject = self.subject_for(phase, age=60, stamp=stamp)
-                    self.assertEqual("COMPLETE", subject.state, subject.note)
-                    self.assertTrue(WipCap().evaluate(fleet.ctx()).allowed,
-                                    f"a {stamp} record's {phase} claim held the cap")
+    def test_control_a_done_phase_is_over(self):
+        self.assertOver(*self.subject_for({"phase": "done", "at": _stamp(60)}))
+
+    def test_nothing_resurrects_a_stamped_record_with_no_live_session(self):
+        """RV-C1, extended by D-108 to every claim: a harvested or closed record with no live session is over."""
+        shapes = {"grace": grace(), "standing hold": standing_hold(), "expired hold": expired_hold(),
+                  "pidless attested": pidless_attested()}
+        for stamp in ("harvested_at", "closed_at"):
+            for name, fields in shapes.items():
+                with self.subTest(stamp=stamp, shape=name):
+                    self.assertOver(*self.subject_for(fields, stamp=stamp))
+
+    def test_a_claim_made_before_the_relaunch_is_not_live(self):
+        """Review RV-H5: `launched_at` reaches both CBW sites. A claim older than the record's (re)launch was an earlier
+        session's: a pid-less attestation and a claim still inside its grace are both disregarded."""
+        for name, fields in (("pidless attested", pidless_attested(age=120)), ("grace", grace(age=120))):
+            with self.subTest(shape=name):
+                self.assertOver(*self.subject_for(fields, launched_at=_stamp(30)))
+            with self.subTest(shape=name, control="launched before the claim"):
+                self.assertWorking(*self.subject_for(fields, launched_at=_stamp(3600)), "")
 
 
-class TestCloseAndHarvestRefuseGraceAndHolding(test_cli.TestCompleteRefusesBrokenPointers):
-    """The same composition at j's refusal: close and harvest must not tear down a `-complete-` worker whose claim is
-    inside its grace or which is holding. `declare --phase done` clears it, as for j's live watcher."""
+class TestCloseAndHarvestAskTheSamePredicate(test_cli.TestCompleteRefusesBrokenPointers):
+    """close and harvest refuse exactly what the board reads as live work on a `-complete-` folder, and nothing else."""
 
     def completed(self):
         env = self.ready_to_complete()
@@ -88,38 +134,58 @@ class TestCloseAndHarvestRefuseGraceAndHolding(test_cli.TestCompleteRefusesBroke
         self.assertEqual(EXIT_OK, code, err)
         return env, record, env.instant.with_name(env.instant.name.replace("-inflight-", "-complete-"))
 
-    def test_grace_and_holding_block_close_and_harvest(self):
-        for phase in ("awaiting-ci", "holding"):
+    def test_grace_and_a_standing_hold_block_close_and_harvest(self):
+        for name, fields in (("grace", grace()), ("standing hold", standing_hold())):
             for verb in ("close", "harvest"):
-                with self.subTest(phase=phase, verb=verb):
+                with self.subTest(shape=name, verb=verb):
                     env, record, child = self.completed()
-                    declaration = Declarations(child)
-                    declaration.set_phase(phase)
+                    _declare(child, **fields)
                     code, out, err = env.fleet.run([verb, "--id", record.todo_id])
                     self.assertEqual(EXIT_REFUSED, code, out + err)
                     self.assertIn("COMPLETE-BUT-WORKING", out + err)
                     self.assertIn("fleet declare --phase done", out + err)
                     self.assertEqual([], env.fleet.killed)
-                    declaration.set_phase("done")
+                    Declarations(child).set_phase("done")
                     code, out, err = env.fleet.run([verb, "--id", record.todo_id])
                     self.assertNotEqual(EXIT_REFUSED, code, out + err)
                     self.assertIn(record.tmux, env.fleet.killed)
 
-    def test_control_a_claim_past_its_grace_allows_close_and_harvest(self):
-        for verb in ("close", "harvest"):
-            with self.subTest(verb=verb):
-                env, record, child = self.completed()
-                Declarations(child).set_phase("awaiting-ci")
-                _age_the_claim(child, 301)
-                code, out, err = env.fleet.run([verb, "--id", record.todo_id])
-                self.assertNotEqual(EXIT_REFUSED, code, out + err)
-                self.assertIn(record.tmux, env.fleet.killed)
+    def test_control_past_grace_and_an_expired_hold_allow_close_and_harvest(self):
+        for name, fields in (("past grace", grace(age=301)), ("expired hold", expired_hold())):
+            for verb in ("close", "harvest"):
+                with self.subTest(shape=name, verb=verb):
+                    env, record, child = self.completed()
+                    _declare(child, **fields)
+                    code, out, err = env.fleet.run([verb, "--id", record.todo_id])
+                    self.assertNotEqual(EXIT_REFUSED, code, out + err)
+                    self.assertIn(record.tmux, env.fleet.killed)
+
+    @staticmethod
+    def ctx_of(env):
+        """The Ctx `cli.main` would build over this fixture (its `context` hook), for asking the refusal directly."""
+        return env.fleet.context()(types.SimpleNamespace(on=lambda _flag: False), io.StringIO(), io.StringIO())
+
+    def test_the_refusal_passes_a_stamped_record_with_no_live_session(self):
+        """Review RV-S2/RV-H6: the board reads such a record COMPLETE, so the refusal must not call it COMPLETE-BUT-WORKING.
+        Asked of the refusal itself, for every claim shape, with the record's session gone."""
+        shapes = {"grace": grace(), "standing hold": standing_hold(), "pidless attested": pidless_attested()}
+        for stamp in ("harvested_at", "closed_at"):
+            for name, fields in shapes.items():
+                with self.subTest(stamp=stamp, shape=name):
+                    env, record, child = self.completed()
+                    _declare(child, **fields)
+                    env.fleet.tmux_live.discard(record.tmux)
+                    setattr(record, stamp, "2026-08-12T01:36:49Z")
+                    self.assertIsNone(cli._refuse_live_complete_watcher(self.ctx_of(env), record, child, "harvest"))
+                    setattr(record, stamp, None)
+                    with self.assertRaises(Refused, msg="control: the unstamped record is refused"):
+                        cli._refuse_live_complete_watcher(self.ctx_of(env), record, child, "harvest")
 
 
 # The inherited cases of TestCompleteRefusesBrokenPointers run in test_cli; this module runs only its own.
 for _name in [n for n in dir(test_cli.TestCompleteRefusesBrokenPointers) if n.startswith("test_")]:
-    if _name not in TestCloseAndHarvestRefuseGraceAndHolding.__dict__:
-        setattr(TestCloseAndHarvestRefuseGraceAndHolding, _name, None)
+    if _name not in TestCloseAndHarvestAskTheSamePredicate.__dict__:
+        setattr(TestCloseAndHarvestAskTheSamePredicate, _name, None)
 
 
 if __name__ == "__main__":
