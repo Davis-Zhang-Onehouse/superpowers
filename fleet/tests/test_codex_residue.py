@@ -208,6 +208,22 @@ class VerbCase(unittest.TestCase):
             self.assertEqual(left(root), [], f"{root}: {out}")
         self.assertIn("codex", out)
 
+    def test_a_record_with_no_instant_path_never_sweeps_the_callers_cwd(self):
+        """RV-35. `Path("").parent` is `.`: a record whose child_instant is empty (pool's default) would sweep whatever
+        directory `fleet close` was run from."""
+        self.codex_worker("cx")
+        record = self.f.store.read(self.f.ids["cx"])
+        record.child_instant = ""
+        self.f.store.write(record)
+        here = self.f.tmp / "caller-cwd"
+        plant(here)
+        before = os.getcwd()
+        os.chdir(here)
+        self.addCleanup(os.chdir, before)
+        code, out, err = self.f.run(["close", "--id", self.f.ids["cx"]])
+        self.assertEqual(left(here), sorted(RESIDUE), out + err)
+        self.assertIn("no instants root", out + err)
+
     def test_close_leaves_residue_while_another_codex_names_the_root(self):
         self.codex_worker("cx")
         plant(self.f.instants)

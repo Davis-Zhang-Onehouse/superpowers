@@ -4200,8 +4200,16 @@ def _codex_residue(ctx: Ctx, record) -> list:
     that did not run codex. Swept only after the pane is gone, and never under a live codex (`sweep_mount_residue`)."""
     if record.runtime != 'codex':
         return []
-    roots = (ctx.home, Path(record.child_instant).parent)
-    return runtime_launch.sweep_mount_residue(roots, proc_root=Path(ctx.proc_root or '/proc'), dry_run=ctx.dry_run)
+    rows = []
+    roots = [ctx.home]
+    if record.child_instant and Path(record.child_instant).is_absolute():
+        roots.append(Path(record.child_instant).parent)
+    else:
+        #: RV-35. `Path("").parent` is `.` — the caller's cwd, which is nobody's writable root.
+        rows.append((record.child_instant or '(empty)', 'examined: no instants root — the record names no absolute '
+                     'instant path, so only the store was swept'))
+    return rows + runtime_launch.sweep_mount_residue(roots, proc_root=Path(ctx.proc_root or '/proc'),
+                                                     dry_run=ctx.dry_run)
 
 
 def _do_close(ctx: Ctx, parsed: Parsed) -> int:
