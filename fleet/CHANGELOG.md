@@ -1,5 +1,49 @@
 # fleet — changelog
 
+## fleet/v0.6.12 — 2026-09-25T05:53:38Z
+Cut from 4a8489c on `stack/0.6.12` (upstream base snapshot/2026-09-22-152849). 36 commit(s) since fleet/v0.6.11.
+
+Every release ships the whole repository — all skills, `commands/`, `hooks/` and the plugin manifest, not only `fleet/`.
+Payload: fleet (13 files), skills (2 files), scripts (2 files).
+Skills changed: maintaining-a-roadmap, using-fleet.
+
+- 63ef9e7 Stop counting harvested and closed historical records
+- c661bcb RV-4 Preserve live evidence over terminal stamps
+- 70f9d6d RV-5 Keep closed unfinished work in the cap
+- 4d9640f RV-6 Stop harvested compactions blocking dispatch
+- b23ea90 RV-7 Display historical terminal states clearly
+- 73dca5a FB-121 A folderless harvested record on another server stops counting
+- 2c51a86 Keep the IT guardian bound to its runner and socket
+- 1aed862 Use namespace-independent guardian test socket names
+- 794da82 RV-2 Share guardian generation across harness copies
+- 6afd21b RV-3 Refuse guardian arms from subshells
+- 0c28e01 RV-4 Verify guardian parent and detach in Python
+- b329841 RV-5 Unlink owned default socket fixtures
+- b58d666 RV-6 Wait for guardian exit in missing-dir cases
+- 5db14ce RV-7a Refuse arm when token publication fails
+- 047acaa RV-7b Resolve socket directory at arm time
+- 5968d9e Revoke old IT guardian when its runner moves sockets
+- a22f220 FB-122a Keep the IT guardian's last arm per socket, not per runner
+- 7247ac1 Keep completing workers visible until live work ends
+- 2a39002 RV-J1: refuse live complete watcher before close and harvest
+- bc96b34 RV-J2: cover claimed milestone with no final report
+- a085b64 RV-J3: cover observed watcher, applied report and Codex pane
+- 927b200 RV-J4: share worker report selection across complete and harvest
+- 591e09c RV-J5: give complete but working a visible fleet-view glyph
+- 2dd9d3f RV-J6: name the complete report guard and its clearing command
+- ed48d16 v23-j nit: guard the instant-name parse in the live-watcher teardown refusal
+- 103c72f Add in-place milestone retitle with row history
+- 81e8b18 RV-2 Share milestone title validation
+- 76b7faa RV-3 Keep untouched roadmap rows backward readable
+- 1a33829 RV-4 Route terminal and mixed milestone refusals
+- f59c9f0 RV-5a Pin retire and disown field combinations
+- 15e3d57 RV-6 Assert retitle leaves claim and inbox intact
+- 096aeeb RV-7 Emit separate milestone history fields
+- a76b799 RV-8a Pin normalized retitle reason echo
+- 8e29935 RV-5b Document exclusive milestone operations
+- 36f0dd7 RV-8b Explain the terminal reopen sequence
+- 4a8489c v23-i nit (FB-124): make the terminal-retitle refusal's clearing command pasteable
+
 ## fleet/v0.6.11 — 2026-09-25T01:07:03Z
 Cut from 829f147 on `stack/0.6.11` (upstream base snapshot/2026-09-22-152849). 45 commit(s) since fleet/v0.6.10.
 
