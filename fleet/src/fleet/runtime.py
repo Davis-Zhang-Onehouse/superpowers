@@ -430,7 +430,7 @@ def _undim(cells: list) -> str:
 #: The cost of dropping the fallback is the safe direction: an old-style plain suggestion reads `10`, a refusal.
 #:
 #: Only chrome MEASURED on a real frame belongs here: 2.1.282 draws "Press up to edit queued messages" in the
-#: box while a message waits behind the turn (`claude-after-busy-enter-282.frame`).
+#: box while a message waits behind the turn (`claude-queued-behind-turn-282.frame`).
 _EMPTY_BOX_CHROME = (
     re.compile(r"press up to edit queued messages", re.I),
 )
