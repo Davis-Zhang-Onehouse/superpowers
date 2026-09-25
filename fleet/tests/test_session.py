@@ -38,6 +38,23 @@ class TestLiveness(unittest.TestCase):
         s, _, _ = layer(procs=[LiveSession(9, pathlib.Path("/elsewhere"), None)])
         self.assertEqual([x.pid for x in s.live()], [9])
 
+class TestSessionLayerForeground(unittest.TestCase):
+    """FB-130 RV-13. `agent_in_foreground` is tri-state and only False is evidence of "not the agent": no probe, a
+    failed answer and an EMPTY answer are all unobservable (None) — an empty list must never read as "no agent"."""
+
+    def test_the_three_answers(self):
+        s, _, _ = layer(sessions=("dt-a",))
+        cases = [(None, None), ([], None), (["claude"], True), (["sleep", "claude"], True), (["bash"], False),
+                 (["sh", "sleep"], False)]
+        for answer, expected in cases:
+            with self.subTest(answer=answer):
+                s.probes.pane_commands = lambda name, answer=answer: answer
+                self.assertIs(s.agent_in_foreground("dt-a"), expected)
+        s.probes.pane_commands = None
+        self.assertIsNone(s.agent_in_foreground("dt-a"))
+        self.assertIsNone(SessionLayer(s.probes, "codex").agent_in_foreground(""))
+
+
 class TestOwnProcesses(unittest.TestCase):
     """`B10`. Which cwd holders a kill of the session ends — its pane pid and that pid's descendants."""
 
