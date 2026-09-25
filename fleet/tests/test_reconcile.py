@@ -283,6 +283,21 @@ class TestReconcile(unittest.TestCase):
         self.assertEqual(subjects["deadWorker-07300301"].state, DEAD)
         self.assertTrue(_counts_against_cap(subjects["deadWorker-07300301"]))
 
+    def test_folderless_harvested_record_naming_another_server_does_not_count(self):
+        """FB-121. A harvested record that names a different tmux server (e.g. the old `fleet`) is terminal: harvest
+        released the lease and killed the session before it stamped. It must read HARVESTED, not UNREACHABLE. The
+        unstamped control on the same server still reads UNREACHABLE and counts."""
+        for todo, harvested in (("harvestedElsewhere-07300312", "2026-07-30T04:00:00Z"),
+                                ("unstampedElsewhere-07300313", None)):
+            self.fleet.store.write(_record(todo_id=todo, child_instant=str(self.fleet.instants / f"missing-{todo}"),
+                                           slot="ws9", tmux=f"dt-{todo}", launched_at="2026-07-30T03:13:00Z",
+                                           tmux_socket="fleet-not-this-one", harvested_at=harvested))
+        subjects = {s.identity: s for s in self.fleet.reconcile()}
+        self.assertEqual(subjects["harvestedElsewhere-07300312"].state, "HARVESTED")
+        self.assertFalse(_counts_against_cap(subjects["harvestedElsewhere-07300312"]))
+        self.assertEqual(subjects["unstampedElsewhere-07300313"].state, UNREACHABLE)
+        self.assertTrue(_counts_against_cap(subjects["unstampedElsewhere-07300313"]))
+
     def test_terminal_stamp_does_not_hide_a_live_busy_session(self):
         self.fleet.launch("dt-deadWorker", 404, "ws1", BUSY_PANE)
         for stamp in ("closed_at", "harvested_at"):

@@ -449,6 +449,10 @@ def _state_of(rec, folder_state, live, phase, parked, pane, sessions, instant, i
                    if rec.tmux_socket else
                    "This record predates the server field, so nothing says where to look: usually the "
                    "wrong tmux server, and `export FLEET_TMUX_SOCKET` to the one it was dispatched on.")), False
+        #: FB-121. Harvest releases the lease and kills the session BEFORE it stamps, so a harvested record with no
+        #: live slot holder is over wherever it was dispatched — including a server we are not talking to.
+        if rec.harvested_at:
+            return HARVESTED, f"record harvested at {rec.harvested_at}; the work is over", False
         #: `SI-59`. The record NAMES a server, and it is not the one we looked on. `SI-39` gave this
         #: situation its own state because DEAD is an ACTIONABLE claim — the response is `reap` — and a
         #: wrong DEAD invites a human to free a slot out from under running work. That state needed a live
@@ -463,8 +467,6 @@ def _state_of(rec, folder_state, live, phase, parked, pane, sessions, instant, i
                 f"{getattr(sessions, 'socket', '') or 'the default server'!r}. Nothing has been observed "
                 f"about whether the work is alive: export FLEET_TMUX_SOCKET={rec.tmux_socket} and ask "
                 f"again."), False
-        if rec.harvested_at:
-            return HARVESTED, f"record harvested at {rec.harvested_at}; the work is over", False
         if rec.closed_at and instant is None:
             return CLOSED, f"record closed at {rec.closed_at}; the session was intentionally closed", False
         if rec.launched_at is None:
