@@ -104,7 +104,10 @@ bash "$SCRIPT" >/dev/null 2>&1
 check "a missing version argument exits 2" "2" "$?"
 
 # --- environment: FLEET_RELEASES unset is refused, from a directory with no .fleet-root above it ---------
-out="$(cd "$TMP" && env -u FLEET_RELEASES RELEASE_POSTFLIGHT_ROOTS_PARENT="$ROOTS" bash "$SCRIPT" "$VERSION" 2>&1)"
+# "No .fleet-root above it" is made true, not assumed (FB-120): scratch may sit INSIDE a fleet root (the no-/tmp
+# rule puts it there), and fleet-env.sh walks up to the first marker below $HOME. HOME=$TMP bounds that walk to
+# the scratch directory itself.
+out="$(cd "$TMP" && env -u FLEET_RELEASES HOME="$TMP" RELEASE_POSTFLIGHT_ROOTS_PARENT="$ROOTS" bash "$SCRIPT" "$VERSION" 2>&1)"
 rc=$?
 check "FLEET_RELEASES unset exits 2" "2" "$rc"
 
