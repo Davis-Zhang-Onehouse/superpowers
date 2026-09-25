@@ -121,6 +121,20 @@ class UnattributedUnlocatableBoxIsRefused(_Teardown):
                 self.assertEqual(fleet.killed, [])
                 self.assertIsNone(fleet.store.read(fleet.ids["loose"]).harvested_at)
 
+    def test_a_busy_pane_with_no_located_caret_is_refused_as_indeterminate(self):
+        """RV-17. The one refusal whose REASON changed: an unattributed busy 2.1.268 pane whose caret row is redrawn
+        was refused as 11 mid-turn at ab2225b3 and is now 14, the same answer the attributed twin and pane-guard give
+        — the box is not located, so "mid-turn with an empty box" is not something this capture can say."""
+        for attributed in (True, False):
+            with self.subTest(attributed=attributed):
+                fleet = self.fleet()
+                self._worker(fleet, "busy", _caret_row_replaced("claude-busy.frame", "  editor redraw in progress"),
+                             attributed=attributed)
+                self.assertEqual(self._pane_guard(fleet, "busy"), cli.PANE_INDETERMINATE)
+                code, out, err = self._close(fleet, "busy")
+                self.assertEqual(code, EXIT_REFUSED, f"{out}{err}")
+                self.assertIn("input state cannot be established", out + err)
+
     def test_force_still_overrides(self):
         fleet = self.fleet()
         self._worker(fleet, "forced", UNLOCATABLE["idle-2.1.268-caret-redrawn"], attributed=False)
