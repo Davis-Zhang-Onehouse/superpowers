@@ -242,7 +242,7 @@ remains. If delivery is uncertain, inspect the pane before another send. Never c
 **Multi-line messages are delivered whole (`FB-27`).** Both TUIs replace a large paste with a count summary —
 Claude Code draws `[Pasted text #N +M lines]` for four or more lines, codex `[Pasted Content C chars]` above
 about a thousand characters — and the verb confirms that summary against the message (M = its newlines,
-C = its characters) before the one Enter. The text is in the box behind the placeholder; a placeholder whose
+C = its characters) before the first Enter. The text is in the box behind the placeholder; a placeholder whose
 counts disagree is somebody else's paste and is never submitted. `send` prints `confirmation` as `draft`
 (the text was read back), `placeholder` (the counts agreed) or `placeholder-uncounted` (Claude Code's
 single-line `[Pasted text #N]`, which states no length at all), and the record says which.

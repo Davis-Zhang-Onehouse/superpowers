@@ -197,7 +197,7 @@ PANE_UNKNOWN = 13
 #: and it is not claude" — and the two were the same value, because `capture_pane` returns `""` when tmux
 #: exits non-zero and `list_processes` returns `[]` when pgrep does.
 #:
-#: It needs its own code because of what the consumers do. Before a SEND, everything but `0` means wait,
+#: It needs its own code because of what the consumers do. Before a SEND, `0` and an empty `11` admit,
 #: so a wrong `12` costs one more poll. Before a CLOSE, `coordinating-instants` states "`0`, `12` or `13`
 #: mean the pane can go" — so a transient `12` AUTHORISES tearing down a pane that is mid-turn, which is
 #: precisely what `close`'s queued-pane refusal exists to prevent. Measured in the field at one poll in
@@ -6151,7 +6151,8 @@ def _do_pane_guard(ctx: Ctx, parsed: Parsed) -> int:
     #: box, and emitting a best guess there would invent a fact.
     queued = layer.unsubmitted(text) if code == PANE_QUEUED_TEXT else None
     #: `I-21`/`I-26`. Written AFTER the verdict is fully decided and from the SAME `captured` the decision
-    #: used — never re-captured — so this can never disagree with the row it backs, and never perturbs it
+    #: used — never re-captured. Dim suggestions receive a visible label in the exported copy; the guard
+    #: still decides from the original capture, so labeling cannot perturb its verdict
     #: either: nothing above this line reads `parsed.get("capture")`. Skipped for `None` on purpose (see
     #: the comment above `captured = None`): a failed or never-attempted capture writes NOTHING, so the
     #: file's own existence is what tells a later reader "this was observed" apart from "this was empty".
