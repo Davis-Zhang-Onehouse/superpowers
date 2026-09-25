@@ -251,8 +251,8 @@ class VerbsJudgeThePaneByItsOwningAgent(unittest.TestCase):
         self.assertEqual(code, 0, err)
         rows = [row.split('\t') for row in out.splitlines() if '\tunknown-session\t' in row]
         self.assertEqual(len(rows), 1, out)
-        self.assertEqual(rows[0][-1], '204', 'child outside the slot is folded into its live parent row')
-        self.assertEqual(rows[0][-2], 'fixture-server', out)
+        self.assertEqual(rows[0][-2], '204', 'child outside the slot is folded into its live parent row')
+        self.assertEqual(rows[0][-3], 'fixture-server', out)
 
     # --- the mismatch that IS real still reads as one -------------------------------------------------------------
 
