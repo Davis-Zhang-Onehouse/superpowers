@@ -270,13 +270,14 @@ single-line `[Pasted text #N]`, which states no length at all), and the record s
 
 **A message taller than Claude Code's input box is confirmed by its tail (`FB-134`).** The box shows only its
 last rows, and its height follows the pane's. At 80 columns a 20-line pane shows 5 rows, so a one-line message
-of about 400 characters no longer fits. `send` then confirms `draft-tail`: the box must show at least three
-rows, they must be the message's last words from a word boundary, and the next frame must show the same thing.
-Only then does the verb press Enter, and Enter submits the whole message, hidden head included. What the tail
-cannot see is the head. That it is exactly ours rests on the box being empty when the send was admitted and on
-the single paste. So `draft-tail` is recorded apart from `draft`, and a human typing into the hidden head
-during the send is the one case it cannot catch. Anything else, a tail cut mid-word included, still ends
-`uncertain-after-insertion` with the text left in the box.
+of about 400 characters no longer fits. `send` then confirms `draft-tail`. The box must show at least three
+rows, and they must be exactly the message's own last rows as Claude Code wraps it. A frame taken 0.1 s later must
+show the same rows. Only then does the verb press Enter, and Enter submits the whole message, hidden head
+included. What the tail cannot see is the head. That the head is exactly ours rests on the box being empty when
+the send was admitted and on the single paste. So `draft-tail` is recorded apart from `draft`, and anything that
+changes the hidden rows during the send goes unseen: a human typing there, or a head lost in whole rows. Any other
+box, a tail cut mid-word or re-wrapped text included, still ends `uncertain-after-insertion` with the text left in
+the box.
 
 **Every send that reached the pane is recorded (`B13`)** in the worker's `.fleet/sends.jsonl`: when, by whom
 (`--by`, else the sender's own `FLEET_INSTANT`), the message's sha256, size and first line, the outcome
