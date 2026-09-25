@@ -4211,18 +4211,30 @@ def _codex_residue(ctx: Ctx, record) -> list:
         #: RV-35. `Path("").parent` is `.` — the caller's cwd, which is nobody's writable root.
         rows.append((record.child_instant or '(empty)', 'examined: no instants root — the record names no absolute '
                      'instant path, so only the store was swept'))
-    #: RV-36. The pane was killed a moment ago and its codex may still be exiting, still naming these roots. Wait a
-    #: little for it — CODEX_EXIT_WAITS × CODEX_EXIT_WAIT_S at most — rather than leave the residue this close
-    #: caused to the next codex close; a codex that stays (another worker) is reported, not waited out.
+    #: RV-36 / CL-5. The pane was killed a moment ago and its codex may still be exiting, still naming these roots.
+    #: Wait while the set of codex processes naming them is SHRINKING — at most CODEX_EXIT_WAITS × CODEX_EXIT_WAIT_S —
+    #: and stop as soon as a wait shows none of them leaving: another worker's codex stays, and is reported, not
+    #: waited out. The holders are read as pids, never from the verdict text.
     import time
 
     sleep = ctx.sleep or time.sleep
-    swept = []
+    proc_root = Path(ctx.proc_root or '/proc')
+
+    def holders():
+        found = set()
+        for root in roots:
+            pids = runtime_launch.codex_sandboxes_under(root, proc_root)
+            found |= set(pids) if pids is not None else {None}
+        return found
+
+    swept, before = [], None
     for attempt in range(CODEX_EXIT_WAITS + 1):
-        swept = runtime_launch.sweep_mount_residue(roots, proc_root=Path(ctx.proc_root or '/proc'),
-                                                   dry_run=ctx.dry_run)
-        if ctx.dry_run or attempt == CODEX_EXIT_WAITS or not any('is alive' in v for _, v in swept):
+        swept = runtime_launch.sweep_mount_residue(roots, proc_root=proc_root, dry_run=ctx.dry_run)
+        residue = any(os.path.lexists(Path(root) / name) for root in roots for name in runtime_launch.MOUNT_RESIDUE)
+        now = holders() if residue and not ctx.dry_run else set()
+        if not now or None in now or attempt == CODEX_EXIT_WAITS or (before is not None and not before - now):
             break
+        before = now
         sleep(CODEX_EXIT_WAIT_S)
     return rows + swept
 

@@ -259,7 +259,17 @@ class VerbCase(unittest.TestCase):
         code, out, err = self.f.run(["close", "--id", self.f.ids["cx"]])
         self.assertEqual(code, 0, err)
         self.assertEqual(left(self.f.instants), sorted(RESIDUE), out)
-        self.assertLessEqual(sum(slept), 3, slept)
+        #: CL-5. Another worker's codex does not exit because this pane closed; once a wait shows no holder leaving,
+        #: waiting longer only delays every close of a codex worker while others run.
+        self.assertEqual(len(slept), 1, slept)
+
+    def test_close_does_not_wait_when_there_is_no_residue(self):
+        self.codex_worker("cx")
+        fake_process(self.proc, 4502, "node", "/x/bin/codex", "--add-dir", str(self.f.instants.resolve()))
+        slept = []
+        self.f.sleep = slept.append
+        self.assertEqual(self.f.run(["close", "--id", self.f.ids["cx"]])[0], 0)
+        self.assertEqual(slept, [])
 
     def test_close_of_a_claude_worker_does_not_sweep(self):
         self.f.worker("cl", live=False)
