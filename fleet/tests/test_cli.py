@@ -2348,6 +2348,22 @@ class TestPaneGuard(CliCase):
         code, out, err = fleet.run(['pane-guard', '--porcelain', '--pane', 'dt-unattributedBusy'])
         self.assertEqual(cli.PANE_INDETERMINATE, code, (out, err))
 
+    def test_blank_caret_row_draft_is_queued_text_and_refuses_send(self):
+        """RV-18 through the CLI: pane-guard 10 and a refused send that leaves the pane untouched."""
+        from tests.test_runtime import box_variant
+        fleet = self.loaded()
+        sent = fleet.tmp / 'blank-first-msg.txt'
+        sent.write_text('hello\n')
+        for busy in (False, True):
+            with self.subTest(busy=busy):
+                fleet.panes['dt-solo'] = box_variant(['\u276f\u00a0', '  Delete the release branch now'], busy=busy)
+                code, out, err = fleet.run(['pane-guard', '--porcelain', '--pane', 'dt-solo'])
+                self.assertEqual(cli.PANE_QUEUED_TEXT, code, (out, err))
+                before = fleet.panes['dt-solo']
+                code, out, err = fleet.run(['send', '--id', fleet.ids['solo'], '--message-file', str(sent)])
+                self.assertEqual(EXIT_REFUSED, code, (out, err))
+                self.assertEqual(before, fleet.panes['dt-solo'])
+
     def test_multiline_box_reports_all_queued_text(self):
         fleet = self.loaded()
         frame = (pathlib.Path(__file__).resolve().parents[1] /
