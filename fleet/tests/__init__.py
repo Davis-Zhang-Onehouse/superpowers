@@ -24,7 +24,9 @@ from unittest import mock
 #: waiting to happen again.
 FLEET_ENV = ("FLEET_HOME", "FLEET_INSTANTS", "FLEET_RELEASES", "FLEET_TMUX_SOCKET", "FLEET_ROOT",
              "FLEET_CODEX_BIN", "FLEET_CLAUDE_BIN", "CODEX_HOME", "CLAUDE_CONFIG_DIR",
-             "REAL_CLAUDE", "CLAUDE_OWNERS_MAP", "FLEET_SEED_CHECK_SECONDS")
+             "REAL_CLAUDE", "CLAUDE_OWNERS_MAP", "FLEET_SEED_CHECK_SECONDS",
+             #: V23-P: the launch watch's window, and the variable `trust.predict` reads (never sets).
+             "FLEET_TRUST_WATCH_SECONDS", "CLAUDE_CODE_SANDBOXED")
 
 
 @contextlib.contextmanager

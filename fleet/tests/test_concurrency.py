@@ -68,6 +68,10 @@ class Fixture:
         def build(parsed, out, err):
             return cli.Ctx(launch_settings=lambda runtime, slot: LaunchSettings(runtime, '/test/bin/' + runtime, '/test/config'),
                            seed_delivery=lambda name, text: seedcheck.Verdict(seedcheck.ATTESTED, detail='hermetic fixture delivery'),
+                           #: V23-P. No pane exists to watch, so the launch watch states it rather than
+                           #: polling an empty fake pane for the whole window with a real sleep.
+                           launch_watch=lambda tmux, runtime: cli.LaunchWatch(
+                               "unobserved", detail="hermetic fixture: no pane is watched"),
                            home=self.home, instants_dir=self.instants, store=self.store,
                            pool=self.pool, sessions=self.sessions, harvest=self.harvest,
                            out=out, err=err, dry_run=parsed.on("dry-run"),

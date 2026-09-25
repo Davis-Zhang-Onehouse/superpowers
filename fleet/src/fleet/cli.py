@@ -107,6 +107,7 @@ from fleet.workspace import GOLDEN_FILE, Workspace, default_git
 from fleet.runtime import choose_runtime, validate_runtime, observe
 from fleet.runtime_config import admission_lock, pane_lock, read_runtime, write_runtime
 from fleet import runtime_launch, messaging
+from fleet import trust
 from fleet import codex_skills as codex_skills_mod
 
 # --- the flag spec ---------------------------------------------------------------------------------
@@ -545,6 +546,9 @@ class Ctx:
     launch_environment: object = None
     seed_delivery: object = None
     resume_verified: object = None
+    #: V23-P (FB-126). `(tmux, runtime) -> LaunchWatch`: what the pane showed after a launch. `None` means watch the
+    #: real pane (`_watch_launch`); a fixture with no pane to watch states the answer instead.
+    launch_watch: object = None
     #: FB-111. `codex_home -> codex_skills.Visibility`: what a codex worker's CODEX_HOME can see of the superpowers
     #: skills. `None` means the real filesystem probe; a fixture whose launch settings name a directory that does
     #: not exist states the answer instead.
@@ -1763,6 +1767,128 @@ def _verify_resume(ctx, layer, record, session_id):
         time.sleep(0.05)
 
 
+# --- folder trust at launch (V23-P, FB-126) ---------------------------------------------------------------
+#
+# `_verify_seed_delivery` and `_verify_resume` read the worker's ARGV, which is right the moment the process
+# execs — while the pane itself may sit at Claude Code's folder-trust screen, waiting for a human forever. Both
+# verbs printed plain success over such a pane. So the launch is now PREDICTED before it starts (`trust.predict`,
+# read-only) and WATCHED after it is recorded, and both answers are rows. Neither changes the exit code (D-3): the
+# launch is good, it is waiting for the operator, and the rows name who clears it and how. fleet never answers
+# the screen and never writes trust — the answer lands in the operator's Claude config, which is theirs.
+
+#: How long a launch is watched for a decisive frame: the trust screen, another dialog, or the prompt. Read like
+#: `_seed_check_window`: 0 is one look, a negative or garbage value falls back to the default.
+TRUST_WATCH_SECONDS = "FLEET_TRUST_WATCH_SECONDS"
+TRUST_WATCH_DEFAULT_S = 8.0
+_TRUST_WATCH_STEP_S = 0.25
+
+
+@dataclass(frozen=True)
+class LaunchWatch:
+    outcome: str      #: "trust-screen" | "dialog" | "ready" | "unobserved"
+    path: str = ""    #: trust-screen: the path the screen shows ("" when its path row could not be read)
+    detail: str = ""  #: unobserved: why
+
+
+def _trust_watch_window(env=None) -> float:
+    raw = (env if env is not None else os.environ).get(TRUST_WATCH_SECONDS, "")
+    try:
+        window = float(raw)
+    except (TypeError, ValueError):
+        return TRUST_WATCH_DEFAULT_S
+    return window if window >= 0 else TRUST_WATCH_DEFAULT_S
+
+
+def _watch_launch(ctx, layer, tmux, runtime) -> LaunchWatch:
+    """What the launched pane shows, bounded by the window. Never raises: an observation problem is
+    `unobserved` with its reason, because it must never roll back or fail a launch that is already recorded."""
+    import time
+    try:
+        if ctx.launch_watch is not None:
+            return ctx.launch_watch(tmux, runtime)
+        window = _trust_watch_window()
+        sleep = ctx.sleep or time.sleep
+        waited = 0.0
+        while True:
+            frame = layer.capture(tmux)
+            if frame:
+                path = trust.trust_screen_path(runtime, frame)
+                if path is not None:
+                    return LaunchWatch("trust-screen", path=path)
+                state = observe(runtime, frame).state
+                if state == "dialog":
+                    return LaunchWatch("dialog")
+                if state in ("busy", "queued", "idle"):
+                    return LaunchWatch("ready")
+            if waited >= window:
+                return LaunchWatch("unobserved", detail=f"no decisive frame within {window:g}s")
+            sleep(_TRUST_WATCH_STEP_S)
+            waited += _TRUST_WATCH_STEP_S
+    except Exception as exc:  # noqa: BLE001 - V23-P (D-3): an observation failure is a row, never a rollback
+        return LaunchWatch("unobserved", detail=_one_line(f"the pane could not be watched: {type(exc).__name__}: "
+                                                          f"{exc}"))
+
+
+def _predict_trust(ctx, settings, cwd) -> "trust.TrustPrediction":
+    """`trust.predict` for this launch, under the environment the worker will be started with. Read-only."""
+    try:
+        return trust.predict(settings.runtime, settings.config_dir, cwd,
+                             environ={**os.environ, **(ctx.launch_environment or {})})
+    except Exception as exc:  # noqa: BLE001 - a prediction is advice; it must never refuse or fail a launch
+        return trust.TrustPrediction(trust.UNKNOWN, "", _one_line(f"{type(exc).__name__}: {exc}"))
+
+
+def _trust_rows(prediction) -> list:
+    """V23-P. The pre-flight answer, on the real call and the dry-run alike."""
+    state, key, detail = prediction.state, prediction.key, prediction.detail
+    if state == trust.TRUSTED:
+        value = f"trusted — projects[{key}]: {detail}" if key else f"trusted — {detail}"
+    elif state == trust.UNTRUSTED:
+        value = (f"untrusted — {detail}, so the launch will stop at Claude Code's folder-trust screen for {key}; "
+                 f"the operator answers it once on the pane")
+    else:
+        value = f"{state} — {detail}"
+    return [("trust", _one_line(value))]
+
+
+def _watch_rows(watch, tmux, slot_path) -> list:
+    """V23-P. What the pane showed after the launch, and when it is the trust screen, whether the folder it names
+    is the leased slot — the one fact the operator must check before answering it."""
+    if watch.outcome == "trust-screen":
+        rows = [("trust_screen",
+                 f"observed — the slot's folder is not trusted by Claude Code: answer the trust screen in {tmux} "
+                 f"once (verify the path it shows is the leased slot {slot_path}): press Down to \"Yes, I trust "
+                 f"this folder\", check it is selected on screen, then Enter. fleet never answers it, because the "
+                 f"answer is written into the operator's Claude config"),
+                ("trust_screen_path", watch.path or "(unreadable — the screen's path row could not be read)")]
+        try:
+            same = bool(watch.path) and Path(watch.path).resolve() == Path(slot_path).resolve()
+        except (OSError, RuntimeError, ValueError):
+            same = False
+        shown = watch.path or "no readable path"
+        rows.append(("trust_screen_is_slot", "yes" if same else
+                     f"NO — the screen names {shown}, not the leased slot {slot_path}; do not answer it, inspect "
+                     f"the pane"))
+        return rows
+    if watch.outcome == "dialog":
+        return [("trust_screen", f"none — but the pane is at another operator dialog; answer it in {tmux}"),
+                ("launch_dialog", "observed")]
+    if watch.outcome == "ready":
+        return [("trust_screen", "none — the pane reached its prompt or its first turn")]
+    return [("trust_screen", _one_line(f"unobserved — {watch.detail or 'no decisive frame'}; check the pane with "
+                                       f"`fleet pane-guard --pane {tmux}`"))]
+
+
+def _launch_trust_rows(ctx, prediction, layer, tmux, runtime, slot_path) -> list:
+    """V23-P. Called only after the launch is recorded, outside any rollback: the rows, plus one stderr line
+    when the pane is waiting at the trust screen."""
+    watch = _watch_launch(ctx, layer, tmux, runtime)
+    if watch.outcome == "trust-screen":
+        print(f"fleet: {tmux} is waiting at Claude Code's folder-trust screen for {watch.path or '(unreadable path)'}; "
+              f"answer it once on the pane (see the trust_screen row).", file=ctx.err)
+    return [*_trust_rows(prediction), *_watch_rows(watch, tmux, slot_path)]
+
+
 def _do_revive(ctx: Ctx, parsed: Parsed) -> int:
     record = _record(ctx, parsed)
     if record.closed_at or record.harvested_at:
@@ -1812,9 +1938,12 @@ def _do_revive(ctx: Ctx, parsed: Parsed) -> int:
     #: FB-110. The resumed session gets the same codex policy and roots as the launch, from the same functions.
     revive_env = dict(ctx.launch_environment or {}, FLEET_HOME=str(ctx.home), FLEET_INSTANTS=str(ctx.instants_dir))
     policy_rows = _codex_policy_rows(settings.runtime, revive_env)
+    #: V23-P (FB-126). Predicted before anything starts, read-only, on the dry-run too.
+    prediction = _predict_trust(ctx, settings, lease.path)
     if ctx.dry_run:
         _emit(ctx, 'revive', [('todo_id', record.todo_id), ('session_id', session_id),
-                            ('transcript', str(transcript)), *policy_rows, ('dry-run', 'nothing started')])
+                            ('transcript', str(transcript)), *policy_rows, *_trust_rows(prediction),
+                            ('dry-run', 'nothing started')])
         return EXIT_OK
     record.child_instant = str(child)
     launcher = runtime_launch.prepare(settings, record, child / '.fleet/seed.txt', revive_env,
@@ -1825,9 +1954,12 @@ def _do_revive(ctx: Ctx, parsed: Parsed) -> int:
     record.runtime_executable, record.runtime_config_dir = settings.executable, settings.config_dir
     record.launched_at = ctx.now()
     ctx.store.write(record)
+    #: V23-P (FB-126). `_verify_resume` read argv, which is right while the pane waits at the trust screen. Watched
+    #: after the record is written, so an observation problem is a row and never a failed revive (D-3).
+    trust_rows = _launch_trust_rows(ctx, prediction, layer, record.tmux, settings.runtime, lease.path)
     _emit(ctx, 'revive', [('todo_id', record.todo_id), ('session_id', session_id), ('runtime', record.runtime),
                           ('model', record.runtime_model or "(none — the CLI's configured default model)"),
-                          *policy_rows])
+                          *policy_rows, *trust_rows])
     return EXIT_OK
 
 
@@ -2104,6 +2236,9 @@ def _do_dispatch(ctx: Ctx, parsed: Parsed) -> int:
 
     settings = None
     skills = None
+    #: V23-P. A refusing dry-run chooses no slot, so there is no folder to predict; it says so rather than guess.
+    prediction = trust.TrustPrediction(trust.NOT_PREDICTED, "", "a gate refused, so no slot was chosen and there "
+                                                                "is no folder to predict")
     if all(verdict.allowed for verdict in verdicts):
         if ctx.launch_settings is None:
             raise BadInput('Dispatch needs an injected runtime launch resolver')
@@ -2128,6 +2263,9 @@ def _do_dispatch(ctx: Ctx, parsed: Parsed) -> int:
         settings = _dispatch_settings(ctx, choice, ctx.pool.slot_path(candidate_slot))
         _refuse_codex_worktree_slot(settings.runtime, ctx.pool.slot_path(candidate_slot), 'dispatch')
         skills = _codex_skills_gate(ctx, settings, parsed)
+        if ctx.dry_run:
+            #: V23-P (FB-126). The candidate slot's folder, predicted read-only before anything is claimed.
+            prediction = _predict_trust(ctx, settings, ctx.pool.slot_path(candidate_slot))
 
     if ctx.dry_run and all(verdict.allowed for verdict in verdicts):
         #: `B10` sweep. The real call's own refusals past the guards, asked here too: the same-minute
@@ -2161,7 +2299,8 @@ def _do_dispatch(ctx: Ctx, parsed: Parsed) -> int:
                  *(_codex_policy_rows(settings.runtime, _fleet_dirs(ctx)) if settings is not None else []),
                  ("seed_extra", (f"{parsed.get('seed-extra')} ({len(seed_extra)} chars would be appended "
                                  f"to the rendered seed)") if seed_extra else
-                  "(none — the seed is exactly what the profile renders)")]
+                  "(none — the seed is exactly what the profile renders)"),
+                 *_trust_rows(prediction)]
         rows += _verdict_kv(verdicts)
         _emit(ctx, "dispatch", rows)
         return code
@@ -2370,6 +2509,11 @@ def _do_dispatch(ctx: Ctx, parsed: Parsed) -> int:
         if interrupted:
             raise launch_error
         raise not_started("given-back", "was given back") from launch_error
+    #: V23-P (FB-126). After the record and the milestone claim, OUTSIDE the rollback try: the seed check read
+    #: argv, which is right while the pane waits at the trust screen, and an observation problem here must never
+    #: roll a good launch back (D-3). `_launch_trust_rows` never raises.
+    trust_rows = _launch_trust_rows(ctx, _predict_trust(ctx, settings, lease.path), ctx.sessions, tmux,
+                                    settings.runtime, lease.path)
     _emit(ctx, "dispatch", [("todo_id", todo_id), ("instant", str(child)), ("slot", lease.slot),
                             ("tmux", tmux), *_title_rows(title), ("watched_source", source.base),
                             ("milestone", milestone_id or "(none)"),
@@ -2381,7 +2525,7 @@ def _do_dispatch(ctx: Ctx, parsed: Parsed) -> int:
                              "(none — this child has no origin.json, so its `propose` stays LOCAL)"),
                             ("launched_at", record.launched_at), *_choice_rows(choice),
                             *_codex_skills_rows(skills, parsed, _releases_of(ctx)),
-                            *_codex_policy_rows(settings.runtime, launch_env)])
+                            *_codex_policy_rows(settings.runtime, launch_env), *trust_rows])
     return EXIT_OK
 
 
