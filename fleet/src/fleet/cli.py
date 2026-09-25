@@ -2499,6 +2499,19 @@ def _do_resume(ctx: Ctx, parsed: Parsed) -> int:
                                     f'session is live.)' if existing is None else '')),
                       clears_who='the operator')
 
+    #: V23-T (RV-21). Adoption stamps `launched_at`, which is how every reader decides whose session this is (D-1). A
+    #: live `dt-<name>` another record owns — a re-dispatch of the same title — is that record's worker, not this
+    #: folder's; adopting it would hand the live worker to this record. Asked before the dry-run returns, like every
+    #: refusal here, and it names the recovery path, so it blocks none (FD-9).
+    here = getattr(ctx.sessions, "socket", "") or ""
+    owner = session_owner(ctx.store.all(), here, ctx.pool).get((here, tmux)) if ctx.sessions.alive(tmux) else None
+    if owner is not None and owner.todo_id != todo_id:
+        raise Refused(f"{tmux} is live and belongs to {owner.todo_id} (launched {owner.launched_at or 'not yet'}), "
+                      f"a later dispatch of the same title; resuming {child.name} would adopt that worker's session "
+                      f"as this record's. Nothing was adopted, claimed or written",
+                      clears_when=f"{tmux} is gone, or the session is adopted by its own instant: `fleet resume "
+                                  f"--instant {owner.child_instant}`",
+                      clears_who="the operator")
     #: `B10` sweep. The claim below is the first write; its refusal is asked before the dry-run returns.
     asked_slot = existing.slot if (existing is not None and existing.slot) else parsed.get("slot")
     if asked_slot and ctx.pool.lease(asked_slot) is None:

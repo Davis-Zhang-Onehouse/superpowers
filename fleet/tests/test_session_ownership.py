@@ -413,6 +413,52 @@ class TheTeardownVerbsLeaveASessionThatIsNotTheirs(unittest.TestCase):
         self.assertIn("dt-lone", fleet.killed)
 
 
+
+class ResumeDoesNotAdoptASessionAnotherRecordOwns(unittest.TestCase):
+    """RV-21. `resume` stamps `launched_at=now` when the session it names is alive, which is how D-1 reads "this record
+    started it". Resuming an OLD folder whose `dt-<name>` is a re-dispatch's live session therefore handed that session
+    to the old record (and rebuilt the harvested record as open, evidence/02-kill-verbs/revive_resume_probe.out). The
+    adoption is refused, naming the owner; resuming the owner is the recovery path and stays open (FD-9)."""
+
+    def _pair(self, old_state="complete"):
+        fleet = Fleet()
+        self.addCleanup(shutil.rmtree, fleet.tmp, True)
+        old = fleet.worker("mile", state=old_state, live=False)
+        old_id = fleet.ids["mile"]
+        rec = fleet.store.read(old_id)
+        rec.launched_at = "2026-07-29T09:00:00Z"
+        rec.harvested_at = rec.closed_at = "2026-07-29T10:00:00Z"
+        fleet.store.write(rec)
+        new = fleet.worker("mile", slot="ws2", pane=IDLE_PANE)
+        return fleet, old, old_id, new
+
+    def test_resuming_the_old_folder_is_refused_and_writes_nothing(self):
+        fleet, old, old_id, _ = self._pair()
+        before = fleet.record_state()
+        code, out, err = fleet.run(["resume", "--instant", str(old)])
+        self.assertNotEqual(code, 0, out)
+        self.assertIn(fleet.ids["mile"], err, "the refusal names the record that owns the session")
+        self.assertEqual(fleet.record_state(), before, "no record was rewritten")
+        self.assertTrue(fleet.store.read(old_id).harvested_at)
+
+    def test_the_dry_run_answers_as_the_real_call_does(self):
+        fleet, old, _, _ = self._pair()
+        code, out, err = fleet.run(["resume", "--dry-run", "--instant", str(old)])
+        self.assertNotEqual(code, 0, out)
+
+    def test_an_unrecorded_folder_with_the_same_name_does_not_adopt_it_either(self):
+        """Neighbour: no record of its own, the same `dt-<name>` by derivation."""
+        fleet, _, _, _ = self._pair()
+        orphan = fleet.orphan("mile")
+        code, out, err = fleet.run(["resume", "--instant", str(orphan)])
+        self.assertNotEqual(code, 0, out)
+
+    def test_resuming_the_owner_still_adopts_its_session(self):
+        """Control: the refusal is about another record's session, not about a live one."""
+        fleet, _, _, new = self._pair()
+        code, out, err = fleet.run(["resume", "--instant", str(new)])
+        self.assertEqual(code, 0, err)
+
 class TheApplyWarningAsksTheProposersOwnSession(unittest.TestCase):
 
     def test_a_done_proposal_by_the_old_record_does_not_warn_about_the_new_workers_session(self):
