@@ -305,6 +305,16 @@ class CodexBusyAsDrawnBy0156(unittest.TestCase):
             with self.subTest(row=row):
                 self.assertEqual(observe('codex', self.with_spinner_row(row)).state, 'busy')
 
+    def test_a_row_cut_at_the_pane_edge_just_after_its_paren_is_still_a_turn(self):
+        """RV-29. The cut can also land just AFTER the closed elapsed-time paren, on the ` · ` separator or right at the
+        paren; the elapsed time is whole, so it proves a turn and reads busy (11), not unknown (14)."""
+        for row in ('• Running tests for the new inventory walk and the reconcile order (8s • esc to interrupt)…',
+                    '• Running tests for the new inventory walk and the reconcile (8s • esc to interrupt) …',
+                    '• Running tests for the new inventory walk and the reconcil (8s • esc to interrupt) ·…',
+                    '◦ Waiting for background terminal and the reconcile ordering (1m 05s • esc to interrupt)·…'):
+            with self.subTest(row=row):
+                self.assertEqual(observe('codex', self.with_spinner_row(row)).state, 'busy')
+
     def test_a_spinner_row_cut_before_its_paren_fails_closed(self):
         """RV-21. Cut before the paren there is no elapsed time to prove a turn and no way to rule one out: `unknown`
         (pane-guard 14, wait) rather than `idle` (0, send)."""
