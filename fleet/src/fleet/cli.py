@@ -1871,8 +1871,8 @@ def _trust_rows(prediction) -> list:
     if state == trust.TRUSTED:
         value = f"trusted — projects[{key}]: {detail}" if key else f"trusted — {detail}"
     elif state == trust.UNTRUSTED:
-        value = (f"untrusted — {detail}, so the launch will stop at Claude Code's folder-trust screen for {key}; "
-                 f"the coordinator or operator answers it once on the pane")
+        value = (f"untrusted — {detail}, so the launch is predicted to stop at Claude Code's folder-trust screen "
+                 f"for {key}; the coordinator or operator answers it once on the pane")
     else:
         value = f"{state} — {detail}"
     return [("trust", _one_line(value))]

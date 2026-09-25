@@ -238,6 +238,10 @@ class TestDispatchReportsTheTrustScreen(CliCase):
         self.assertTrue(rows_of(out)["trust"].startswith("untrusted"), out)
         self.assertIn("the coordinator or operator answers it once on the pane", rows_of(out)["trust"])
         self.assertIn("folder-trust screen", rows_of(out)["trust"])
+        #: RV-32. A prediction, so it says so: it read a config, it did not see the pane.
+        self.assertIn("so the launch is predicted to stop at Claude Code's folder-trust screen for",
+                      rows_of(out)["trust"])
+        self.assertNotIn("will stop at", rows_of(out)["trust"])
 
 
 def admission_held(home) -> bool:
