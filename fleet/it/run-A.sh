@@ -1428,7 +1428,7 @@ PY
 
   # ---- A8a: the forbidden commands ----------------------------------------------------------------
   if [ "$n_forbidden" = 0 ] && [ "$n_kill_unsafe" = 0 ]; then
-    a_pass A8a "$OUT/A8-audit.txt" "$(sq "audited $nfiles harness files (lib.sh + every run-*.sh, this runner included, comments and string literals discounted): 0 git push / git merge / gh pr merge / rm -rf-on-home in an EXECUTED position; all $n_kill tmux kill-server/kill-session sites, shell-level and embedded in quoted or heredoc code, name a private server (tmux -L <name> other than default, tmux -S with an absolute or variable-rooted path outside /tmp/tmux-<uid>, or it_tmux which refuses when no section is entered), so none can reach the live tmux server")"
+    a_pass A8a "$OUT/A8-audit.txt" "$(sq "audited $nfiles harness files (lib.sh + every run-*.sh, this runner included, comments and string literals discounted): 0 git push / git merge / gh pr merge / rm -rf-on-home in an EXECUTED position; all $n_kill tmux kill-server/kill-session sites, shell-level and embedded in quoted or heredoc code, name a private server (tmux -L <name> other than default, tmux -S with an absolute or variable-rooted path outside the box's default tmux directory, or it_tmux which refuses when no section is entered), so none can reach the live tmux server")"
   else
     a_fail A8a "$OUT/A8-audit.txt" "$(sq "$n_forbidden forbidden command(s) and $n_kill_unsafe of $n_kill tmux kill site(s) with no private socket, across $nfiles files :: $(sed -n '/^=== forbidden/,/^=== kill_all/p' "$OUT/A8-audit.txt" | sed -n '2,3p' | scrub | tr '\n' ' ')")"
   fi
