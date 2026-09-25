@@ -160,6 +160,18 @@ title you passed. A wrapper must also keep the exit status: `fleet dispatch … 
 dispatch killed by a signal prints nothing at all. An interrupt (SIGINT) during the launch rolls back and
 stays an interrupt, with no row.
 
+**A Claude launch can stop at the folder-trust screen, and dispatch says so.** Every dispatch and revive,
+`--dry-run` included, prints a pre-flight `trust` row — `trusted`, `untrusted`, `unknown`, or `not-predicted`
+(codex) — read-only from `<CLAUDE_CONFIG_DIR>/.claude.json` and the git layout: a folder is trusted when a trust
+record sits on its canonical git root (the main worktree, for a linked one) or on the cwd or a parent up to the
+git toplevel; a trusted folder above that toplevel does not count. After a real launch, a bounded pane watch
+(`FLEET_TRUST_WATCH_SECONDS`, default 8, finite ≥ 0) prints `trust_screen`: `observed` (plus `trust_screen_path`
+and `trust_screen_is_slot`, `yes` or `NO — … do not answer it`, and one stderr line), `none`, or `unobserved`
+(check with `fleet pane-guard`). Another operator dialog prints `launch_dialog observed`. The exit stays `0`: the
+worker proceeds once the operator answers the pane, and the board reads BLOCKED (`15`) until then. fleet never
+answers the screen and never writes a Claude or codex config — `superpowers:coordinating-instants` says how to
+answer it.
+
 `fleet pane-guard` has its own codes because it is a contract for an external monitor: `0` safe, `10`
 queued-text, `11` mid-turn, `12` not-claude, `13` unknown-pane, `14` indeterminate, `15` awaiting-operator.
 Branch on the code before any send: `0` and `11` admit `fleet send` only when its own observation confirms an empty input; `10`, `14` and `15` refuse.

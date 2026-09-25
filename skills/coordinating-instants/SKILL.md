@@ -105,6 +105,22 @@ which is the one thing that could actually take a slot somebody is still working
 the pid named in the refusal to exit, then `harvest` (`FI-11`).
 <!-- v2-cite: close-refuses-queued-pane J8 -->
 
+### A launch stopped at the folder-trust screen
+
+A Claude worker leased into a folder Claude Code does not trust starts at its trust screen, not at the seed.
+`dispatch` and `revive` predict it before launch (a read-only `trust` row: `trusted`/`untrusted`/`unknown`) and
+watch the pane briefly after: `trust_screen observed` means the worker is waiting on you. The exit is still `0`
+— the launch succeeded — and the board reads BLOCKED (`15`) until you answer. Answer it yourself, once:
+
+1. Read `trust_screen_is_slot`. `yes` means the path the screen shows is the leased slot; `NO` means do not
+   answer it — inspect the pane, something else is being trusted.
+2. Attach to the pane and read the path on screen yourself; it must be the slot the row names.
+3. Press Down to "Yes, I trust this folder", check on screen that it is selected, then Enter.
+
+fleet never answers it and neither do you by any other route: the answer is written into the operator's Claude
+config. Never edit a `.claude.json`, never ask a worker to, and never set `CLAUDE_CODE_SANDBOXED` to skip the
+screen. One answer per slot folder — the next dispatch into it reads `trusted`.
+
 Two verbs answer specific questions when the loop is not enough: `fleet status --id <todo>` for one subject in
 full, and `fleet compaction-status` for what is holding dispatch.
 

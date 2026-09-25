@@ -102,7 +102,9 @@ recorded model (`--model` / `-m`) when one was chosen at dispatch. A Codex recor
 policy it launched with (`-a never -s workspace-write`, network on, the same writable roots); `revive --dry-run`
 prints it as a `codex_policy` row before anything starts. A codex record whose slot is a linked git worktree is refused
 (exit 4): codex runs only in clone-shaped slots, so dispatch the work again into a clone slot. The record decides, not the fleet
-selection: a codex record on a claude box revives as codex. A
+selection: a codex record on a claude box revives as codex. `revive` reports the same `trust` and `trust_screen`
+rows as `dispatch` (`superpowers:using-fleet`); a revived Claude pane at the trust screen is answered as
+`superpowers:coordinating-instants` describes, never by editing a config. A
 legacy Claude record (no recorded configuration) resolves the slot's owner through
 `scripts/claude-config-dir.sh` and says so.
 
