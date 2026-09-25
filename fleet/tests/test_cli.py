@@ -595,10 +595,12 @@ class Fleet:
         #: passed on an ambient `FLEET_HOME` and failed inside `release-verify`, which runs with it unset.
         with hermetic_environment(self.instants, home=self.tmp):
             # The suite may itself run from a checkout nested under a real instant. Keep the fixture's
-            # default cwd in its private tree; focused cwd cases patch Path.cwd explicitly.
+            # default cwd in its private tree; focused cwd cases patch Path.cwd explicitly, and a case that
+            # already chdir'd INTO the private tree (v23-a's relative --instant cases) keeps its own cwd.
             prior_cwd = os.getcwd()
             try:
-                os.chdir(self.tmp)
+                if not pathlib.Path(prior_cwd).resolve().is_relative_to(pathlib.Path(self.tmp).resolve()):
+                    os.chdir(self.tmp)
                 code = cli.main(list(argv), stdout=out, stderr=err, context=self.context())
             finally:
                 os.chdir(prior_cwd)

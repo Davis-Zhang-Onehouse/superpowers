@@ -129,9 +129,15 @@ class TestInstantPaths(CliCase):
     def test_refusal_names_resolved_bad_path(self):
         fleet = self.loaded()
         bad = './not-an-instant'
-        code, out, err = fleet.run(['roadmap', '--instant', bad])
+        previous = Path.cwd()
+        try:
+            os.chdir(fleet.tmp)
+            code, out, err = fleet.run(['roadmap', '--instant', bad])
+            expected = str((Path.cwd() / bad).resolve())
+        finally:
+            os.chdir(previous)
         self.assertEqual(code, 2)
-        self.assertIn(str((Path.cwd() / bad).resolve()), err)
+        self.assertIn(expected, err)
 
     def test_missing_path_refusal_explains_both_relative_forms(self):
         fleet = self.loaded()
