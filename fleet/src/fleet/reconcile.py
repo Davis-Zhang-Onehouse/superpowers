@@ -325,7 +325,7 @@ def session_owner(records, here: str, pool=None) -> dict:
     launch is the one whose pane it is. A start in progress counts too (RV-32): dispatch starts the session, delivers the
     seed and only then stamps `launched_at`, so for those seconds the new record is known by its lease — held, unstamped
     — and ranks by `dispatched_at`. A start tmux refused gave its lease back and ranks below every start. `pool` is
-    what that needs; without one, a never-launched record never owns. Stamps (harvested/closed) are what fleet did to
+    what that needs; without one, a never-launched record never outranks a launched one. Stamps (harvested/closed) are what fleet did to
     a record LATER and decide only a tie: in the live store every reused-name pair has BOTH records stamped. A record
     naming no server is keyed on `here`, as the join already treats it."""
     owners = {}
