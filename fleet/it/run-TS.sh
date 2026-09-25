@@ -124,7 +124,7 @@ fi
 # ---- TS2: the control, a slot the scratch config trusts ----------------------------------------------
 ts_dispatch TS2 tsTrusted t2 trusted-slot
 if ts_wait_frame "$TMUXN" 'Not logged in|auto mode' "$OUT/TS2-pane.txt" && ! grep -q 'one you trust' "$OUT/TS2-pane.txt" \
-   && [ "$(cat "$OUT/TS2-dispatch.rc")" = 0 ] && [ "$(row trust_screen "$OUT/TS2-dispatch.out" | cut -d' ' -f1)" != observed ]; then
+   && [ "$(cat "$OUT/TS2-dispatch.rc")" = 0 ] && [ "$(row trust_screen "$OUT/TS2-dispatch.out" | cut -d' ' -f1)" = none ]; then
   it_pass TS2a "fleet/it/TS/out/TS2-pane.txt" "control: the trusted slot's claude reached its prompt with no trust screen, and dispatch reported none (trust_screen='$(row trust_screen "$OUT/TS2-dispatch.out")')"
 else
   it_fail TS2a "fleet/it/TS/out/TS2-pane.txt" "control broken: rc=$(cat "$OUT/TS2-dispatch.rc") trust_screen='$(row trust_screen "$OUT/TS2-dispatch.out")'"

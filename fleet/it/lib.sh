@@ -375,7 +375,10 @@ it_outside_checkout_dir() {   # it_outside_checkout_dir <name> -> prints a FRESH
   local parent="${IT_REAL_AGENT_PARENT:-}" top
   if [ -z "$parent" ]; then
     parent="$IT_ROOT"
-    while top="$(git -C "$parent" rev-parse --show-toplevel 2>/dev/null)" && [ -n "$top" ]; do
+    #: RV-30. Scrubbed: an exported GIT_DIR / GIT_WORK_TREE makes git describe THAT repository from any dir (the
+    #: walk ran to `/`, or never ended), and a ceiling would hide the repository around the checkout.
+    while top="$(env -u GIT_DIR -u GIT_WORK_TREE -u GIT_COMMON_DIR -u GIT_CEILING_DIRECTORIES \
+                   git -C "$parent" rev-parse --show-toplevel 2>/dev/null)" && [ -n "$top" ]; do
       [ "$top" = / ] && break
       parent="$(cd "$top/.." && pwd)"
     done
