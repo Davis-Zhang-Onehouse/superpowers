@@ -22,6 +22,7 @@ import time
 repo = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(repo / 'fleet/src'))
 from fleet.runtime import plain  # noqa: E402
+from fleet.render import BOARD_COLUMNS  # noqa: E402
 from fleet.store import Store  # noqa: E402
 
 root = Path(os.environ['RT_ATTEMPT']).resolve()
@@ -329,7 +330,8 @@ verdict['b'] = dict(todo=b.todo_id, dispatch_rows={k: out[k] for k in ('runtime'
 assert verdict['b']['seed_check'][0].startswith('verified\t'), verdict['b']
 assert verdict['b']['pane_guard_id'] == 0 and verdict['b']['pane_guard_pane'] == 0, verdict['b']
 board = fleet('board').stdout
-verdict['board_runtime'] = {line.split('\t')[0]: line.split('\t')[-1] for line in board.splitlines()
+runtime_col = BOARD_COLUMNS.index('runtime')
+verdict['board_runtime'] = {line.split('\t')[0]: line.split('\t')[runtime_col] for line in board.splitlines()
                             if line.startswith((a.todo_id, b.todo_id))}
 assert verdict['board_runtime'] == {a.todo_id: f'claude/{MODEL}', b.todo_id: 'codex'}, board
 
