@@ -99,6 +99,8 @@ def _is_scrolled_tail(draft, text) -> bool:
     if not draft or draft.count("\n") + 1 < TAIL_MIN_ROWS:
         return False
     seen, whole = _squash(draft), _squash(text)
+    #: A prefilter only: the row check below implies a strict, word-aligned suffix. It keeps a draft that is not one
+    #: from paying for the wrap on every poll.
     if not (0 < len(seen) < len(whole) and whole.endswith(seen) and whole[-len(seen) - 1] == " "):
         return False
     #: RV-8. A suffix is not yet a SCROLLED view: a box that lost its head and re-wrapped what was left is a suffix too,
