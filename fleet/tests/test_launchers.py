@@ -14,6 +14,7 @@ the bit.
 """
 import os
 import pathlib
+import runpy
 import shutil
 import subprocess
 import tempfile
@@ -160,3 +161,10 @@ class ExecutableBitCase(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class TestFleetViewStates(unittest.TestCase):
+    def test_complete_but_working_has_visible_glyph(self):
+        styles = runpy.run_path(str(REPO / "bin" / "fleet-view"))["STATE_STYLE"]
+        self.assertIn("COMPLETE-BUT-WORKING", styles)
+        self.assertNotEqual(" ", styles["COMPLETE-BUT-WORKING"][1])
