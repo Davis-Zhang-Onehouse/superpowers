@@ -505,12 +505,27 @@ class SessionLayer:
 
 
 def _live_state(proc: Path) -> bool:
-    """`V23-H`. Whether `/proc/<pid>` is a process that is neither gone nor a zombie."""
+    """`V23-H`. Whether `/proc/<pid>` may be a live process: False only for one that is gone or a zombie. A stat that
+    exists but cannot be read (`hidepid`, another user's process) counts as LIVE — an outside child that cannot be
+    seen must still keep its parent's unit from reading closed, so this fails closed."""
     try:
         state = (proc / "stat").read_text(encoding="utf-8", errors="surrogateescape").rsplit(")", 1)[1].split()[0]
-    except (OSError, IndexError):
+    except FileNotFoundError:
         return False
+    except (OSError, IndexError):
+        return proc.exists()
     return state not in ("Z", "X")
+
+
+def _boot_epoch(proc_root: Path) -> Optional[float]:
+    """`V23-H`. The boot time (`btime` in `/proc/stat`), None when unreadable."""
+    try:
+        for line in (Path(proc_root) / "stat").read_text().splitlines():
+            if line.startswith("btime "):
+                return float(line.split()[1])
+    except (OSError, ValueError, IndexError):
+        pass
+    return None
 
 
 def default_probes(process_name: str = "claude", tmux_socket=_FROM_ENV, *,
@@ -595,8 +610,10 @@ def default_probes(process_name: str = "claude", tmux_socket=_FROM_ENV, *,
         if children:
             #: A zombie (or a child reaped since) holds nothing and ends with nothing; only live children count.
             children = {child for child in children if _live_state(Path(proc_root) / str(child))}
+        boot = _boot_epoch(proc_root)
+        started_at = None if boot is None or not start.isdigit() else boot + int(start) / os.sysconf("SC_CLK_TCK")
         return Proc(pid=pid, ppid=ppid, start=start, argv=argv, sid=sid, tty=tty,
-                    children=None if children is None else tuple(sorted(children)))
+                    children=None if children is None else tuple(sorted(children)), started_at=started_at)
 
     def signal_pid(pid: int, sig: int) -> bool:
         """`V23-H`. One signal to one pid. Its callers pass only pids `orphans.attribute` attributed to the instant
