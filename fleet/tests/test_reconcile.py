@@ -23,7 +23,8 @@ from dataclasses import fields as dataclass_fields
 from fleet.guards import CAP_EXCLUDED_STATES, _counts_against_cap
 from fleet.pool import Pool
 from fleet.reconcile import (AWAITING_CI, BLOCKED, COMPLETE, DEAD, IDLE, KINDS, PARKED, RUNNING, STALE_WAIT_S, STATES,
-                             UNKNOWN_SESSION, UNREACHABLE, Subject, _awaiting_note, needs_a_human, reconcile)
+                             UNKNOWN_SESSION, UNREACHABLE, Subject, _awaiting_note, _unknown_subject,
+                             needs_a_human, reconcile)
 from fleet.session import LiveSession, Probes, SessionLayer
 from fleet.store import Declarations, Record, Store
 from tests.test_runtime_discovery import probe_unreadable
@@ -34,6 +35,15 @@ SLOTS = ("ws1", "ws2", "ws3", "ws4", "ws5", "ws6", "ws7", "ws8", "ws9")
 
 OURS = "/i/00000000-07300312-inflight-append-fleetInfraRebuild"
 THEIRS = "/i/00000000-07290101-inflight-append-otherEffort"
+
+
+class TestUnknownAddressEvidence(unittest.TestCase):
+    def test_process_without_a_pane_does_not_inherit_the_queried_server_or_other_children(self):
+        outer = LiveSession(1, pathlib.Path('/slot/ws1'), None, runtime='codex')
+        unrelated = LiveSession(2, pathlib.Path('/elsewhere'), None, runtime='claude', nested=True)
+        subject = _unknown_subject(outer, 'ws1', [outer, unrelated], 'private-socket')
+        self.assertEqual(subject.evidence['tmux_socket'], '')
+        self.assertEqual(subject.evidence['nested'], '')
 
 #: A pane that is neither working nor waiting for a keystroke.
 QUIET_PANE = "\n".join(["compiled 42 files", "wrote target/fleet.jar", "done"])

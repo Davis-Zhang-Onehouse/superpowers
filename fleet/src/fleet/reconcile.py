@@ -774,10 +774,10 @@ def _unknown_subject(sess, slot: str, live_sessions=(), server=""):
         "cwd": str(sess.cwd),
         "runtime": sess.runtime,
         "session": sess.name or "",
-        "tmux_socket": server,
+        "tmux_socket": server if sess.name else "",
         "nested": ("true" if getattr(sess, "nested", False) else
                    ",".join(str(item.pid) for item in live_sessions
-                            if item.name == sess.name and getattr(item, "nested", False))),
+                            if sess.name and item.name == sess.name and getattr(item, "nested", False))),
         "record": "none",
         "slot": slot or "",
         "process": "unreadable" if unreadable else "",
