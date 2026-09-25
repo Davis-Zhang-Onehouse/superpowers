@@ -261,6 +261,12 @@ class Reap(unittest.TestCase):
         self.assertNotIn(501, [pid for pid, _ in self.sent])
         self.assertIn((501, "gone"), [(pid, how) for pid, how, _ in done])
 
+    def test_an_undelivered_signal_is_reported_unsignalled_not_gone(self):
+        att = self.units()
+        done = orphans.reap(att.of(REAP), att.procs, self.live.get, lambda pid, sig: False, self.slept.append,
+                            wait_s=0.2)
+        self.assertEqual({how for _, how, _ in done}, {"unsignalled"})
+
     def test_a_process_that_survives_kill_is_reported_survived(self):
         att = self.units()
         done = orphans.reap(att.of(REAP), att.procs, self.live.get, self.signal_pid, self.slept.append, wait_s=0.2)
@@ -354,13 +360,13 @@ class FactsFixture:
     the table, from every slot's holders and from its parent's children) unless it is in `stubborn`."""
 
     def __init__(self, fleet):
-        self.fleet, self.table, self.sent, self.stubborn = fleet, {}, [], set()
+        self.fleet, self.table, self.sent, self.stubborn, self.immortal = fleet, {}, [], set(), set()
         fleet.sessions.probes.proc_facts = lambda pid: self.table.get(pid)
         fleet.sessions.probes.signal_pid = self.signal
 
     def signal(self, pid, sig):
         self.sent.append((pid, sig))
-        if pid in self.stubborn and sig == signal.SIGTERM:
+        if pid in self.immortal or (pid in self.stubborn and sig == signal.SIGTERM):
             return True
         self.table.pop(pid, None)
         for held in self.fleet.holders.values():
@@ -399,6 +405,22 @@ class HarvestReapsAttributed(CliCase):
             self.assertIn(pid, out)
         self.assertIn("reaped", out)
         self.assertTrue(fleet.store.read(fleet.ids["doneWorker"]).harvested_at)
+
+    def test_a_watcher_that_survives_kill_is_named_in_the_release_refusal(self):
+        """Final review I1: the gate let the unit through on the promise of the reap; when a member survives even KILL,
+        the release refuses — and the refusal must say what was signalled and what is left."""
+        fleet = self.fleet()
+        facts = FactsFixture(fleet)
+        path = self.harvestable(fleet)
+        facts.hold("ws1", *self.pipeline_for(path))
+        facts.immortal.add(501)
+        code, out, err = fleet.run(["harvest", "--id", fleet.ids["doneWorker"]])
+        self.assertEqual(code, EXIT_REFUSED, out + err)
+        self.assertIn("Signalled first", err)
+        self.assertIn("501 survived", err)
+        self.assertIn("500 TERM", err)
+        self.assertIsNotNone(fleet.pool.lease("ws1"))
+        self.assertTrue(fleet.store.read(fleet.ids["doneWorker"]).harvested_at, "SI-31: stamped before the release")
 
     def test_a_refusing_harvest_signals_nothing(self):
         fleet = self.fleet()
@@ -707,6 +729,17 @@ class CompleteWarns(CliCase):
         self.assertEqual(code, EXIT_OK, out + err)
         self.assertIn("watchers", out)
         self.assertTrue(path.exists())
+
+    def test_a_failure_to_read_the_slot_never_blocks_complete(self):
+        from unittest import mock
+        fleet = self.fleet()
+        facts = FactsFixture(fleet)
+        path = self.worker_in_slot(fleet)
+        facts.hold("ws1", *pipeline(ppid=7000, path=str(path)))
+        with mock.patch("fleet.orphans.naming_holders", side_effect=OSError("/proc went away")):
+            code, out, err = fleet.run(["complete", "--instant", str(path)])
+        self.assertEqual(code, EXIT_OK, out + err)
+        self.assertFalse(path.exists())
 
     def test_no_watchers_no_row(self):
         fleet = self.fleet()
