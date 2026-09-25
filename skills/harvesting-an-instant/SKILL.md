@@ -58,7 +58,8 @@ holders that are **attributable** to the instant being torn down — the session
 kill, or a detached orphan (parent init, its own session, no terminal, started after the worker launched, nothing
 outside it) whose environment carries that worker's `FLEET_INSTANT` and whose argv names that instant — and print a
 `reaped` row per pid. Anything else is never signalled:
-`harvest` still refuses and lists it, and when a holder names the instant but is not safe to end (a live parent, a
+`harvest` still refuses and lists it, and when a holder names the instant (or is one of the session's own
+processes) but is not safe to end (a live parent, a
 child outside it, a server that predates the worker, a terminal multiplexer, another instant's environment) the
 refusal prints the exact `kill -TERM …` line with the
 reason. Run it yourself only if the process is yours to end; `--dry-run` shows `would-reap` rows first.

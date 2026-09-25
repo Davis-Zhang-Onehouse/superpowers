@@ -430,7 +430,8 @@ slot (parent init, its own session, no terminal, no live child outside it) that 
 whose environment carries that worker's `FLEET_INSTANT` and whose argv names that instant. Each one is named in a
 `reaped` row (`would-reap` in a dry run, which signals nothing). A call refused before the kill signals nothing; a
 `harvest` that refuses only at the release — a reaped process outlived even KILL — names every signal it sent. A holder that
-names the instant but fails any of those conditions gets its exact `kill -TERM …` line and the reason in the
+names the instant, or is one of the session's own processes, but fails any of those conditions (a live child outside
+it, a terminal multiplexer, …) gets its exact `kill -TERM …` line and the reason in the
 refusal (or a `not-reaped` row from `close`) and is never signalled. `abort` does not reap. `complete` adds a
 `watchers` row, without changing its exit code, when processes in the slot name the instant.
 
