@@ -1,4 +1,4 @@
-"""One literal insertion and one observed submission; ambiguous delivery is never retried — and every
+"""One literal insertion and an observed submission (one retry for a confirmed stuck draft); ambiguous delivery is never retried — and every
 attempt that reached the pane is written down (B13)."""
 import hashlib
 import json
