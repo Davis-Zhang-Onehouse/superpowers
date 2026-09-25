@@ -569,22 +569,16 @@ class A8KillSiteAudit(unittest.TestCase):
                 counts, out = self.audit(**{"run-X.sh": text})
                 self.assertEqual((counts["kill_all"], counts["kill_unsafe"]), (1, unsafe), out)
 
-    def test_an_argv_list_split_across_lines_is_still_a_site(self):
-        """CL-3. The scan read one line at a time, so a kill whose argv list continues on the next line was neither
-        counted nor judged."""
-        for label, (text, unsafe) in {
-            "heredoc, bare": ("python3 - <<'PY'\nimport subprocess\nsubprocess.run([\"tmux\",\n"
-                              "                \"kill-server\"])\nPY\n", 1),
-            "python -c, private -S": ("python3 -c '\nimport subprocess\nsubprocess.run([\"tmux\", \"-S\", \"/var/tmp/it/s\",\n"
-                                      "                \"kill-server\"])\n'\n", 0),
-        }.items():
-            with self.subTest(label):
-                counts, out = self.audit(**{"run-X.sh": text})
-                self.assertEqual((counts["kill_all"], counts["kill_unsafe"]), (1, unsafe), out)
+    def test_a_call_split_across_lines_is_a_stated_limit_not_a_silent_pass(self):
+        """The CL-3 join was reverted (coordinator D-82) after it opened new gaps; a kill whose argv list continues on the
+        next line is not seen (ISSUES I-11). Pinned here so the limit cannot change unnoticed in either direction."""
+        counts, out = self.audit(**{"run-X.sh": "python3 - <<'PY'\nimport subprocess\nsubprocess.run([\"tmux\",\n"
+                                                "                \"kill-server\"])\nPY\n"})
+        self.assertEqual((counts["kill_all"], counts["kill_unsafe"]), (0, 0), out)
 
     def test_held_text_is_judged_at_every_reset_and_at_end_of_file(self):
-        """CL2-1. A line whose brackets stay open is held for the next; it was DROPPED unjudged when a heredoc ended, when
-        a shell-level kill line came next, and at end of file — a regression from 08e0ba7b."""
+        """CL2-1's shapes (a kill on a line with an unbalanced bracket, at a heredoc end, at end of file, before a shell
+        kill line). With the CL-3 join reverted each line is judged as it stands, so none of them is dropped."""
         held = 'subprocess.run([\"tmux\", \"kill-server\"]); print(\"(\")'
         for label, (text, want) in {
             "heredoc end": (f"python3 - <<'PY'\nimport subprocess\n{held.replace(chr(92), '')}\nPY\n", (1, 1)),
@@ -603,8 +597,8 @@ class A8KillSiteAudit(unittest.TestCase):
             "shell ;": "tmux -L x kill-session -t a; tmux kill-server\n",
             "shell &&": "tmux -L x kill-server && tmux kill-session -t y\n",
             "shell, no spaces around ;": "tmux -L x kill-session -t a;tmux kill-server;\n",
-            "embedded, joined across lines": ("python3 - <<'PY'\nimport subprocess\nsubprocess.run([\"tmux\", \"-L\", \"x\",\n"
-                                              "    \"kill-server\"]); subprocess.run([\"tmux\", \"kill-server\"])\nPY\n"),
+            "embedded, one line": ("python3 - <<'PY'\nimport subprocess\nsubprocess.run([\"tmux\", \"-L\", \"x\", "
+                                   "\"kill-server\"]); subprocess.run([\"tmux\", \"kill-server\"])\nPY\n"),
         }.items():
             with self.subTest(label):
                 counts, out = self.audit(**{"run-X.sh": text})
