@@ -4194,6 +4194,9 @@ def _refuse_live_complete_watcher(ctx: Ctx, record: Record, child: Path, verb: s
         clears_who="the dispatched instant or the coordinator on its behalf")
 
 
+CODEX_EXIT_WAITS, CODEX_EXIT_WAIT_S = 4, 0.5
+
+
 def _codex_residue(ctx: Ctx, record) -> list:
     """FB-117. `[(path, verdict)]` from sweeping the codex sandbox's mount-point residue out of the two writable roots
     this record's worker was launched with — the store and the instants tree its folder lives in — or `[]` for a record
@@ -4208,8 +4211,20 @@ def _codex_residue(ctx: Ctx, record) -> list:
         #: RV-35. `Path("").parent` is `.` — the caller's cwd, which is nobody's writable root.
         rows.append((record.child_instant or '(empty)', 'examined: no instants root — the record names no absolute '
                      'instant path, so only the store was swept'))
-    return rows + runtime_launch.sweep_mount_residue(roots, proc_root=Path(ctx.proc_root or '/proc'),
-                                                     dry_run=ctx.dry_run)
+    #: RV-36. The pane was killed a moment ago and its codex may still be exiting, still naming these roots. Wait a
+    #: little for it — CODEX_EXIT_WAITS × CODEX_EXIT_WAIT_S at most — rather than leave the residue this close
+    #: caused to the next codex close; a codex that stays (another worker) is reported, not waited out.
+    import time
+
+    sleep = ctx.sleep or time.sleep
+    swept = []
+    for attempt in range(CODEX_EXIT_WAITS + 1):
+        swept = runtime_launch.sweep_mount_residue(roots, proc_root=Path(ctx.proc_root or '/proc'),
+                                                   dry_run=ctx.dry_run)
+        if ctx.dry_run or attempt == CODEX_EXIT_WAITS or not any('is alive' in v for _, v in swept):
+            break
+        sleep(CODEX_EXIT_WAIT_S)
+    return rows + swept
 
 
 def _do_close(ctx: Ctx, parsed: Parsed) -> int:
