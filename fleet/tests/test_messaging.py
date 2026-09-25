@@ -6,7 +6,7 @@ import unittest
 from types import SimpleNamespace
 
 from fleet.errors import BadInput, FleetError, Refused
-from fleet.messaging import (CONFIRMED_BY_DRAFT, CONFIRMED_BY_PLACEHOLDER, CONFIRMED_BY_PLACEHOLDER_UNCOUNTED, SUBMITTED, confirms, UNCERTAIN_AFTER_ENTER, line_count,
+from fleet.messaging import (CONFIRMED_BY_DRAFT, CONFIRMED_BY_DRAFT_TAIL, CONFIRMED_BY_PLACEHOLDER, CONFIRMED_BY_PLACEHOLDER_UNCOUNTED, SUBMITTED, confirms, UNCERTAIN_AFTER_ENTER, line_count,
                              UNCERTAIN_AFTER_INSERTION, SendRecord, read_sends, record_send, send, sends_path)
 from fleet.runtime import PaneObservation, observe
 
@@ -40,6 +40,98 @@ class MessagingTests(unittest.TestCase):
             layer, events = self.fixture([PaneObservation('idle'), PaneObservation('queued', 'please re-run it')])
             with self.assertRaises(FleetError):
                 send(Path(directory), layer, SimpleNamespace(tmux='worker'), text, timeout_s=0)
+
+    # ---- FB-134: a message taller than Claude Code's input box ------------------------------------
+    #: The 0.6.15 send that ended `uncertain-after-insertion` on v23-h and v23-p (dispatch/gate-release-0615.txt),
+    #: byte for byte as `fleet send` reads it (the trailing newline included).
+    SCROLLED_TEXT = (
+        "Coordinator: the gate has RETURNED. Fleet 0.6.15 is GREEN and DEPLOYED (21:02:48Z; current = fleet-v0.6.15; "
+        "the shared checkout is at tag ab2225b3). The hold is LIFTED: finish your remaining steps (full hermetic, "
+        "scripts/tests, IT near your change, closure), then propose done and complete. Your branch stays on its "
+        "lineage base 334fb1d5 (0.6.13); the next stack rebases it onto 0.6.15. If you re-run anything against the "
+        "installed fleet, it is now 0.6.15, whose hermetic suite no longer spawns real claude.\n")
+    #: dispatch/reboot-resume-0925.txt, the message in the 3-row frame.
+    REBOOT_TEXT = (
+        "Coordinator: the box REBOOTED (it went down about 11:09Z, back up about 14:00Z; the tmux server and every "
+        "background process were lost). Your pane was revived with `fleet revive` into this same session. Resume where "
+        "you left off per your HANDOFF. Background subagents, shells, gates and watchers from before the reboot are "
+        "GONE: re-launch anything you still need and do not wait on them. Re-check your slot's git state before "
+        "continuing. Fences unchanged.\n")
+
+    def scrolled(self, name):
+        root = Path(__file__).resolve().parents[1] / 'it/fixtures/runtime'
+        return observe('claude', (root / name).read_text())
+
+    def test_a_scrolled_claude_box_confirms_by_its_tail_on_the_real_frames(self):
+        """FB-134. Claude Code's box shows only its last rows once a message is taller than the box (measured on
+        2.1.282: 5 rows at 80x20, 3 at 80x16), so the verb read a strict suffix of its own paste, never confirmed
+        it, and never pressed Enter. The 0.6.15 record reads `uncertain-after-insertion`, confirmation "".
+        One plain Enter submits the whole text, hidden head included."""
+        for name, text in (('claude-scrolled-box-282.frame', self.SCROLLED_TEXT),
+                           ('claude-scrolled-box-3rows-282.frame', self.REBOOT_TEXT)):
+            with self.subTest(frame=name), tempfile.TemporaryDirectory() as directory:
+                tail = self.scrolled(name)
+                self.assertEqual(tail.state, 'queued')
+                self.assertTrue(text.startswith('Coordinator') and not tail.draft.startswith('Coordinator'))
+                self.assertEqual(CONFIRMED_BY_DRAFT_TAIL, confirms('claude', tail.draft, text))
+                layer, events = self.runtime_fixture('claude', [PaneObservation('idle'), tail, tail,
+                                                                PaneObservation('busy')])
+                recorded = []
+                self.assertEqual((SUBMITTED, CONFIRMED_BY_DRAFT_TAIL),
+                                 send(Path(directory), layer, SimpleNamespace(tmux='worker'), text,
+                                      sleep=lambda _: None, recorder=lambda o, c: recorded.append((o, c))))
+                self.assertEqual(events, [('literal', text), ('submit', None)])
+                self.assertEqual(recorded, [(SUBMITTED, CONFIRMED_BY_DRAFT_TAIL)])
+
+    def test_a_tail_seen_once_is_never_submitted(self):
+        """The tail cannot show the head, so it must agree across two consecutive frames before any Enter."""
+        tail = self.scrolled('claude-scrolled-box-282.frame')
+        for second in (PaneObservation('queued', 'someone else'), PaneObservation('unknown'),
+                       PaneObservation('queued', tail.draft + ' more')):
+            with self.subTest(second=second), tempfile.TemporaryDirectory() as directory:
+                layer, events = self.runtime_fixture('claude', [PaneObservation('idle'), tail, second])
+                with self.assertRaisesRegex(FleetError, 'uncertain after insertion'):
+                    send(Path(directory), layer, SimpleNamespace(tmux='worker'), self.SCROLLED_TEXT, timeout_s=0)
+                self.assertEqual(events, [('literal', self.SCROLLED_TEXT)])
+
+    def test_what_a_tail_is_not(self):
+        """Each guard of the tail confirmation, one at a time. None of these may ever reach Enter."""
+        text = self.SCROLLED_TEXT
+        words = text.split()
+        rows = lambda ws, per=12: '\n'.join(' '.join(ws[i:i + per]) for i in range(0, len(ws), per))
+        suffix3 = rows(words[-36:])                           # a 3-row, word-aligned suffix: the control
+        self.assertEqual(CONFIRMED_BY_DRAFT_TAIL, confirms('claude', suffix3, text))
+        cases = {
+            'two rows are too few to be a scrolled box': rows(words[-24:]),
+            'a suffix cut mid-word is not a row start': rows(words[-36:])[3:],
+            'a prefix is a paste still arriving': rows(words[:36]),
+            'a middle slice does not end at our end': rows(words[-40:-4]),
+            'somebody else\'s text': rows(('lorem ipsum dolor sit amet ' * 8).split()),
+            'our text twice is not a suffix': rows((text + ' ' + text).split()),
+        }
+        for why, draft in cases.items():
+            with self.subTest(why):
+                self.assertIsNone(confirms('claude', draft, text))
+        with self.subTest('codex is not measured to scroll, so it never confirms by tail'):
+            self.assertIsNone(confirms('codex', suffix3, text))
+        with self.subTest('the whole text is still the strong kind'):
+            self.assertEqual(CONFIRMED_BY_DRAFT, confirms('claude', rows(words), text))
+
+    def test_the_retry_waits_for_the_same_tail_evidence(self):
+        """After Enter the scrolled box still shows the tail: one retry on the same evidence, then the distinct
+        failure. A changed tail at the retry's re-observation refuses the retry."""
+        tail = self.scrolled('claude-scrolled-box-282.frame')
+        with tempfile.TemporaryDirectory() as directory:
+            layer, events = self.runtime_fixture('claude', [PaneObservation('idle'), tail, tail, tail, tail, tail])
+            with self.assertRaisesRegex(FleetError, 'inserted-not-submitted'):
+                send(Path(directory), layer, SimpleNamespace(tmux='worker'), self.SCROLLED_TEXT, timeout_s=0)
+            self.assertEqual(events, [('literal', self.SCROLLED_TEXT), ('submit', None), ('submit', None)])
+        with tempfile.TemporaryDirectory() as directory:
+            layer, events = self.runtime_fixture('claude', [PaneObservation('idle'), tail, tail, tail,
+                                                            PaneObservation('queued', 'someone else')])
+            with self.assertRaisesRegex(FleetError, 'retry refused'):
+                send(Path(directory), layer, SimpleNamespace(tmux='worker'), self.SCROLLED_TEXT, timeout_s=0)
+            self.assertEqual(events, [('literal', self.SCROLLED_TEXT), ('submit', None)])
 
     def test_nonidle_never_types(self):
         for state in ('queued','dialog','unknown'):

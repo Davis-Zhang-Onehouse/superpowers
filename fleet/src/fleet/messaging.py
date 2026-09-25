@@ -31,6 +31,14 @@ CONFIRMED_BY_PLACEHOLDER = "placeholder"
 #: with no newline sits in the box, which any single-line message of 800+ characters would also produce.
 #: It is accepted (the box was observed empty before this one paste) and recorded as the weakest kind.
 CONFIRMED_BY_PLACEHOLDER_UNCOUNTED = "placeholder-uncounted"
+#: FB-134. Claude Code's input box shows only its LAST rows once a message is taller than the box (measured on
+#: 2.1.282 at 80 columns: every row at 24 lines, 5 rows at 20, 3 at 16 and 12), and no cursor key scrolls the
+#: head back into view. The verb then read a strict suffix of its own paste, never confirmed it and never
+#: pressed Enter, and every 380–510-char coordinator send to an 80-column worker ended uncertain. A tail that
+#: ends at the message's last word and fills a scrolled box confirms, as its own weaker kind.
+CONFIRMED_BY_DRAFT_TAIL = "draft-tail"
+#: The smallest scrolled box measured. Fewer rows is a box that could have shown more, not a scrolled one.
+TAIL_MIN_ROWS = 3
 
 
 def validate_message(text):
@@ -68,12 +76,27 @@ def confirms(runtime, draft, text) -> Optional[str]:
     """
     if draft and _squash(draft) == _squash(text):
         return CONFIRMED_BY_DRAFT
+    if runtime == "claude" and _is_scrolled_tail(draft, text):
+        return CONFIRMED_BY_DRAFT_TAIL
     placeholder = paste_placeholder(runtime, draft)
     if placeholder is not None and placeholder.describes(text):
         if placeholder.chars is None and not placeholder.newlines:
             return CONFIRMED_BY_PLACEHOLDER_UNCOUNTED
         return CONFIRMED_BY_PLACEHOLDER
     return None
+
+
+def _is_scrolled_tail(draft, text) -> bool:
+    """Whether `draft` is what a scrolled claude box shows of `text`: at least `TAIL_MIN_ROWS` rows whose words
+    are the message's LAST words, starting at a word boundary (claude wraps at words, so a scrolled view begins
+    on one). Not a prefix: a paste still arriving shows its head, and a view that ends before our last word is
+    not ours to submit. A VISIBLE draft longer than the message is refused. What the box hides above the view is not
+    seen: that it holds exactly our head rests on the box being empty at admission and on one paste under
+    `pane_lock` — `send` never inserts twice — which is why this kind is recorded apart from `draft`."""
+    if not draft or draft.count("\n") + 1 < TAIL_MIN_ROWS:
+        return False
+    seen, whole = _squash(draft), _squash(text)
+    return 0 < len(seen) < len(whole) and whole.endswith(seen) and whole[-len(seen) - 1] == " "
 
 
 def digest(text: str) -> str:
@@ -205,6 +228,13 @@ def send(home, sessions, record, text, *, timeout_s=10.0, clock=time.monotonic,
                 observation = sessions.observe(record.tmux)
                 if observation.state in ('queued', 'busy'):
                     confirmation = confirms(runtime, observation.draft, text) or ""
+                    if confirmation == CONFIRMED_BY_DRAFT_TAIL:
+                        #: FB-134. The tail cannot show the head, so it must hold still: the next frame has
+                        #: to show the SAME tail before any Enter. An exact draft needs no second frame — a
+                        #: paste still arriving is a prefix, which never equals the message.
+                        again = sessions.observe(record.tmux)
+                        if again.state not in ('queued', 'busy') or again.draft != observation.draft:
+                            confirmation = ""
                     if confirmation:
                         break
                 # A TUI redraw can temporarily omit its prompt/footer, and a BUSY pane can still show its
