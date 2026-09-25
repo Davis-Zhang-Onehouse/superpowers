@@ -3828,14 +3828,40 @@ def _do_complete(ctx: Ctx, parsed: Parsed) -> int:
         return exit_code_for(gate)
     if target.exists():                            # `B10` sweep: above the dry-run's return, not below it
         raise BadInput(f"{target} already exists; an instant may hold only one state (OBS-14)")
+    #: `V23-H`. Read after every refusal above (v23-j's included), so it can only ever be a warning on a path that
+    #: renames; it never changes the exit code and never signals anything.
+    watchers = _slot_watchers(ctx, child)
     if ctx.dry_run:
         _emit(ctx, "complete", [("dry-run", "the folder was not renamed"), ("gate", gate.guard),
-                                ("allowed", "true"), ("would-rename", f"{child.name} -> {target.name}")])
+                                ("allowed", "true"), ("would-rename", f"{child.name} -> {target.name}"),
+                                *watchers])
         return EXIT_OK
     child.rename(target)
     _emit(ctx, "complete", [("gate", gate.guard), ("from", child.name), ("to", target.name),
-                            ("path", str(target))])
+                            ("path", str(target)), *watchers])
     return EXIT_OK
+
+
+def _slot_watchers(ctx: Ctx, child: Path) -> list:
+    """`V23-H`. A `watchers` row naming the live processes in this worker's slot whose argv names its own instant —
+    harness Monitors (`tail -F … | ugrep …`) run in their own session, outlive the pane's close and hold the slot —
+    or `[]`. The caller's own lineage (this very `fleet complete`) is never listed."""
+    record = _record_for(ctx, child)
+    if record is None or not record.slot:
+        return []
+    lease = ctx.pool.lease(record.slot)
+    layer = ctx.sessions_for(record)
+    if lease is None or lease.todo_id != record.todo_id or not layer.facts_observable():
+        return []
+    found = orphans.naming_holders(ctx.pool.cwd_holders(record.slot), layer.proc_facts,
+                                   orphans.instant_spellings(record.child_instant, child),
+                                   exclude=_caller_lineage(layer))
+    if not found:
+        return []
+    pids = " ".join(str(proc.pid) for proc in found)
+    return [("watchers", f"pid(s) {pids} hold slot {record.slot} and name this instant "
+                         f"({_argv_line(found[0].argv)[:120]}) — stop your watchers before complete (TaskStop the "
+                         f"Monitor, or: kill -TERM {pids}); once orphaned, `close`/`harvest` reap them")]
 
 
 # --- abort ----------------------------------------------------------------------------------------

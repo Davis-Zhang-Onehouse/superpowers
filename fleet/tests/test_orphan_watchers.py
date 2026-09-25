@@ -618,3 +618,67 @@ class RealOrphanPipeline(CliCase):
         self.assertEqual((_session_members(ours), _session_members(stranger)), before,
                          "a refusing harvest signalled a real process")
         self.assertIsNotNone(fleet.pool.lease("ws1"))
+
+
+class CompleteWarns(CliCase):
+    """`complete` lists the worker's live watchers — slot holders naming its own instant — and still completes. It never
+    signals, never counts the caller's own lineage, and v23-j's refusals still come first."""
+
+    def worker_in_slot(self, fleet):
+        path = fleet.worker("finishing", slot="ws1", pane=IDLE_PANE)
+        fleet.reviewed(path)
+        return path
+
+    def test_complete_lists_live_watchers_and_still_completes(self):
+        fleet = self.fleet()
+        facts = FactsFixture(fleet)
+        path = self.worker_in_slot(fleet)
+        facts.hold("ws1", *pipeline(ppid=7000, path=str(path)))
+        code, out, err = fleet.run(["complete", "--instant", str(path)])
+        self.assertEqual(code, EXIT_OK, out + err)
+        self.assertIn("watchers", out)
+        self.assertIn("501", out)
+        self.assertIn("stop your watchers", out)
+        self.assertEqual(facts.sent, [], "complete must never signal")
+        self.assertFalse(path.exists(), "complete did not rename")
+
+    def test_the_dry_run_warns_too(self):
+        fleet = self.fleet()
+        facts = FactsFixture(fleet)
+        path = self.worker_in_slot(fleet)
+        facts.hold("ws1", *pipeline(ppid=7000, path=str(path)))
+        code, out, err = fleet.run(["complete", "--dry-run", "--instant", str(path)])
+        self.assertEqual(code, EXIT_OK, out + err)
+        self.assertIn("watchers", out)
+        self.assertTrue(path.exists())
+
+    def test_no_watchers_no_row(self):
+        fleet = self.fleet()
+        FactsFixture(fleet)
+        path = self.worker_in_slot(fleet)
+        code, out, err = fleet.run(["complete", "--instant", str(path)])
+        self.assertEqual(code, EXIT_OK, out + err)
+        self.assertNotIn("watchers", out)
+
+    def test_the_callers_own_process_is_not_a_watcher(self):
+        fleet = self.fleet()
+        facts = FactsFixture(fleet)
+        path = self.worker_in_slot(fleet)
+        facts.hold("ws1", Proc(os.getpid(), 1, "me", ("fleet", "complete", "--instant", str(path)),
+                               sid=os.getpid(), children=()))
+        code, out, err = fleet.run(["complete", "--instant", str(path)])
+        self.assertEqual(code, EXIT_OK, out + err)
+        self.assertNotIn("watchers", out)
+
+    def test_v23j_awaiting_ci_refusal_still_comes_first(self):
+        from fleet.store import Declarations
+        fleet = self.fleet()
+        facts = FactsFixture(fleet)
+        path = self.worker_in_slot(fleet)
+        facts.hold("ws1", *pipeline(ppid=7000, path=str(path)))
+        Declarations(path).set_phase("awaiting-ci")
+        code, out, err = fleet.run(["complete", "--instant", str(path)])
+        self.assertEqual(code, EXIT_REFUSED, out + err)
+        self.assertIn("awaiting-ci", err)
+        self.assertNotIn("stop your watchers", out + err)
+        self.assertTrue(path.exists())

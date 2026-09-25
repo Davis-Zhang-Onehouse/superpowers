@@ -288,8 +288,11 @@ sweep:
   millisecond later.
 - **Declare the phase you are actually in.** An instant that has completed is not `awaiting-ci`; a stale
   claim outlives the watcher that justified it, and `complete` refuses while it stands.
-- **Kill the waiters you armed.** One worker left seven wait shells alive, one of which had been
-  self-matching for 7 h 55 m.
+- **Kill the waiters you armed, and stop your watchers before `fleet complete`.** One worker left seven wait
+  shells alive, one of which had been self-matching for 7 h 55 m. A harness Monitor (`tail -F … | ugrep …`) runs
+  in its own session: it survives your pane's close, holds the slot, and blocked a harvest with 21 pids until
+  someone killed them by hand. Stop each one (TaskStop) first; `fleet complete` lists any it can still see in a
+  `watchers` row, and `close`/`harvest` end only the ones attributable to your instant.
 - **Empty the slot of scratch** once its scripts are copied into `evidence/`. A private `.m2` is 22 GB,
   and the next lessee inherits it.
 
