@@ -94,7 +94,7 @@ from fleet import origin as origin_mod
 from fleet import evidence as evidence_mod
 from fleet.origin import Origin
 from fleet.roadmap import (ATTENTION, COORDINATOR, RETIRED, SUPERSEDED, TERMINAL, Milestone,
-                           Proposal, Roadmap, _check_evidence, _check_status,
+                           Proposal, Roadmap, _check_evidence, _check_status, _check_title,
                            _proposer as roadmap_proposer,
                            last_index)
 from fleet.session import (TMUX_SOCKET_ENV, SessionLayer, default_probes, outer,
@@ -3311,11 +3311,7 @@ def _do_milestone(ctx: Ctx, parsed: Parsed) -> int:
     #: The check the parser used to make. Kept word-for-word in force: `--title` went optional ONLY so
     #: `--retire` could run without one, and an add path that quietly accepts an untitled milestone is a
     #: worse defect than the one being fixed.
-    if not (parsed.get("title") or "").strip():
-        raise BadInput(
-            "raising a milestone needs --title: an untitled milestone cannot be dispatched, because the "
-            "title is what a worker's charter is rendered from. (`--retire` does not need one — it names "
-            "a milestone that already exists.)")
+    _check_title(parsed.get("title"), raising=True)
 
     deps = parsed.all("dep")
     known = {m.id for m in roadmap.milestones()}

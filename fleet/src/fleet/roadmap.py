@@ -203,6 +203,23 @@ def _check_status(status: str) -> str:
     return status
 
 
+def _normalized_title(title: str) -> str:
+    return " ".join(str(title or "").split())
+
+
+def _check_title(title: str, *, raising: bool) -> str:
+    """One title gate for raising and retitling; return its comparison form."""
+    normalized = _normalized_title(title)
+    if not normalized:
+        if raising:
+            raise BadInput(
+                "raising a milestone needs --title: an untitled milestone cannot be dispatched, because the "
+                "title is what a worker's charter is rendered from. (`--retire` does not need one — it names "
+                "a milestone that already exists.)")
+        raise BadInput("`--retitle` needs a nonempty title, as raising a milestone does")
+    return normalized
+
+
 def _shadowing(m) -> BadInput:
     return BadInput(f"milestone {m.id!r} is already in the roadmap; refusing to shadow it",
                     clears_when=f"the new work is raised under a NEW id; if {m.id!r} itself is being "
@@ -447,8 +464,7 @@ class Roadmap:
         reason = " ".join(str(reason or "").split())
         if not reason:
             raise BadInput("`--retitle` needs `--reason` so the old wording stays explainable")
-        if not str(title or "").strip():
-            raise BadInput("`--retitle` needs a nonempty title, as raising a milestone does")
+        normalized_title = _check_title(title, raising=False)
 
         def checked(data):
             for entry in data["milestones"]:
@@ -457,7 +473,7 @@ class Roadmap:
                 if entry["status"] in TERMINAL:
                     raise BadInput(f"milestone {milestone_id!r} is {entry['status']}, which is terminal; "
                                    "reopen it through apply --reopen before retitling")
-                if title == entry["title"]:
+                if normalized_title == _normalized_title(entry["title"]):
                     raise BadInput(f"milestone {milestone_id!r} already has that title")
                 return entry
             raise BadInput(f"no milestone {milestone_id!r} in {self.path}")
