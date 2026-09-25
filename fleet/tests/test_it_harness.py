@@ -854,6 +854,20 @@ class NestedSelftestTmuxBoundary(unittest.TestCase):
         result = run_bash(f'. "{it}/lib.sh"\nit_section X', tmp, home=tmp / "home")
         self.assertNotEqual(result.returncode, 0, result.stdout + result.stderr)
 
+    def test_dynamic_section_rerun_replaces_its_kill_audit_row(self):
+        tmp = pathlib.Path(tempfile.mkdtemp(prefix="it-audit-rerun-"))
+        self.addCleanup(shutil.rmtree, tmp, True)
+        it = harness_copy(tmp)
+        results = tmp / "results.tsv"
+        results.write_text("case\tverdict\tevidence\tnote\n")
+        for section in ("X-101", "X-202"):
+            body = (f'. "{it}/lib.sh"\nit_own_cases "ISOLATION-X-.*"\n'
+                    f'it_section {section}\nit_assert_isolation X-leave\n')
+            result = run_bash(body, tmp, env={"IT_RESULTS": str(results)}, home=tmp / "home")
+            self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        rows = [line for line in results.read_text().splitlines() if line.startswith("KILL-AUDIT-")]
+        self.assertEqual(len(rows), 1, rows)
+
 
 class ServerGuardian(unittest.TestCase):
     """FB-73. A runner's EXIT trap cannot run when the shell tree is SIGKILLed (what TaskStop does); its

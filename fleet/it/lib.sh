@@ -312,8 +312,9 @@ it_allow_tmux_dir() {
 }
 
 it_kill_audit_result() {
+  local audit_case="KILL-AUDIT-${IT_TMUX_AUDIT_CASE_SECTION:-$SECTION}"
   [ -n "${IT_TMUX_AUDIT_LEDGER:-}" ] && [ -f "$IT_TMUX_AUDIT_LEDGER" ] || {
-    it_fail "KILL-AUDIT-$SECTION" "" "tmux audit ledger is missing"; return 1;
+    it_fail "$audit_case" "" "tmux audit ledger is missing"; return 1;
   }
   local summary verdict
   summary="$(python3 - "$IT_TMUX_AUDIT_LEDGER" <<'PY'
@@ -326,12 +327,12 @@ names = [r['command'] + '@' + os.path.basename(r['socket']) +
 print(('FAIL' if any(r['decision'] == 'deny' for r in kills) else 'PASS') + '|' +
       str(len(kills)) + ' kill(s): ' + (', '.join(names) if names else '(none)'))
 PY
-)" || { it_fail "KILL-AUDIT-$SECTION" "" "tmux audit ledger cannot be parsed"; return 1; }
+)" || { it_fail "$audit_case" "" "tmux audit ledger cannot be parsed"; return 1; }
   verdict="${summary%%|*}"
   if [ "$verdict" = PASS ]; then
-    it_pass "KILL-AUDIT-$SECTION" "fleet/it/$SECTION/tmux-audit.jsonl" "${summary#*|}"
+    it_pass "$audit_case" "fleet/it/$SECTION/tmux-audit.jsonl" "${summary#*|}"
   else
-    it_fail "KILL-AUDIT-$SECTION" "fleet/it/$SECTION/tmux-audit.jsonl" "${summary#*|}"
+    it_fail "$audit_case" "fleet/it/$SECTION/tmux-audit.jsonl" "${summary#*|}"
     return 1
   fi
 }
@@ -342,14 +343,18 @@ it_section() {            # it_section <name> -> own FLEET_HOME, own slots, own 
     return 2
   fi
   SECTION="$1"
+  IT_TMUX_AUDIT_CASE_SECTION="$SECTION"
+  local suffix="${SECTION##*-}"
+  case "$suffix" in ''|*[!0-9]*) ;; *) IT_TMUX_AUDIT_CASE_SECTION="${SECTION%-*}" ;; esac
+  export IT_TMUX_AUDIT_CASE_SECTION
   # Runners declare their legacy rows before entering a section. Extend that ownership with this
   # section's audit row and remove its prior verdict, without touching another section's rows.
   if [ -n "${IT_OWN_RE:-}" ] && [ "$RESULTS" = "${IT_OWN_FILE:-}" ] && [ -f "$RESULTS" ]; then
     local audit_tmp
     audit_tmp="$(mktemp "$(dirname "$RESULTS")/.$(basename "$RESULTS").XXXXXX")" || return 1
-    IT_AUDIT_CASE="KILL-AUDIT-$SECTION" awk -F '\t' 'NR==1 || $1 != ENVIRON["IT_AUDIT_CASE"]' "$RESULTS" > "$audit_tmp" \
+    IT_AUDIT_CASE="KILL-AUDIT-$IT_TMUX_AUDIT_CASE_SECTION" awk -F '\t' 'NR==1 || $1 != ENVIRON["IT_AUDIT_CASE"]' "$RESULTS" > "$audit_tmp" \
       && mv "$audit_tmp" "$RESULTS" || return 1
-    IT_OWN_RE="$IT_OWN_RE|KILL-AUDIT-$SECTION"
+    IT_OWN_RE="$IT_OWN_RE|KILL-AUDIT-$IT_TMUX_AUDIT_CASE_SECTION"
   fi
   export FLEET_HOME="$IT_ROOT/$SECTION/home"
   SLOTS="$IT_ROOT/$SECTION/slots"

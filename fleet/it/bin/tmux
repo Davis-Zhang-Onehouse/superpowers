@@ -72,7 +72,7 @@ def refresh_result(rows):
     section = os.environ.get("IT_TMUX_AUDIT_SECTION")
     if not path or not section or not os.path.isfile(path):
         return
-    case = f"KILL-AUDIT-{section}"
+    case = f"KILL-AUDIT-{os.environ.get('IT_TMUX_AUDIT_CASE_SECTION') or section}"
     with open(path, encoding="utf-8") as source:
         lines = source.readlines()
     if not any(line.startswith(case + "\t") for line in lines):
