@@ -188,9 +188,9 @@ _install_live_fleet_guard()
 #     directory of this suite, so a bare or `-L` tmux can only name a server that lives here;
 #   * FLEET_CLAUDE_BIN / FLEET_CODEX_BIN name `fixtures/bin/no-real-runtime`, which runs nothing;
 #   * THE TRIPWIRE: an audit hook refuses an in-process exec of a real runtime binary or of a tmux call aimed at
-#     a FOREIGN server (the caller's tmux directory or `$TMUX` server), `fixtures/tmux-tripwire/tmux` — first on
-#     PATH — refuses the same for child processes, and both, like the stub, append to one log. A test whose run
-#     grew that log FAILS, even if the product swallowed the refusal. `expect_tripwire()` is how a case that
+#     a FOREIGN server (the caller's tmux directory or `$TMUX` server); `fixtures/tripwire-path/`, first on PATH
+#     with `tmux`, `claude` and `codex`, refuses the same for child processes; both, like the stub, append to one
+#     log. A test whose run grew that log FAILS, even if the product swallowed the refusal. `expect_tripwire()` is how a case that
 #     trips it on purpose takes its records back.
 #
 # A child that inherits this environment reuses it (the log, the foreign set) instead of minting its own, so a
@@ -205,7 +205,7 @@ _FIXTURES = pathlib.Path(__file__).resolve().parent / "fixtures"
 NO_REAL_RUNTIME = str(_FIXTURES / "bin" / "no-real-runtime")
 #: A claude that answers `claude agents --json` with no sessions — for a fixture whose verbs reach `peers`.
 CLAUDE_AGENTS_STUB = str(_FIXTURES / "bin" / "claude-agents-stub")
-_TMUX_SHIM_DIR = str(_FIXTURES / "tmux-tripwire")
+_TRIPWIRE_PATH_DIR = str(_FIXTURES / "tripwire-path")
 RUNTIME_BINS = ("FLEET_CLAUDE_BIN", "FLEET_CODEX_BIN")
 TMUX_HANDLES = ("TMUX", "TMUX_PANE", "FLEET_TMUX_SOCKET")
 
@@ -225,7 +225,7 @@ _OWNER = not _inherits_a_live_boundary(os.environ)
 
 
 def _ambient_path():
-    return os.pathsep.join(p for p in os.environ.get("PATH", "").split(os.pathsep) if p != _TMUX_SHIM_DIR)
+    return os.pathsep.join(p for p in os.environ.get("PATH", "").split(os.pathsep) if p != _TRIPWIRE_PATH_DIR)
 
 
 def _real_runtimes(path):
@@ -270,8 +270,8 @@ for _name in TMUX_HANDLES:
 os.environ["TMUX_TMPDIR"] = SUITE_TMUX_TMPDIR
 for _name in RUNTIME_BINS:
     os.environ[_name] = NO_REAL_RUNTIME
-if not os.environ.get("PATH", "").startswith(_TMUX_SHIM_DIR + os.pathsep):
-    os.environ["PATH"] = _TMUX_SHIM_DIR + os.pathsep + AMBIENT_PATH
+if not os.environ.get("PATH", "").startswith(_TRIPWIRE_PATH_DIR + os.pathsep):
+    os.environ["PATH"] = _TRIPWIRE_PATH_DIR + os.pathsep + AMBIENT_PATH
 
 
 def tmux_server(argv, env):
@@ -320,9 +320,12 @@ def _trip(kind, what, argv):
 
 
 def _exec_guard(event, args):
-    if event != "subprocess.Popen":
+    if event == "subprocess.Popen":
+        executable, argv, _cwd, env = args
+    elif event in ("os.exec", "os.posix_spawn"):          # RV-29: os.execv*/os.posix_spawn* raise these
+        executable, argv, env = args
+    else:
         return
-    executable, argv, _cwd, env = args
     if isinstance(argv, (str, bytes)):
         argv = [argv]
     argv = [os.fsdecode(a) for a in argv] if argv else []
