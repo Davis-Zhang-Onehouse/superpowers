@@ -7,17 +7,23 @@
 real="${FLEET_SUITE_REAL_TMUX:-/usr/bin/tmux}"
 server="" name=""
 argv=("$@")
+# A getopt cluster (`-uS path`, `-uSpath`, `-2L name`): the first of c/f/L/S/T takes the rest of the cluster, or the
+# next argument, as its value and ends the cluster (RV-26).
 while [ $# -gt 0 ]; do
-  case "$1" in
-    -S) server="${2:-}"; shift 2 || shift ;;
-    -S?*) server="${1#-S}"; shift ;;
-    -L) name="${2:-}"; shift 2 || shift ;;
-    -L?*) name="${1#-L}"; shift ;;
-    -c|-f|-T) shift 2 || shift ;;
-    --) break ;;
-    -*) shift ;;
-    *) break ;;
-  esac
+  case "$1" in --|-) break ;; -*) ;; *) break ;; esac
+  arg="$1"; shift; i=1
+  while [ "$i" -lt "${#arg}" ]; do
+    flag="${arg:$i:1}"
+    case "$flag" in
+      c|f|L|S|T)
+        value="${arg:$((i+1))}"
+        if [ -z "$value" ] && [ $# -gt 0 ]; then value="$1"; shift; fi
+        [ "$flag" = S ] && server="$value"
+        [ "$flag" = L ] && name="$value"
+        break ;;
+    esac
+    i=$((i+1))
+  done
 done
 # tmux uses TMUX_TMPDIR only when it names an existing directory, and /tmp otherwise (RV-25).
 tmpdir="${TMUX_TMPDIR:-}"

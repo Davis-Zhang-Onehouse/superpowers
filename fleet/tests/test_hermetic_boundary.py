@@ -153,6 +153,28 @@ class TheTripwire(unittest.TestCase):
         self.assertEqual(done.returncode, 97, done.stderr)
         self.assertEqual(len(seen), 1, seen)
 
+    def test_clustered_short_options_are_parsed_as_getopt_does(self):
+        """RV-26. `-uS path`, `-uSpath` and `-2L name` are one cluster to tmux's getopt; a parser that stops at the
+        cluster reads the socket path as the command and resolves the default server instead."""
+        env = {"TMUX_TMPDIR": str(self.decoy_dir.parent)}
+        by_name = os.path.realpath(self.decoy_dir.parent / f"tmux-{os.getuid()}" / "named")
+        for argv, want in ((["tmux", "-uS", str(self.decoy), "ls"], str(self.decoy)),
+                           (["tmux", f"-uS{self.decoy}", "ls"], str(self.decoy)),
+                           (["tmux", "-2L", "named", "ls"], by_name),
+                           (["tmux", "-2uLnamed", "ls"], by_name),
+                           (["tmux", "-2", "-S", str(self.decoy), "ls"], str(self.decoy))):
+            with self.subTest(argv=argv[1:3]):
+                self.assertEqual(tests.tmux_server(argv, env), os.path.realpath(want))
+        with tests.expect_tripwire() as seen:
+            with self.assertRaises(tests.HostReached):
+                subprocess.run(["tmux", "-uS", str(self.decoy), "ls"], capture_output=True)
+            for cluster in (f"-uS '{self.decoy}'", f"-2uS'{self.decoy}'"):
+                done = subprocess.run(["bash", "-c", f"tmux {cluster} ls"], env=self.child_env,
+                                      capture_output=True, text=True)
+                self.assertEqual(done.returncode, 97, cluster + " " + done.stderr)
+                self.assertNotIn("decoy-live", done.stdout)
+        self.assertEqual(len(seen), 3, seen)
+
     def test_the_test_whose_run_grew_the_tripwire_log_fails(self):
         """The record is what makes a SWALLOWED refusal still fail: a product that catches the non-zero exit
         and carries on would otherwise turn the refusal into a pass."""
