@@ -51,6 +51,16 @@ produces a confusing refusal at the end of a successful close-out, and a coordin
 failure reaches for the one flag that could take a slot somebody is still working in.
 <!-- v2-cite: harvest-commits-whole J2 -->
 
+**A holder that never exits is usually the worker's own watcher, and `close`/`harvest` end it for you.** A
+harness Monitor (`tail -n0 -F <instant>/… | ugrep …`) runs in its own session with no terminal, so closing the
+pane does not reach it: it is reparented to init and keeps the slot. `close` and `harvest --id` now end the slot
+holders that are **attributable** to the instant being torn down — the session's own processes that survived the
+kill, or a detached orphan (parent init, its own session, no terminal, started after the worker launched, nothing
+outside it) whose argv names that instant — and print a `reaped` row per pid. Anything else is never signalled:
+`harvest` still refuses and lists it, and when a holder names the instant but is not safe to end (a live parent, a
+child outside it, a server that predates the worker) the refusal prints the exact `kill -TERM …` line with the
+reason. Run it yourself only if the process is yours to end; `--dry-run` shows `would-reap` rows first.
+
 **A tmux server can outlive its last session.** After `close` of the last session on the root's socket
 the server normally exits within seconds. An operator's `tmux -L <socket> attach` client that is stopped or
 wedged holds it up instead: `tmux -L <socket> list-panes -a` answers `no current target` (alive, zero
