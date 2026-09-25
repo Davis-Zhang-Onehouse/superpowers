@@ -83,6 +83,21 @@ class MessagingTests(unittest.TestCase):
                 self.assertEqual(events, [('literal', text), ('submit', None)])
                 self.assertEqual(recorded, [(SUBMITTED, CONFIRMED_BY_DRAFT_TAIL)])
 
+    def test_a_tall_two_line_message_confirms_by_its_last_line_rows(self):
+        """RV-24. Each hard line wraps on its own: a real 2.1.282 box at 80x20 holding "Reply OK." plus one long line shows
+        only the long line's last rows. A row check that wrapped the whole message as one paragraph never matched it,
+        and the send ended uncertain again, FB-134's own symptom."""
+        long = ' '.join('This second line is long on purpose so that the box scrolls, part %d of eight.' % i
+                        for i in range(1, 9))
+        text = 'Reply OK.\n' + long + '\n'
+        tail = self.scrolled('claude-scrolled-box-2lines-282.frame')
+        self.assertTrue(tail.draft.startswith('part 4 of eight.'))
+        self.assertEqual(CONFIRMED_BY_DRAFT_TAIL, confirms('claude', tail.draft, text))
+        rows = self.wrapped('First line of three.'.split()) + [''] + self.wrapped(long.split())
+        self.assertEqual(CONFIRMED_BY_DRAFT_TAIL, confirms('claude', '\n'.join(rows[-4:]), 'First line of three.\n\n' + long))
+        with self.subTest('a head-lost first line re-wrapped into the last line is still refused'):
+            self.assertIsNone(confirms('claude', '\n'.join(self.wrapped(('Reply OK. ' + long).split())[-5:]), text))
+
     def test_a_tail_seen_once_is_never_submitted(self):
         """The tail cannot show the head, so it must agree across two consecutive frames before any Enter."""
         tail = self.scrolled('claude-scrolled-box-282.frame')
