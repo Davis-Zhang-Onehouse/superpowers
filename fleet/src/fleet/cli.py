@@ -7314,8 +7314,9 @@ def _cadence(ctx: Ctx, parsed: Parsed) -> list:
         ceiling = Path(ctx.cwd_ceiling).resolve() if ctx.cwd_ceiling is not None else None
         nearest = None
         for candidate in (cwd, *cwd.parents):
-            #: The walk never climbs above `ctx.cwd_ceiling`: above it lies a tree the caller never meant.
-            if ceiling is not None and not candidate.resolve().is_relative_to(ceiling):
+            #: The walk never climbs ABOVE `ctx.cwd_ceiling`: its ancestors are a tree the caller never meant. A cwd
+            #: that starts outside the ceiling still walks its own subtree (RV-15).
+            if ceiling is not None and candidate.resolve() != ceiling and ceiling.is_relative_to(candidate.resolve()):
                 break
             try:
                 InstantName.parse(candidate.name)
