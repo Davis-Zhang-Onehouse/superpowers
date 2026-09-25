@@ -3158,7 +3158,7 @@ def _pointer_gate(ctx: Ctx, child: Path) -> None:
 
 
 def _do_milestone(ctx: Ctx, parsed: Parsed) -> int:
-    """The COORDINATOR's verb: put a milestone ON the roadmap.
+    """The COORDINATOR's verb: raise, retitle, retire or release a milestone's claim.
 
     `SI-26`. `SD-5` removed reassignment and made a milestone the thing that carries an item across an
     effort boundary — *"an item that outlives its effort becomes a documented issue in the workspace plus a
@@ -3176,6 +3176,31 @@ def _do_milestone(ctx: Ctx, parsed: Parsed) -> int:
     """
     child = _instant(ctx, parsed)
     roadmap = Roadmap(child)
+
+    operations = [name for name in ("retire", "disown", "history") if parsed.on(name)]
+    if parsed.get("retitle") is not None:
+        operations.append("retitle")
+    if len(operations) > 1:
+        raise BadInput(f"milestone operations cannot be combined: {', '.join(operations)}")
+    if operations and (any(parsed.get(name) is not None for name in ("title", "status", "owner"))
+                       or parsed.all("dep") or parsed.all("evidence")):
+        raise BadInput(f"milestone --{operations[0]} cannot be combined with raising or changing status")
+    if parsed.on("history"):
+        if parsed.get("reason") is not None:
+            raise BadInput("milestone --history does not take --reason")
+        entries = roadmap.milestone(parsed.get("id")).title_history
+        _emit(ctx, "milestone", [("title-history", f"{row['at']} | {row['actor']} | "
+                                                       f"{row['old_title']} | {row['reason']}")
+                                 for row in entries] or [("title-history", "(none)")])
+        return EXIT_OK
+    if parsed.get("retitle") is not None:
+        target = parsed.get("id")
+        title = parsed.get("retitle")
+        prior = roadmap.retitle(target, title, parsed.get("reason"), actor(), dry_run=ctx.dry_run)
+        _emit(ctx, "milestone", [("would-retitle" if ctx.dry_run else "retitled", target),
+                                  ("old-title", prior.title if ctx.dry_run else prior.title_history[-1]["old_title"]),
+                                  ("title", title), ("reason", parsed.get("reason"))])
+        return EXIT_OK
 
     #: `FI-10`. Retiring is a different act from raising, so it is a flag on the coordinator's verb
     #: rather than a new verb: same actor, same file, same authority, and one more verb is one more row
@@ -6922,7 +6947,7 @@ VERBS = {spec.name: spec for spec in (
         Flag("--instant", True, True, "the instant"),
     )),
     _verb("milestone", _do_milestone, False,
-          "the COORDINATOR puts a milestone ON the roadmap, or retires a superseded one", (
+          "the COORDINATOR raises, retitles or retires a milestone", (
         Flag("--instant", True, True, "the instant holding the roadmap"),
         Flag("--id", True, True, "the milestone id, unique within the roadmap"),
         #: NOT parser-required, because `--retire` names an EXISTING milestone and inventing a title to
@@ -6944,7 +6969,9 @@ VERBS = {spec.name: spec for spec in (
              "exclusive claim, not a note. Readiness is derived from deps alone and never reads it"),
         Flag("--retire", False, False,
              "retire an EXISTING milestone: sets it dropped and removes it from the ready population"),
-        Flag("--reason", True, False, "why it was retired; required with --retire"),
+        Flag("--retitle", True, False, "new title for an EXISTING milestone; needs --reason"),
+        Flag("--history", False, False, "read prior titles, reasons, times and actors for --id"),
+        Flag("--reason", True, False, "why it was retired, retitled or disowned; required for each"),
     )),
     _verb("propose", _do_propose, False, "the WORKER's status proposal; never a roadmap write", (
         Flag("--instant", True, True, "the PROPOSING instant — its id is what attributes the proposal"),
