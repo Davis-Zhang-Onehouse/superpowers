@@ -498,6 +498,44 @@ class SeedCheckAsksEachRecordOfItsOwnSession(unittest.TestCase):
         self.assertNotIn(old.name, out + err, "the old record was checked against a session it does not own")
         self.assertIn(new.name, out + err, "the owner is still checked (the case is not vacuous)")
 
+
+class EveryPerRecordReaderAsksWhoseSessionItIs(unittest.TestCase):
+    """RV-35. Three more readers asked `alive(record.tmux)` of one record: the runtime-switch blocker, the watcher a
+    `declare --phase awaiting-ci` records as observed, and `complete`'s awaiting-ci refusal. For a dead record whose
+    `dt-<name>` a re-dispatch holds, each read the re-dispatch's session as the record's own."""
+
+    def _pair(self, pane=IDLE_PANE):
+        fleet = Fleet()
+        self.addCleanup(shutil.rmtree, fleet.tmp, True)
+        old = fleet.worker("mile", slot="ws1", live=False)
+        rec = fleet.store.read(fleet.ids["mile"])
+        rec.launched_at = "2026-07-29T09:00:00Z"
+        fleet.store.write(rec)
+        old_id = fleet.ids["mile"]
+        fleet.worker("mile", slot="ws2", pane=pane)
+        return fleet, old, old_id
+
+    def test_the_runtime_blocker_does_not_call_the_dead_record_running(self):
+        fleet, _, old_id = self._pair()
+        code, out, err = fleet.run(["runtime", "--set", "codex"])
+        self.assertNotIn(f"running record {old_id}", out + err)
+        self.assertIn(f"record {old_id} can still be resumed", out + err, "it is still named, truthfully")
+
+    def test_a_claim_on_the_old_folder_does_not_record_the_new_workers_monitor(self):
+        watched = "\n".join(["gh run watch 1234 --exit-status", "", "  auto mode on · 1 monitor · ? for shortcuts"])
+        fleet, old, _ = self._pair(pane=watched)
+        code, out, err = fleet.run(["declare", "--instant", str(old), "--phase", "awaiting-ci"])
+        self.assertFalse(Declarations(old).watchers(), f"the re-dispatch's Monitor became this claim's watcher: {out}")
+
+    def test_complete_does_not_describe_the_new_workers_watcher_as_this_instants(self):
+        watched = "\n".join(["gh run watch 1234 --exit-status", "", "  auto mode on · 1 monitor · ? for shortcuts"])
+        fleet, old, _ = self._pair(pane=watched)
+        d = Declarations(old)
+        d.set_phase("awaiting-ci", now="2026-07-29T09:30:00Z")
+        code, out, err = fleet.run(["complete", "--instant", str(old)])
+        self.assertNotEqual(code, 0)
+        self.assertNotIn("with a live watcher", out + err)
+
 class TheApplyWarningAsksTheProposersOwnSession(unittest.TestCase):
 
     def test_a_done_proposal_by_the_old_record_does_not_warn_about_the_new_workers_session(self):
