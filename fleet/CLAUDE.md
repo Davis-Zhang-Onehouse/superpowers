@@ -46,8 +46,15 @@ so `assert-head-green.sh` was RED at every tree (FB-35).
 The guard is installed when the `tests` package is imported. That always happens for `discover -s tests`
 over the whole suite, which is how P-1, `selftest` and `release-verify` run it, and for any
 `tests.<module>` target. A `-p` subset whose modules never import `tests` runs unguarded.
-It does not watch a tmux SERVER. A test that inherits `FLEET_TMUX_SOCKET` and resolves no root can still
-probe the live server, and nothing fails. `hermetic_environment` clears that variable.
+**Nor a tmux server or runtime binary it did not create** (FB-118). On import, `tests/__init__.py` removes `TMUX`,
+`TMUX_PANE` and `FLEET_TMUX_SOCKET`, points `TMUX_TMPDIR` at a directory of the suite (removed at exit, its servers
+killed), and sets `FLEET_CLAUDE_BIN`/`FLEET_CODEX_BIN` to `tests/fixtures/bin/no-real-runtime`, which runs nothing
+(`hermetic_environment` re-sets them after clearing). A tripwire backs it: an in-process exec of a real claude/codex,
+or of tmux aimed at the caller's tmux directory or `$TMUX` server, raises `HostReached`; `tests/fixtures/tmux-tripwire/tmux`
+(first on PATH) refuses the same for child processes; and a test whose run recorded any of these FAILS, even when the
+product swallowed the refusal. A fixture whose verbs reach `peers` uses `tests/fixtures/bin/claude-agents-stub`; a case
+that trips the tripwire on purpose wraps it in `tests.expect_tripwire()`. Before this, one suite run from a worker pane
+exec'd the real `claude agents --json` four times and sent seventeen `tmux -L fleet-davis` calls to the live server.
 
 ## Running the integration sections
 
