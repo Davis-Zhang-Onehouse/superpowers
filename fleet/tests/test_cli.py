@@ -61,7 +61,7 @@ from fleet.origin import Origin
 from fleet.review import Review
 from fleet.roadmap import Milestone, Roadmap
 from fleet.session import LiveSession, Probes, SessionLayer
-from fleet.store import Declarations, Record, Store
+from fleet.store import ATTESTED_PREFIX, Declarations, Record, Store
 from fleet.workspace import Workspace
 
 ROOT = pathlib.Path(__file__).resolve().parents[1]
@@ -5331,6 +5331,11 @@ class TestCompleteRefusesBrokenPointers(CliCase):
                                     "--verdict", "READY",
                                     "--finding", "RV-1:Minor:applied:evidence/INDEX.md:baseline:none"])
         self.assertEqual(EXIT_OK, code, err)
+        (child / "evidence").mkdir(exist_ok=True)
+        (child / "evidence" / "INDEX.md").write_text("done\n")
+        code, _, err = fleet.run(["propose", "--instant", str(child), "--milestone", milestone,
+                                  "--status", "done", "--evidence", "evidence/INDEX.md"])
+        self.assertEqual(EXIT_OK, code, err)
         return types.SimpleNamespace(fleet=fleet, instant=child)
 
     def test_complete_refuses_a_pointer_the_rename_will_break(self):
@@ -5461,6 +5466,85 @@ class TestCompleteRefusesBrokenPointers(CliCase):
         self.assertEqual(EXIT_REFUSED, code)
         self.assertIn("fleet declare --phase done", err)
         self.assertIn("complete-phase", err)
+
+    def test_complete_names_the_live_attested_watcher(self):
+        env = self.ready_to_complete()
+        declarations = Declarations(env.instant)
+        declarations.set_phase("awaiting-ci")
+        declarations.set_watchers(ATTESTED_PREFIX + "gate pid:999",
+                                  pid={"pid": 999, "start": "1"})
+        with mock.patch("fleet.reconcile.pid_start", return_value=("pid-running", "1")):
+            code, _, err = env.fleet.run(["complete", "--instant", str(env.instant)])
+        self.assertEqual(EXIT_REFUSED, code)
+        self.assertIn("live watcher", err)
+        self.assertIn("pid:999", err)
+        self.assertTrue(env.instant.exists())
+
+    def test_complete_refuses_a_claimed_milestone_with_a_running_last_report(self):
+        env = self.ready_to_complete()
+        (env.instant / "evidence" / "INDEX.md").parent.mkdir(exist_ok=True)
+        (env.instant / "evidence" / "INDEX.md").write_text("progress\n")
+        code, _, err = env.fleet.run(["propose", "--instant", str(env.instant),
+                                     "--milestone", "M9", "--status", "running",
+                                     "--evidence", "evidence/INDEX.md"])
+        self.assertEqual(EXIT_OK, code, err)
+        code, _, err = env.fleet.run(["complete", "--instant", str(env.instant)])
+        self.assertEqual(EXIT_REFUSED, code, err)
+        self.assertIn("M9", err)
+        self.assertIn("running", err)
+        self.assertTrue(env.instant.exists())
+
+    def test_complete_refuses_a_claimed_milestone_with_an_awaiting_ci_last_report(self):
+        env = self.ready_to_complete()
+        (env.instant / "evidence" / "INDEX.md").parent.mkdir(exist_ok=True)
+        (env.instant / "evidence" / "INDEX.md").write_text("waiting\n")
+        code, _, err = env.fleet.run(["propose", "--instant", str(env.instant),
+                                     "--milestone", "M9", "--status", "awaiting-ci",
+                                     "--evidence", "evidence/INDEX.md"])
+        self.assertEqual(EXIT_OK, code, err)
+        code, _, err = env.fleet.run(["complete", "--instant", str(env.instant)])
+        self.assertEqual(EXIT_REFUSED, code, err)
+        self.assertIn("M9", err)
+        self.assertIn("awaiting-ci", err)
+        self.assertTrue(env.instant.exists())
+
+    def test_complete_ignores_a_claim_that_was_transferred_to_another_owner(self):
+        env = self.ready_to_complete()
+        roadmap = Roadmap(env.fleet.paths["readyWorker"])
+        roadmap.disown("M9", expect_owner=str(env.instant), reason="transferred")
+        roadmap.claim("M9", str(env.fleet.paths["readyWorker"]))
+        code, _, err = env.fleet.run(["propose", "--instant", str(env.instant),
+                                     "--milestone", "M9", "--status", "running",
+                                     "--evidence", "evidence/INDEX.md"])
+        self.assertEqual(EXIT_OK, code, err)
+        code, _, err = env.fleet.run(["complete", "--instant", str(env.instant)])
+        self.assertEqual(EXIT_OK, code, err)
+
+    def test_complete_refuses_new_running_report_even_after_an_older_done_was_applied(self):
+        env = self.ready_to_complete()
+        roadmap = Roadmap(env.fleet.paths["readyWorker"])
+        roadmap.apply(roadmap.proposals()[-1])
+        code, _, err = env.fleet.run(["propose", "--instant", str(env.instant),
+                                     "--milestone", "M9", "--status", "running",
+                                     "--evidence", "evidence/INDEX.md"])
+        self.assertEqual(EXIT_OK, code, err)
+        code, _, err = env.fleet.run(["complete", "--instant", str(env.instant)])
+        self.assertEqual(EXIT_REFUSED, code, err)
+        self.assertIn("running", err)
+
+    def test_a_busy_complete_pane_is_still_refused_by_close_and_harvest(self):
+        env = self.ready_to_complete()
+        record = next(r for r in env.fleet.store.all() if pathlib.Path(r.child_instant) == env.instant)
+        env.fleet.panes[record.tmux] = BUSY_PANE
+        env.fleet.tmux_live.add(record.tmux)
+        env.fleet.procs.append(LiveSession(pid=7777, cwd=env.instant, name=record.tmux))
+        code, _, err = env.fleet.run(["complete", "--instant", str(env.instant)])
+        self.assertEqual(EXIT_OK, code, err)
+        for verb in ("close", "harvest"):
+            code, out, err = env.fleet.run([verb, "--id", record.todo_id])
+            self.assertEqual(EXIT_REFUSED, code, out + err)
+            self.assertIn("mid-turn", out + err)
+        self.assertEqual([], env.fleet.killed)
 
 
 class TestReviewRecordsTheHeadsItReviewed(CliCase):
