@@ -214,6 +214,11 @@ class AttributionRule(unittest.TestCase):
         self.assertNotIn("\n", command)
         self.assertTrue(command.startswith("kill -TERM 300  # "), command)
 
+    def test_the_kill_command_is_one_line_whatever_its_reason_quotes(self):
+        """RV-35, second layer: `kill_command` itself flattens its reason, so no future reason text can split it."""
+        unit = orphans.Unit(300, (300, 301), NAME, "quoted\nsecond line\tand a tab")
+        self.assertEqual(unit.kill_command(), "kill -TERM 300 301  # quoted second line and a tab")
+
     def test_provenance_of_a_prefix_sharing_sibling_is_not_this_instant(self):
         facts = table(*pipeline())
         facts[500] = Proc(500, 1, "s500", facts[500].argv, sid=500, children=(501, 502), started_at=LATER,
