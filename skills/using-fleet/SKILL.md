@@ -411,9 +411,13 @@ For these, read the dry run's rows, not only its exit code.
 mid-turn pane, one holding unsubmitted text, one awaiting an operator or one whose state cannot be read is
 refused with rc 4, dry run and real alike, and the refusal names the verb's own override (`fleet abort
 --instant <w> --reason <why> --force`, `fleet harvest --id <todo> --force`). That holds whether or not an agent
-process is attributed to the pane: a claude pane whose input box cannot be located is refused as indeterminate, as
-`pane-guard` answers `14` for it (FB-130). Three shapes stay closeable without `--force`: no session answers, every
-pane of the session is dead by tmux's own `pane_dead` (remain-on-exit), or nothing on a live pane is an agent (`12`). `--force` overrides that judgement
+process is attributed to the pane: an agent's pane whose input box cannot be located is refused as indeterminate, as
+`pane-guard` answers `14` for it (FB-130). A pane counts as not an agent's only on process evidence — nothing
+attributed, tmux's `pane_current_command` naming no agent in any pane, and nothing claude on screen; a missing glyph
+is not evidence, and an unanswered tmux fails closed. Three shapes stay closeable without `--force`: no session
+answers, every pane of the session is dead by tmux's own `pane_dead` (remain-on-exit), or that process evidence says
+no agent is there. `pane-guard` still reads an unattributed codex pane `12` even while it holds a draft, a turn or a
+dialog; `close` refuses those, so do not read that `12` as "closeable". `--force` overrides that judgement
 about work in progress and nothing else — never the cwd-holder gate. A process whose cwd cannot be read counts
 as an UNDECIDED holder of a slot when it descends from one that sits there; a teardown writes such processes
 into the lease before its kill, so they keep the slot held while they live (FB-90).
