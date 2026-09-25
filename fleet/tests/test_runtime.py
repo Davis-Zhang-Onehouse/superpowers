@@ -13,6 +13,17 @@ LOOKALIKE_FIRST_LINES = ('Ask him first:', 'ask the reviewer to rerun RV-3', 'Tr
                          'new task? no, keep going')
 
 
+def box_variant(box_rows, busy: bool = False) -> str:
+    """`claude-multiline.frame` (real 2.1.268, escape-free) with its input box rows replaced by `box_rows`."""
+    root = Path(__file__).resolve().parents[1] / 'it/fixtures/runtime'
+    lines = (root / 'claude-multiline.frame').read_text().splitlines()
+    caret = max(i for i, row in enumerate(lines) if row.startswith('\u276f'))
+    frame = '\n'.join(lines[:caret] + list(box_rows) + lines[caret + 2:]) + '\n'
+    if busy:
+        frame = frame.replace('auto mode on (shift+tab to cycle)', 'auto mode on (shift+tab to cycle) \u00b7 esc to interrupt', 1)
+    return frame
+
+
 def escape_free_multiline(first: str, busy: bool = False) -> str:
     """`claude-multiline.frame` (a real 2.1.268 capture with no escape codes) with only the draft's first line
     changed; `busy` adds the live-turn hint to its status row, the way 2.1.282 draws it."""
@@ -107,6 +118,16 @@ class RuntimeTests(unittest.TestCase):
             with self.subTest(body=body):
                 frame = '\n'.join(lines[:caret] + ['\u276f\u00a0' + body] + lines[caret + 2:]) + '\n'
                 self.assertEqual(draft, observe('claude', frame).draft)
+
+    def test_a_blank_caret_row_above_real_continuation_text_is_a_draft(self):
+        """RV-18. A draft that starts with a newline (Shift+Enter first, or a paste beginning with one) leaves
+        the caret row blank and the text on the continuation rows. It is a draft, idle or busy."""
+        for busy in (False, True):
+            with self.subTest(busy=busy):
+                frame = box_variant(['\u276f\u00a0', '  Delete the release branch now'], busy=busy)
+                actual = observe('claude', frame)
+                self.assertEqual(('busy' if busy else 'queued', 'Delete the release branch now'),
+                                 (actual.state, actual.draft))
 
     def test_dim_suggestions_are_marked_in_capture_and_never_drafts(self):
         from fleet.runtime import annotate_placeholders

@@ -160,12 +160,13 @@ def _dialog_row(runtime: RuntimeName, visible: list[str]) -> bool:
 
 def _claude_draft(rows, frame):
     index = _claude_caret_index(rows)
-    draft = _caret_content(rows[index]) if index is not None else None
-    if not draft:
+    if index is None:
         return None
     # The measured multiline editor has a caret row followed by indented
     # continuations, ending at the input border. Never include status chrome.
-    content = [draft]
+    # RV-18: the caret row may be BLANK (a draft that starts with a newline), so the continuation rows are
+    # read before emptiness is decided; returning on an empty caret row hid the whole draft.
+    content = [_caret_content(rows[index]) or '']
     for row in rows[index + 1:]:
         visible = plain(row)
         if (not visible.startswith('  ') or any(c in visible for c in '─━')
@@ -173,7 +174,7 @@ def _claude_draft(rows, frame):
             break
         content.append(_undim(_cells(row)[2:]))
     draft = '\n'.join(content).strip()
-    return None if _is_placeholder(draft) else draft
+    return None if not draft or _is_placeholder(draft) else draft
 
 
 def _claude_caret_index(rows):
