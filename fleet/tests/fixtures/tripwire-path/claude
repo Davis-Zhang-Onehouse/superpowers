@@ -1,0 +1,4 @@
+#!/usr/bin/env bash
+# FB-118 / RV-29. First on PATH for every process the hermetic suite starts, so a child that runs this runtime by NAME
+# (a script, `env`, `timeout`, `bash -c`) reaches the refusing stub, not the box's real binary.
+exec "$(dirname "$0")/../bin/no-real-runtime" "$@"

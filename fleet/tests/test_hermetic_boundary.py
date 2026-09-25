@@ -170,6 +170,27 @@ class TheTripwire(unittest.TestCase):
         self.assertFalse((self.tmp / "claude.reached").exists(), "the 'real' runtime ran")
         self.assertEqual(len(seen), 1, seen)
 
+    def test_a_child_that_runs_claude_or_codex_by_name_reaches_the_stub(self):
+        """RV-29. FLEET_CLAUDE_BIN covers fleet's own resolution; a child that runs `claude`/`codex` by NAME — a
+        script, `env`, `timeout`, `bash -c` — resolves PATH, and the tripwire's PATH directory answers first."""
+        with tests.expect_tripwire() as seen:
+            for line in ("claude agents --json", "env codex --version", "timeout 5 claude --version"):
+                done = subprocess.run(["bash", "-c", line], capture_output=True, text=True)
+                self.assertEqual(done.returncode, 97, line + " " + done.stderr)
+        self.assertEqual(len(seen), 3, seen)
+        self.assertTrue(all(record.startswith("runtime\t") for record in seen), seen)
+
+    def test_an_in_process_posix_spawn_of_a_real_runtime_is_refused(self):
+        fake_host = self.tmp / "codex"
+        fake_host.write_text("#!/bin/sh\necho reached > \"$0.reached\"\n")
+        fake_host.chmod(0o755)
+        with mock.patch.object(tests, "REAL_RUNTIMES", frozenset({os.path.realpath(fake_host)})), \
+                tests.expect_tripwire() as seen:
+            with self.assertRaises(tests.HostReached):
+                os.posix_spawn(str(fake_host), [str(fake_host)], dict(os.environ))
+        self.assertFalse((self.tmp / "codex.reached").exists(), "the 'real' runtime ran")
+        self.assertEqual(len(seen), 1, seen)
+
     def test_the_stub_an_unset_runtime_resolves_to_records_and_refuses(self):
         with tests.expect_tripwire() as seen:
             done = subprocess.run([os.environ["FLEET_CLAUDE_BIN"], "agents", "--json"], capture_output=True,
