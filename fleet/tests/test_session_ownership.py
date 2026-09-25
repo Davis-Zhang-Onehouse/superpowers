@@ -536,6 +536,37 @@ class EveryPerRecordReaderAsksWhoseSessionItIs(unittest.TestCase):
         self.assertNotEqual(code, 0)
         self.assertNotIn("with a live watcher", out + err)
 
+
+class AnExecutedReviveOwnsItsSession(unittest.TestCase):
+
+    def test_revive_makes_the_revived_record_the_owner(self):
+        """RV-24. D-1 says a revived record keeps its session because `revive` stamps `launched_at`. Executed, not
+        hand-set: A (`recoverable`, ws7) launched at 11.00; B, a later dispatch of the same title, launched at 11.30 and
+        was harvested. B owns `dt-recoverable` until A is revived at NOW (12.00); then A does."""
+        fleet = Fleet(slots=8)
+        self.addCleanup(shutil.rmtree, fleet.tmp, True)
+        args = fleet.revival_fixture()
+        a_id = fleet.ids["recoverable"]
+        rec = fleet.store.read(a_id)
+        rec.launched_at = "2026-07-30T11:00:00Z"
+        fleet.store.write(rec)
+        fleet.worker("recoverable", state="complete", live=False)
+        b = fleet.store.read(fleet.ids["recoverable"])
+        b.launched_at = "2026-07-30T11:30:00Z"
+        b.harvested_at = b.closed_at = "2026-07-30T11:45:00Z"
+        fleet.store.write(b)
+        self.assertEqual(R.session_owner(fleet.store.all(), fleet.socket)[(fleet.socket, "dt-recoverable")].todo_id,
+                      b.todo_id, "precondition: before the revive the later launch owns the name")
+        code, out, err = fleet.run(["revive", *args])
+        self.assertEqual(code, 0, err)
+        self.assertEqual([name for name, _, _ in fleet.started], ["dt-recoverable"])
+        fleet.tmux_live.add("dt-recoverable")                       # what the real start leaves behind
+        fleet.panes["dt-recoverable"] = IDLE_PANE
+        code, out, err = fleet.run(["status", "--id", a_id, "--porcelain"])
+        self.assertIn("evidence.liveness\tsession", out)
+        code, out, err = fleet.run(["status", "--id", b.todo_id, "--porcelain"])
+        self.assertIn("evidence.liveness\tnone", out)
+
 class TheApplyWarningAsksTheProposersOwnSession(unittest.TestCase):
 
     def test_a_done_proposal_by_the_old_record_does_not_warn_about_the_new_workers_session(self):
