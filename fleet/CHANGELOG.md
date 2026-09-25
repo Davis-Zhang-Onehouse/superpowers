@@ -1,5 +1,58 @@
 # fleet — changelog
 
+## fleet/v0.6.11 — 2026-09-25T01:07:03Z
+Cut from 829f147 on `stack/0.6.11` (upstream base snapshot/2026-09-22-152849). 45 commit(s) since fleet/v0.6.10.
+
+Every release ships the whole repository — all skills, `commands/`, `hooks/` and the plugin manifest, not only `fleet/`.
+Payload: fleet (21 files), skills (2 files), docs (1 file).
+Skills changed: dispatching-a-wave, using-fleet.
+
+- 3cec243 fleet: observe each pane as the runtime of the agent that owns it (v23-k, FB-113)
+- 2ea7ff8 fleet: codex spinner with a parenthesised or edge-cut status still reads busy (RV-21)
+- 9dddd8f fleet tests: abort and harvest --id refuse a busy codex worker as mid-turn, not as a mismatch (RV-17)
+- 195e286 fleet: a record's slot-holder pid is the worker, not its nested child (RV-23)
+- 607af25 fleet tests: only tests that pass on the base are named control (RV-26)
+- ae45a5d fleet tests: the v23-k module docstring says which tests fail structurally on the base (RV-27)
+- d824101 fleet: a codex busy row cut just after its elapsed-time paren reads busy, not unknown (RV-29, S3 stack)
+- 0f26972 fleet: key the WIP cap on the effort, not the base string (V23-D, v2-04)
+- b16e5eb fleet: keep the compaction rule's record population base-wide (RV-C1)
+- b382e01 fleet: a relative instants dir keeps the base-only cap population (RV-C2)
+- 4d10da4 fleet: an unplaceable instant path counts instead of crashing the cap (RV-C3)
+- 889a1c0 fleet: report foreign same-base claims as set aside too (RV-C4)
+- d8bc6a9 fleet: folder: yes whenever the holder's folder is on disk (RV-C5)
+- 266073e fleet/tests: pin the F2b holder grep against the bracketed holder text (RV-C6)
+- 08c00cd skills: reflow dispatching-a-wave Step 3 and show a bracketed holder (RV-C7)
+- e1bc150 fleet: set a foreign worker aside once, not once per record and lease (RV-X1)
+- 07479a7 fleet: say which half of the compaction rule is effort-scoped (RV-O1)
+- f3a46e6 Resolve instant operands before lookup and parsing
+- de2039a RV-4 Restore bare instant name lookup
+- 92e8ffd RV-6 Preserve symlinked instants directory paths
+- ce741b6 RV-5 Explain both relative instant forms in refusals
+- d8a6abc RV-7 Cover relative proposal destination
+- 8c3be52 RV-8 Name both operand and parsed instant on grammar refusal
+- e1ec4bd Scope cadence notices to the caller effort and collapse duplicate sources
+- 0182410 RV-C-1 Preserve cadence alarm for nested and unnamed efforts
+- 87afa34 RV-C-2 Make explicit-target exclusion assertion nonvacuous
+- 348a291 RV-C-3 Explain relative register omission at notification time
+- 17e9802 RV-C-4 Remove unused L7 stale-base export
+- 61fef76 RV-C-1 Honor the nearest cwd instant with named directories
+- e18642a fleet tests: v23-c's fixture cwd keeps a case's own chdir into its private tree (S3 stack glue, v23-a x v23-c)
+- dfd70b0 fleet: dispatch says what it did on stdout, with exit 5 when a launch was rolled back (V23-B)
+- 8489228 skills/using-fleet: dispatch's exit 5 not-started, its refused/error rows and title_as_used (V23-B)
+- e59723f fleet: a render or slot-settings failure keeps the code its dry-run gives (V23-B, IT D5)
+- 0c7eb26 fleet/it: D12 — a real tmux refusal after the claim exits 5 and says so on stdout (V23-B)
+- 3509a30 fleet: a non-start's row kind follows the exit code the caller gets (RV-C1)
+- febf470 fleet: a non-start's rows are bare values under left_* keys, with the prose in remedy (RV-C6)
+- 6ead448 fleet: a rolled-back dispatch names its record as the store holds it (RV-C2)
+- f18d52a fleet: a failure inside the dispatch rollback no longer masks the launch error (RV-C4)
+- a80cfb3 fleet: an interrupt during the dispatch launch still rolls back, then stays an interrupt (RV-C5)
+- 7f29c97 fleet: a dispatch refused by the argument parser prints its error row too (RV-C3)
+- 85c9009 fleet: a refusing dry-run prints the same refused rows as its real call (RV-C7)
+- dfcb1fa fleet: title_rewritten states camel's whole rule, including the x prefix and todo (RV-C8)
+- 025aadb skills/using-fleet: name the non-start's left_* rows, the parser case and SIGINT (RV-C6)
+- 14f0fa6 fleet: a flag in the --title position is not reported as the title used (RV-C9)
+- 829f147 fleet: left_instant and left_record share one absent sentinel, none (RV-C10)
+
 ## fleet/v0.6.10 — 2026-09-24T21:02:21Z
 Cut from c20d00b on `stack/0.6.9` (upstream base snapshot/2026-09-22-152849). 1 commit(s) since fleet/v0.6.9.
 
