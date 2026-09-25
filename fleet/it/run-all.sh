@@ -100,6 +100,8 @@ RUNNERS=(
   #: round bound to the heads it reviewed actually gates `propose --status done` against a real repo — a
   #: control that only runs under `--full` is a control that is mostly not running.
   "RH:bash $IT_ROOT/run-reviewhead.sh"
+  # V23-I: a cheap real-CLI correction with a dependent row and visible history.
+  "RETITLE:bash $IT_ROOT/run-retitle.sh"
 )
 
 # The sections added after this orchestrator was written. No prerequisites — checked per runner: each

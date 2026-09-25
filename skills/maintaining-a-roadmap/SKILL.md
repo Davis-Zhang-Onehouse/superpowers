@@ -48,6 +48,11 @@ already a `done` row that appears to cover it.
 Run it at both ends. The second run matters more, because what a worker delivers is routinely not what its
 title anticipated, and the moment of applying `done` is the last moment anybody looks.
 
+Correct a wrong title on the same id with `fleet milestone --instant <coordinator> --id <id>
+--retitle "<new title>" --reason "<why>"`. Read prior wording with `fleet milestone --instant
+<coordinator> --id <id> --history`. The row keeps its status, deps, owner and evidence. Retitle refuses
+done or dropped rows; reopen one through `apply --reopen` before correcting its title.
+
 ## 2. Readiness is derived — never store it
 
 `fleet roadmap` recomputes readiness from whether each dependency reached `done`, and names the blocker
@@ -80,8 +85,9 @@ Every `--dep` must already exist on the roadmap, and it is checked at the moment
 dependency is not an error later; it is a milestone that reads as permanently in progress. Add
 dependencies in order — a row before the rows it depends on is a row you have to retire and re-raise.
 
-**And you get one chance.** Raising a milestone whose id already exists is rejected with *"refusing to
-shadow it"*, and there is no amend verb. (That one is covered by `fleet`'s hermetic suite rather than by an
+**Dependency choices get one chance.** Raising a milestone whose id already exists is rejected with *"refusing to
+shadow it"*, and there is no dependency amend verb. Title corrections use `milestone --retitle` without
+changing the id. (The duplicate-id refusal is covered by `fleet`'s hermetic suite rather than by an
 integration case, so it carries no citation here — the guarantee is real, the evidence just lives
 elsewhere.)
 So **a dependency discovered after a row is raised has nowhere mechanical to live.** This is `SI-44`, and

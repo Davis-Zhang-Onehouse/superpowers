@@ -47,7 +47,7 @@ resuming session reads it, and the milestone is what makes it dispatchable.
 Nothing here reads a `.md` file. The registry is JSON; `render` turns it into markdown, never back.
 """
 import json
-from dataclasses import asdict, dataclass
+from dataclasses import asdict, dataclass, field
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Optional
@@ -146,6 +146,8 @@ class Milestone:
     #: Cleared by `claim`, deliberately: a milestone carrying a sentence about why its CURRENT owner does
     #: not own it is worse than one carrying nothing.
     disowned_reason: str = ""
+    #: Prior titles remain on the row they describe. Default keeps old roadmaps readable.
+    title_history: list = field(default_factory=list)
 
 
 @dataclass(frozen=True)
@@ -438,6 +440,38 @@ class Roadmap:
                         self._save(self.proposals_path, inbox)
                 return _milestone(entry)
         raise BadInput(f"no milestone {milestone_id!r} in {self.path}, so there is nothing to retire")
+
+    def retitle(self, milestone_id: str, title: str, reason: str, actor: str,
+                *, dry_run: bool = False) -> Milestone:
+        """Correct a row's title while retaining its identity and prior wording."""
+        reason = " ".join(str(reason or "").split())
+        if not reason:
+            raise BadInput("`--retitle` needs `--reason` so the old wording stays explainable")
+        if not str(title or "").strip():
+            raise BadInput("`--retitle` needs a nonempty title, as raising a milestone does")
+
+        def checked(data):
+            for entry in data["milestones"]:
+                if entry["id"] != milestone_id:
+                    continue
+                if entry["status"] in TERMINAL:
+                    raise BadInput(f"milestone {milestone_id!r} is {entry['status']}, which is terminal; "
+                                   "reopen it through apply --reopen before retitling")
+                if title == entry["title"]:
+                    raise BadInput(f"milestone {milestone_id!r} already has that title")
+                return entry
+            raise BadInput(f"no milestone {milestone_id!r} in {self.path}")
+
+        if dry_run:
+            return _milestone(checked(self._load()))
+        with held_for_update(self.path):
+            data = self._load()
+            entry = checked(data)
+            entry.setdefault("title_history", []).append({
+                "old_title": entry["title"], "reason": reason, "at": _now(), "actor": actor})
+            entry["title"] = title
+            self._save(self.path, data)
+            return _milestone(entry)
 
     def milestones(self) -> list:
         owners = _Owners()
