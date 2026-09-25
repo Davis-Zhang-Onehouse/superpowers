@@ -443,6 +443,27 @@ class TestBriefSaysWhatTheBoardDoes(unittest.TestCase):
         self.assertIn('2026-07-30T12:05:00Z', row)
         self.assertIn('fresh watcher', row)
 
+    def test_a_pre_relaunch_observed_claim_is_not_told_its_grace_passed(self):
+        """CL-1. `_grace_of` is empty for a claim older than the relaunch, whether or not 5 minutes have passed;
+        the row must give that reason, not "which have passed" (RV-43: a note stating a reason the board does
+        not use)."""
+        _declare(self.path, phase='awaiting-ci', at='2026-07-30T11:59:00Z', watchers='1 monitor')
+        row = self.phase_row('2026-07-30T12:01:00Z')                   # 2 min after the claim, launched 12:00
+        self.assertNotIn('which have passed', row)
+        self.assertIn('relaunched', row)
+
+    def test_a_future_stamped_observed_claim_is_not_told_its_grace_passed(self):
+        _declare(self.path, phase='awaiting-ci', at='2026-07-30T13:00:00Z', watchers='1 monitor')
+        row = self.phase_row('2026-07-30T12:30:00Z')
+        self.assertNotIn('which have passed', row)
+        self.assertIn('in the future', row)
+
+    def test_an_old_observed_claim_is_told_its_grace_passed(self):
+        """Control: an ordinary claim past its 5 minutes."""
+        _declare(self.path, phase='awaiting-ci', at='2026-07-30T12:00:00Z', watchers='1 monitor')
+        row = self.phase_row('2026-07-30T12:10:00Z')
+        self.assertIn('which have passed', row)
+
     def test_a_hold_is_shown_with_its_expiry_and_reason(self):
         _declare(self.path, phase='holding', at='2026-07-30T12:00:00Z', hold_reason='told to wait',
                  hold_until='2026-07-30T12:30:00Z')

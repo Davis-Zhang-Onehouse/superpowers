@@ -79,7 +79,7 @@ from fleet.pool import Pool, ReapReport
 from fleet.profiles import Profile
 from fleet import root as root_mod
 from fleet.reconcile import (HOLD_DEFAULT_S, HOLD_MAX_S, PHASE_HOLDING, WATCHER_GRACE_S, _grace_of, _hold_of,
-                             claim_predates_launch)
+                             claim_predates_launch, grace_withheld)
 from fleet.reconcile import (COMPLETE, COMPLETE_BUT_WORKING, KIND_WORKER, PARKED, PHASE_AWAITING_CI, PID_GONE,
                              PID_RUNNING, RUNNING, WATCHER_ATTESTED, WATCHER_OBSERVED, _watcher_of,
                              attested_pid_status, needs_a_human, pid_start, reconcile)
@@ -5275,6 +5275,14 @@ def near_miss_rows(child: Path) -> list:
     return rows
 
 
+def _grace_clause(graced: str, withheld: str) -> str:
+    """CL-1. The tail of brief's observed-watcher sentence: the grace this claim is in, or the board's own reason
+    it is in none (`reconcile.grace_withheld`) — never "passed" for a claim the grace was withheld from."""
+    if graced:
+        return f"; this claim is {graced}"
+    return f", {withheld}" if withheld == "which have passed" else f"; {withheld}"
+
+
 def _do_brief(ctx: Ctx, parsed: Parsed) -> int:
     """What a dispatched instant needs to know about itself, in one screen. Read-only.
 
@@ -5407,7 +5415,7 @@ def _do_brief(ctx: Ctx, parsed: Parsed) -> int:
             seen = ("OBSERVED on the pane at claim time; `fleet board` re-reads the pane, a fresh watcher on it "
                     "renews the claim with no re-declare, and once no watcher is on it the board disregards the "
                     f"claim (NO WATCHER OBSERVABLE) — except in the {WATCHER_GRACE_S // 60} minutes after the "
-                    f"claim" + (f"; this claim is {graced}" if graced else ", which have passed"))
+                    f"claim" + _grace_clause(graced, grace_withheld(declarations, getattr(own, "launched_at", None))))
         detail = (f"phase={declarations.phase() or '(none declared)'}, "
                   f"parked={declarations.parked() or '(not parked)'}, "
                   f"watcher={watchers} — {seen}")
