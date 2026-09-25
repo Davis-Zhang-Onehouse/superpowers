@@ -3108,6 +3108,7 @@ def _lineage_gate(ctx: Ctx, child: Path, verb: str) -> None:
 
 GUARD_COMPLETE_POINTERS = "complete-pointers"
 GUARD_COMPLETE_PHASE = "complete-phase"
+GUARD_COMPLETE_REPORT = "complete-report"
 
 #: The two documents a resuming reader and the coordinator actually navigate from. CHARTER.md and
 #: .fleet/seed.txt also carry the folder name and are deliberately NOT scanned: they are rendered by the
@@ -3665,9 +3666,11 @@ def _do_complete(ctx: Ctx, parsed: Parsed) -> int:
         milestone, status = claim
         if status is None or status in ("running", "awaiting-ci"):
             raise Refused(
-                f"complete-report: claimed milestone {milestone!r} has last report {status or '(none)'!r}; "
+                f"{GUARD_COMPLETE_REPORT}: claimed milestone {milestone!r} has last report {status or '(none)'!r}; "
                 "the work is still live",
-                clears_when="propose a final report after the work is finished (done, dropped, blocked or ready)",
+                clears_when=(f"fleet propose --instant {child} --milestone {milestone} --status done "
+                             "--evidence <path> after the work is finished (or use dropped, blocked or ready "
+                             "when that is the final outcome)"),
                 clears_who="this worker")
     review = Review(child, now=ctx.now)
     gate = review.gate(require_scope="all")
