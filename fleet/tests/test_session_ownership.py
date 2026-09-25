@@ -269,6 +269,11 @@ class TheOwnerRule(unittest.TestCase):
         new.dispatched_at = "2026-09-22T00:03:00Z"
         self.assertIs(R.session_owner([old, new], "here", pool)[("here", "dt-mile")], old,
                       "a start dispatched before the rival's launch cannot own what the rival started later")
+        new.dispatched_at = "2026-09-22T00:05:00Z"
+        pool.release("ws2", force=True)
+        pool.claim(todo_id="someone-else", tmux="dt-other", base_instant="B", child_instant="/i/y", slot="ws2")
+        self.assertIs(R.session_owner([old, new], "here", pool)[("here", "dt-mile")], old,
+                      "the slot it names is leased to another record: its own start is not in progress")
 
     def test_on_a_tie_the_unstamped_record_wins(self):
         a = self._rec("mile-02", "2026-09-22T00:05:06Z", harvested=True)
