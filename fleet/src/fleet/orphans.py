@@ -24,7 +24,10 @@ tty, STARTED AFTER the worker was launched, and some member's argv names the ins
 what keeps a childless tmux or screen server out: fleet's own servers carry the first dispatch's command line — which
 names that instant — and have ppid 1, their own session and no tty, but every one of them started before the
 `launched_at` of any session on it, because `launched_at` is stamped only after the session started and its seed was
-seen delivered. **NAMED** — a kill
+seen delivered. And the root must carry the worker's PROVENANCE (D-10): `FLEET_INSTANT` in its environment names this
+instant — the launcher exports it (`runtime_launch.prepare`) and every process the worker's harness starts inherits
+it, while an operator's or coordinator's server started from the slot carries another instant or none. The start
+bound alone left exactly that server reapable when it started after the launch (Task-3 review). **NAMED** — a kill
 command printed, nothing signalled — when a member names the instant but the root has a live parent: an operator's
 shell running `tail -F <instant>/…` from inside the slot is exactly that. **REFUSED** otherwise, and always for an
 unreadable holder, a holder whose facts cannot be read, and any unit containing the caller or one of its ancestors.
@@ -59,6 +62,9 @@ class Proc:
     children: Optional[tuple] = None
     #: Epoch seconds the process started (boot time + stat field 22 / CLK_TCK), None when unread.
     started_at: Optional[float] = None
+    #: `FLEET_INSTANT` from `/proc/<pid>/environ`: the instant whose launch this process descends from. None when it
+    #: is absent or the environment cannot be read (another uid, a non-dumpable process).
+    fleet_instant: Optional[str] = None
 
 
 @dataclass(frozen=True)
@@ -158,6 +164,7 @@ def attribute(holders, facts: Callable, spellings, *, session_own=None, exclude=
         detached = head.ppid == INIT_PID and head.sid == root and head.tty == 0
         owned = own.get(root) is not None and own.get(root) == head.start
         late = not_before is not None and head.started_at is not None and head.started_at >= not_before
+        ours = head.fleet_instant is not None and head.fleet_instant in set(spellings)
         if lineage & set(members):
             units.append(Unit(root, members, REFUSE, "the unit contains the process running this command or one of "
                                                      "its ancestors"))
@@ -175,6 +182,11 @@ def attribute(holders, facts: Callable, spellings, *, session_own=None, exclude=
                                                    f"start after this worker was launched (a server or daemon that "
                                                    f"predates it looks exactly like this), so it is not ended "
                                                    f"automatically"))
+        elif named and detached and not ours:
+            units.append(Unit(root, members, NAME, f"pid {named[0]}'s argv names {named[1]}, but pid {root}'s "
+                                                   f"environment does not say it was started by this worker "
+                                                   f"(FLEET_INSTANT is {head.fleet_instant or 'absent or unreadable'}), "
+                                                   f"so it is not ended automatically"))
         elif named and detached:
             units.append(Unit(root, members, REAP, f"orphaned (pid {root}'s parent is init, it leads its own session "
                                                    f"with no terminal) and pid {named[0]}'s argv names {named[1]}"))

@@ -4137,8 +4137,10 @@ def _slot_gate_before_kill(ctx: Ctx, record, child: Path, verb: str, reap: bool 
             #: `orphans`: REAP units are spared (the real call ends them after the kill), NAME units stay refusals and
             #: carry their kill command.
             if snapshot is not None:
+                #: `RV-21`. From the `own` this very scan produced — a second scan would miss a child born between.
                 snapshot.clear()
-                snapshot.update(_own_snapshot(ctx, record))
+                snapshot.update({int(pid): fact.start for pid in own
+                                 if (fact := layer.proc_facts(int(pid))) is not None})
             attribution = _attribution(ctx, record, child, holders=[p for p in pids if p not in own])
             if attribution is not None:
                 spare |= set(attribution.pids(orphans.REAP))
