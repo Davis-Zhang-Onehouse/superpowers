@@ -29,6 +29,34 @@ def _git(*argv):
                    stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
 
 
+def _in_git(d: Path) -> bool:
+    """True when `d` is inside a git work tree, or under any `.git` entry (which `trust.git_layout` treats as
+    "git failed to answer" rather than "outside git")."""
+    if any(os.path.lexists(a / ".git") for a in (d, *d.parents)):
+        return True
+    env = {k: v for k, v in os.environ.items() if k not in _GIT_SCRUB}
+    try:
+        r = subprocess.run(["git", "-C", str(d), "rev-parse", "--is-inside-work-tree"], env=env,
+                           capture_output=True, text=True, timeout=10)
+    except (OSError, subprocess.TimeoutExpired):
+        return True
+    return r.returncode == 0 and r.stdout.strip() == "true"
+
+
+def _outside_git_root() -> Path:
+    """RV-26. A temp root verified to be outside every git work tree. The cases below assert what happens OUTSIDE
+    git (a walk "up to /", `(None, None)`), which silently assumed the system temp dir is not inside a checkout.
+    The system temp dir first; if TMPDIR (or a stray `.git` above it) puts it inside git, a fixed fallback; if
+    none qualifies, the test is skipped with the reason rather than failed."""
+    tried = []
+    for candidate in (tempfile.gettempdir(), "/var/tmp", "/tmp", "/dev/shm"):
+        d = Path(candidate).resolve()
+        if d.is_dir() and os.access(d, os.W_OK) and not _in_git(d):
+            return d
+        tried.append(str(d))
+    raise unittest.SkipTest(f"no writable temp root outside every git work tree (tried {', '.join(tried)})")
+
+
 class _Layout:
     """The trust-matrix layout: g (git, one commit) with g/sub, a linked worktree wt of g, a clone c2 of g,
     plain/sub (no git), and nest/inner (a git root under a plain dir)."""
@@ -50,7 +78,7 @@ class _Layout:
 class PredictClaudeMatrixCase(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
-        cls._tmp = tempfile.TemporaryDirectory()
+        cls._tmp = tempfile.TemporaryDirectory(dir=_outside_git_root())
         #: resolved, because git reports real paths and so does the screen
         cls.L = _Layout(Path(cls._tmp.name).resolve())
 
@@ -74,7 +102,8 @@ class PredictClaudeMatrixCase(unittest.TestCase):
     def test_case_A_plain_sub_no_records_is_untrusted(self):
         got = self.predict(self.L.plain / "sub")
         self.assertUntrusted(got, self.L.plain / "sub")
-        self.assertIn("up to /", got.detail)
+        #: RV-26. Ends with: "up to /" is a PREFIX of "up to /tmp/..." (a walk bounded at a toplevel).
+        self.assertTrue(got.detail.endswith("up to /"), got.detail)
 
     def test_case_B_plain_trusted_covers_plain_sub(self):
         self.assertTrusted(self.predict(self.L.plain / "sub", self.L.plain), self.L.plain)
@@ -141,11 +170,37 @@ class PredictClaudeMatrixCase(unittest.TestCase):
                 self.assertEqual((got.state, got.key), (trust.UNKNOWN, ""), got)
 
 
+class OutsideGitRootCase(unittest.TestCase):
+    """RV-26. The chooser of the root every layout above is built under."""
+
+    def test_a_temp_root_inside_a_work_tree_is_passed_over(self):
+        with tempfile.TemporaryDirectory(dir="/var/tmp") as tmp:
+            repo = Path(tmp).resolve() / "repo"
+            _git("init", "-q", str(repo))
+            (repo / "t").mkdir()
+            with mock.patch.object(tempfile, "gettempdir", return_value=str(repo / "t")):
+                self.assertTrue(_in_git(repo / "t"))
+                self.assertNotEqual(repo / "t", _outside_git_root())
+                self.assertFalse(_in_git(_outside_git_root()))
+
+    def test_a_stray_dot_git_above_the_temp_root_counts_as_inside(self):
+        with tempfile.TemporaryDirectory(dir="/var/tmp") as tmp:
+            (Path(tmp) / ".git").mkdir()
+            (Path(tmp) / "t").mkdir()
+            self.assertTrue(_in_git(Path(tmp) / "t"))
+
+    def test_no_candidate_outside_git_skips_with_the_reason(self):
+        with mock.patch(f"{__name__}._in_git", return_value=True):
+            with self.assertRaises(unittest.SkipTest) as caught:
+                _outside_git_root()
+        self.assertIn("outside every git work tree", str(caught.exception))
+
+
 class PredictClaudeConfigCase(unittest.TestCase):
     """The config file's own failure modes. No git: the layout is injected as outside-git."""
 
     def setUp(self):
-        self._tmp = tempfile.TemporaryDirectory()
+        self._tmp = tempfile.TemporaryDirectory(dir=_outside_git_root())
         self.addCleanup(self._tmp.cleanup)
         self.cfg = Path(self._tmp.name) / "cfg"
         self.cfg.mkdir()
@@ -229,7 +284,7 @@ class PredictClaudeConfigCase(unittest.TestCase):
         self.assertEqual((got.state, got.key), (trust.TRUSTED, str(root)))
         got = self._predict_with_runner(lambda argv: (128, ""))
         self.assertEqual(got.state, trust.UNTRUSTED)
-        self.assertIn("up to /", got.detail)
+        self.assertTrue(got.detail.endswith("up to /"), got.detail)
 
     def test_rc_128_under_a_dot_git_entry_is_unknown(self):
         """git answering rc≠0 while an ancestor holds `.git` (a dir, or a worktree's file) is git failing to
