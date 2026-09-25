@@ -273,10 +273,16 @@ def resolve_settings(runtime, slot, environ, which, runner) -> LaunchSettings:
     return LaunchSettings(runtime, executable, str(Path(config).resolve()))
 
 
+#: The only keys the launcher copies from the caller's environment into the pane (the rest it sets itself). The
+#: pane otherwise inherits the tmux SERVER's environment, so a variable outside this tuple that fleet's own process
+#: carries says nothing about the pane (RV-27, `cli._predict_trust`).
+EXPORTED_FROM_ENVIRON = ('FLEET_HOME', 'FLEET_INSTANTS', 'PATH')
+
+
 def prepare(settings, record, seed_path, environ, *, session_id=None) -> Path:
     child = Path(record.child_instant)
     writable = writable_dirs(environ)
-    env = {key: environ[key] for key in ('FLEET_HOME', 'FLEET_INSTANTS', 'PATH') if environ.get(key)}
+    env = {key: environ[key] for key in EXPORTED_FROM_ENVIRON if environ.get(key)}
     env.update(FLEET_ROOT=record.root, FLEET_TMUX_SOCKET=record.tmux_socket,
                INSTANT=str(child), FLEET_INSTANT=str(child), FLEET_BIN=fleet_executable())
     env['CODEX_HOME' if settings.runtime == 'codex' else 'CLAUDE_CONFIG_DIR'] = settings.config_dir
