@@ -295,7 +295,9 @@ s6_idle=0; send_wait_idle "$TMUXN" && s6_idle=1
 #: worker's reply, are what prove Enter delivered the WHOLE message rather than the tail that was visible.
 it_tmux capture-pane -p -S - -t "$TMUXN" > "$OUT/SEND-6-history.txt" 2>&1 || true
 s6_head=0; grep -qF '❯ Reply OK. This single line' "$OUT/SEND-6-history.txt" && s6_head=1
-s6_reply=0; grep -qE '^● OK' "$OUT/SEND-6-history.txt" && s6_reply=1
+#: RV-26. The OK must come AFTER this case's echo: the same pane answered OK to SEND-1 and SEND-2 earlier.
+s6_reply=0; awk 'index($0, "❯ Reply OK. This single line") == 1 { seen = 1 } seen && /^● OK/ { found = 1 } END { exit !found }' \
+  "$OUT/SEND-6-history.txt" && s6_reply=1
 if [ "$s6" = 0 ] && grep -q $'^delivery\tsubmitted$' "$OUT/SEND-6-send.out" \
    && grep -q $'^confirmation\tdraft-tail$' "$OUT/SEND-6-send.out" && [ "$s6_idle" = 1 ] \
    && [ "$s6_head" = 1 ] && [ "$s6_reply" = 1 ] \
