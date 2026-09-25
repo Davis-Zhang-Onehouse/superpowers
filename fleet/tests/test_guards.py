@@ -433,6 +433,18 @@ class TestTheCap(GuardCase):
         self.assertTrue(CompactionExclusive().evaluate(done.ctx()).allowed,
                         "a completed compaction blocks forever: an unclearable alarm")
 
+    def test_folderless_harvested_compaction_stops_blocking(self):
+        fleet = self.fleet()
+        fleet.worker("foldTheStack", optype="compact", slot="ws1", live=False)
+        rec = fleet.store.all()[0]
+        rec.harvested_at = "2026-07-30T04:00:00Z"
+        fleet.store.write(rec)
+        shutil.rmtree(fleet.paths["foldTheStack"])
+        subjects = fleet.subjects()
+        self.assertEqual(next(s for s in subjects if s.identity == rec.todo_id).state, "HARVESTED")
+        verdict = CompactionExclusive().evaluate(fleet.ctx())
+        self.assertTrue(verdict.allowed, verdict.reason)
+
     def test_a_compaction_that_exists_only_as_a_folder_still_blocks_every_dispatch(self):
         """`SI-30`. The guard read only the reconciled join — records, leases, live processes — so a
         compaction that exists as a FOLDER WITH NO RECORD was invisible to it.
