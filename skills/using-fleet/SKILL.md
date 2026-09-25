@@ -399,10 +399,11 @@ the same shape. A dry run can still answer rc=0 where the real call exits non-ze
 - `abort` and `harvest --id` when the session's own processes cannot be attributed (no pane pids or
   parent walk). The dry run prints a `gate` row saying it could not decide. If a holder is left after the
   kill, the two verbs end differently. `abort` waits once more and names the partial state. `harvest --id`
-  has already applied the proposals and stamped the record by then, so it refuses with the bare OBS-48
-  message and leaves the slot for `reap`.
-- `abort` and `harvest --id` when a process of the session's own tree survives the kill. Nothing can see
-  that before the kill.
+  has already applied the proposals and stamped the record by then, so it refuses naming that partial state
+  — and whatever it signalled first — and leaves the slot for `reap`.
+- `abort` when a process of the session's own tree survives the kill: nothing can see that before the kill.
+  `harvest --id` ends such a survivor after the kill (it is the session's own); it still refuses at the release
+  if one outlives even KILL.
 - `revive` on a record with no session name. `dispatch` and `resume` never write one.
 
 For these, read the dry run's rows, not only its exit code.
@@ -427,7 +428,8 @@ the session's own processes that survive its kill (a harness watcher runs in its
 so `close` of an in-flight worker also ends its detached background jobs in the slot), and a detached orphan in the
 slot (parent init, its own session, no terminal, no live child outside it) that started after the worker launched,
 whose environment carries that worker's `FLEET_INSTANT` and whose argv names that instant. Each one is named in a
-`reaped` row (`would-reap` in a dry run, which signals nothing). A refusing call signals nothing; a holder that
+`reaped` row (`would-reap` in a dry run, which signals nothing). A call refused before the kill signals nothing; a
+`harvest` that refuses only at the release — a reaped process outlived even KILL — names every signal it sent. A holder that
 names the instant but fails any of those conditions gets its exact `kill -TERM …` line and the reason in the
 refusal (or a `not-reaped` row from `close`) and is never signalled. `abort` does not reap. `complete` adds a
 `watchers` row, without changing its exit code, when processes in the slot name the instant.
