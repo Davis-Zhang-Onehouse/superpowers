@@ -314,7 +314,8 @@ def session_owner(records, here: str) -> dict:
     every successful start stamps it on the record that started (dispatch after seed delivery, `revive` after its
     verify, `resume` when it adopts a live session), and no start succeeds while a same-named session is live (tmux
     refuses the duplicate; `revive` refuses an occupied pane). So of the records naming a live session, the latest
-    launch is the one whose pane it is. Stamps (harvested/closed) are what fleet did to a record LATER and decide
+    COMPLETED launch is the one whose pane it is. Not yet a start in progress: dispatch starts the session, delivers
+    the seed and only then stamps `launched_at`, so for those seconds the new record ranks as never launched. Stamps (harvested/closed) are what fleet did to a record LATER and decide
     only a tie: in the live store every reused-name pair has BOTH records stamped. A record naming no server is keyed
     on `here`, as the join already treats it."""
     owners = {}
