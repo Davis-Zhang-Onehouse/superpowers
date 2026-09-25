@@ -496,6 +496,26 @@ class TestAgainstRealTmux(unittest.TestCase):
                          f"{self.long!r} is visible on the DEFAULT tmux server — the suite is creating "
                          f"sessions on the server the operator's coordinator is attached to (SI-3)")
 
+    def test_panes_dead_reads_tmuxs_own_flag(self):
+        """FB-130. A remain-on-exit pane keeps its session answering after its process exits; `panes_dead` says so,
+        a live pane is False, and a session that does not exist is unobservable (None), never dead."""
+        dead = f"{self.long}-dead"
+        started = subprocess.run(self.TMUX + ["new-session", "-d", "-s", dead, "sleep 60"],
+                                 capture_output=True, text=True)
+        self.assertEqual(started.returncode, 0, started.stderr)
+        self.addCleanup(subprocess.run, self.TMUX + ["kill-session", "-t", exact_session_target(dead)],
+                        capture_output=True)
+        subprocess.run(self.TMUX + ["set-option", "-w", "-t", f"={dead}:", "remain-on-exit", "on"], check=True,
+                       capture_output=True)
+        os.kill(self.probes.pane_pid(dead), 15)
+        deadline = time.monotonic() + 5
+        while self.probes.panes_dead(dead) is not True and time.monotonic() < deadline:
+            time.sleep(0.05)
+        self.assertIs(self.probes.panes_dead(dead), True)
+        self.assertTrue(self.probes.has_session(dead), "the fixture is not the remain-on-exit shape")
+        self.assertIs(self.probes.panes_dead(self.long), False)
+        self.assertIsNone(self.probes.panes_dead(f"{self.long}-missing"))
+
     def test_a_one_character_prefix_does_not_resolve_to_a_longer_live_session(self):
         self.assertTrue(self.probes.has_session(self.long),
                         "the fixture session is not live, so every assertion below is vacuous")
