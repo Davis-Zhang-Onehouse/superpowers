@@ -817,6 +817,20 @@ class CompleteWarns(CliCase):
         self.assertEqual(code, EXIT_OK, out + err)
         self.assertFalse(path.exists())
 
+    def test_any_error_while_reading_watchers_never_blocks_complete(self):
+        """RV-36. D-5: the row is a warning, so no failure while reading it — not only FleetError/OSError — may stop
+        the rename."""
+        from unittest import mock
+        for error in (ValueError("bad stat field"), RuntimeError("symlink loop")):
+            fleet = self.fleet()
+            facts = FactsFixture(fleet)
+            path = self.worker_in_slot(fleet)
+            facts.hold("ws1", *pipeline(ppid=7000, path=str(path)))
+            with mock.patch("fleet.orphans.naming_holders", side_effect=error):
+                code, out, err = fleet.run(["complete", "--instant", str(path)])
+            self.assertEqual(code, EXIT_OK, f"{error!r}: {out}{err}")
+            self.assertFalse(path.exists())
+
     def test_no_watchers_no_row(self):
         fleet = self.fleet()
         FactsFixture(fleet)
