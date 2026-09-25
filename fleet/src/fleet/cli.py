@@ -79,7 +79,7 @@ from fleet.pool import Pool, ReapReport
 from fleet.profiles import Profile
 from fleet import root as root_mod
 from fleet.reconcile import (HOLD_DEFAULT_S, HOLD_MAX_S, PHASE_HOLDING, WATCHER_GRACE_S, _grace_of, _hold_of,
-                             claim_predates_launch, grace_withheld)
+                             claim_predates_launch, complete_work_is_live, grace_withheld)
 from fleet.reconcile import (COMPLETE, COMPLETE_BUT_WORKING, KIND_WORKER, PARKED, PHASE_AWAITING_CI, PID_GONE,
                              PID_RUNNING, RUNNING, WATCHER_ATTESTED, WATCHER_LIVE, WATCHER_OBSERVED, _watcher_of,
                              attested_pid_status, needs_a_human, pid_start, reconcile)
@@ -3737,8 +3737,9 @@ def _do_complete(ctx: Ctx, parsed: Parsed) -> int:
         record = _record_for(ctx, child)
         session = ctx.sessions if record is None else ctx.sessions_for(record)
         pane = session.capture(record.tmux) if record is not None and session.alive(record.tmux) else ""
-        kind, watcher = _watcher_of(pane or "", session, child, capture_failed=pane is None)
-        live = kind in (WATCHER_OBSERVED, WATCHER_ATTESTED)
+        kind, watcher = _watcher_of(pane or "", session, child, capture_failed=pane is None,
+                                    launched_at=record.launched_at if record is not None else None)
+        live = kind in WATCHER_LIVE
         raise Refused(
             f"{GUARD_COMPLETE_PHASE}: the declared phase is still awaiting-ci"
             + (f" with a live watcher ({watcher})" if live else "")
@@ -4237,21 +4238,24 @@ def _refuse_live_complete_watcher(ctx: Ctx, record: Record, child: Path, verb: s
     if state != "complete":
         return
     phase = Declarations(child).phase()
-    #: S5 (v23-g x v23-j, coordinator D-90): a `holding` phase and a claim inside its grace count as live, fail safe.
-    if phase == PHASE_HOLDING:
-        raise Refused(
-            f"{verb} refused: {child.name} is {COMPLETE_BUT_WORKING}; it is still declared {PHASE_HOLDING}. "
-            "Nothing was closed, released, renamed, applied or written.",
-            clears_when=f"fleet declare --phase done --instant {child} once the hold is over",
-            clears_who="the dispatched instant or the coordinator on its behalf")
-    if phase != PHASE_AWAITING_CI:
+    if phase not in (PHASE_AWAITING_CI, PHASE_HOLDING):
         return
     sessions = ctx.sessions_for(record)
-    captured = sessions.capture(record.tmux) if record.tmux and sessions.alive(record.tmux) else ""
-    kind, watcher = _watcher_of(captured or "", sessions, child, capture_failed=captured is None,
-                                launched_at=record.launched_at)
-    if kind not in WATCHER_LIVE:
+    live = bool(record.tmux) and sessions.alive(record.tmux)
+    captured = sessions.capture(record.tmux) if live else ""
+    kind, watcher = (_watcher_of(captured or "", sessions, child, capture_failed=captured is None,
+                                 launched_at=record.launched_at) if phase == PHASE_AWAITING_CI else ("", ""))
+    #: S5 D-108: the board's own predicate, so close/harvest refuse exactly what the board reads as live work (a busy
+    #: pane is `_pane_refusal`'s to judge, not this one's). A stamped record with no live session is over.
+    why = complete_work_is_live(record, child, phase, live=live, busy=False, watcher_kind=kind)
+    if not why:
         return
+    if why == PHASE_HOLDING:
+        raise Refused(
+            f"{verb} refused: {child.name} is {COMPLETE_BUT_WORKING}; it is still declared {PHASE_HOLDING} "
+            f"({_hold_of(child)[1]}). Nothing was closed, released, renamed, applied or written.",
+            clears_when=f"fleet declare --phase done --instant {child} once the hold is over",
+            clears_who="the dispatched instant or the coordinator on its behalf")
     raise Refused(
         f"{verb} refused: {child.name} is {COMPLETE_BUT_WORKING}; its watcher is alive: {watcher}. "
         "Nothing was closed, released, renamed, applied or written.",

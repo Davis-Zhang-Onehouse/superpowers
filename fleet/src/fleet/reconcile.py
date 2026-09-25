@@ -278,6 +278,28 @@ def reconcile(store, pool, sessions, instants_dir: Path, idle_after_s: int = 180
 # --- workers ---------------------------------------------------------------------------------------
 
 
+def complete_work_is_live(rec, instant, phase, *, live: bool, busy: bool, watcher_kind: str) -> str:
+    """Why a `-complete-` folder's work is still live — `"busy"`, `PHASE_HOLDING` or `"watcher"` — or `""` when it is
+    over. The ONE predicate for both readers of v23-j's COMPLETE-BUT-WORKING: the board (`_worker_subject`, and so the
+    WIP cap) and the close/harvest refusal (`cli._refuse_live_complete_watcher`), so the two never disagree.
+
+    - A busy live pane is always live work.
+    - RV-C1 / S5 D-108: a harvested or closed record with no live session is OVER. A stale claim of any kind (a
+      pid-less attestation, a claim still inside its grace, a hold) never resurrects it.
+    - S5 D-108 (supersedes D-90's "expired or not"): `holding` counts only while `_hold_of` says the hold stands.
+    - An `awaiting-ci` claim counts while its watcher is live: observed, attested, or inside its bounded GRACE.
+    """
+    if busy:
+        return "busy"
+    if (rec.harvested_at or rec.closed_at) and not live:
+        return ""
+    if phase == PHASE_HOLDING:
+        return PHASE_HOLDING if _hold_of(instant)[0] else ""
+    if phase == PHASE_AWAITING_CI and watcher_kind in WATCHER_LIVE:
+        return "watcher"
+    return ""
+
+
 def _worker_subject(rec, pool, sessions, instants_dir: Path, idle_after_s: int, live: bool, sess,
                     live_sessions=(), local_nested_sessions=()):
     if sessions.runtime != rec.runtime:
@@ -310,21 +332,13 @@ def _worker_subject(rec, pool, sessions, instants_dir: Path, idle_after_s: int, 
         watcher_kind, watcher_text = _watcher_of(pane, sessions, instant,
                                                  capture_failed=captured is None, launched_at=rec.launched_at)
         busy = live and sessions.busy(pane)
-        #: RV-C1. A harvested or closed record with no live session is over: its stale `awaiting-ci` claim (often a
-        #: pid-less attestation nothing ever re-checks) must not resurrect it into the cap. Live evidence still wins.
-        stamped_and_gone = bool(rec.harvested_at or rec.closed_at) and not live
-        #: S5 (v23-g x v23-j, coordinator D-90). A claim inside its grace, or any `holding` phase (expired or not),
-        #: counts as live work here, fail safe; RV-C1's terminal stamps still win over both.
-        holding = phase == PHASE_HOLDING
-        if busy or (not stamped_and_gone and (holding or (phase == PHASE_AWAITING_CI and
-                                                          watcher_kind in WATCHER_LIVE))):
+        why = complete_work_is_live(rec, instant, phase, live=live, busy=busy, watcher_kind=watcher_kind)
+        if why:
             state = COMPLETE_BUT_WORKING
-            if busy:
-                note = "the instant folder is `-complete-` but its pane is busy"
-            elif holding:
-                note = f"the instant folder is `-complete-` but it is still declared {PHASE_HOLDING}"
-            else:
-                note = f"the instant folder is `-complete-` but its watcher is alive: {watcher_text}"
+            note = ("the instant folder is `-complete-` but its pane is busy" if why == "busy"
+                    else f"the instant folder is `-complete-` but it is still declared {PHASE_HOLDING}: "
+                         f"{_hold_of(instant)[1]}" if why == PHASE_HOLDING
+                    else f"the instant folder is `-complete-` but its watcher is alive: {watcher_text}")
     if sess is not None and sess.runtime != rec.runtime:
         state, note = BLOCKED, f'live runtime {sess.runtime} differs from record runtime {rec.runtime}'
         on_pane = False
