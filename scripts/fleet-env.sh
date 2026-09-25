@@ -166,9 +166,9 @@ fleet_instant() {
   fleet status --id "$1" --porcelain 2>/dev/null | awk -F'\t' '$1=="evidence.instant"{print $2}'
 }
 
-# Every running subject: "<id>\t<slot>".
+# Every working subject, including a progressing parked worker: "<id>\t<slot>".
 fleet_running() {
-  fleet board --porcelain 2>/dev/null | awk -F'\t' '$3=="RUNNING"{print $1"\t"$5}'
+  fleet board --porcelain 2>/dev/null | awk -F'\t' '$3=="RUNNING" || ($3=="PARKED" && $12=="true"){print $1"\t"$5}'
 }
 
 # Read a pane WITHOUT attaching. The trailing colon on the target is required: `-t '=name'` returns an

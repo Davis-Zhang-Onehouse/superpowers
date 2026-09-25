@@ -505,14 +505,14 @@ class TestRoadmapPorcelainPrintsEvidence(unittest.TestCase):
 
 
 class TestBoardAddressColumns(unittest.TestCase):
-    def test_appends_session_server_and_nested_without_moving_old_columns(self):
+    def test_appends_session_server_nested_and_working_without_moving_old_columns(self):
         s = worker("alice-1", "PARKED", tmux="custom-pane", tmux_socket="private-socket",
-                   nested="3456")
+                   nested="3456", working="true")
         row = render.board([s], porcelain=True).splitlines()[0].split("\t")
         self.assertEqual(render.BOARD_COLUMNS[:8],
                          ("identity", "kind", "state", "label", "slot", "milestone", "note", "runtime"))
-        self.assertEqual(render.BOARD_COLUMNS[-3:], ("session", "server", "nested"))
-        self.assertEqual(row[-3:], ["custom-pane", "private-socket", "3456"])
+        self.assertEqual(render.BOARD_COLUMNS[-4:], ("session", "server", "nested", "working"))
+        self.assertEqual(row[-4:], ["custom-pane", "private-socket", "3456", "true"])
         self.assertEqual(len(render.board([], porcelain=True).splitlines()[0].split("\t")),
                          len(render.BOARD_COLUMNS))
 
