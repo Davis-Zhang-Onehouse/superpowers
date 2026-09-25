@@ -68,7 +68,7 @@ from typing import Callable
 
 from fleet import (EXIT_ATTENTION, EXIT_BAD_INPUT, EXIT_CODES, EXIT_NO_CAPACITY, EXIT_NOT_STARTED, EXIT_OK,
                    EXIT_REFUSED, __version__)
-from fleet import guards, layout, peers as peers_mod, render, seedcheck
+from fleet import guards, layout, orphans, peers as peers_mod, render, seedcheck
 from fleet.atomic import atomic_symlink, atomic_write
 from fleet.errors import BadInput, FleetError, InstantNameError, NoCapacity, NotStarted, Refused
 from fleet.harvest import DEFAULT_MAX_AGE_S, REGISTER_NAME, Harvest
@@ -3958,7 +3958,98 @@ def _release_slot_or_name_the_partial_state(ctx: Ctx, record, child: Path) -> st
         ) from exc
 
 
-def _slot_gate_before_kill(ctx: Ctx, record, child: Path, verb: str) -> str:
+def _caller_lineage(layer) -> set:
+    """`V23-H`. This process and every ancestor, read through the layer's facts probe: never a reap target, whatever
+    its argv or cwd says (a `fleet` run from inside the slot names the instant in its own argv)."""
+    lineage, pid, steps = set(), os.getpid(), 0
+    while pid and pid > 1 and pid not in lineage and steps < 256:
+        lineage.add(pid)
+        fact = layer.proc_facts(pid)
+        pid, steps = (fact.ppid if fact is not None else 0), steps + 1
+    return lineage
+
+
+def _attribution(ctx: Ctx, record, child, session_own=None, holders=None):
+    """`V23-H`. Which of `record.slot`'s cwd holders are the torn-down instant's own (`orphans.attribute`), or None when
+    that cannot be asked: no slot, a lease that is gone or now somebody else's (`FB-89`), or no facts probe (NOT
+    OBSERVABLE — every holder is then refused exactly as before this existed)."""
+    if record is None or not record.slot:
+        return None
+    lease = ctx.pool.lease(record.slot)
+    if lease is None or lease.todo_id != record.todo_id:
+        return None
+    layer = ctx.sessions_for(record)
+    if not layer.facts_observable():
+        return None
+    pids = ctx.pool.cwd_holders(record.slot) if holders is None else list(holders)
+    return orphans.attribute(pids, layer.proc_facts,
+                             orphans.instant_spellings(record.child_instant, child),
+                             session_own=session_own, exclude=_caller_lineage(layer),
+                             not_before=_launch_bound(record.launched_at))
+
+
+#: `V23-H` (D-9). Seconds past `launched_at` a by-name root must have started: `launched_at` is truncated to the second
+#: and `btime` is itself rounded, so the bound is widened by two rather than trusting either to the tick.
+LAUNCH_MARGIN_S = 2.0
+
+
+def _launch_bound(launched_at):
+    """The epoch second a by-name reap root must have started at or after, or None when no launch is recorded."""
+    from datetime import datetime, timezone
+    if not launched_at:
+        return None
+    try:
+        at = datetime.strptime(str(launched_at), "%Y-%m-%dT%H:%M:%SZ").replace(tzinfo=timezone.utc)
+    except ValueError:
+        return None
+    return at.timestamp() + LAUNCH_MARGIN_S
+
+
+def _own_snapshot(ctx: Ctx, record) -> dict:
+    """`V23-H`. `{pid: start}` of the slot holders that are the LIVE session's own processes, read before the kill: the
+    ones among them that survive it (their own session, no tty) are the session's, and `orphans` reaps them by this."""
+    if record is None or not record.slot or not record.tmux:
+        return {}
+    layer = ctx.sessions_for(record)
+    if not layer.facts_observable() or not layer.alive(record.tmux):
+        return {}
+    own = layer.own_processes(record.tmux, ctx.pool.cwd_holders(record.slot)) or set()
+    return {pid: fact.start for pid in own if (fact := layer.proc_facts(int(pid))) is not None}
+
+
+def _reap_attributed(ctx: Ctx, record, attribution) -> list:
+    """`V23-H`. End every REAP unit of `attribution` (TERM, a bound, KILL — `orphans.reap`) and return
+    `(pid, outcome, argv, why)` per pid. Nothing else is ever signalled."""
+    import time
+
+    if attribution is None or not attribution.of(orphans.REAP):
+        return []
+    layer = ctx.sessions_for(record)
+    done = orphans.reap(attribution.of(orphans.REAP), attribution.procs, layer.proc_facts, layer.signal_pid,
+                        ctx.sleep or time.sleep)
+    return [(pid, outcome, _argv_line(attribution.procs[pid].argv), unit.why) for pid, outcome, unit in done]
+
+
+def _argv_line(argv) -> str:
+    line = " ".join(argv)
+    return line if len(line) <= 160 else line[:157] + "..."
+
+
+def _would_reap_rows(ctx: Ctx, record, child, own_snapshot: dict) -> list:
+    """`V23-H`. What a real `harvest`/`close` would end, read before any kill and signalling nothing. The session's own
+    processes read "ends with the session, or is reaped if it survives the kill"."""
+    attribution = _attribution(ctx, record, child, session_own=own_snapshot)
+    if attribution is None:
+        return []
+    return [Row(kind="would-reap", subject=str(pid), severity=INFO,
+                detail=(f"{_argv_line(attribution.procs[pid].argv)} — {unit.why}"
+                        + ("; it ends with the session, or is reaped if it survives the kill"
+                           if pid in own_snapshot else "") + ". Nothing was signalled."))
+            for unit in attribution.of(orphans.REAP) for pid in unit.members]
+
+
+def _slot_gate_before_kill(ctx: Ctx, record, child: Path, verb: str, reap: bool = False,
+                           snapshot: dict = None) -> str:
     """`B10`. The `OBS-48` cwd-holder gate, asked BEFORE anything is closed, released, renamed or written —
     by the real `abort`/`harvest --id` and by its `--dry-run` alike, so the two cannot disagree about the
     same argv. Both verbs kill the session and then release its slot; both used to meet this refusal only
@@ -3996,9 +4087,11 @@ def _slot_gate_before_kill(ctx: Ctx, record, child: Path, verb: str) -> str:
         "holder that survives the kill refuses there, from that partial state (`reap` recovers the slot)")
 
     spared = set()
+    named = []
 
     def refusal():
         spared.clear()
+        named.clear()
         pids = ctx.pool.cwd_holders(record.slot)
         if not pids:
             return None, ""
@@ -4012,8 +4105,20 @@ def _slot_gate_before_kill(ctx: Ctx, record, child: Path, verb: str) -> str:
                           f"pid or parent walk), so the cwd-holder gate could not be decided before the "
                           f"kill; {after_an_undecided_gate}")
         spared.update(pid for pid in pids if pid in own)
+        spare = set(own)
+        if reap:
+            #: `V23-H`. The session's own holders are snapshotted for the post-kill reap; the others are judged by
+            #: `orphans`: REAP units are spared (the real call ends them after the kill), NAME units stay refusals and
+            #: carry their kill command.
+            if snapshot is not None:
+                snapshot.clear()
+                snapshot.update(_own_snapshot(ctx, record))
+            attribution = _attribution(ctx, record, child, holders=[p for p in pids if p not in own])
+            if attribution is not None:
+                spare |= set(attribution.pids(orphans.REAP))
+                named[:] = attribution.of(orphans.NAME)
         #: `RV-21`. The same scan `own` was computed from — a second one would read a newborn child as foreign.
-        return ctx.pool.release_refusal(record.slot, spare=own, holders=pids), ""
+        return ctx.pool.release_refusal(record.slot, spare=spare, holders=pids), ""
 
     def note_the_unreadable():
         """`FB-90`. The session's own processes are spared because the kill ends them — but one whose cwd cannot
@@ -4041,7 +4146,9 @@ def _slot_gate_before_kill(ctx: Ctx, record, child: Path, verb: str) -> str:
         f"{ABORT_RELEASE_WAIT_S}s to exit. Nothing was closed, released, renamed, applied or written — "
         f"session {record.tmux or '(none)'} {'still running' if live else 'not running'}, slot "
         f"{record.slot!r} still leased, {child} unchanged, the roadmap untouched. Re-run the identical "
-        f"`{verb}` command once the pid(s) named above exit.",
+        f"`{verb}` command once the pid(s) named above exit."
+        + (" Attributable to this instant but not safe to end automatically — if it is yours to end: "
+           + "; ".join(f"`{unit.kill_command()}`" for unit in named) + "." if named else ""),
         clears_when=found.clears_when,
         clears_who=found.clears_who,
     )
@@ -4432,8 +4539,12 @@ def _do_close(ctx: Ctx, parsed: Parsed) -> int:
     taken = _session_taken_by(ctx, record)
     refusal = None if parsed.on("force") or taken is not None else _pane_refusal(ctx, record)
 
+    #: `V23-H`. Read BEFORE the kill: which slot holders are this session's own. Those among them that survive it —
+    #: harness watchers run in their own session with no tty, so `kill-session` never reaches them — are reaped below.
+    own_snapshot = {} if refusal else _own_snapshot(ctx, record)
+
     if ctx.dry_run:
-        rows = [("dry-run", "nothing was closed, stamped or released"),
+        rows = [("dry-run", "nothing was closed, stamped, released or signalled"),
                 ("record", record.todo_id),
                 ("session", record.tmux or "(none)"),
                 ("would-close", "false — refused" if refusal else
@@ -4442,6 +4553,8 @@ def _do_close(ctx: Ctx, parsed: Parsed) -> int:
             rows += [("refused", refusal[0]), ("reason", refusal[1]),
                      ("clears_when", refusal[2]), ("clears_who", refusal[3] or "the operator")]
         else:
+            rows += [("would-reap", f"{row.subject} {row.detail}")
+                     for row in _would_reap_rows(ctx, record, child, own_snapshot)]
             rows += [("codex_residue", f"{path}: {verdict}") for path, verdict in _codex_residue(ctx, record)]
         _emit(ctx, "close", rows)
         return EXIT_REFUSED if refusal else EXIT_OK
@@ -4454,6 +4567,8 @@ def _do_close(ctx: Ctx, parsed: Parsed) -> int:
         ctx.sessions_for(record).kill(record.tmux)
     record.closed_at = ctx.now()
     ctx.store.write(record)
+    attribution = _attribution(ctx, record, child, session_own=own_snapshot)
+    reaped = _reap_attributed(ctx, record, attribution)
     #: RV-15 (`B11`). Who frees the slot depends on whether the folder is still there: `harvest` resolves it
     #: first and exits 2 on one that resolves to nothing, so for a gone folder `reap` is the only door.
     child, _ = _child_or_why(ctx, record)
@@ -4470,6 +4585,11 @@ def _do_close(ctx: Ctx, parsed: Parsed) -> int:
         ("closed_at", record.closed_at),
         ("forced", "true" if parsed.on("force") else "false"),
         ("slot_still_held", held),
+        *[("reaped", f"{pid} {outcome}: {argv} — {why}") for pid, outcome, argv, why in reaped],
+        *[("not-reaped", unit.kill_command()) for unit in (attribution.of(orphans.NAME) if attribution else [])],
+        *([("slot_holders", f"pid(s) {', '.join(str(p) for p in attribution.pids(orphans.REFUSE))} hold "
+                            f"{record.slot} and are not attributable to this instant; none was signalled")]
+          if attribution is not None and attribution.pids(orphans.REFUSE) else []),
         ("disarmed", "the monitor's arm set is recomputed from the join; this pane is no longer in it"),
         *[("codex_residue", f"{path}: {verdict}") for path, verdict in _codex_residue(ctx, record)]])
     return EXIT_OK
@@ -4733,10 +4853,12 @@ def _do_harvest(ctx: Ctx, parsed: Parsed) -> int:
             #: `FB-88`. The pane guard first: it waits for nothing, and harvest kills the same pane `close` does.
             _refuse_a_guarded_pane(ctx, record, child, "harvest", parsed,
                                    f"fleet harvest --id {record.todo_id} {FORCE}")
-            undecided = _slot_gate_before_kill(ctx, record, child, "harvest")
+            own_snapshot = {}
+            undecided = _slot_gate_before_kill(ctx, record, child, "harvest", reap=True, snapshot=own_snapshot)
             if ctx.dry_run:
                 if undecided:
                     rows.append(Row(kind="gate", subject=record.todo_id, severity=INFO, detail=undecided))
+                rows += _would_reap_rows(ctx, record, child, own_snapshot)
                 roadmap, mine, held, recorded = _harvest_inbox(ctx, child)
                 #: The status the real run would judge the claim on: the last row it would apply for the origin
                 #: milestone, else the milestone's current status (`_stranded_claim` reads that itself).
@@ -4797,6 +4919,12 @@ def _do_harvest(ctx: Ctx, parsed: Parsed) -> int:
                 record.harvested_at = ctx.now()
                 record.closed_at = ctx.now()
                 ctx.store.write(record)
+                #: `V23-H`. After the kill (a session's detached watchers survive it) and after the stamp (`SI-31`: a
+                #: crash here leaves a stamped record and a held slot, which `reap` recovers), before the release.
+                rows += [Row(kind="reaped", subject=str(pid), severity=INFO,
+                             detail=f"{outcome}: {argv} — {why} (slot {record.slot}, instant {child.name})")
+                         for pid, outcome, argv, why in _reap_attributed(
+                             ctx, record, _attribution(ctx, record, child, session_own=own_snapshot))]
                 released = _released_or_why_not(ctx, record) if record.slot else "(none)"
                 rows.append(Row(kind="harvested", subject=record.todo_id, severity=INFO,
                                 detail=(f"delta applied at {roadmap.instant.name} "

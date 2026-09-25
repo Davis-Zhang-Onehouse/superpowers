@@ -20,7 +20,11 @@ The harness's watcher is exactly the shape this admits: `setsid`, no controlling
 
 **A unit is REAPED** when it is closed and either its root is a process the recorded session owned before this call
 killed it (same pid, same start time), or its root is ORPHANED (ppid 1), leads its own session with no controlling
-tty, and some member's argv names the instant (D-2). **NAMED** — a kill
+tty, STARTED AFTER the worker was launched, and some member's argv names the instant (D-2, D-9). The start bound is
+what keeps a childless tmux or screen server out: fleet's own servers carry the first dispatch's command line — which
+names that instant — and have ppid 1, their own session and no tty, but every one of them started before the
+`launched_at` of any session on it, because `launched_at` is stamped only after the session started and its seed was
+seen delivered. **NAMED** — a kill
 command printed, nothing signalled — when a member names the instant but the root has a live parent: an operator's
 shell running `tail -F <instant>/…` from inside the slot is exactly that. **REFUSED** otherwise, and always for an
 unreadable holder, a holder whose facts cannot be read, and any unit containing the caller or one of its ancestors.
@@ -53,6 +57,8 @@ class Proc:
     sid: Optional[int] = None
     tty: int = 0
     children: Optional[tuple] = None
+    #: Epoch seconds the process started (boot time + stat field 22 / CLK_TCK), None when unread.
+    started_at: Optional[float] = None
 
 
 @dataclass(frozen=True)
@@ -126,7 +132,9 @@ def _readable(holders, facts):
     return procs, blind
 
 
-def attribute(holders, facts: Callable, spellings, *, session_own=None, exclude=()) -> Attribution:
+def attribute(holders, facts: Callable, spellings, *, session_own=None, exclude=(), not_before=None) -> Attribution:
+    """`not_before` is the epoch second a by-name root must have started at or after (the caller passes the record's
+    `launched_at` plus a margin); None — no launch recorded — means nothing is reaped by name."""
     procs, blind = _readable(holders, facts)
     units = [Unit(pid, (pid,), REFUSE, f"pid {pid}'s process facts could not be read, so nothing ties it to this "
                                        f"instant") for pid in blind]
@@ -148,18 +156,25 @@ def attribute(holders, facts: Callable, spellings, *, session_own=None, exclude=
                       if (spelled := names_instant(procs[pid].argv, spellings))), None)
         outside = _outside_children(members, procs)
         detached = head.ppid == INIT_PID and head.sid == root and head.tty == 0
+        owned = own.get(root) is not None and own.get(root) == head.start
+        late = not_before is not None and head.started_at is not None and head.started_at >= not_before
         if lineage & set(members):
             units.append(Unit(root, members, REFUSE, "the unit contains the process running this command or one of "
                                                      "its ancestors"))
-        elif outside is None and (named or own.get(root) is not None):
+        elif outside is None and (named or owned):
             units.append(Unit(root, members, NAME, f"its children could not be read, so ending it might end processes "
                                                    f"nothing attributed; not ended automatically"))
-        elif outside and (named or own.get(root) is not None):
+        elif outside and (named or owned):
             units.append(Unit(root, members, NAME, f"it has live children outside the unit ({_pids(outside)}), which "
                                                    f"ending it would take down too; not ended automatically"))
-        elif own.get(root) is not None and own.get(root) == head.start:
+        elif owned:
             units.append(Unit(root, members, REAP, f"pid {root} was the recorded session's own process before the "
                                                    f"kill and survived it"))
+        elif named and detached and not late:
+            units.append(Unit(root, members, NAME, f"pid {named[0]}'s argv names {named[1]}, but pid {root} did not "
+                                                   f"start after this worker was launched (a server or daemon that "
+                                                   f"predates it looks exactly like this), so it is not ended "
+                                                   f"automatically"))
         elif named and detached:
             units.append(Unit(root, members, REAP, f"orphaned (pid {root}'s parent is init, it leads its own session "
                                                    f"with no terminal) and pid {named[0]}'s argv names {named[1]}"))
