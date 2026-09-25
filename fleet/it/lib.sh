@@ -369,8 +369,18 @@ it_section() {            # it_section <name> -> own FLEET_HOME, own slots, own 
     TMUX_TMPDIR="$IT_AMBIENT_TMUX_TMPDIR"
   else
     socket_root="$(realpath "$IT_ROOT/../../..")/.it-tmux"
+    local prospective="$socket_root/itk-$SECTION.XXXXXX/tmux-$(id -u)/itfleet-$SECTION"
+    if [ "${#prospective}" -ge 100 ]; then
+      # A release verify worktree can be deeper than Unix sun_path permits. Only the socket
+      # directory falls back to a fresh short path; all evidence and stores remain in the section.
+      socket_root="${IT_TMUX_AUDIT_SHORT_ROOT:-${TMPDIR:-/tmp}}"
+      prospective="$socket_root/itk-$SECTION.XXXXXX/tmux-$(id -u)/itfleet-$SECTION"
+      [ "${#prospective}" -lt 100 ] || {
+        echo "it_section: no short private tmux socket root is available" >&2; return 2;
+      }
+    fi
     mkdir -p "$socket_root"
-    TMUX_TMPDIR="$(mktemp -d "$socket_root/$SECTION.XXXXXX")" || return 1
+    TMUX_TMPDIR="$(mktemp -d "$socket_root/itk-$SECTION.XXXXXX")" || return 1
   fi
   export TMUX_TMPDIR
   IT_TMUX_AUDIT_LEDGER="$EV/tmux-audit.jsonl"; export IT_TMUX_AUDIT_LEDGER

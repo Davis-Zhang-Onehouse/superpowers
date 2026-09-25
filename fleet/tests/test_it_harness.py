@@ -868,6 +868,26 @@ class NestedSelftestTmuxBoundary(unittest.TestCase):
         rows = [line for line in results.read_text().splitlines() if line.startswith("KILL-AUDIT-")]
         self.assertEqual(len(rows), 1, rows)
 
+    def test_deep_checkout_uses_short_private_socket_root(self):
+        tmp = pathlib.Path(tempfile.mkdtemp(prefix="it-deep-audit-"))
+        self.addCleanup(shutil.rmtree, tmp, True)
+        deep = tmp / ("nested" * 15) / "owner"
+        deep.mkdir(parents=True)
+        it = harness_copy(deep)
+        short = tmp / "short"
+        short.mkdir()
+        body = (f'. "{it}/lib.sh"\nit_section X\n'
+                'it_tmux new-session -d -s mine "sleep 30"\n'
+                'it_tmux kill-server\n')
+        result = run_bash(body, deep, env={"FLEET_SUITE_TRIPWIRE": "", "TMUX_TMPDIR": "",
+                                           "IT_TMUX_AUDIT_SHORT_ROOT": str(short)}, home=tmp / "home")
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        ledgers = list((it / "X").glob("tmux-audit.jsonl"))
+        self.assertEqual(len(ledgers), 1)
+        rows = [json.loads(line) for line in ledgers[0].read_text().splitlines()]
+        self.assertTrue(all(row["socket"].startswith(str(short)) for row in rows
+                            if row["command"] in ("new-session", "kill-server")), rows)
+
 
 class ServerGuardian(unittest.TestCase):
     """FB-73. A runner's EXIT trap cannot run when the shell tree is SIGKILLed (what TaskStop does); its
