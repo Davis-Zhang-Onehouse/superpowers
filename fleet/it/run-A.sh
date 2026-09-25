@@ -1242,6 +1242,11 @@ def private_socket(text):
     return False
 
 
+def open_brackets(text):
+    """CL-3. More `(`/`[` than `)`/`]`: an argv list or call that continues on the next line."""
+    return text.count("(") + text.count("[") - text.count(")") - text.count("]")
+
+
 def strip_comment(text):
     """A `#` that starts a word (and is not tmux's `#{format}`) begins a comment, in shell and in python alike."""
     return re.sub(r"(^|\s)#(?!\{).*$", "", text)
@@ -1304,19 +1309,33 @@ for path in sys.argv[1:]:
     report["files"] += 1
     name = os.path.basename(path)
     pending = None
+    def embedded(text, lineno, tag):
+        """Join `text` onto an open call from the previous lines, and judge it once its brackets close (or after 8
+        lines, so an unbalanced line cannot swallow the file)."""
+        held, held_at, held_n = embedded.state
+        joined = (held + " " + text) if held else text
+        start = held_at if held else lineno
+        if open_brackets(joined) > 0 and held_n < 8:
+            embedded.state = [joined, start, held_n + 1]
+            return
+        embedded.state = ["", 0, 0]
+        found = EMBED_KILL.search(joined)
+        if found:
+            report["kill_all"].append(f"{name}:{start} [{tag}] {joined.strip()[:130]}")
+            if not private_socket(found.group(0) + joined[found.end():]):
+                report["kill_unsafe"].append(f"{name}:{start} [{tag}] {joined.strip()[:130]}")
+    embedded.state = ["", 0, 0]
+
     for lineno, raw in enumerate(open(path, encoding="utf-8", errors="replace"), start=1):
         raw = raw.rstrip("\n")
         if pending is not None:
             report["heredoc_data_lines"] += 1
             if raw.strip() == pending:
                 pending = None
+                embedded.state = ["", 0, 0]
                 continue
             #: FB-119. A heredoc body is data to the shell, but python it feeds can still kill a server.
-            body = strip_comment(raw)
-            if EMBED_KILL.search(body):
-                report["kill_all"].append(f"{name}:{lineno} [heredoc] {body.strip()[:130]}")
-                if not private_socket(EMBED_KILL.search(body).group(0) + body[EMBED_KILL.search(body).end():]):
-                    report["kill_unsafe"].append(f"{name}:{lineno} [heredoc] {body.strip()[:130]}")
+            embedded(strip_comment(raw), lineno, "heredoc")
             continue
         code, masked, plain = lex(raw)
         where = f"{name}:{lineno}"
@@ -1330,11 +1349,10 @@ for path in sys.argv[1:]:
             # section has been entered and so cannot reach the default server.
             if not private_socket(plain) and not re.search(r"\bit_tmux\b", code):
                 report["kill_unsafe"].append(f"{where} {masked.strip()[:130]}")
-        elif (embedded := EMBED_KILL.search(plain)):
+            embedded.state = ["", 0, 0]
+        else:
             #: FB-119: inside a string on this line (a `python3 -c`/`bash -c` body, a multi-line quoted script).
-            report["kill_all"].append(f"{where} [embedded] {plain.strip()[:130]}")
-            if not private_socket(embedded.group(0) + plain[embedded.end():]):
-                report["kill_unsafe"].append(f"{where} [embedded] {plain.strip()[:130]}")
+            embedded(plain, lineno, "embedded")
         if RM_CMD.search(code):
             m = RM_TGT.search(masked)
             target = m.group("target") if m else "(none)"

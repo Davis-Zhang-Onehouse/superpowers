@@ -566,6 +566,19 @@ class A8KillSiteAudit(unittest.TestCase):
                 counts, out = self.audit(**{"run-X.sh": text})
                 self.assertEqual((counts["kill_all"], counts["kill_unsafe"]), (1, unsafe), out)
 
+    def test_an_argv_list_split_across_lines_is_still_a_site(self):
+        """CL-3. The scan read one line at a time, so a kill whose argv list continues on the next line was neither
+        counted nor judged."""
+        for label, (text, unsafe) in {
+            "heredoc, bare": ("python3 - <<'PY'\nimport subprocess\nsubprocess.run([\"tmux\",\n"
+                              "                \"kill-server\"])\nPY\n", 1),
+            "python -c, private -S": ("python3 -c '\nimport subprocess\nsubprocess.run([\"tmux\", \"-S\", \"/var/tmp/it/s\",\n"
+                                      "                \"kill-server\"])\n'\n", 0),
+        }.items():
+            with self.subTest(label):
+                counts, out = self.audit(**{"run-X.sh": text})
+                self.assertEqual((counts["kill_all"], counts["kill_unsafe"]), (1, unsafe), out)
+
     def test_prose_and_the_audits_own_patterns_are_not_sites(self):
         text = ("# the guardian runs `tmux kill-server` on its socket\n"
                 "echo 'never a bare tmux kill-server here'\n"
