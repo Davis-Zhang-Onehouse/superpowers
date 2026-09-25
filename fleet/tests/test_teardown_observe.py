@@ -4,8 +4,9 @@ could not be located was then closed without `--force`, while `pane-guard` answe
 capture. Every teardown now asks `_box_unproven`, the predicate `pane-guard` asks, whether or not an agent is
 attributed; the three shapes that stay closeable are named and pinned here (DECISIONS D-3).
 
-Frames are the real Claude Code 2.1.268 / 2.1.282 captures in `it/fixtures/runtime/` (v23-f), with the input box made
-unlocatable the way a mid-redraw or clipped capture draws it. Every refusal case here was RED at ab2225b3."""
+Frames start from the real Claude Code 2.1.268 / 2.1.282 and codex captures in `it/fixtures/runtime/` (v23-f). The
+unlocatable ones are those captures edited the way a mid-redraw or clipped capture draws the box, or hand-built where
+named; no real unlocatable capture exists. Every refusal case here was RED at ab2225b3."""
 
 import pathlib
 import unittest
@@ -38,7 +39,9 @@ def _footer_clipped(name: str) -> str:
     return "\n".join(lines[:-1]) + "\n"
 
 
-#: The unlocatable-box shapes, each a real 2.1.x capture. `pane-guard` reads every one 14 attributed or not.
+#: The unlocatable-box shapes. No real capture of an unlocatable 2.1.x box exists in `it/fixtures/runtime/`, so two are
+#: real 2.1.268 captures EDITED to be unlocatable (caret row redrawn; status line clipped) and the third is hand-built
+#: (the RV-19 transcript shape). `pane-guard` reads every one 14 attributed or not.
 UNLOCATABLE = {
     "idle-2.1.268-caret-redrawn": _caret_row_replaced("claude-idle.frame", "· editor redraw in progress"),
     "idle-2.1.268-footer-clipped": _footer_clipped("claude-idle.frame"),
