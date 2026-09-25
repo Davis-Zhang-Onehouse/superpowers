@@ -418,6 +418,16 @@ class TheTeardownVerbsLeaveASessionThatIsNotTheirs(unittest.TestCase):
         self.assertFalse((old / ".fleet" / "abort.json").exists(), "nothing was written")
         self.assertIn("is not running", err)
 
+    def test_the_left_running_note_reads_an_owner_that_is_still_starting(self):
+        """RV-41 (closure 1). Under D-4 the owner may not have launched yet; the note said `launched None`."""
+        fleet, _, old_id = self._pair("inflight", old_closed=False)
+        rec = fleet.store.read(fleet.ids["mile"])
+        rec.launched_at = None
+        fleet.store.write(rec)
+        code, out, err = fleet.run(["close", "--id", old_id, "--force"])
+        self.assertNotIn("launched None", out + err)
+        self.assertIn(f"starting, dispatched {rec.dispatched_at}", out + err)
+
     def test_close_of_the_owner_still_kills_its_own_session(self):
         """Control: the rule removes a kill only from a record that does not own the session."""
         fleet, _, _ = self._pair("abort")
