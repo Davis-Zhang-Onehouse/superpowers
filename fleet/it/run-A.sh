@@ -162,7 +162,7 @@ print(" ".join(sorted(n for n, s in VERBS.items() if s.read_only)))')"
 a_run() {                 # a_run <logbase> <cmd...> -> A_RC, stdout $A_OUT, stderr $A_ERR
   local base="$1"; shift
   A_OUT="$OUT/$base.stdout"; A_ERR="$OUT/$base.stderr"
-  timeout 300 "$@" > "$A_OUT" 2> "$A_ERR"; A_RC=$?
+  timeout "${A_TIMEOUT:-300}" "$@" > "$A_OUT" 2> "$A_ERR"; A_RC=$?
 }
 
 # ===================================================================================================
@@ -829,9 +829,9 @@ $4 $2"
 
 a5_drive() {              # a5_drive <state> <verb> <want> <args...>
   local state="$1" verb="$2" want="$3"; shift 3
-  local limit=300
-  [ "$verb" = selftest ] && limit=600  # the expanded hermetic suite can exceed five minutes
-  a_run "A5-$state-$verb" timeout "$limit" "$IT_FLEET" "$verb" "$@"
+  local A_TIMEOUT=300
+  [ "$verb" = selftest ] && A_TIMEOUT=600  # the expanded hermetic suite can exceed five minutes
+  a_run "A5-$state-$verb" "$IT_FLEET" "$verb" "$@"
   a5_record "$state" "$verb" "$want" "$A_RC" "$state"
   A5_LAST_RC="$A_RC"
 }

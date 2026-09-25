@@ -757,6 +757,32 @@ class RuntimeTmuxKillAudit(unittest.TestCase):
         self.assertEqual(subprocess.run([self.real, "-S", str(socket), "has-session"],
                                         capture_output=True).returncode, 0)
 
+    def test_compound_command_cannot_hide_a_server_kill(self):
+        socket = self.private / f"tmux-{os.getuid()}" / "foreign"
+        socket.parent.mkdir(mode=0o700)
+        self.assertEqual(subprocess.run([self.real, "-S", str(socket), "new-session", "-d", "-s", "mine", "sleep 30"],
+                                        capture_output=True).returncode, 0)
+        self.addCleanup(subprocess.run, [self.real, "-S", str(socket), "kill-server"], capture_output=True)
+        result = self.tmux("-L", "foreign", "list-sessions", ";", "kill-server")
+        self.assertEqual(result.returncode, 97, result.stderr)
+        self.assertEqual(subprocess.run([self.real, "-S", str(socket), "has-session"],
+                                        capture_output=True).returncode, 0)
+        rows = [json.loads(line) for line in self.ledger.read_text().splitlines()]
+        self.assertTrue(any(r["command"] == "kill-server" and r["decision"] == "deny" for r in rows), rows)
+
+    def test_server_side_dispatch_cannot_hide_a_server_kill(self):
+        socket = self.private / f"tmux-{os.getuid()}" / "foreign"
+        socket.parent.mkdir(mode=0o700)
+        self.assertEqual(subprocess.run([self.real, "-S", str(socket), "new-session", "-d", "-s", "mine", "sleep 30"],
+                                        capture_output=True).returncode, 0)
+        self.addCleanup(subprocess.run, [self.real, "-S", str(socket), "kill-server"], capture_output=True)
+        result = self.tmux("-L", "foreign", "if-shell", "-F", "1", "kill-server")
+        self.assertEqual(result.returncode, 97, result.stderr)
+        self.assertEqual(subprocess.run([self.real, "-S", str(socket), "has-session"],
+                                        capture_output=True).returncode, 0)
+        rows = [json.loads(line) for line in self.ledger.read_text().splitlines()]
+        self.assertTrue(any(r["command"] == "kill-server" and r["decision"] == "deny" for r in rows), rows)
+
     def test_foreign_session_on_owned_server_is_not_registered_by_a_read(self):
         socket = self.private / f"tmux-{os.getuid()}" / "own"
         self.assertEqual(self.tmux("-L", "own", "new-session", "-d", "-s", "mine", "sleep 30").returncode, 0)

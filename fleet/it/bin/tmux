@@ -4,6 +4,7 @@
 import fcntl
 import json
 import os
+import re
 import subprocess
 import sys
 import tempfile
@@ -55,6 +56,27 @@ def option(rest, flag):
         if arg.startswith(flag) and len(arg) > len(flag):
             return arg[len(flag):]
     return None
+
+
+def nested_kills(rest):
+    """Find kill words in arguments that tmux could execute as a later command."""
+    found = []
+    for arg in rest:
+        for word in re.findall(r"[A-Za-z][A-Za-z-]*", arg):
+            if len(word) >= 6 and "kill-server".startswith(word) and not "kill-session".startswith(word):
+                found.append("kill-server")
+            elif len(word) >= 6 and "kill-session".startswith(word):
+                found.append("kill-session")
+    return found
+
+
+def can_dispatch_commands(command, rest):
+    # A compound argv can execute a later command after the first one. These tmux commands can
+    # execute commands supplied as arguments or from a file; their effect is not proved by argv[0].
+    dispatchers = ("source-file", "if-shell", "confirm-before", "run-shell", "bind-key",
+                   "set-hook", "command-prompt", "display-menu", "display-popup")
+    return any(";" in arg for arg in rest) or bool(command and any(
+        name.startswith(command) for name in dispatchers))
 
 
 def server_pid(real, socket):
@@ -120,6 +142,8 @@ def main():
         for directory in dirs)
     destructive = command in ("kill-server", "kill-session")
     creates = command in ("new-session", "new")
+    indirect = can_dispatch_commands(command, rest)
+    hidden_kills = nested_kills(rest) if indirect else []
     row = {"argv": argv, "socket": socket, "command": command,
            "target": option(rest, "-t"), "decision": "allow", "reason": ""}
     if not ledger:
@@ -165,13 +189,18 @@ def main():
                     row.update(decision="deny", reason="session target is not an exact created session")
                 elif creates and not option(rest, "-s"):
                     row.update(decision="deny", reason="new session has no auditable name")
+            if indirect:
+                row.update(decision="deny", reason="compound or server-side command dispatch is unauditable")
             if row["decision"] == "deny":
-                row["status"] = 97
+                denied_rows = [dict(row, status=97)]
+                denied_rows.extend(dict(row, command=kill, target=None, nested=True, status=97)
+                                   for kill in hidden_kills)
                 stream.seek(0, os.SEEK_END)
-                stream.write(json.dumps(row) + "\n")
+                for denied in denied_rows:
+                    stream.write(json.dumps(denied) + "\n")
                 stream.flush()
-                if destructive:
-                    refresh_result([*history, row])
+                if destructive or hidden_kills:
+                    refresh_result([*history, *denied_rows])
                 print(f"IT tmux audit: refused {command}: {row['reason']}", file=sys.stderr)
                 return 97
             if command in ("attach", "attach-session"):
