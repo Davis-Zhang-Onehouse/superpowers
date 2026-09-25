@@ -1214,7 +1214,10 @@ def private_socket(text):
     absolute path outside the box's /tmp/tmux-<uid>, a path rooted in a variable (`"$DIR/..."`, as A8b accepts for
     rm targets), or python's `os.path.join(<variable>, ...)`. No socket option at all is the default server."""
     tokens = [t for t in SPLIT.split(text) if t]
-    start = next((i for i, t in enumerate(tokens) if t == "tmux" or t.endswith("/tmux")), None)
+    kill = next((i for i, t in enumerate(tokens) if t in ("kill-server", "kill-session")), len(tokens))
+    #: CL-1. The tmux invocation that KILLS: the last `tmux` before the kill word, not the first on the line, which
+    #: may be a named `has-session` guarding a bare `tmux kill-server`.
+    start = next((i for i in range(kill - 1, -1, -1) if tokens[i] == "tmux" or tokens[i].endswith("/tmux")), None)
     if start is None:
         return False
     rest = tokens[start + 1:]
