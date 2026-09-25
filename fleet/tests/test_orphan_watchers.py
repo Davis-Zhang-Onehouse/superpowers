@@ -184,6 +184,26 @@ class AttributionRule(unittest.TestCase):
                 self.assertEqual(att.pids(REAP), [], (env, argv))
                 self.assertEqual(att.pids(NAME), [300], (env, argv))
 
+    def test_a_multiplexer_root_is_never_reaped_by_name_even_with_the_workers_provenance(self):
+        """RV-32. A dispatcher instant's own `fleet dispatch`/`revive` run from its slot starts a server that inherits its
+        FLEET_INSTANT and starts after its launch; nested instants would make its argv name the dispatcher. Childless
+        (panes kept dead), it passes every other condition — and ending it ends every session on it."""
+        for argv in (("tmux", "-L", "fleet", "new-session", "-d", f"{INST}/.fleet/resume.sh"),
+                     ("tmux: server (/tmp/tmux-1000/fleet)", f"{INST}/x"),
+                     ("/usr/bin/screen", "-dmS", "x", "tail", "-F", f"{INST}/x"),
+                     ("SCREEN", "-dmS", "x", f"{INST}/x"),
+                     ("dtach", "-n", "/tmp/s", "tail", "-F", f"{INST}/x")):
+            facts = table(Proc(300, 1, "t", argv, sid=300, children=(), started_at=LATER, fleet_instant=INST))
+            att = orphans.attribute([300], facts.get, self.spell(), not_before=LAUNCHED)
+            self.assertEqual((att.pids(REAP), att.pids(NAME)), ([], [300]), argv)
+
+    def test_control_a_shell_named_like_a_path_under_tmux_is_still_reaped(self):
+        """Neighbour: the multiplexer test reads argv[0] only, so a watcher whose ARGUMENTS mention tmux is unaffected."""
+        facts = table(Proc(300, 1, "t", ("zsh", "-c", f"tail -F {INST}/tmux.log"), sid=300, children=(),
+                           started_at=LATER, fleet_instant=INST))
+        att = orphans.attribute([300], facts.get, self.spell(), not_before=LAUNCHED)
+        self.assertEqual(att.pids(REAP), [300])
+
     def test_provenance_of_a_prefix_sharing_sibling_is_not_this_instant(self):
         facts = table(*pipeline())
         facts[500] = Proc(500, 1, "s500", facts[500].argv, sid=500, children=(501, 502), started_at=LATER,

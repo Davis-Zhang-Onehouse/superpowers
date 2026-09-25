@@ -44,6 +44,10 @@ INIT_PID = 1
 REAP, NAME, REFUSE = "reap", "name", "refuse"
 #: How long TERM gets before KILL. Watchers exit on TERM at once; the bound is for one that ignores it.
 REAP_TERM_WAIT_S = 3.0
+#: Terminal multiplexers: a server of one is a detached, tty-less orphan whose sessions are other processes' — never
+#: ended by name (RV-32). Read from argv[0] only, so `tmux: server (…)` counts and a watcher that merely mentions tmux
+#: in its arguments does not.
+_MULTIPLEXERS = frozenset({"tmux", "screen", "dtach", "abduco", "zellij"})
 #: What may sit either side of a path for the text to be that path and not a longer one (`…-orphanw2`, `/x…`).
 _PATH_CHARS = frozenset("ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789._~-")
 
@@ -182,6 +186,10 @@ def attribute(holders, facts: Callable, spellings, *, session_own=None, exclude=
                                                    f"start after this worker was launched (a server or daemon that "
                                                    f"predates it looks exactly like this), so it is not ended "
                                                    f"automatically"))
+        elif named and detached and _multiplexer(head.argv):
+            units.append(Unit(root, members, NAME, f"pid {root} is a terminal multiplexer ({head.argv[0][:40]!r}); "
+                                                   f"ending it would end every session on it, so it is not ended "
+                                                   f"automatically"))
         elif named and detached and not ours:
             units.append(Unit(root, members, NAME, f"pid {named[0]}'s argv names {named[1]}, but pid {root}'s "
                                                    f"environment does not say it was started by this worker "
@@ -197,6 +205,13 @@ def attribute(holders, facts: Callable, spellings, *, session_own=None, exclude=
         else:
             units.append(Unit(root, members, REFUSE, "nothing ties it to this instant"))
     return Attribution(units=units, procs=procs)
+
+
+def _multiplexer(argv) -> bool:
+    """Whether argv[0] is a terminal multiplexer (`tmux`, `/usr/bin/screen`, `SCREEN`, `tmux: server (…)`)."""
+    if not argv or not argv[0].split():
+        return False
+    return Path(argv[0].split()[0]).name.rstrip(":").lower() in _MULTIPLEXERS
 
 
 def _pids(pids) -> str:
