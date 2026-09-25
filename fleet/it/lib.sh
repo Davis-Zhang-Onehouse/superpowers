@@ -197,28 +197,31 @@ IT_ENV_UNNAMED=(-u FLEET_HOME -u FLEET_INSTANTS -u FLEET_ROOT -u FLEET_INSTANT -
 #
 # Match the runner pid against getppid() in the guardian's own pid namespace before watching it.
 # A parent change before Python starts must fail safe, including adoption by a subreaper.
+# The last arm is remembered PER SOCKET (FB-122a): one runner arms several sections (run-group5 L/M/N,
+# group3 E/K), and a runner-wide slot made arming the second section revoke the first section's guardian.
+declare -gA IT_GUARD_LAST_TOKENFILES IT_GUARD_LAST_TOKENS
 it_guard_server() {       # it_guard_server <runner-pid> <socket>
   [ "$BASHPID" = "$$" ] || { echo "it_guard_server: call from the runner's top-level shell" >&2; return 1; }
   local expected_parent="$1" sock="$2" pidfile tokenfile token dir uid_dir old_token revoke
+  local last_file="${IT_GUARD_LAST_TOKENFILES[$sock]:-}" last_token="${IT_GUARD_LAST_TOKENS[$sock]:-}"
   # A move must revoke the previous directory BEFORE trying to arm the new one. If the new arm fails,
   # the old guardian must still be unable to kill a same-named server the runner never started.
-  if [ -n "${IT_GUARD_LAST_TOKENFILE:-}" ]; then
-    if [ -e "$IT_GUARD_LAST_TOKENFILE" ]; then
-      old_token="$(cat "$IT_GUARD_LAST_TOKENFILE")" || return 1
-      if [ "$old_token" = "$IT_GUARD_LAST_TOKEN" ]; then
+  if [ -n "$last_file" ]; then
+    if [ -e "$last_file" ]; then
+      old_token="$(cat "$last_file")" || return 1
+      if [ "$old_token" = "$last_token" ]; then
         revoke="revoked-$$-$BASHPID-$RANDOM-$RANDOM"
-        printf '%s\n' "$revoke" > "$IT_GUARD_LAST_TOKENFILE.tmp.$BASHPID" || return 1
-        mv -f "$IT_GUARD_LAST_TOKENFILE.tmp.$BASHPID" "$IT_GUARD_LAST_TOKENFILE" || {
-          unlink "$IT_GUARD_LAST_TOKENFILE.tmp.$BASHPID" 2>/dev/null || true
+        printf '%s\n' "$revoke" > "$last_file.tmp.$BASHPID" || return 1
+        mv -f "$last_file.tmp.$BASHPID" "$last_file" || {
+          unlink "$last_file.tmp.$BASHPID" 2>/dev/null || true
           return 1
         }
         # The obsolete guardian will see no matching token; discard this runner's revocation marker.
-        [ "$(cat "$IT_GUARD_LAST_TOKENFILE" 2>/dev/null)" = "$revoke" ] &&
-          unlink "$IT_GUARD_LAST_TOKENFILE" 2>/dev/null || true
+        [ "$(cat "$last_file" 2>/dev/null)" = "$revoke" ] &&
+          unlink "$last_file" 2>/dev/null || true
       fi
     fi
-    IT_GUARD_LAST_TOKENFILE=
-    IT_GUARD_LAST_TOKEN=
+    unset "IT_GUARD_LAST_TOKENFILES[$sock]" "IT_GUARD_LAST_TOKENS[$sock]"
   fi
   pidfile="$IT_ROOT/.guardians/$sock.pid"        # a subdirectory of fleet/it: generated, git-ignored
   mkdir -p "$IT_ROOT/.guardians"
@@ -234,8 +237,8 @@ it_guard_server() {       # it_guard_server <runner-pid> <socket>
     unlink "$tokenfile.tmp.$BASHPID" 2>/dev/null || true
     return 1
   }
-  IT_GUARD_LAST_TOKENFILE="$tokenfile"
-  IT_GUARD_LAST_TOKEN="$token"
+  IT_GUARD_LAST_TOKENFILES[$sock]="$tokenfile"
+  IT_GUARD_LAST_TOKENS[$sock]="$token"
   python3 -c '
 import atexit, os, subprocess, sys, time
 sock, directory, tokenfile, token, expected_parent = sys.argv[2:7]
