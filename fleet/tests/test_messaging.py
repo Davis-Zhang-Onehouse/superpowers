@@ -58,6 +58,36 @@ class MessagingTests(unittest.TestCase):
                                  ('queued-behind-turn' if runtime == 'claude' else 'submitted-mid-turn', CONFIRMED_BY_DRAFT))
                 self.assertEqual(events, [('literal', 'hello'), ('submit', None)])
 
+    def test_a_busy_pane_that_draws_the_paste_late_is_still_submitted(self):
+        """S5 review RV-F1 (coordinator D-108). A send admitted to a BUSY pane: the first capture after the paste can
+        still show the empty (claude) or partly drawn (codex) busy box. That is a redraw, not a failure: keep
+        observing until the draft confirms, as the idle path does, and submit it once."""
+        cases = (('claude', [PaneObservation('busy'), PaneObservation('busy'), PaneObservation('busy', 'hello'),
+                             PaneObservation('busy')], 'queued-behind-turn'),
+                 ('codex', [PaneObservation('busy'), PaneObservation('busy', 'hel'), PaneObservation('busy', 'hello'),
+                            PaneObservation('busy')], 'submitted-mid-turn'))
+        for runtime, states, outcome in cases:
+            with self.subTest(runtime=runtime), tempfile.TemporaryDirectory() as directory:
+                layer, events = self.runtime_fixture(runtime, states)
+                self.assertEqual(send(Path(directory), layer, SimpleNamespace(tmux='worker'), 'hello',
+                                      sleep=lambda _: None), (outcome, CONFIRMED_BY_DRAFT))
+                self.assertEqual(events, [('literal', 'hello'), ('submit', None)])
+
+    def test_a_busy_pane_still_fails_on_a_dialog_or_at_the_deadline(self):
+        """RV-F1's boundary: tolerating a busy redraw must not tolerate a dialog, nor wait past the deadline."""
+        with tempfile.TemporaryDirectory() as directory:
+            layer, events = self.fixture([PaneObservation('busy'), PaneObservation('dialog')])
+            with self.assertRaisesRegex(FleetError, 'uncertain after insertion'):
+                send(Path(directory), layer, SimpleNamespace(tmux='worker'), 'hello', sleep=lambda _: None)
+            self.assertEqual(events, [('literal', 'hello')])
+        with tempfile.TemporaryDirectory() as directory:
+            ticks = iter(range(1000))
+            layer, events = self.fixture([PaneObservation('busy')] * 50)
+            with self.assertRaisesRegex(FleetError, 'uncertain after insertion'):
+                send(Path(directory), layer, SimpleNamespace(tmux='worker'), 'hello', timeout_s=3,
+                     clock=lambda: next(ticks), sleep=lambda _: None)
+            self.assertEqual(events, [('literal', 'hello')], 'nothing is submitted when the draft never confirms')
+
     def test_busy_pane_with_draft_or_dialog_never_types(self):
         for runtime in ('claude', 'codex'):
             for state, draft in (('busy', 'someone else'), ('queued', 'someone else'),
