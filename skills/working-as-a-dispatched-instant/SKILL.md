@@ -163,7 +163,9 @@ the very shell running it, so it names a pid that is gone a second later, and se
 pids (`declare` refuses more than one). The pid is recorded with its start time, and once that process exits (or the pid is recycled) the board
 reads **NO WATCHER OBSERVABLE** and disregards the claim by itself — no re-declaring by hand after the
 gate. `declare` refuses a `pid:` that is not running, or two of them. Without a handle nothing re-checks the
-attestation: `declare` says so, and it is only as good as your honesty.
+attestation: `declare` says so, and it is only as good as your honesty — until your session is relaunched. After
+a `revive` (or a `resume`), an attestation with no pid handle made before the relaunch is disregarded, because it
+was the word of the session that no longer exists: re-declare if the watcher still holds. `fleet brief` says so.
 
 A watcher this tool OBSERVED on your pane is re-checked the same way: once it is no longer on the status
 line, the board reads NO WATCHER OBSERVABLE and disregards the claim — it is never relabelled ATTESTED.
@@ -188,10 +190,11 @@ disregarded (`HOLD EXPIRED`) and you count again. Renewing is another typed `dec
 refuses while you are holding, as it does while you are `awaiting-ci`.
 
 **A claim nothing backs is disregarded, not believed.** With no watcher on your pane and no genuine
-attestation standing — nothing recorded, an observed watcher since gone, or an attested pid that exited —
+attestation standing — nothing recorded, an observed watcher since gone (past the 5-minute grace after the
+claim), an attested pid that exited, or an unhandled attestation older than your session's relaunch —
 `reconcile` sets the phase aside: your row is not `AWAITING-CI`, you count
 against the WIP cap again, and if your pane is quiet you age into `IDLE` like any other worker. So writing `declare.json` by hand
-buys nothing, and a `--watcher` attestation that stops being true is worth un-declaring.
+buys nothing — a hold is bounded by its own claim stamp plus 4 h wherever it is read — and a `--watcher` attestation that stops being true is worth un-declaring.
 
 Do not reach for it to skip arming a monitor you could have armed. The flag exists so a *correct* claim the
 predicate cannot see stays cheap and honest — and so nobody is tempted to write `declare.json` by hand,
