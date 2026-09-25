@@ -1200,6 +1200,44 @@ FORBIDDEN = [
     (re.compile(r"\brm\s+-[a-zA-Z]*r[a-zA-Z]*\s+(\$HOME|~(/|\s|$)|/home/[a-z]+\s*$)"), "rm -rf home"),
 ]
 KILL = re.compile(r"tmux[^;&|]*kill-(server|session)")
+#: FB-119. A kill issued from code INSIDE a string — a multi-line `python3 -c '...'`, a `bash -c "..."`, a heredoc
+#: body — is masked out of `code`, so it is found on the comment-stripped text instead, in CALL position only: `tmux`
+#: right after a quote, `[`, `(` or a `-c`, and a whole `kill-server`/`kill-session` word after it. Prose ("never a
+#: bare tmux kill-server") and this audit's own patterns (`kill-(server|session)`) are not call shapes.
+EMBED_KILL = re.compile(r"""(?:^|["'`\[(]|\s-c\s+["']?)\s*(?:\S*/)?tmux\b[^#\n]*?(?<![\w-])kill-(?:server|session)(?![\w-])""")
+SPLIT = re.compile(r"""[\s,\[\]()'"`=]+""")
+IDENT = re.compile(r"[A-Za-z_][A-Za-z0-9_]*$")
+
+
+def private_socket(text):
+    """Whether a tmux kill names a PRIVATE server. `-L <name>` unless the name is `default`; `-S <path>` only with an
+    absolute path outside the box's /tmp/tmux-<uid>, a path rooted in a variable (`"$DIR/..."`, as A8b accepts for
+    rm targets), or python's `os.path.join(<variable>, ...)`. No socket option at all is the default server."""
+    tokens = [t for t in SPLIT.split(text) if t]
+    start = next((i for i, t in enumerate(tokens) if t == "tmux" or t.endswith("/tmux")), None)
+    if start is None:
+        return False
+    rest = tokens[start + 1:]
+    for i, t in enumerate(rest):
+        if t in ("kill-server", "kill-session"):
+            return False
+        flag, value = (t[:2], t[2:]) if t[:2] in ("-L", "-S") and len(t) > 2 else (t, rest[i + 1] if i + 1 < len(rest) else "")
+        if flag == "-L":
+            return bool(value) and value != "default"
+        if flag == "-S":
+            if value.startswith("/"):
+                return not value.startswith("/tmp/tmux-")
+            if value.startswith("$"):
+                return True
+            if value == "os.path.join" and i + 2 < len(rest):
+                return bool(IDENT.match(rest[i + 2]))
+            return False
+    return False
+
+
+def strip_comment(text):
+    """A `#` that starts a word (and is not tmux's `#{format}`) begins a comment, in shell and in python alike."""
+    return re.sub(r"(^|\s)#(?!\{).*$", "", text)
 RM_CMD = re.compile(r"\brm\s+(-[a-zA-Z]+\s+)*-[a-zA-Z]*r[a-zA-Z]*\b")
 RM_TGT = re.compile(r"\brm\s+(-[a-zA-Z]+\s+)*-[a-zA-Z]*r[a-zA-Z]*\s+(?P<target>\S+)")
 #: LIVE_TMUX_HANDOVER and the per-run prune (`find "$IT_ROOT" … -delete`) came with FB-60's per-run baseline;
@@ -1265,6 +1303,13 @@ for path in sys.argv[1:]:
             report["heredoc_data_lines"] += 1
             if raw.strip() == pending:
                 pending = None
+                continue
+            #: FB-119. A heredoc body is data to the shell, but python it feeds can still kill a server.
+            body = strip_comment(raw)
+            if EMBED_KILL.search(body):
+                report["kill_all"].append(f"{name}:{lineno} [heredoc] {body.strip()[:130]}")
+                if not private_socket(EMBED_KILL.search(body).group(0) + body[EMBED_KILL.search(body).end():]):
+                    report["kill_unsafe"].append(f"{name}:{lineno} [heredoc] {body.strip()[:130]}")
             continue
         code, masked, plain = lex(raw)
         where = f"{name}:{lineno}"
@@ -1273,10 +1318,16 @@ for path in sys.argv[1:]:
                 report["forbidden"].append(f"{where} [{label}] {code.strip()[:120]}")
         if KILL.search(code):
             report["kill_all"].append(f"{where} {masked.strip()[:130]}")
-            # Safe iff it names a private server: `-L <socket>`, or `it_tmux` — lib.sh's wrapper, which
-            # refuses outright when no section has been entered and so cannot reach the default server.
-            if not re.search(r"tmux\s+-L\b", code) and not re.search(r"\bit_tmux\b", code):
+            # Safe iff it names a private server (`private_socket`: `-L <name>` other than `default`, or an absolute /
+            # variable-rooted `-S`), or goes through `it_tmux` — lib.sh's wrapper, which refuses outright when no
+            # section has been entered and so cannot reach the default server.
+            if not private_socket(plain) and not re.search(r"\bit_tmux\b", code):
                 report["kill_unsafe"].append(f"{where} {masked.strip()[:130]}")
+        elif (embedded := EMBED_KILL.search(plain)):
+            #: FB-119: inside a string on this line (a `python3 -c`/`bash -c` body, a multi-line quoted script).
+            report["kill_all"].append(f"{where} [embedded] {plain.strip()[:130]}")
+            if not private_socket(embedded.group(0) + plain[embedded.end():]):
+                report["kill_unsafe"].append(f"{where} [embedded] {plain.strip()[:130]}")
         if RM_CMD.search(code):
             m = RM_TGT.search(masked)
             target = m.group("target") if m else "(none)"
@@ -1319,7 +1370,7 @@ PY
 
   # ---- A8a: the forbidden commands ----------------------------------------------------------------
   if [ "$n_forbidden" = 0 ] && [ "$n_kill_unsafe" = 0 ]; then
-    a_pass A8a "$OUT/A8-audit.txt" "$(sq "audited $nfiles harness files (lib.sh + every run-*.sh, this runner included, comments and string literals discounted): 0 git push / git merge / gh pr merge / rm -rf-on-home in an EXECUTED position; all $n_kill tmux kill-server/kill-session sites name a private server (tmux -L, or it_tmux which refuses when no section is entered), so none can reach the live tmux server")"
+    a_pass A8a "$OUT/A8-audit.txt" "$(sq "audited $nfiles harness files (lib.sh + every run-*.sh, this runner included, comments and string literals discounted): 0 git push / git merge / gh pr merge / rm -rf-on-home in an EXECUTED position; all $n_kill tmux kill-server/kill-session sites, shell-level and embedded in quoted or heredoc code, name a private server (tmux -L <name> other than default, tmux -S with an absolute or variable-rooted path outside /tmp/tmux-<uid>, or it_tmux which refuses when no section is entered), so none can reach the live tmux server")"
   else
     a_fail A8a "$OUT/A8-audit.txt" "$(sq "$n_forbidden forbidden command(s) and $n_kill_unsafe of $n_kill tmux kill site(s) with no private socket, across $nfiles files :: $(sed -n '/^=== forbidden/,/^=== kill_all/p' "$OUT/A8-audit.txt" | sed -n '2,3p' | scrub | tr '\n' ' ')")"
   fi
