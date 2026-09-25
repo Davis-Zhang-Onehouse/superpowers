@@ -308,16 +308,23 @@ def _worker_subject(rec, pool, sessions, instants_dir: Path, idle_after_s: int, 
                                      instant, idle_after_s, holder, capture_failed=captured is None)
     if folder_state == "complete":
         watcher_kind, watcher_text = _watcher_of(pane, sessions, instant,
-                                                 capture_failed=captured is None)
+                                                 capture_failed=captured is None, launched_at=rec.launched_at)
         busy = live and sessions.busy(pane)
         #: RV-C1. A harvested or closed record with no live session is over: its stale `awaiting-ci` claim (often a
         #: pid-less attestation nothing ever re-checks) must not resurrect it into the cap. Live evidence still wins.
         stamped_and_gone = bool(rec.harvested_at or rec.closed_at) and not live
-        if busy or (phase == PHASE_AWAITING_CI and not stamped_and_gone and watcher_kind in
-                    (WATCHER_OBSERVED, WATCHER_ATTESTED)):
+        #: S5 (v23-g x v23-j, coordinator D-90). A claim inside its grace, or any `holding` phase (expired or not),
+        #: counts as live work here, fail safe; RV-C1's terminal stamps still win over both.
+        holding = phase == PHASE_HOLDING
+        if busy or (not stamped_and_gone and (holding or (phase == PHASE_AWAITING_CI and
+                                                          watcher_kind in WATCHER_LIVE))):
             state = COMPLETE_BUT_WORKING
-            note = ("the instant folder is `-complete-` but its pane is busy" if busy
-                    else f"the instant folder is `-complete-` but its watcher is alive: {watcher_text}")
+            if busy:
+                note = "the instant folder is `-complete-` but its pane is busy"
+            elif holding:
+                note = f"the instant folder is `-complete-` but it is still declared {PHASE_HOLDING}"
+            else:
+                note = f"the instant folder is `-complete-` but its watcher is alive: {watcher_text}"
     if sess is not None and sess.runtime != rec.runtime:
         state, note = BLOCKED, f'live runtime {sess.runtime} differs from record runtime {rec.runtime}'
         on_pane = False
