@@ -361,6 +361,17 @@ the same counts the human banner shows (`board`: `kind`=`population`, `identity`
 one row, never zero bytes, and a script can tell it from a wrong `FLEET_HOME`. Count subjects or slots by
 column (`$2=="held"`), never with `wc -l` over the whole output.
 
+`board --porcelain` columns are, in order: `identity`, `kind`, `state`, `label`, `slot`,
+`milestone`, `note`, `runtime`, `session`, `server`, `nested`. The last three are appended;
+the first eight retain their positions. `session` is the recorded tmux session, and `server`
+is its recorded tmux socket (empty for a legacy record whose server was never measured).
+`nested` lists nested agent PIDs folded into an owned or unowned pane's row, or `true` on a
+separate nested process row. `fleet peers` also appends `nested`; a nested child stays
+visible but is not an addressable peer. A worker with a standing parked question remains
+`PARKED` while its pane is busy; `status --porcelain` reports `evidence.working=true` and
+the board note says work is progressing. A `PARKED` worker with `working=true` does not
+increase the human-attention count.
+
 ## `--dry-run`
 
 Every mutating verb has one, derived from whether the verb is read-only rather than added per verb — so the

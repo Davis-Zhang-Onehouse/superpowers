@@ -391,9 +391,10 @@ class TestReconcile(unittest.TestCase):
         self.assertIsNone(Declarations(self.fleet.paths["proseClaimer-07300305"]).phase())
         self.assertEqual(self.subject("proseClaimer-07300305").state, "RUNNING")
 
-    def test_a_parked_worker_that_is_progressing_is_RUNNING_with_a_note(self):
+    def test_a_parked_worker_that_is_progressing_stays_PARKED_with_working_flag(self):
         s = self.subject("parkedBusy-07300306")
-        self.assertEqual(s.state, "RUNNING")
+        self.assertEqual(s.state, PARKED)
+        self.assertEqual(s.evidence["working"], "true")
         self.assertTrue(s.note.strip(), "the park must survive as a note")
         self.assertIn(PARK_BUSY_Q, s.note)
 
@@ -863,7 +864,8 @@ class TestNeedsAHumanUsesKnownFacts(unittest.TestCase):
 
         subject = self.subjects()["parkbusy-07300522"]
 
-        self.assertEqual(subject.state, RUNNING, f"{subject.state}: {subject.note!r}")
+        self.assertEqual(subject.state, PARKED, f"{subject.state}: {subject.note!r}")
+        self.assertEqual(subject.evidence["working"], "true")
         self.assertFalse(needs_a_human(subject))
 
     # --- fact 4: an awaiting-ci claim with nothing watching ------------------------------------------

@@ -4706,6 +4706,9 @@ def _do_peers(ctx: Ctx, parsed: Parsed) -> int:
     live = ctx.sessions.live()
     if ctx.sessions.runtime == 'claude':
         rows = peers_mod.load_peers()
+        nested_pids = {item.pid for item in live if getattr(item, "nested", False)}
+        for row in rows:
+            row["nested"] = "true" if int(row["pid"]) in nested_pids else "false"
         native_pids = {int(row['pid']) for row in rows}
         rows += peers_mod.from_live_sessions([item for item in live
                                               if item.runtime == 'codex' or item.pid not in native_pids],

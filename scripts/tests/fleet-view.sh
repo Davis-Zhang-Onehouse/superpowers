@@ -51,10 +51,10 @@ from fleet.store import Record, Store
 from fleet.pool import Pool
 W = sys.argv[1]; home = Path(os.environ["FLEET_HOME"])
 Store(home).write(Record(todo_id="viewworker-07310000", child_instant=W, base_instant="00000000",
-    slot="wsA", tmux="dt-viewworker", profile="w", golden="", lineage_base="", title="t",
+    slot="wsA", tmux="dt-viewworker", tmux_socket="v23e-test-socket", profile="w", golden="", lineage_base="", title="t",
     dispatched_at="2026-07-31T00:00:00Z", launched_at="2026-07-31T00:00:00Z"))
-Pool(home, cwd_probe=lambda p: [], alive=lambda n: False).claim("wsA", "viewworker-07310000",
-                                                                "00000000", "dt-viewworker")
+Pool(home, cwd_probe=lambda p: [], alive=lambda n: False).claim("viewworker-07310000", "dt-viewworker",
+                                                                "00000000", W, slot="wsA")
 PY
 
 # --- THE core property: the view must not disagree with the product ----------------------------------
@@ -78,6 +78,9 @@ while IFS=$'\t' read -r ident kind state rest; do
     || { note "FAIL state $state for $ident is in porcelain but not in the view"; fails=1; }
 done < <("$FLEET" board --porcelain 2>/dev/null)
 note "ok   every subject and state in porcelain appears in the view"
+v="$(FLEET_VIEW_WIDTH=200 python3 "$VIEW" board --wide 2>/dev/null)"
+printf '%s' "$v" | grep -q 'dt-viewworker' || { note "FAIL recorded session missing from view"; fails=1; }
+printf '%s' "$v" | grep -q 'v23e-test-socket' || { note "FAIL recorded server missing from view"; fails=1; }
 # …and the leases view carries its population footer too (`B04`): the pool that was read, with its counts.
 FLEET_VIEW_WIDTH=200 python3 "$VIEW" leases 2>/dev/null | grep -q -- "2 enrolled · 1 held · 1 free" \
   && note "ok   the leases population row reaches the view as a footer" \

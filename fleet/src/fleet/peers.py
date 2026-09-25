@@ -76,7 +76,8 @@ def from_live_sessions(sessions, socket=""):
     for session in sessions:
         row = dict(pid=session.pid, cwd=str(session.cwd), name=session.name or "",
                    status="live", runtime=session.runtime, transport="tmux",
-                   tmux=session.name or "", tmux_socket=socket)
+                   tmux=session.name or "", tmux_socket=socket,
+                   nested="true" if getattr(session, "nested", False) else "false")
         if getattr(session, "unreadable", False):
             #: RV-26. Carried so `classify` can say why this row is refused; its cwd is `/proc/<pid>`, never read.
             row["unreadable"] = True
@@ -360,7 +361,7 @@ def classify(rows, leases, self_pid=None, proc_root="/proc"):
     live = [_is_live(int(row["pid"]), row["cwd"], proc_root=proc_root) for row in rows]
     live_by_slot = {}
     for idx, row in enumerate(rows):
-        if live[idx]:
+        if live[idx] and row.get("nested") != "true":
             live_by_slot.setdefault(os.path.realpath(row["cwd"]), []).append(idx)
     # Count ROWS. Two byte-identical duplicate rows therefore contest their slot and BOTH go
     # FOREIGN. That is deliberate and fail-closed: a duplicated row is a listing we do not
@@ -378,6 +379,7 @@ def classify(rows, leases, self_pid=None, proc_root="/proc"):
             "runtime": row.get("runtime", "claude"),
             "transport": row.get("transport", "native"),
             "tmux_socket": row.get("tmux_socket", ""),
+            "nested": row.get("nested", "false"),
             "instant": "", "milestone": "", "tmux": "", "todo_id": "",
         }
 
@@ -407,6 +409,8 @@ def classify(rows, leases, self_pid=None, proc_root="/proc"):
             rec.update(verdict=FOREIGN,
                        why=("this process's /proc could not be read, so neither its cwd nor its identity can "
                             "be verified; refusing (fail-closed)"))
+        elif row.get("nested") == "true":
+            rec.update(verdict=FOREIGN, why="nested child of another agent; visible but not a peer address")
         elif not live[idx]:
             _attach()
             rec.update(verdict=DEAD,
@@ -442,7 +446,7 @@ def classify(rows, leases, self_pid=None, proc_root="/proc"):
 
 
 #: The porcelain contract: exactly these fields, tab-separated, one line per peer, no blank lines.
-PEER_COLUMNS = ("verdict", "name", "pid", "status", "milestone", "tmux", "cwd", "instant")
+PEER_COLUMNS = ("verdict", "name", "pid", "status", "milestone", "tmux", "cwd", "instant", "nested")
 
 
 def _cell(value):
@@ -517,7 +521,7 @@ def render(results, addressable_only=False):
         lines.append(f"         cwd={_cell(r['cwd'])}")
         lines.append(f"         runtime={_cell(r.get('runtime', 'claude'))} "
                      f"transport={_cell(r.get('transport', 'native'))} "
-                     f"socket={_cell(r.get('tmux_socket', ''))}")
+                     f"socket={_cell(r.get('tmux_socket', ''))} nested={_cell(r.get('nested', 'false'))}")
         if r["instant"]:
             lines.append(f"         instant={_cell(r['instant'])}")
         lines.append(f"         why={_cell(r['why'])}")
