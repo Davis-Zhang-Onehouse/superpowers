@@ -612,6 +612,43 @@ class ServerGuardian(unittest.TestCase):
         time.sleep(6)                      # past that window
         self.assertTrue(self.server_up(), "the predecessor's guardian killed the successor's server")
 
+    def test_second_section_does_not_revoke_the_first_sections_guardian(self):
+        """FB-122a. One runner arms several sections (run-group5 L/M/N, group3 E/K). Revocation is per SOCKET:
+        arming the second section's guardian must leave the first section's armed, so a SIGKILL reaps both."""
+        second = f"{self.section[:-1]}h"
+        second_socket = f"itfleet-{second}"
+        self.addCleanup(subprocess.run, ["tmux", "-L", second_socket, "kill-server"], capture_output=True,
+                        env=self.env)
+        started = self.tmp / "started"
+        script = (f'. "{self.it}/lib.sh"\n'
+                  f'it_section {self.section} >/dev/null 2>&1\n'
+                  f'it_tmux new-session -d -s {self.socket}-victim "sleep 300"\n'
+                  f'it_section {second} >/dev/null 2>&1\n'
+                  f'it_tmux new-session -d -s {second_socket}-victim "sleep 300"\n'
+                  f'touch "{started}"\nsleep 300 & echo $! > "{self.tmp}/sleep.pid"; wait\n')
+        (self.tmp / "runner.sh").write_text(script)
+        p = subprocess.Popen(["bash", str(self.tmp / "runner.sh")], cwd=self.tmp, env=self.env,
+                             stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+        self.addCleanup(lambda: (p.kill(), p.wait()))
+        self.addCleanup(lambda: subprocess.run(
+            ["bash", "-c", f'kill "$(cat "{self.tmp}/sleep.pid" 2>/dev/null)" 2>/dev/null; true']))
+        for _ in range(100):
+            if started.exists():
+                break
+            time.sleep(0.1)
+        self.assertTrue(started.exists(), "runner did not reach its second section")
+        up = lambda sock: subprocess.run(["tmux", "-L", sock, "ls"], capture_output=True,
+                                         env=self.env).returncode == 0
+        self.assertTrue(up(self.socket) and up(second_socket), "both sections' servers must be up")
+        p.kill()
+        p.wait()
+        for _ in range(100):          # the guardians poll every 2 s
+            if not up(self.socket) and not up(second_socket):
+                break
+            time.sleep(0.1)
+        self.assertFalse(up(second_socket), "the second section's server survived its runner's SIGKILL")
+        self.assertFalse(up(self.socket), "arming the second section revoked the first section's guardian")
+
     def _start_guarded_runner(self, armed_dir, runner_pid='"$$"'):
         started = self.tmp / "started"
         script = (f'. "{self.it}/lib.sh"\n'
