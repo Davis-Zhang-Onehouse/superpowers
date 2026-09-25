@@ -78,6 +78,101 @@ def writable_dirs(environ) -> tuple:
                                if environ.get(key)))
 
 
+#: FB-117. The names codex's workspace-write sandbox protects inside EVERY writable root (measured, codex-cli 0.156.1):
+#: each is bind-mounted read-only, and when it does not exist codex creates an EMPTY host directory as the mount target.
+#: codex removes its targets when the sandboxed command ends cleanly; after a SIGKILL of the command's group they stay,
+#: and the next clean run drops them from its registry without removing them, so they are permanent. The only codex
+#: setting that avoids them grants WRITE on these names — a sandboxed worker could then create a real `.git` (config,
+#: hooks) in the store or the instants tree — so fleet keeps the argv and sweeps instead (v23-n D-2).
+MOUNT_RESIDUE = ('.agents', '.codex', '.git')
+#: argv[0] basenames that run a codex sandbox: the TUI, its sandbox helper, and the bwrap it execs.
+_CODEX_PROCESSES = ('codex', 'codex-linux-sandbox', 'bwrap')
+
+
+def _names_root(argv, root) -> bool:
+    """Whether a codex argv names `root` as a root: `--add-dir <root>` / `--bind <root> <root>` as a whole argument,
+    or the sandbox helper's policy JSON carrying `"<root>"`."""
+    quoted = json.dumps(root)
+    return any(arg == root or quoted in arg for arg in argv[1:])
+
+
+def codex_sandboxes_under(root, proc_root=Path('/proc')):
+    """Live pids of a codex process whose argv names `root` — the only processes that can hold a protection mount
+    there, or start one. None when the process table cannot be read: the caller must then keep everything."""
+    root = str(Path(root).resolve())
+    try:
+        entries = [entry for entry in Path(proc_root).iterdir() if entry.name.isdigit()]
+        init = os.path.basename(os.fsdecode((Path(proc_root) / '1' / 'cmdline').read_bytes().split(b'\0')[0]))
+    except OSError:
+        return None
+    if init in _CODEX_PROCESSES:
+        #: A caller inside a codex sandbox sees only its own PID namespace (docs/README.fleet-runtimes.md), so an
+        #: empty answer there would say nothing about the codex workers outside it.
+        return None
+    pids = []
+    for entry in entries:
+        try:
+            argv = [os.fsdecode(a) for a in (entry / 'cmdline').read_bytes().split(b'\0') if a]
+        except OSError:
+            continue                                     # exited between the listing and the read
+        if not argv:
+            continue
+        names = [os.path.basename(argv[0])] + ([os.path.basename(argv[1])] if len(argv) > 1 else [])
+        if names[0] in _CODEX_PROCESSES or names[1:] == ['codex']:
+            if _names_root(argv, root):
+                pids.append(int(entry.name))
+    return sorted(pids)
+
+
+def _not_residue(path: Path):
+    """Why `path` is NOT provably codex mount residue, or None when it is: a real, empty directory that is not a mount
+    point. A non-empty directory, a file, a symlink or a mount is never removed."""
+    if path.is_symlink():
+        return 'a symlink'
+    if not path.is_dir():
+        return 'not a directory'
+    if os.path.ismount(path):
+        return 'a mount point'
+    try:
+        count = len(os.listdir(path))
+    except OSError as exc:
+        return f'unreadable ({exc.strerror})'
+    return f'not empty ({count} entries)' if count else None
+
+
+def sweep_mount_residue(roots, proc_root=Path('/proc'), dry_run=False) -> list:
+    """FB-117. Remove the codex mount-point residue from each writable root fleet gave a codex worker (the store and
+    the instants tree). `[(path, verdict)]`, one row per candidate and one for a root with none, so an empty answer
+    is never silence. A root is left alone while any codex naming it is alive, since an rmdir there would detach a
+    live sandbox's protection mount; `os.rmdir` itself refuses a directory that gained an entry."""
+    rows = []
+    for root in dict.fromkeys(str(Path(r).resolve()) for r in roots):
+        found = [Path(root) / name for name in MOUNT_RESIDUE if os.path.lexists(Path(root) / name)]
+        if not found:
+            rows.append((root, f'examined: none of {", ".join(MOUNT_RESIDUE)} present'))
+            continue
+        holders = codex_sandboxes_under(root, proc_root)
+        if holders is None or holders:
+            why = ('the process table is unreadable' if holders is None else
+                   'a codex naming this root is alive (pid ' + ', '.join(map(str, holders)) + ')')
+            rows += [(str(path), f'kept: {why}; swept by the next close or harvest of a codex worker')
+                     for path in found]
+            continue
+        for path in found:
+            reason = _not_residue(path)
+            if reason:
+                rows.append((str(path), f'kept: {reason}'))
+            elif dry_run:
+                rows.append((str(path), 'would remove: empty codex mount residue'))
+            else:
+                try:
+                    os.rmdir(path)
+                    rows.append((str(path), 'removed: empty codex mount residue'))
+                except OSError as exc:
+                    rows.append((str(path), f'kept: {exc.strerror}'))
+    return rows
+
+
 def linked_worktrees(workspace) -> tuple:
     """D-51. The checkouts at the slot root or one level below whose `.git` is a FILE — a linked git worktree (ws5's shape:
     the shared checkout's repository is outside the slot). A codex worker cannot commit there, since its sandbox

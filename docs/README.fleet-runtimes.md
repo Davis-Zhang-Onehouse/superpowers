@@ -90,7 +90,17 @@ the sandbox refuses fails back to the model (a write outside those roots reads `
 danger-full-access, and no knob loosens it; the argv outranks `CODEX_HOME/config.toml`, which fleet never edits.
 `dispatch`, `revive` (and its `--dry-run`) print a `codex_policy` row, and `brief`'s `runtime` row carries the same
 text. Roots listed under `[sandbox_workspace_write] writable_roots` in `CODEX_HOME/config.toml` still apply on top, and
-the row says so because fleet does not read that file. The launcher exports GH_TOKEN from `~/.gh-token-<root>` for codex as for claude. Without it, `gh` in the
+the row says so because fleet does not read that file.
+**Sandbox mount residue (FB-117, measured on 0.156.1).** The sandbox bind-mounts `.agents`, `.codex` and `.git` read-only
+inside every writable root, and where a name does not exist it creates an EMPTY host directory as the mount target — so
+`$FLEET_HOME` and `$FLEET_INSTANTS` show them while any codex command runs. codex removes them when the command ends
+cleanly; after a SIGKILL of the command's group they stay, and later runs treat them as real. No `sandbox_workspace_write`
+key avoids them, and the one permission-profile setting that does grants WRITE on them (a sandboxed worker could then
+create a real `.git` in the store or the instants tree), so the argv is unchanged and `close` / `harvest --id` of a codex
+record sweep instead: an entry named exactly `.agents`/`.codex`/`.git` in those two roots, a real EMPTY directory, not a
+mount point, and only while no codex naming that root is alive. Each gets a `codex_residue` row (`codex-residue` in
+`harvest`); anything else is kept and says why. Run from inside a codex sandbox, the sweep keeps everything, since its
+`/proc` shows only its own PID namespace. The launcher exports GH_TOKEN from `~/.gh-token-<root>` for codex as for claude. Without it, `gh` in the
 sandbox acts as whatever account `~/.config/gh` names.
 Known limit (measured on 0.156.1): the sandbox runs each command in its own PID namespace, so `pgrep`/`/proc` see
 only the sandbox. The 22 verbs whose cli.py reach includes a process or pane probe cannot see host processes when a

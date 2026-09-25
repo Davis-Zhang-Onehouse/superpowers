@@ -1032,6 +1032,10 @@ DELETE_ALLOWLIST = {
                                               # names matching atomic.tmp_name's shape: anything else raises
                                               # Refused naming it rather than being swept (SI-7).
     ("pool.py", "_reclaim", "rmdir"),         # <home>/pool/leases/<slot> once emptied of that litter.
+    ("runtime_launch.py", "sweep_mount_residue", "rmdir"),  # FB-117: <root>/{.agents,.codex,.git} for a root
+                                              # fleet passed codex as writable (FLEET_HOME, the instants tree),
+                                              # only when a real EMPTY directory and no codex naming the root
+                                              # is alive. codex's own mount-target residue; rmdir fails safe.
     # The release pipeline. Both arguments are also written out in test_cli.py's OUTWARD_CALL_SITES —
     # which is itself a finding: this build now audits its delete sites in TWO registries that nothing
     # keeps in step, so a site can be declared in one and undeclared in the other. Tracked as `II-3` in

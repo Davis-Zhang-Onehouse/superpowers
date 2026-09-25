@@ -550,6 +550,8 @@ class Ctx:
     #: `None` — every real call — walks to `/`. A fixture names its private tree, so a TMPDIR that happens to
     #: sit under an instant-named folder is not mistaken for the caller's effort.
     cwd_ceiling: object = None
+    #: FB-117. The process table the codex mount-residue sweep reads; `None` means the real `/proc`.
+    proc_root: object = None
 
     def live_work_now(self) -> bool:
         if self.live_work is not None:
@@ -4192,6 +4194,16 @@ def _refuse_live_complete_watcher(ctx: Ctx, record: Record, child: Path, verb: s
         clears_who="the dispatched instant or the coordinator on its behalf")
 
 
+def _codex_residue(ctx: Ctx, record) -> list:
+    """FB-117. `[(path, verdict)]` from sweeping the codex sandbox's mount-point residue out of the two writable roots
+    this record's worker was launched with — the store and the instants tree its folder lives in — or `[]` for a record
+    that did not run codex. Swept only after the pane is gone, and never under a live codex (`sweep_mount_residue`)."""
+    if record.runtime != 'codex':
+        return []
+    roots = (ctx.home, Path(record.child_instant).parent)
+    return runtime_launch.sweep_mount_residue(roots, proc_root=Path(ctx.proc_root or '/proc'), dry_run=ctx.dry_run)
+
+
 def _do_close(ctx: Ctx, parsed: Parsed) -> int:
     """Shut a pane this store owns, and disarm the monitor by doing it (FD-10).
 
@@ -4224,6 +4236,8 @@ def _do_close(ctx: Ctx, parsed: Parsed) -> int:
         if refusal:
             rows += [("refused", refusal[0]), ("reason", refusal[1]),
                      ("clears_when", refusal[2]), ("clears_who", refusal[3] or "the operator")]
+        else:
+            rows += [("codex_residue", f"{path}: {verdict}") for path, verdict in _codex_residue(ctx, record)]
         _emit(ctx, "close", rows)
         return EXIT_REFUSED if refusal else EXIT_OK
 
@@ -4251,7 +4265,8 @@ def _do_close(ctx: Ctx, parsed: Parsed) -> int:
         ("closed_at", record.closed_at),
         ("forced", "true" if parsed.on("force") else "false"),
         ("slot_still_held", held),
-        ("disarmed", "the monitor's arm set is recomputed from the join; this pane is no longer in it")])
+        ("disarmed", "the monitor's arm set is recomputed from the join; this pane is no longer in it"),
+        *[("codex_residue", f"{path}: {verdict}") for path, verdict in _codex_residue(ctx, record)]])
     return EXIT_OK
 
 
@@ -4535,6 +4550,8 @@ def _do_harvest(ctx: Ctx, parsed: Parsed) -> int:
                                         f"release {record.slot or '(no slot)'} and stamp the record. "
                                         f"Nothing was changed.")))
                 rows += _held_rows(record, roadmap, held)
+                rows += [Row(kind="codex-residue", subject=path, severity=INFO, detail=verdict)
+                         for path, verdict in _codex_residue(ctx, record)]
             else:
                 roadmap, mine, held, recorded = _harvest_inbox(ctx, child)
                 superseding = _superseded_by(roadmap, mine)
@@ -4585,6 +4602,8 @@ def _do_harvest(ctx: Ctx, parsed: Parsed) -> int:
                                         f"record stamped at {record.harvested_at}; the row has left the "
                                         f"board (FD-5)")))
                 rows += _held_rows(record, roadmap, held)
+                rows += [Row(kind="codex-residue", subject=path, severity=INFO, detail=verdict)
+                         for path, verdict in _codex_residue(ctx, record)]
 
     if ctx.dry_run:
         sources = ctx.harvest.sources()
