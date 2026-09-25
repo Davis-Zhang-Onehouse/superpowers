@@ -23,6 +23,7 @@ shows up as a named failure rather than as one loop that stopped early.
 import ast
 import io
 import json
+import os
 import pathlib
 import re
 import shutil
@@ -221,7 +222,9 @@ class Fleet:
                            pool=self.pool, sessions=self.sessions, harvest=self.harvest,
                            out=out, err=err, dry_run=parsed.on("dry-run"),
                            porcelain=parsed.on("porcelain"), now=lambda: NOW,
-                           git=self.git, runner=self.runner, live_work=True)
+                           git=self.git, runner=self.runner, live_work=True,
+                           #: V23-O RV-14. The cadence walk from cwd stays inside this fixture's private tree.
+                           cwd_ceiling=self.tmp)
         return build
 
     def run(self, argv):
@@ -230,7 +233,14 @@ class Fleet:
         #: time, so without this the suite measured whatever the person running it had exported — 33 cases
         #: passed on an ambient `FLEET_HOME` and failed inside `release-verify`, which runs with it unset.
         with hermetic_environment(self.instants, home=self.tmp):
-            code = cli.main(list(argv), stdout=out, stderr=err, context=self.context())
+            # V23-O RV-14. The verb runs from the fixture's own tree, as `tests.test_cli.Fleet.run` does, so the
+            # runner's checkout location cannot become "the caller's instant".
+            prior_cwd = os.getcwd()
+            try:
+                os.chdir(self.tmp)
+                code = cli.main(list(argv), stdout=out, stderr=err, context=self.context())
+            finally:
+                os.chdir(prior_cwd)
         return code, out.getvalue(), err.getvalue()
 
     def record_state(self) -> dict:
@@ -857,3 +867,23 @@ class TestEveryVerbIsDocumentedWhereUsersLook(unittest.TestCase):
         phantom = sorted(named - set(VERBS))
         self.assertEqual(phantom, [],
                          f"the skill documents verb(s) that do not exist: {phantom}")
+
+
+class TestTheFixtureCadenceStaysInsideItsTree(Loaded):
+    """V23-O RV-14. `Fleet.run` here drove `main` from the RUNNER's cwd, so `_cadence`'s walk for "the caller's
+    instant" started in whatever tree the suite ran from. From a checkout nested under an instant folder, every
+    verb's alarm was scoped to that outer instant and the fixture's own overdue register was dropped."""
+
+    def test_a_runner_cwd_under_an_instant_folder_does_not_steal_the_alarm(self):
+        fleet = self.loaded()
+        outer = pathlib.Path(tempfile.mkdtemp(prefix="fleet-contracts-outer-"))
+        self.addCleanup(shutil.rmtree, outer, True)
+        runner_cwd = outer / "00000000-09250300-inflight-append-hostEffort" / "checkout"
+        runner_cwd.mkdir(parents=True)
+        previous = pathlib.Path.cwd()
+        try:
+            os.chdir(runner_cwd)
+            code, out, err = fleet.run(["pane-guard", "--porcelain", "--pane", "dt-solo"])
+        finally:
+            os.chdir(previous)
+        self.assertIn(f"{cli.CADENCE_PREFIX} {fleet.instants / OURS}", err)
