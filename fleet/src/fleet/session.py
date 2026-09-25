@@ -510,11 +510,33 @@ def _live_state(proc: Path) -> bool:
     seen must still keep its parent's unit from reading closed, so this fails closed."""
     try:
         state = (proc / "stat").read_text(encoding="utf-8", errors="surrogateescape").rsplit(")", 1)[1].split()[0]
-    except FileNotFoundError:
-        return False
     except (OSError, IndexError):
         return proc.exists()
     return state not in ("Z", "X")
+
+
+def _listed_children(base: Path) -> Optional[set]:
+    """`V23-H`. Every child pid `base`'s threads list, or None when any list cannot be read."""
+    found = set()
+    try:
+        for task in (base / "task").iterdir():
+            found.update(int(token) for token in (task / "children").read_text().split())
+    except (OSError, ValueError):
+        return None
+    return found
+
+
+def _environ_value(base: Path, key: str) -> Optional[str]:
+    """`V23-H`. One variable from `/proc/<pid>/environ`, None when absent or unreadable (another uid, non-dumpable)."""
+    try:
+        raw = (base / "environ").read_bytes()
+    except OSError:
+        return None
+    prefix = key.encode() + b"="
+    for entry in raw.split(b"\0"):
+        if entry.startswith(prefix):
+            return entry[len(prefix):].decode("utf-8", "surrogateescape")
+    return None
 
 
 def _boot_epoch(proc_root: Path) -> Optional[float]:
@@ -608,12 +630,20 @@ def default_probes(process_name: str = "claude", tmux_socket=_FROM_ENV, *,
         except (OSError, ValueError):
             children = None
         if children:
-            #: A zombie (or a child reaped since) holds nothing and ends with nothing; only live children count.
-            children = {child for child in children if _live_state(Path(proc_root) / str(child))}
+            #: A zombie (or a child reaped since) holds nothing and ends with nothing; only live children count. A child
+            #: whose `/proc` entry is invisible (`hidepid=2` hides another uid's) counts as live while the parent still
+            #: lists it — only a re-read that no longer lists it proves it gone. Fails closed.
+            listed_again = _listed_children(base)
+            children = {child for child in children
+                        if _live_state(Path(proc_root) / str(child))
+                        or (not (Path(proc_root) / str(child)).exists()
+                            and (listed_again is None or child in listed_again))}
+        environ = _environ_value(base, "FLEET_INSTANT")
         boot = _boot_epoch(proc_root)
         started_at = None if boot is None or not start.isdigit() else boot + int(start) / os.sysconf("SC_CLK_TCK")
         return Proc(pid=pid, ppid=ppid, start=start, argv=argv, sid=sid, tty=tty,
-                    children=None if children is None else tuple(sorted(children)), started_at=started_at)
+                    children=None if children is None else tuple(sorted(children)), started_at=started_at,
+                    fleet_instant=environ)
 
     def signal_pid(pid: int, sig: int) -> bool:
         """`V23-H`. One signal to one pid. Its callers pass only pids `orphans.attribute` attributed to the instant

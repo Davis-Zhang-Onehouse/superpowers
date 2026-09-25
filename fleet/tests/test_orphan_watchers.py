@@ -32,7 +32,7 @@ def pipeline(root=500, ppid=1, path=INST):
     """The measured harness shape: zsh wrapper (argv carries `$INSTANT` unexpanded), tail (argv names the path),
     grep (argv names nothing). `evidence/01-repro/base-334fb1d5.txt`."""
     return (Proc(root, ppid, "s500", ("zsh", "-c", "tail -n0 -F $INSTANT/evidence/INDEX.md | grep DONE"),
-                 sid=root, children=(root + 1, root + 2), started_at=LATER),
+                 sid=root, children=(root + 1, root + 2), started_at=LATER, fleet_instant=path),
             Proc(root + 1, root, "s501", ("tail", "-n0", "-F", f"{path}/evidence/INDEX.md"), sid=root, children=()),
             Proc(root + 2, root, "s502", ("grep", "--line-buffered", "DONE"), sid=root, children=()))
 
@@ -171,6 +171,25 @@ class AttributionRule(unittest.TestCase):
         self.assertEqual(att.pids(REAP), [])
         self.assertEqual(att.pids(NAME), [300])
 
+    def test_a_server_started_after_launch_without_the_workers_provenance_is_named(self):
+        """Task-3 review, Critical: a childless tmux/screen server started from the slot AFTER the launch, naming the
+        instant (an operator's `tmux new "less <instant>/…"` with its panes gone) — detached, closed, late. Its
+        environment carries another instant or none, so it is not the worker's."""
+        for env in (None, "/i/00000000-09250000-inflight-append-coordinator"):
+            for argv in (("tmux", "new", "-s", "peek", "less", f"{INST}/evidence/INDEX.md"),
+                         ("SCREEN", "-dmS", "x", "tail", "-F", f"{INST}/x")):
+                facts = table(Proc(300, 1, "t", argv, sid=300, children=(), started_at=LATER, fleet_instant=env))
+                att = orphans.attribute([300], facts.get, self.spell(), not_before=LAUNCHED)
+                self.assertEqual(att.pids(REAP), [], (env, argv))
+                self.assertEqual(att.pids(NAME), [300], (env, argv))
+
+    def test_provenance_of_a_prefix_sharing_sibling_is_not_this_instant(self):
+        facts = table(*pipeline())
+        facts[500] = Proc(500, 1, "s500", facts[500].argv, sid=500, children=(501, 502), started_at=LATER,
+                          fleet_instant=INST + "2")
+        att = orphans.attribute([500, 501, 502], facts.get, self.spell(), not_before=LAUNCHED)
+        self.assertEqual(att.pids(REAP), [])
+
     def test_no_recorded_launch_reaps_nothing_by_name(self):
         facts = table(*pipeline())
         att = orphans.attribute([500, 501, 502], facts.get, self.spell(), not_before=None)
@@ -304,9 +323,15 @@ class RealProcessFacts(unittest.TestCase):
         (root / "40" / "cmdline").write_bytes(b"sh\0-c\0x\0")
         (me / "children").write_text("41 42")
         (root / "41" / "stat").mkdir(parents=True)                        # exists, unreadable as a file
-        (root / "42").mkdir()                                              # gone between listing and reading: no stat
+        (root / "42").mkdir()                                              # exists, no stat at all: gone or hidden
         fact = default_probes(tmux_socket="itfleet-v23h-unused", proc_root=root).proc_facts(40)
-        self.assertEqual(fact.children, (41,))
+        self.assertEqual(fact.children, (41, 42))
+        (me / "children").write_text("41 43")                              # 43: no /proc entry (hidepid=2), listed
+        fact = default_probes(tmux_socket="itfleet-v23h-unused", proc_root=root).proc_facts(40)
+        self.assertEqual(fact.children, (41, 43), "a listed child hidden from /proc must count as live")
+        (root / "40" / "environ").write_bytes(b"A=1\0FLEET_INSTANT=/i/x\0")
+        self.assertEqual(default_probes(tmux_socket="itfleet-v23h-unused", proc_root=root).proc_facts(40).fleet_instant,
+                         "/i/x")
         self.assertAlmostEqual(fact.started_at, 1000 + 500 / os.sysconf("SC_CLK_TCK"))
 
     def test_an_absent_probe_is_not_observable(self):
@@ -559,11 +584,12 @@ def _session_members(sid):
     return sorted(out)
 
 
-def _spawn_orphan(cwd, command):
+def _spawn_orphan(cwd, command, instant=None):
     """A real `setsid sh -c '<command>'` whose launcher exits at once, so it is reparented to init with no terminal —
     the shape `close` leaves behind. Returns the orphan's pid, which is also its session id."""
     done = subprocess.run(["bash", "-c", f"setsid sh -c {shlex.quote(command)} </dev/null >/dev/null 2>&1 & echo $!"],
-                          cwd=str(cwd), capture_output=True, text=True, check=True, start_new_session=True)
+                          cwd=str(cwd), capture_output=True, text=True, check=True, start_new_session=True,
+                          env=dict(os.environ, **({"FLEET_INSTANT": instant} if instant else {})))
     root = int(done.stdout.strip())
     for _ in range(100):
         fields = _stat(root)
@@ -603,15 +629,16 @@ class RealOrphanPipeline(CliCase):
         path = fleet.worker("realDone", state="complete", slot="ws1", pane=IDLE_PANE, live=False)
         fleet.reviewed(path)
         inflight = str(path).replace("-complete-", "-inflight-")
+        self.inflight = inflight
         return fleet, f"tail -n0 -F {inflight}/evidence/INDEX.md | grep --line-buffered DONE"
 
     def test_harvest_reaps_the_real_orphan_and_nothing_outside_the_slot(self):
         fleet, watcher = self.real_fleet()
-        ours = _spawn_orphan(fleet.pool.slot_path("ws1"), watcher)
+        ours = _spawn_orphan(fleet.pool.slot_path("ws1"), watcher, instant=self.inflight)
         self.roots.append(ours)
         elsewhere = fleet.tmp / "elsewhere"
         elsewhere.mkdir()
-        theirs = _spawn_orphan(elsewhere, watcher)
+        theirs = _spawn_orphan(elsewhere, watcher, instant=self.inflight)
         self.roots.append(theirs)
         members = _session_members(ours)
         self.assertGreaterEqual(len(members), 3, "control: the fixture pipeline did not start")
@@ -623,11 +650,22 @@ class RealOrphanPipeline(CliCase):
         self.assertEqual(_session_members(ours), [], "the orphaned watcher is still alive")
         self.assertGreaterEqual(len(_session_members(theirs)), 3, "a process outside the slot was signalled")
 
+    def test_a_naming_orphan_without_the_workers_environment_refuses_and_is_named(self):
+        """D-10 with real processes: same shape, but started from an environment that is not the worker's."""
+        fleet, watcher = self.real_fleet()
+        stranger = _spawn_orphan(fleet.pool.slot_path("ws1"), watcher)
+        self.roots.append(stranger)
+        before = _session_members(stranger)
+        code, out, err = fleet.run(["harvest", "--id", fleet.ids["realDone"]])
+        self.assertEqual(code, EXIT_REFUSED, out + err)
+        self.assertIn(f"kill -TERM {stranger}", err)
+        self.assertEqual(_session_members(stranger), before, "a process without the worker's provenance was signalled")
+
     def test_a_non_naming_orphan_in_the_slot_refuses_and_nothing_is_signalled(self):
         fleet, watcher = self.real_fleet()
-        ours = _spawn_orphan(fleet.pool.slot_path("ws1"), watcher)
+        ours = _spawn_orphan(fleet.pool.slot_path("ws1"), watcher, instant=self.inflight)
         self.roots.append(ours)
-        stranger = _spawn_orphan(fleet.pool.slot_path("ws1"), "sleep 60 | cat")
+        stranger = _spawn_orphan(fleet.pool.slot_path("ws1"), "sleep 60 | cat", instant=self.inflight)
         self.roots.append(stranger)
         before = (_session_members(ours), _session_members(stranger))
         code, out, err = fleet.run(["harvest", "--id", fleet.ids["realDone"]])
