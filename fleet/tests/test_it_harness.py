@@ -560,6 +560,9 @@ class A8KillSiteAudit(unittest.TestCase):
             "CL-2 doubled slash": ("tmux -S /tmp//tmux-1000/default kill-server\n", 1),
             "CL-2 dot-dot respelling": ("tmux -S /var/../tmp/tmux-1000/default kill-server\n", 1),
             "CL-2 empty -L": ("tmux -L \"\" kill-server\n", 1),
+            "CL2-3 variable-rooted socket named .../tmux": ("tmux -S \"$IT_DIR/tmux\" kill-server\n", 0),
+            "CL2-3 absolute socket named .../tmux": ("tmux -S /var/tmp/x/tmux kill-server\n", 0),
+            "CL2-3 clustered -uS .../tmux": ("tmux -uS /var/tmp/x/tmux kill-server\n", 0),
             "python relative": ("python3 -c 'import subprocess; subprocess.run([\"tmux\", \"-S\", \"sock\", \"kill-server\"])'\n", 1),
         }.items():
             with self.subTest(label):
