@@ -6,7 +6,7 @@ import unittest
 from types import SimpleNamespace
 
 from fleet.errors import BadInput, FleetError, Refused
-from fleet.messaging import (CONFIRMED_BY_DRAFT, CONFIRMED_BY_DRAFT_TAIL, CONFIRMED_BY_PLACEHOLDER, CONFIRMED_BY_PLACEHOLDER_UNCOUNTED, SUBMITTED, confirms, UNCERTAIN_AFTER_ENTER, line_count,
+from fleet.messaging import (CONFIRMED_BY_DRAFT, CONFIRMED_BY_DRAFT_TAIL, TAIL_SETTLE_S, CONFIRMED_BY_PLACEHOLDER, CONFIRMED_BY_PLACEHOLDER_UNCOUNTED, SUBMITTED, confirms, UNCERTAIN_AFTER_ENTER, line_count,
                              UNCERTAIN_AFTER_INSERTION, SendRecord, read_sends, record_send, send, sends_path)
 from fleet.runtime import PaneObservation, observe
 
@@ -93,6 +93,18 @@ class MessagingTests(unittest.TestCase):
                 with self.assertRaisesRegex(FleetError, 'uncertain after insertion'):
                     send(Path(directory), layer, SimpleNamespace(tmux='worker'), self.SCROLLED_TEXT, timeout_s=0)
                 self.assertEqual(events, [('literal', self.SCROLLED_TEXT)])
+
+    def test_the_tail_is_re_read_after_a_settle_interval(self):
+        """RV-9. Two captures a few milliseconds apart show the same frame, so a back-to-back second read could not see
+        a paste still arriving. The second read of a tail comes after TAIL_SETTLE_S (over three times the 22-32 ms the
+        measured drafts took to render)."""
+        tail = self.scrolled('claude-scrolled-box-282.frame')
+        with tempfile.TemporaryDirectory() as directory:
+            layer, events = self.runtime_fixture('claude', [PaneObservation('idle'), tail, tail, PaneObservation('busy')])
+            send(Path(directory), layer, SimpleNamespace(tmux='worker'), self.SCROLLED_TEXT,
+                 sleep=lambda seconds: events.append(('sleep', seconds)))
+            self.assertEqual(events, [('literal', self.SCROLLED_TEXT), ('sleep', TAIL_SETTLE_S), ('submit', None)])
+        self.assertGreaterEqual(TAIL_SETTLE_S, 0.1)
 
     @staticmethod
     def wrapped(words, width=76):

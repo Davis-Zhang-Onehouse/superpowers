@@ -39,6 +39,9 @@ CONFIRMED_BY_PLACEHOLDER_UNCOUNTED = "placeholder-uncounted"
 CONFIRMED_BY_DRAFT_TAIL = "draft-tail"
 #: The smallest scrolled box measured. Fewer rows is a box that could have shown more, not a scrolled one.
 TAIL_MIN_ROWS = 3
+#: RV-9. How long a tail must hold still before Enter: over three times the 22-32 ms a measured draft took to render
+#: after the paste. Two captures a few ms apart show the same frame and could not see a paste still arriving.
+TAIL_SETTLE_S = 0.1
 
 
 def validate_message(text):
@@ -253,9 +256,10 @@ def send(home, sessions, record, text, *, timeout_s=10.0, clock=time.monotonic,
                 if observation.state in ('queued', 'busy'):
                     confirmation = confirms(runtime, observation.draft, text) or ""
                     if confirmation == CONFIRMED_BY_DRAFT_TAIL:
-                        #: FB-134. The tail cannot show the head, so it must hold still: the next frame has
-                        #: to show the SAME tail before any Enter. An exact draft needs no second frame — a
-                        #: paste still arriving is a prefix, which never equals the message.
+                        #: FB-134. The tail cannot show the head, so it must hold still: a frame taken
+                        #: TAIL_SETTLE_S later has to show the SAME tail before any Enter. An exact draft needs no
+                        #: second frame — a paste still arriving is a prefix, which never equals the message.
+                        sleep(TAIL_SETTLE_S)
                         again = sessions.observe(record.tmux)
                         if again.state not in ('queued', 'busy') or again.draft != observation.draft:
                             confirmation = ""
