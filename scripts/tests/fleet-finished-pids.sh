@@ -76,7 +76,9 @@ if [ ! -d "$DONE_INSTANT" ] || [ ! -d "$WORK_INSTANT" ]; then
 fi
 # The rename IS the completion signal, and it outranks the recorded path — so the finished worker is made
 # finished the same way a real one does it, by renaming its own folder.
-DONE_INSTANT_COMPLETE="${DONE_INSTANT/-inflight-/-complete-}"
+# The BASENAME only (FB-120): `${DONE_INSTANT/-inflight-/-complete-}` rewrote the first `-inflight-` in the whole
+# path, which is the running worker's own instant folder whenever scratch sits inside one.
+DONE_INSTANT_COMPLETE="$(dirname "$DONE_INSTANT")/$(basename "$DONE_INSTANT" | sed 's/-inflight-/-complete-/')"
 mv "$DONE_INSTANT" "$DONE_INSTANT_COMPLETE"
 DONE_INSTANT="$DONE_INSTANT_COMPLETE"
 
