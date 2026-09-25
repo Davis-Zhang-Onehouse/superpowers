@@ -1654,6 +1654,27 @@ class TestCadence(CliCase):
         self.assertIn(f"{cli.CADENCE_PREFIX} {fleet.instants / OURS}", err)
         self.assertNotIn(cli.CADENCE_PREFIX, out)
 
+    def test_cwd_outside_the_ceiling_still_walks_to_its_own_instant(self):
+        # V23-O RV-15. The ceiling stops the walk climbing ABOVE the fixture's tmp; it must not end the walk of a
+        # cwd that starts elsewhere, or a negative-scope assertion from there passes because nothing was walked.
+        fleet = self.loaded()
+        elsewhere = pathlib.Path(tempfile.mkdtemp(prefix="fleet-cli-elsewhere-"))
+        self.addCleanup(shutil.rmtree, elsewhere, True)
+        foreign = elsewhere / "other-effort" / FRESH_BASE
+        foreign.mkdir(parents=True)
+        register = foreign / "ISSUES.md"
+        register.write_text("## Other-1 overdue\n")
+        fleet.harvest.register(str(foreign), str(register))
+        data = json.loads(fleet.harvest.path.read_text())
+        for source in data["sources"]:
+            source["registered_at"] = LONG_AGO
+            source["last_run"] = LONG_AGO
+        fleet.harvest.path.write_text(json.dumps(data))
+        with mock.patch.object(cli.Path, "cwd", return_value=foreign):
+            code, out, err = fleet.run(["pane-guard", "--porcelain", "--pane", "dt-solo"])
+        self.assertIn(f"{cli.CADENCE_PREFIX} {foreign}", err)
+        self.assertNotIn(str(fleet.instants / OURS), err)
+
     def test_path_and_base_sources_for_one_register_print_once(self):
         for state in ("inflight", "complete"):
             with self.subTest(state=state):
