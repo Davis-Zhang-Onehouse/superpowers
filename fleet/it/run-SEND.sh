@@ -291,12 +291,18 @@ send_wait_idle "$TMUXN" >/dev/null
 it_tmux resize-window -t "$TMUXN" -x 80 -y 20 > "$OUT/SEND-6-resize.out" 2>&1; sleep 2
 send_case SEND-6 "$M6"; s6=$?
 s6_idle=0; send_wait_idle "$TMUXN" && s6_idle=1
+#: RV-10. The box never showed the message's head (it scrolled out), so the head in the transcript echo, and the
+#: worker's reply, are what prove Enter delivered the WHOLE message rather than the tail that was visible.
+it_tmux capture-pane -p -S - -t "$TMUXN" > "$OUT/SEND-6-history.txt" 2>&1 || true
+s6_head=0; grep -qF '❯ Reply OK. This single line' "$OUT/SEND-6-history.txt" && s6_head=1
+s6_reply=0; grep -qE '^● OK' "$OUT/SEND-6-history.txt" && s6_reply=1
 if [ "$s6" = 0 ] && grep -q $'^delivery\tsubmitted$' "$OUT/SEND-6-send.out" \
    && grep -q $'^confirmation\tdraft-tail$' "$OUT/SEND-6-send.out" && [ "$s6_idle" = 1 ] \
+   && [ "$s6_head" = 1 ] && [ "$s6_reply" = 1 ] \
    && record_check "$W" 3 'submitted' 'draft,placeholder,draft-tail' > "$OUT/SEND-6-record.txt" 2>&1; then
-  it_pass SEND-6 "fleet/it/SEND/out/SEND-6-send.out" "a $(wc -c < "$M6")-byte ONE-line \`fleet send\` into a real claude pane resized to 80x20 exited 0 with delivery=submitted, confirmation=draft-tail (the box showed only its last rows, and they were the message's last words, seen twice) and the pane returned to idle; the record's third row says draft-tail (FB-134: before the fix this ended uncertain-after-insertion with no Enter sent)"
+  it_pass SEND-6 "fleet/it/SEND/out/SEND-6-send.out" "a $(wc -c < "$M6")-byte ONE-line \`fleet send\` into a real claude pane resized to 80x20 exited 0 with delivery=submitted, confirmation=draft-tail (the box showed only its last rows, and they were the message's last words, seen twice) and the pane returned to idle; the transcript echo carries the message's HEAD, which the box never showed, and the worker replied OK; the record's third row says draft-tail (FB-134: before the fix this ended uncertain-after-insertion with no Enter sent)"
 else
-  it_fail SEND-6 "fleet/it/SEND/out/SEND-6-send.out" "the over-tall one-line send was not submitted as draft-tail: rc=$s6 idle_after=$s6_idle — $(tr '\n' ' ' < "$OUT/SEND-6-send.out" | cut -c1-200)"
+  it_fail SEND-6 "fleet/it/SEND/out/SEND-6-send.out" "the over-tall one-line send was not submitted whole as draft-tail: rc=$s6 idle_after=$s6_idle head_in_echo=$s6_head reply=$s6_reply — $(tr '\n' ' ' < "$OUT/SEND-6-send.out" | cut -c1-200)"
   send_clear_box || true
 fi
 
