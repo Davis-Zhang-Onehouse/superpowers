@@ -3195,9 +3195,11 @@ def _do_milestone(ctx: Ctx, parsed: Parsed) -> int:
         if parsed.get("reason") is not None:
             raise BadInput("milestone --history does not take --reason")
         entries = roadmap.milestone(parsed.get("id")).title_history
-        _emit(ctx, "milestone", [("title-history", f"{row['at']} | {row['actor']} | "
-                                                       f"{row['old_title']} | {row['reason']}")
-                                 for row in entries] or [("title-history", "(none)")])
+        rows = [(f"history.{index}.{key}", row[source])
+                for index, row in enumerate(entries, start=1)
+                for key, source in (("at", "at"), ("actor", "actor"),
+                                    ("old-title", "old_title"), ("reason", "reason"))]
+        _emit(ctx, "milestone", rows or [("history", "(none)")])
         return EXIT_OK
     if parsed.get("retitle") is not None:
         target = parsed.get("id")
