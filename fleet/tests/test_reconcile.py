@@ -309,6 +309,16 @@ class TestReconcile(unittest.TestCase):
                 self.assertIn("405", subject.note)
                 self.assertTrue(_counts_against_cap(subject))
 
+    def test_closed_record_with_inflight_folder_still_counts(self):
+        rec = self.fleet.store.read("deadWorker-07300301")
+        rec.closed_at = "2026-07-30T04:00:00Z"
+        self.fleet.store.write(rec)
+        subject = next(s for s in self.fleet.reconcile() if s.identity == rec.todo_id)
+        self.assertEqual(subject.evidence["folder_state"], "inflight")
+        self.assertTrue(subject.holds_slot)
+        self.assertEqual(subject.state, DEAD)
+        self.assertTrue(_counts_against_cap(subject))
+
     def test_a_live_process_with_no_record_is_reported_as_an_unknown(self):
         # OBS-48. A records-first join is structurally blind to this session; process-first is the only
         # direction that can see it.
