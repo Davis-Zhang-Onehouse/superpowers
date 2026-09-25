@@ -5605,6 +5605,11 @@ class TestCompleteRefusesBrokenPointers(CliCase):
                 self.assertNotEqual(EXIT_REFUSED, code, out + err)
                 self.assertIn(record.tmux, env.fleet.killed)
 
+    def test_live_watcher_guard_ignores_a_child_folder_that_is_not_an_instant_name(self):
+        """An unparseable child name cannot be a `-complete-` folder, so the guard does not apply — the same
+        answer `_record_for` gives — rather than raising the parse error out of close/harvest."""
+        self.assertIsNone(cli._refuse_live_complete_watcher(None, None, pathlib.Path("/x/not-an-instant"), "close"))
+
     def test_a_busy_complete_pane_is_still_refused_by_close_and_harvest(self):
         env = self.ready_to_complete()
         record = next(r for r in env.fleet.store.all() if pathlib.Path(r.child_instant) == env.instant)
