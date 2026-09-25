@@ -92,6 +92,16 @@ class TheBoundaryInAChild(unittest.TestCase):
         self.assertNotEqual(got["log"], "/nonexistent-v23n/tripwire.log")
 
 
+    def test_the_boxs_default_tmux_dir_is_foreign_even_when_the_caller_exports_TMUX_TMPDIR(self):
+        """RV-28. A runner in the FB-73 guardian style exports its own TMUX_TMPDIR; the live servers still sit in
+        /tmp/tmux-<uid>, and a `-S /tmp/tmux-<uid>/fleet-davis` must stay foreign."""
+        with tempfile.TemporaryDirectory() as caller_dir:
+            env = {k: v for k, v in os.environ.items() if not k.startswith("FLEET_SUITE_")}
+            env["TMUX_TMPDIR"] = caller_dir
+            got = self.probe(env)
+        self.assertIn(os.path.realpath(f"/tmp/tmux-{os.getuid()}"), [os.path.realpath(f) for f in got["foreign"]], got)
+
+
 class TheTripwire(unittest.TestCase):
     """The tripwire refuses and RECORDS; the record fails the test that caused it. Every case aims it at a
     decoy server this case created, so if the tripwire were broken the call would reach only the decoy."""

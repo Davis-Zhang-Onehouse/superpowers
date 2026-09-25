@@ -242,8 +242,10 @@ def _real_runtimes(path):
 if _OWNER:
     AMBIENT_PATH = _ambient_path()
     REAL_TMUX = shutil.which("tmux", path=AMBIENT_PATH) or "/usr/bin/tmux"
-    #: The operator's servers: the tmux directory the caller's shell resolves, and the `$TMUX` server if any.
+    #: The operator's servers: the box's default tmux directory ALWAYS (RV-28: a caller that exports its own
+    #: TMUX_TMPDIR does not move the live servers), the directory the caller's shell resolves, and `$TMUX`'s server.
     FOREIGN_TMUX = tuple(dict.fromkeys(filter(None, (
+        str(pathlib.Path("/tmp").resolve() / f"tmux-{os.getuid()}"),
         str(pathlib.Path(os.environ.get("TMUX_TMPDIR") or "/tmp").resolve() / f"tmux-{os.getuid()}"),
         os.environ.get("TMUX", "").split(",")[0]))))
     REAL_RUNTIMES = _real_runtimes(AMBIENT_PATH)
