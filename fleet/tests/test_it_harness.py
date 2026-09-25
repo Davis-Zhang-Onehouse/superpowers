@@ -735,6 +735,14 @@ class ServerGuardian(unittest.TestCase):
         self.assertIn(b"arm-status=1", result.stdout)
         self.assertFalse((self.it / ".guardians" / f"{self.socket}.pid").exists())
 
+    def test_relative_socket_directory_is_resolved_when_armed(self):
+        (self.tmp / "relative").mkdir()
+        self._start_guarded_runner("relative")
+        guardian_pid = int((self.it / ".guardians" / f"{self.socket}.pid").read_text())
+        argv = pathlib.Path(f"/proc/{guardian_pid}/cmdline").read_bytes().split(b"\0")
+        directory = argv[argv.index(b"it-guardian") + 2]
+        self.assertTrue(os.path.isabs(directory), directory)
+
 
 if __name__ == "__main__":
     unittest.main()
