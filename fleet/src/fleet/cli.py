@@ -4077,7 +4077,7 @@ def _start_of(record) -> str:
 
 
 def _session_left_note(record, owner) -> str:
-    return (f"left {record.tmux} running: it belongs to {owner.todo_id}, launched {owner.launched_at}, after this "
+    return (f"left {record.tmux} running: it belongs to {owner.todo_id} ({_start_of(owner)}), started after this "
             f"record's launch ({record.launched_at or 'never'}) — its own session is already gone (V23-T)")
 
 
