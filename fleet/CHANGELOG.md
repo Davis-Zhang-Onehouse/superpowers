@@ -1,5 +1,13 @@
 # fleet — changelog
 
+## fleet/v0.6.13 — 2026-09-25T09:19:55Z
+Cut from 035b6d2 on `fix/rv-c1` (upstream base snapshot/2026-09-22-152849). 1 commit(s) since fleet/v0.6.12.
+
+Every release ships the whole repository — all skills, `commands/`, `hooks/` and the plugin manifest, not only `fleet/`.
+Payload: fleet (2 files).
+
+- 035b6d2 RV-C1 A stamped record with no live session does not resurrect as COMPLETE-BUT-WORKING
+
 ## fleet/v0.6.12 — 2026-09-25T05:53:38Z
 Cut from 4a8489c on `stack/0.6.12` (upstream base snapshot/2026-09-22-152849). 36 commit(s) since fleet/v0.6.11.
 
