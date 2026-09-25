@@ -515,14 +515,14 @@ def _state_of(rec, folder_state, live, phase, parked, pane, sessions, instant, i
                          f"(deleted, or moved outside {Path(rec.child_instant).parent}); the session is "
                          f"live, and every fleet verb it would run to report or finish refuses"), False
     return _live_state(phase, parked, pane, sessions, instant, idle_after_s,
-                       capture_failed=capture_failed)
+                       capture_failed=capture_failed, launched_at=rec.launched_at)
 
 
-def _live_state(phase, parked, pane, sessions, instant, idle_after_s, capture_failed=False):
+def _live_state(phase, parked, pane, sessions, instant, idle_after_s, capture_failed=False, launched_at=None):
     waiting = sessions.unsubmitted(pane)
     busy = sessions.busy(pane)
     watcher_kind, watcher_text = (
-        _watcher_of(pane, sessions, instant, capture_failed=capture_failed)
+        _watcher_of(pane, sessions, instant, capture_failed=capture_failed, launched_at=launched_at)
         if phase == PHASE_AWAITING_CI and sessions.runtime != 'codex' else (None, ""))
     unwatched = watcher_kind in WATCHER_UNBACKED
     on_pane = False
@@ -670,7 +670,17 @@ def attested_pid_status(handle) -> tuple:
     return PID_RUNNING, f"its pid {pid} is running"
 
 
-def _watcher_of(pane, sessions, instant, capture_failed=False) -> tuple:
+def _stamp_s(stamp):
+    """Epoch seconds of a `%Y-%m-%dT%H:%M:%SZ` stamp, or None when absent or unparsable — NOT MEASURED."""
+    if not stamp or not isinstance(stamp, str):
+        return None
+    try:
+        return calendar.timegm(time.strptime(stamp, "%Y-%m-%dT%H:%M:%SZ"))
+    except ValueError:
+        return None
+
+
+def _watcher_of(pane, sessions, instant, capture_failed=False, launched_at=None) -> tuple:
     """`(kind, text)`: what backs an `awaiting-ci` claim right now. OBSERVED is on the pane's status line
     at this moment; ATTESTED is the claimant's word recorded in `declare.json`; GONE is a watcher that
     backed the claim and provably no longer does; NONE is nothing either way.
@@ -696,6 +706,20 @@ def _watcher_of(pane, sessions, instant, capture_failed=False) -> tuple:
         if status == PID_GONE:
             return WATCHER_GONE, f"{sentence}; it was attested as: {said}"
         if status is None:
+            #: `V23-G` (v2-10). The box rebooted and the revive path recreated every session; an attestation
+            #: with no pid handle was the word of the session that made it, and nothing can re-check that word
+            #: across a relaunch — measured at 0.6.11 it kept a revived worker AWAITING-CI, out of the cap, with
+            #: nothing behind it. `revive` and `resume` stamp `launched_at`, and dispatch stamps it once the seed
+            #: is delivered, before a worker has oriented far enough to declare, so a claim OLDER than the launch
+            #: was made by an earlier session. `resume` also stamps it when it ADOPTS a live session; that claim
+            #: is disregarded too, which is the cap's under-trigger direction (a re-declare, never a leaked slot).
+            #: Either stamp missing or unreadable is NOT MEASURED (`FI-7`) and the attestation stands as before.
+            claimed, launched = _stamp_s(declarations.declared_at()), _stamp_s(launched_at)
+            if claimed is not None and launched is not None and claimed < launched:
+                return WATCHER_GONE, (f"it was attested as: {said} — at {declarations.declared_at()}, with no pid "
+                                      f"handle, and this record's session was relaunched at {launched_at} (`revive` "
+                                      f"and `resume` stamp it), so nothing re-checks that word across the "
+                                      f"relaunch; re-declare if it still holds")
             return WATCHER_ATTESTED, (f"{said} (no pid handle was recorded at the claim, so nothing re-checks it: the claimant "
                                       f"must re-declare when it ends)")
         return WATCHER_ATTESTED, f"{said} ({sentence})"
