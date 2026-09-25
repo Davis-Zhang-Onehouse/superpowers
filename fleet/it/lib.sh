@@ -15,6 +15,12 @@ set -uo pipefail
 # caller does that, and every runner is a file.)
 case "$-" in *i*) ;; *) exec </dev/null ;; esac
 
+# The caller's tmux handles end here (FB-118, v23-k OI-4). From a worker pane `$TMUX` names the LIVE fleet
+# server, and a bare `tmux` follows it ahead of TMUX_TMPDIR: `it_live_tmux_sessions` baselined fleet-davis's
+# `dt-` sessions that way. Every section names its own server (`it_section`), and the live-session reads below
+# name `-L default`, so nothing in a run has a use for the pane's handle.
+unset TMUX TMUX_PANE
+
 IT_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 # The fleet package root — the directory holding src/ and tests/. One level up from `it/`, where the old
 # layout had it two levels up (fleet/it/ inside an instant). Named INSTANT for continuity with
@@ -131,8 +137,8 @@ IT_TMUX_SOCKET=""       # set by it_section. Empty until then, and it_tmux refus
 # The harness's OWN tmux calls. Never a bare `tmux` for section work — the same rule as `fleet()` below,
 # and for the same reason: the server, like FLEET_HOME, is explicit or it is somebody else's.
 #
-# The bare form still has exactly two legitimate uses, both READ-ONLY and both about the live server:
-# `it_live_tmux_sessions` and a section's deliberate "the operator's sessions are untouched" snapshot.
+# The one other form is `it_live_tmux_sessions`, READ-ONLY: `-L default`, the server a socket-less call lands on
+# once this file has stripped `$TMUX` — the leak destination the isolation check watches.
 it_tmux() {
   if [ -z "$IT_TMUX_SOCKET" ]; then
     echo "it_tmux: no section entered, so there is no private server to talk to. A bare tmux here would" \
@@ -508,7 +514,8 @@ it_zero_delta() {
 # a line carries a window count and an `(attached)` marker that change when the operator merely attaches —
 # that is not a contamination and a check that reports it as one gets switched off. A session APPEARING or
 # DISAPPEARING is the thing that must never happen.
-it_live_tmux_sessions() { tmux ls -F '#{session_name}' 2>/dev/null | sort; }
+#: `-L default`, never a bare `tmux`: bare follows an inherited `$TMUX` to whatever server the caller's pane is on.
+it_live_tmux_sessions() { tmux -L default ls -F '#{session_name}' 2>/dev/null | sort; }
 
 # it_assert_no_private_leak <case-id> <private-names-file> [<note-suffix>]
 #
@@ -987,8 +994,8 @@ it_assert_isolation() {
   sessions="$(it_live_tmux_sessions)"
   # Recorded, never touched. Per section rather than one shared file: two sections running concurrently
   # would otherwise both write it, and a register with two writers is the defect this whole wave is about.
-  if tmux ls 2>/dev/null | grep -q '^dt-'; then
-    tmux ls 2>/dev/null | grep '^dt-' > "$IT_ROOT/dt-sessions-seen${SECTION:+-$SECTION}.txt"
+  if printf '%s\n' "$sessions" | grep -q '^dt-'; then
+    printf '%s\n' "$sessions" | grep '^dt-' > "$IT_ROOT/dt-sessions-seen${SECTION:+-$SECTION}.txt"
   fi
   if [ ! -f "$LIVE_TMUX_SNAPSHOT" ]; then
     it_establish_run_baseline "$tag" "$sessions" "${stores_note}${instants_note}"

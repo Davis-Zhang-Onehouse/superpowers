@@ -95,8 +95,11 @@ class WrapperExecutable(unittest.TestCase):
         return direct, wrapped
 
     def test_it_fleet_passes_argv_streams_and_exit_code_through(self):
+        #: `leases`, not `board` (FB-118, D-4 of v23-n): `board` counts the HOST's processes even on an empty
+        #: store, so two back-to-back runs read 7 and 8 subjects with nothing changed in fleet. Pass-through is
+        #: the property here, and it needs a verb whose output this case owns.
         for argv in (["notaverb", "--porcelain"], ["init", "--help"],
-                     ["board", "--home", str(self.tmp / "store"), "--porcelain"]):
+                     ["leases", "--home", str(self.tmp / "store"), "--porcelain"]):
             direct, wrapped = self._direct_and_wrapped(*argv)
             self.assertEqual((wrapped.returncode, wrapped.stdout, wrapped.stderr),
                              (direct.returncode, direct.stdout, direct.stderr), argv)
@@ -299,6 +302,49 @@ class RowOwnership(unittest.TestCase):
         self.assertRegex("M5-coverage", "^(" + m_re + ")$")
         self.assertRegex("M8-release-history", "^(" + m_re + ")$")
         self.assertRegex("M11b", "^(" + m_re + ")$")
+
+
+class HarnessTmuxBoundary(unittest.TestCase):
+    """FB-118 (v23-k OI-4). `lib.sh` is sourced from worker panes, where `$TMUX` names the live fleet server, and its
+    live-session reads were a bare `tmux ls`, which follows `$TMUX`: §OR run 1 baselined fleet-davis's `dt-`
+    sessions that way. Here a decoy server this case creates stands in for the pane's, so even the RED run
+    reads nothing but the decoy. RED: evidence/01-red/it-harness-tmux-at-base.out."""
+
+    def setUp(self):
+        if shutil.which("tmux") is None:
+            self.skipTest("tmux is not on PATH")
+        self.tmp = pathlib.Path(tempfile.mkdtemp(prefix="it-harness-"))
+        self.addCleanup(shutil.rmtree, self.tmp, True)
+        self.it = harness_copy(self.tmp)
+        self.decoy = self.tmp / "pane-server"
+        self.tmpdir = self.tmp / "tmuxdir"
+        self.default = self.tmpdir / f"tmux-{os.getuid()}" / "default"
+        for sock, name in ((self.decoy, "dt-decoy-live"), (self.default, "leaked-here")):
+            sock.parent.mkdir(parents=True, exist_ok=True)
+            sock.parent.chmod(0o700)            # tmux refuses a `-L` socket directory any looser than this
+            made = subprocess.run(["tmux", "-S", str(sock), "new-session", "-d", "-s", name],
+                                  capture_output=True, text=True)
+            self.assertEqual(made.returncode, 0, made.stderr)
+            self.addCleanup(subprocess.run, ["tmux", "-S", str(sock), "kill-server"], capture_output=True)
+
+    def lib(self, body):
+        return run_bash(f'. "{self.it}/lib.sh"\n{body}', self.tmp,
+                        env={"TMUX": f"{self.decoy},1,0", "TMUX_PANE": "%9", "TMUX_TMPDIR": str(self.tmpdir)},
+                        home=self.tmp / "home")
+
+    def test_sourcing_lib_sh_strips_the_callers_tmux_handles(self):
+        out = self.lib('printf "%s|%s\\n" "${TMUX-unset}" "${TMUX_PANE-unset}"')
+        self.assertEqual(out.stdout.strip(), "unset|unset", out.stderr)
+
+    def test_the_live_session_read_never_follows_the_callers_TMUX(self):
+        out = self.lib("it_live_tmux_sessions")
+        self.assertNotIn("dt-decoy-live", out.stdout, "it_live_tmux_sessions read the server $TMUX names")
+
+    def test_the_live_session_read_still_watches_where_a_socketless_call_lands(self):
+        """The control: stripping $TMUX must not blind the check. A socket-less tmux call from a section lands on
+        `default` under TMUX_TMPDIR, and that is the server the read must still see."""
+        out = self.lib("it_live_tmux_sessions")
+        self.assertEqual(out.stdout.split(), ["leaked-here"], out.stderr)
 
 
 class ZeroDelta(unittest.TestCase):
