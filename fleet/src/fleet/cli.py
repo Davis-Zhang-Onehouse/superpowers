@@ -1819,6 +1819,9 @@ def _watch_launch(ctx, layer, tmux, runtime) -> LaunchWatch:
         window = _trust_watch_window()
         sleep = ctx.sleep or time.sleep
         waited = 0.0
+        #: RV-29. Also a wall-clock bound: the summed sleeps alone left the tmux captures' own time unbounded. The
+        #: summed sleeps still end a hermetic run whose injected sleep costs no time.
+        deadline = time.monotonic() + window
         while True:
             frame = layer.capture(tmux)
             if frame:
@@ -1832,7 +1835,7 @@ def _watch_launch(ctx, layer, tmux, runtime) -> LaunchWatch:
                     return LaunchWatch("dialog")
                 if state in ("busy", "queued", "idle"):
                     return LaunchWatch("ready")
-            if waited >= window:
+            if waited >= window or time.monotonic() >= deadline:
                 return LaunchWatch("unobserved", detail=f"no decisive frame within {window:g}s")
             sleep(_TRUST_WATCH_STEP_S)
             waited += _TRUST_WATCH_STEP_S
