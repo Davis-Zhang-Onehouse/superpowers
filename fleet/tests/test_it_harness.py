@@ -27,8 +27,8 @@ FLEET_DESTINATIONS = ("FLEET_HOME", "FLEET_INSTANTS", "FLEET_ROOT", "FLEET_INSTA
                       "IT_ASKED_NAMES", "IT_RESULTS",   # an IT section runs this suite (M13)
                       "TMUX", "TMUX_PANE")              # a bare `tmux` inside a pane follows $TMUX, not TMUX_TMPDIR
 #: One private tmux directory per test process for ordinary cases. ServerGuardian's missing-directory
-#: regression cases use a uniquely named server under tmux's real default directory to prove that a
-#: fallback cannot kill it; each cleans up only that fixture's server and socket file.
+#: regression cases start no server outside it: they observe, through the suite's tripwire (FB-118), that the
+#: guardian makes no tmux call aimed at the box's default directory (S5 glue, v23-l x v23-n).
 #: (`tempfile.gettempdir()` would be /tmp, which IS tmux's default — found in review.)
 PRIVATE_TMUX_DIR = tempfile.mkdtemp(prefix="it-harness-tmux-")
 atexit.register(shutil.rmtree, PRIVATE_TMUX_DIR, True)
@@ -632,7 +632,8 @@ class A8KillSiteAudit(unittest.TestCase):
 class ServerGuardian(unittest.TestCase):
     """FB-73. A runner's EXIT trap cannot run when the shell tree is SIGKILLed (what TaskStop does); its
     private server must still go away. All socket names are unique to this process; the fallback cases
-    create and clean up only their own same-named server under the real default directory. RED:
+    observe the guardian's tmux calls through the suite's tripwire rather than creating a server under the
+    real default directory (S5 glue). RED:
     evidence/01-red/fb73-kill9-base.txt (the server still up 10 s after kill -9)."""
 
     def setUp(self):
@@ -641,8 +642,8 @@ class ServerGuardian(unittest.TestCase):
         self.tmp = pathlib.Path(tempfile.mkdtemp(prefix="it-harness-"))
         self.addCleanup(shutil.rmtree, self.tmp, True)
         self.it = harness_copy(self.tmp)
-        # A sandbox may map every test process to the same small PID. The default-dir regression
-        # cases use a host-visible tmux socket, so its name must remain unique across pid namespaces.
+        # A sandbox may map every test process to the same small PID, so the socket name stays unique
+        # across pid namespaces: a same-named server anywhere else is never this test's.
         self.section = f"selftest{uuid.uuid4().hex[:10]}g"
         self.socket = f"itfleet-{self.section}"
         # Every tmux socket of this test — the section's private one AND the "default" server the isolation
@@ -684,9 +685,10 @@ class ServerGuardian(unittest.TestCase):
         self.assertFalse(self.server_up(), "private server survived its runner's SIGKILL")
 
     def test_a_guardian_whose_directory_is_gone_touches_no_other_server(self):
-        """RV-38. The guardian kills `TMUX_TMPDIR=<dir> tmux -L <sock>`. When <dir> is gone first (a hermetic test's
-        tmp removed before the 2 s poll notices the runner died), tmux falls back to /tmp, so the kill reached
-        `/tmp/tmux-<uid>/<sock>` — the operator's directory; the suite's tripwire caught it charged to other tests."""
+        """RV-38. A guardian whose <dir> is gone first (a hermetic test's tmp removed before the 2 s poll notices the
+        runner died) must not fall back to /tmp. v23-n's own guardian killed `TMUX_TMPDIR=<dir> tmux -L <sock>`,
+        which falls back to `/tmp/tmux-<uid>/<sock>`; v23-l's (the one in the tree) kills `tmux -S <dir>/tmux-<uid>/<sock>`
+        and exits first when <dir> is gone. Either way, no tmux call may reach another directory."""
         sockdir = self.tmp / "sockdir"
         sockdir.mkdir()
         self.env["TMUX_TMPDIR"] = str(sockdir)
@@ -943,13 +945,29 @@ class ServerGuardian(unittest.TestCase):
             for pid in paused:
                 os.kill(pid, signal.SIGCONT)
 
-    def test_default_socket_fixture_is_unlinked_after_cleanup(self):
-        case = ServerGuardian("test_deleted_armed_directory_does_not_kill_default_server")
-        result = unittest.TestResult()
-        case.run(result)
-        self.assertTrue(result.wasSuccessful(), result.errors or result.failures)
-        socket_path = pathlib.Path("/tmp") / f"tmux-{os.getuid()}" / case.socket
-        self.assertFalse(socket_path.exists(), f"fixture left a stale socket: {socket_path}")
+    def test_the_tripwire_observes_the_guardians_tmux_calls(self):
+        """Positive control for the observation form above (S5 review RV-H1/H2): the fallback cases can only see the
+        guardian's calls if the guardian runs `tmux` by NAME through PATH. A recording `tmux` placed first on the
+        runner's PATH must see the ordinary kill, `-S <dir>/tmux-<uid>/<sock> kill-server`, after a SIGKILL."""
+        bin_dir = self.tmp / "record-bin"
+        bin_dir.mkdir()
+        log = self.tmp / "tmux-calls.log"
+        recorder = bin_dir / "tmux"
+        recorder.write_text(f'#!/bin/sh\nprintf "%s\\n" "$*" >> "{log}"\n'
+                            f'PATH="{self.env["PATH"]}" exec tmux "$@"\n')
+        recorder.chmod(0o755)
+        self.env["PATH"] = f"{bin_dir}:{self.env['PATH']}"
+        runner = self.start_runner()
+        guardian = int((self.it / ".guardians" / f"{self.socket}.pid").read_text())
+        runner.kill()
+        runner.wait()
+        deadline = time.monotonic() + 10
+        while pathlib.Path(f"/proc/{guardian}").exists() and time.monotonic() < deadline:
+            time.sleep(0.1)
+        self.assertFalse(pathlib.Path(f"/proc/{guardian}").exists(), "the guardian never finished")
+        calls = log.read_text().splitlines() if log.exists() else []
+        expected = f"-S {self.tmp}/tmux-{os.getuid()}/{self.socket} kill-server"
+        self.assertIn(expected, calls, f"the guardian's kill never went through PATH: {calls}")
 
     def test_mismatched_runner_pid_fails_safe(self):
         """A caller whose claimed pid is not the guardian's parent cannot authorize a kill."""
