@@ -54,7 +54,10 @@ or of tmux aimed at a server outside the suite (the box's `/tmp/tmux-<uid>` alwa
 caller's `$TMUX` server), raises `HostReached`; `tests/fixtures/tripwire-path/`
 (first on PATH, holding `tmux`, `claude` and `codex`) refuses the same for child processes; and a test whose run recorded any of these FAILS, even when the
 product swallowed the refusal. A fixture whose verbs reach `peers` uses `tests/fixtures/bin/claude-agents-stub`; a case
-that trips the tripwire on purpose wraps it in `tests.expect_tripwire()`. Before this, one suite run from a worker pane
+that trips the tripwire on purpose wraps it in `tests.expect_tripwire()`. Its limit: a CHILD process that runs tmux,
+claude or codex by ABSOLUTE path (`/usr/bin/tmux -L <live> …`) bypasses the PATH directory; only the suite's own
+process sees an absolute-path exec (the audit hook), and a child's server choice is still bounded by the inherited
+private `TMUX_TMPDIR` unless it names `-S` or resets that variable. Before this, one suite run from a worker pane
 exec'd the real `claude agents --json` four times and sent seventeen `tmux -L fleet-davis` calls to the live server.
 
 ## Running the integration sections
