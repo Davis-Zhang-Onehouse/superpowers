@@ -1,0 +1,10 @@
+#!/usr/bin/env bash
+# FB-118. What an unset FLEET_CLAUDE_BIN / FLEET_CODEX_BIN resolves to inside the hermetic suite
+# (`tests/__init__.py` sets both). Reaching it means a test exec'd a runtime without giving itself a stub,
+# which at the base exec'd the box's real `claude agents --json`. It runs nothing: it records the call on the
+# suite's tripwire log, so the test that caused it FAILS, and exits 97.
+if [ -n "${FLEET_SUITE_TRIPWIRE:-}" ]; then
+  printf 'runtime\t%s\t%s\n' "$0" "$*" >> "$FLEET_SUITE_TRIPWIRE" 2>/dev/null
+fi
+echo "hermetic suite: refused to run a real claude/codex ($*). Give the test its own stub, e.g. FLEET_CLAUDE_BIN=tests/fixtures/bin/claude-agents-stub." >&2
+exit 97

@@ -1,0 +1,41 @@
+#!/usr/bin/env bash
+# FB-118. The hermetic suite's `tmux`, first on PATH for every process the suite starts (`tests/__init__.py`).
+# It resolves the server this call would reach the way tmux does — `-S path`, else `-L name` under
+# $TMUX_TMPDIR/tmux-<uid>, else $TMUX's socket, else `default` there — and REFUSES (records on the tripwire log,
+# exits 97, runs nothing) when that server is in FLEET_SUITE_FOREIGN_TMUX: the tmux directory and the $TMUX
+# server of the shell that started the suite, i.e. the operator's live servers. Anything else is the real tmux.
+real="${FLEET_SUITE_REAL_TMUX:-/usr/bin/tmux}"
+server="" name=""
+argv=("$@")
+while [ $# -gt 0 ]; do
+  case "$1" in
+    -S) server="${2:-}"; shift 2 || shift ;;
+    -S?*) server="${1#-S}"; shift ;;
+    -L) name="${2:-}"; shift 2 || shift ;;
+    -L?*) name="${1#-L}"; shift ;;
+    -c|-f|-T) shift 2 || shift ;;
+    --) break ;;
+    -*) shift ;;
+    *) break ;;
+  esac
+done
+if [ -z "$server" ]; then
+  if [ -n "$name" ]; then server="${TMUX_TMPDIR:-/tmp}/tmux-$(id -u)/$name"
+  elif [ -n "${TMUX:-}" ]; then server="${TMUX%%,*}"
+  else server="${TMUX_TMPDIR:-/tmp}/tmux-$(id -u)/default"
+  fi
+fi
+server="$(realpath -m -- "$server")"
+IFS=':' read -r -a foreign <<< "${FLEET_SUITE_FOREIGN_TMUX:-}"
+for f in "${foreign[@]}"; do
+  [ -n "$f" ] || continue
+  f="$(realpath -m -- "$f")"
+  if [ "$server" = "$f" ] || [ "$(dirname -- "$server")" = "$f" ]; then
+    if [ -n "${FLEET_SUITE_TRIPWIRE:-}" ]; then
+      printf 'tmux\t%s\t%s\n' "$server" "${argv[*]}" >> "$FLEET_SUITE_TRIPWIRE" 2>/dev/null
+    fi
+    echo "hermetic suite: refused tmux ${argv[*]} — it would reach $server, a server this suite did not create." >&2
+    exit 97
+  fi
+done
+exec "$real" "${argv[@]}"
