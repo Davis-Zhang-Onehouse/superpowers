@@ -533,6 +533,74 @@ class ServerGuardian(unittest.TestCase):
             time.sleep(0.1)
         self.assertFalse(up(), "the server under the runner's own TMUX_TMPDIR survived its runner's SIGKILL")
 
+    def _assert_rearm_revokes_old_directory(self, valid_move):
+        old_dir = self.tmp / "old-sockets"
+        old_dir.mkdir()
+        new_dir = self.tmp / "new-sockets"
+        if valid_move:
+            new_dir.mkdir()
+        old_env = dict(self.env, TMUX_TMPDIR=str(old_dir))
+        new_env = dict(self.env, TMUX_TMPDIR=str(new_dir))
+        self.addCleanup(subprocess.run, ["tmux", "-L", self.socket, "kill-server"],
+                        capture_output=True, env=old_env)
+        if valid_move:
+            self.addCleanup(subprocess.run, ["tmux", "-L", self.socket, "kill-server"],
+                            capture_output=True, env=new_env)
+        ready = self.tmp / "rearmed"
+        sleeper = self.tmp / "rearmed-sleep.pid"
+        old_guardian = self.tmp / "old-guardian.pid"
+        new_guardian = self.tmp / "new-guardian.pid"
+        script = (f'. "{self.it}/lib.sh"\n'
+                  f'it_section {self.section} >/dev/null 2>&1\n'
+                  'sleep 0.3\n'
+                  f'cat "{self.it}/.guardians/{self.socket}.pid" > "{old_guardian}"\n'
+                  f'it_move_tmux_tmpdir "{new_dir}"\n')
+        if valid_move:
+            script += f'cat "{self.it}/.guardians/{self.socket}.pid" > "{new_guardian}"\n'
+            script += f'it_tmux new-session -d -s {self.socket}-owned "sleep 300"\n'
+        script += f'touch "{ready}"\nsleep 300 & echo $! > "{sleeper}"; wait\n'
+        (self.tmp / "move-runner.sh").write_text(script)
+        runner = subprocess.Popen(["bash", str(self.tmp / "move-runner.sh")], cwd=self.tmp,
+                                  env=old_env, stdin=subprocess.DEVNULL,
+                                  stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+        self.addCleanup(lambda: (runner.kill(), runner.wait()))
+        self.addCleanup(lambda: subprocess.run(
+            ["bash", "-c", f'kill "$(cat "{sleeper}" 2>/dev/null)" 2>/dev/null; true'],
+            capture_output=True))
+        for _ in range(100):
+            if ready.exists():
+                break
+            time.sleep(0.1)
+        self.assertTrue(ready.exists(), "runner did not re-arm")
+        started = subprocess.run(["tmux", "-L", self.socket, "new-session", "-d", "-s", "foreign"],
+                                 capture_output=True, env=old_env)
+        self.assertEqual(started.returncode, 0, started.stderr)
+        if valid_move:
+            self.assertEqual(subprocess.run(["tmux", "-L", self.socket, "ls"],
+                                            capture_output=True, env=new_env).returncode, 0)
+        runner.kill()
+        runner.wait()
+        for pidfile in ([old_guardian, new_guardian] if valid_move else [old_guardian]):
+            pid = int(pidfile.read_text())
+            deadline = time.monotonic() + 10
+            while pathlib.Path(f"/proc/{pid}").exists() and time.monotonic() < deadline:
+                time.sleep(0.1)
+            self.assertFalse(pathlib.Path(f"/proc/{pid}").exists(),
+                             f"guardian {pid} did not exit")
+        self.assertEqual(subprocess.run(["tmux", "-L", self.socket, "ls"],
+                                        capture_output=True, env=old_env).returncode, 0,
+                         "old guardian killed a foreign same-named server")
+        if valid_move:
+            self.assertNotEqual(subprocess.run(["tmux", "-L", self.socket, "ls"],
+                                              capture_output=True, env=new_env).returncode, 0,
+                                "new guardian did not reap the runner's server")
+
+    def test_rearm_in_new_directory_revokes_old_guardian(self):
+        self._assert_rearm_revokes_old_directory(valid_move=True)
+
+    def test_failed_rearm_still_revokes_old_guardian(self):
+        self._assert_rearm_revokes_old_directory(valid_move=False)
+
     def test_a_back_to_back_rerun_keeps_its_server(self):
         """The first runner's guardian is inside its 2 s poll window when the second runner of the same
         section starts; it must not kill the second runner's server (found in review)."""
@@ -707,6 +775,8 @@ class ServerGuardian(unittest.TestCase):
         self.assertEqual(subprocess.run(["tmux", "-L", self.socket, "ls"],
                                         capture_output=True, env=env).returncode, 0,
                          "first copy's guardian killed the second copy's server")
+        tokenfile = armed / f"tmux-{os.getuid()}" / f".{self.socket}.guard"
+        self.assertTrue(tokenfile.exists(), "old guardian removed the successor's token")
 
     def test_command_substitution_cannot_arm_a_guardian(self):
         started = subprocess.run(["tmux", "-L", self.socket, "new-session", "-d", "-s", "victim"],
@@ -742,6 +812,28 @@ class ServerGuardian(unittest.TestCase):
         argv = pathlib.Path(f"/proc/{guardian_pid}/cmdline").read_bytes().split(b"\0")
         directory = argv[argv.index(b"it-guardian") + 2]
         self.assertTrue(os.path.isabs(directory), directory)
+
+    def test_symlink_socket_directory_uses_real_path(self):
+        real_dir = self.tmp / "real-sockets"
+        real_dir.mkdir()
+        link_dir = self.tmp / "linked-sockets"
+        link_dir.symlink_to(real_dir, target_is_directory=True)
+        self._start_guarded_runner(link_dir)
+        guardian_pid = int((self.it / ".guardians" / f"{self.socket}.pid").read_text())
+        argv = pathlib.Path(f"/proc/{guardian_pid}/cmdline").read_bytes().split(b"\0")
+        directory = argv[argv.index(b"it-guardian") + 2].decode()
+        self.assertEqual(directory, str(real_dir))
+
+    def test_guardian_unlinks_its_token_after_runner_exits(self):
+        runner = self.start_runner()
+        tokenfile = self.tmp / f"tmux-{os.getuid()}" / f".{self.socket}.guard"
+        self.assertTrue(tokenfile.exists(), "the runner did not publish a token")
+        runner.kill()
+        runner.wait()
+        deadline = time.monotonic() + 10
+        while tokenfile.exists() and time.monotonic() < deadline:
+            time.sleep(0.1)
+        self.assertFalse(tokenfile.exists(), "guardian left its own token behind")
 
 
 if __name__ == "__main__":
