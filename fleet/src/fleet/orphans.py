@@ -79,7 +79,8 @@ class Unit:
     why: str
 
     def kill_command(self) -> str:
-        return f"kill -TERM {' '.join(str(p) for p in self.members)}  # {self.why}"
+        """ONE line, whatever the reason quotes: a newline or tab from another process's text is flattened (RV-35)."""
+        return f"kill -TERM {' '.join(str(p) for p in self.members)}  # {' '.join(self.why.split())}"
 
 
 @dataclass
@@ -193,7 +194,8 @@ def attribute(holders, facts: Callable, spellings, *, session_own=None, exclude=
         elif named and detached and not ours:
             units.append(Unit(root, members, NAME, f"pid {named[0]}'s argv names {named[1]}, but pid {root}'s "
                                                    f"environment does not say it was started by this worker "
-                                                   f"(FLEET_INSTANT is {head.fleet_instant or 'absent or unreadable'}), "
+                                                   f"(FLEET_INSTANT is "
+                                                   f"{repr(head.fleet_instant) if head.fleet_instant else 'absent or unreadable'}), "
                                                    f"so it is not ended automatically"))
         elif named and detached:
             units.append(Unit(root, members, REAP, f"orphaned (pid {root}'s parent is init, it leads its own session "
