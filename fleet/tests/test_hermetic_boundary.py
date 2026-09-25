@@ -10,6 +10,7 @@ import os
 import pathlib
 import shutil
 import subprocess
+import sys
 import tempfile
 import unittest
 from unittest import mock
@@ -59,6 +60,36 @@ class TheSuiteBoundary(unittest.TestCase):
         for where, env in (("inside hermetic_environment", inside), ("in the suite process", outside)):
             for name, value in env.items():
                 self.assertEqual(value, str(FIXTURES / "bin" / "no-real-runtime"), f"{name} {where}")
+
+
+class TheBoundaryInAChild(unittest.TestCase):
+    """RV-27. A child that inherits the suite's environment reuses it; one that inherits only a stale marker (a leaked
+    FLEET_SUITE_TRIPWIRE, say from a tmux server's global environment) must build its own boundary, not trust it."""
+
+    PROBE = ("import json, os, tests; print(json.dumps({'owner': tests._OWNER, 'log': tests.TRIPWIRE_LOG, "
+             "'foreign': list(tests.FOREIGN_TMUX), 'tmpdir': os.environ['TMUX_TMPDIR'], "
+             "'tmpdir_exists': os.path.isdir(os.environ['TMUX_TMPDIR'])}))")
+
+    def probe(self, env):
+        import json
+        done = subprocess.run([sys.executable, "-c", self.PROBE], env=env, cwd=FIXTURES.parent.parent,
+                              capture_output=True, text=True)
+        self.assertEqual(done.returncode, 0, done.stderr)
+        return json.loads(done.stdout.strip().splitlines()[-1])
+
+    def test_a_child_of_the_suite_reuses_its_boundary(self):
+        got = self.probe(dict(os.environ))
+        self.assertFalse(got["owner"])
+        self.assertEqual(got["log"], tests.TRIPWIRE_LOG)
+
+    def test_a_stale_marker_is_not_trusted(self):
+        env = dict(os.environ, FLEET_SUITE_TRIPWIRE="/nonexistent-v23n/tripwire.log", FLEET_SUITE_FOREIGN_TMUX="",
+                   TMUX_TMPDIR="/nonexistent-v23n/tmux")
+        got = self.probe(env)
+        self.assertTrue(got["owner"], got)
+        self.assertTrue(got["foreign"], got)
+        self.assertTrue(got["tmpdir_exists"], got)
+        self.assertNotEqual(got["log"], "/nonexistent-v23n/tripwire.log")
 
 
 class TheTripwire(unittest.TestCase):
