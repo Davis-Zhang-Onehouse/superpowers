@@ -572,6 +572,54 @@ class AnExecutedReviveOwnsItsSession(unittest.TestCase):
         code, out, err = fleet.run(["status", "--id", b.todo_id, "--porcelain"])
         self.assertIn("evidence.liveness\tnone", out)
 
+
+class DispatchDoesNotStartOverALiveSessionOfTheSameName(unittest.TestCase):
+    """RV-40. Dispatch claimed its lease and wrote its record BEFORE `sessions.start`, and only tmux's duplicate-name
+    refusal stopped a same-title dispatch while `dt-<name>` was live. Until the rollback ran (forever, if the dispatch
+    died first or its release was refused) the new record was unlaunched, unstamped and held its own lease: exactly
+    what D-4 reads as a start in progress, so it outranked the live worker and `abort` of it killed that worker. The
+    dispatch now refuses before the claim, as SI-20 does, so that shape is never written."""
+
+    def test_a_dispatch_is_refused_before_the_claim_while_the_session_name_is_live(self):
+        fleet = Fleet()
+        self.addCleanup(shutil.rmtree, fleet.tmp, True)
+        fleet.worker("mile", state="complete", pane=IDLE_PANE)             # its session survived the harvest
+        rec = fleet.store.read(fleet.ids["mile"])
+        rec.harvested_at = rec.closed_at = "2026-07-30T11:00:00Z"
+        fleet.store.write(rec)
+        before_records, before_leases = fleet.record_state(), fleet.pool_state()
+        code, out, err = fleet.run(["dispatch", "--profile", str(fleet.profile("worker")), "--title", "mile",
+                                    "--base", "00000000"])
+        self.assertEqual(code, 4, f"{out}{err}")
+        self.assertIn("dt-mile", err)
+        self.assertEqual(fleet.record_state(), before_records, "no record was written")
+        self.assertEqual(fleet.pool_state(), before_leases, "no lease was claimed")
+        self.assertEqual((fleet.started, fleet.killed), ([], []), "no session was started or killed")
+
+    def test_the_dry_run_refuses_the_same_way(self):
+        fleet = Fleet()
+        self.addCleanup(shutil.rmtree, fleet.tmp, True)
+        fleet.worker("mile", state="complete", pane=IDLE_PANE)
+        rec = fleet.store.read(fleet.ids["mile"])
+        rec.harvested_at = rec.closed_at = "2026-07-30T11:00:00Z"
+        fleet.store.write(rec)
+        code, out, err = fleet.run(["dispatch", "--dry-run", "--profile", str(fleet.profile("worker")),
+                                    "--title", "mile", "--base", "00000000"])
+        self.assertEqual(code, 4, f"{out}{err}")
+
+    def test_a_dispatch_whose_session_name_is_free_still_starts(self):
+        """Neighbour: the same harvested record, its session gone."""
+        fleet = Fleet()
+        self.addCleanup(shutil.rmtree, fleet.tmp, True)
+        fleet.worker("mile", state="complete", live=False)
+        rec = fleet.store.read(fleet.ids["mile"])
+        rec.harvested_at = rec.closed_at = "2026-07-30T11:00:00Z"
+        fleet.store.write(rec)
+        code, out, err = fleet.run(["dispatch", "--profile", str(fleet.profile("worker")), "--title", "mile",
+                                    "--base", "00000000"])
+        self.assertEqual(code, 0, err)
+        self.assertEqual([name for name, _, _ in fleet.started], ["dt-mile"])
+
 class TheApplyWarningAsksTheProposersOwnSession(unittest.TestCase):
 
     def test_a_done_proposal_by_the_old_record_does_not_warn_about_the_new_workers_session(self):

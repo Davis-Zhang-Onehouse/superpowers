@@ -1911,6 +1911,21 @@ def _dispatch_collision(ctx: Ctx, base, optype, title):
             f"anything was claimed. Change the title, or wait for the next minute.",
             clears_when=f"no record is stored under todo {todo_id!r}",
             clears_who="the caller, by re-running with another --title or in the next minute")
+    #: V23-T (RV-40). tmux refuses a duplicate session name, so this dispatch could only fail at `tmux new-session`
+    #: and roll back — after claiming a lease and writing a record that, until the rollback ran (or forever, if it
+    #: died first or its release was refused), read as a start in progress and outranked the live worker (D-4). Refused
+    #: here instead, before the claim, like the collisions above.
+    if ctx.sessions.alive(tmux):
+        here = getattr(ctx.sessions, "socket", "") or ""
+        owner = session_owner(ctx.store.all(), here, ctx.pool).get((here, tmux))
+        whose = (f"record {owner.todo_id} ({owner.child_instant})" if owner is not None
+                 else "no record in this store (an unrecorded session)")
+        raise Refused(
+            f"session {tmux} is live on this server and belongs to {whose}; this dispatch derives the same "
+            f"session name from its title, and tmux refuses a duplicate. Refused before anything was claimed.",
+            clears_when=f"{tmux} is gone (`fleet close --id {owner.todo_id}` if that work is over)" if owner is not None
+                        else f"{tmux} is gone, or the title differs",
+            clears_who="the operator, or the caller by re-running with another --title")
     return name, child, todo_id, tmux
 
 
