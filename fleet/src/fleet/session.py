@@ -142,6 +142,12 @@ class Probes:
     #: `sleep` for an exec'd sleep (`evidence/06-receive/pane-current-command-measured.txt` in the v23-q instant).
     #: It is the process evidence that does not depend on the census attributing the agent.
     pane_commands: Optional[Callable[[str], Optional[list]]] = None
+    #: `V23-H`. One live process's `(ppid, start, argv)` as an `orphans.Proc`, None when it has exited, is a zombie or
+    #: cannot be read. Defaulted like the fields above: absent means NOT OBSERVABLE, and nothing is attributed.
+    proc_facts: Optional[Callable[[int], object]] = None
+    #: `V23-H`. Send one signal to one pid; True when it was delivered. The only signal edge in the package that is
+    #: not a tmux verb, reached only through `cli`'s attributed reap. Defaulted: absent, nothing is ever signalled.
+    signal_pid: Optional[Callable[[int, int], bool]] = None
 
 
 @dataclass(frozen=True)
@@ -472,6 +478,19 @@ class SessionLayer:
             return None
         return self.runtime in commands
 
+    def facts_observable(self) -> bool:
+        """`V23-H`. Whether this layer can read process facts at all. False is NOT OBSERVABLE, so the attribution
+        rule is never consulted and every slot holder is refused exactly as before it existed."""
+        return self.probes.proc_facts is not None
+
+    def proc_facts(self, pid: int):
+        """`V23-H`. One process's `orphans.Proc`, or None (gone, a zombie, unreadable, or no probe)."""
+        return None if self.probes.proc_facts is None else self.probes.proc_facts(pid)
+
+    def signal_pid(self, pid: int, sig: int) -> bool:
+        """`V23-H`. Deliver one signal to one pid; False when there is no probe or it was not delivered."""
+        return False if self.probes.signal_pid is None else bool(self.probes.signal_pid(pid, sig))
+
     def pane_pid(self, name: str) -> Optional[int]:
         """The pid tmux started in this session's pane, or None if it cannot be observed.
 
@@ -488,6 +507,9 @@ class SessionLayer:
 def default_probes(process_name: str = "claude", tmux_socket=_FROM_ENV, *,
                    both_runtimes=False, proc_root=Path("/proc")) -> Probes:
     """The real probes: `pgrep -x <process_name>`, `/proc/<pid>/{cwd,cmdline}` and `tmux`.
+
+    Since `V23-H` it is also the package's one single-pid SIGNAL seam (`signal_pid`), reached only through
+    `cli`'s attributed reap of a torn-down instant's orphaned watchers.
 
     One of the package's THREE subprocess seams — the others are `cli._default_runner` and
     `workspace.default_git`, and the module docstring says why the count is stated instead of rounded
@@ -534,6 +556,35 @@ def default_probes(process_name: str = "claude", tmux_socket=_FROM_ENV, *,
             return int(tail[1])
         except (IndexError, ValueError):
             return 0
+
+    def proc_facts(pid: int):
+        """`V23-H`. `/proc/<pid>/stat` (ppid, start time) and `cmdline` (argv, NUL-split), or None for a pid that is
+        gone, a zombie, or unreadable. World-readable for another uid's process too; `orphans` refuses those anyway,
+        because they reach it only as `pool.UnreadableHolder`s."""
+        from fleet.orphans import Proc
+        base = Path(proc_root) / str(pid)
+        try:
+            fields = (base / "stat").read_text(encoding="utf-8", errors="surrogateescape").rsplit(")", 1)[1].split()
+            raw = (base / "cmdline").read_bytes()
+        except (OSError, IndexError):
+            return None
+        if not fields or fields[0] in ("Z", "X"):
+            return None
+        try:
+            ppid, start = int(fields[1]), fields[19]
+        except (IndexError, ValueError):
+            return None
+        argv = tuple(part.decode("utf-8", "surrogateescape") for part in raw.split(b"\0") if part)
+        return Proc(pid=pid, ppid=ppid, start=start, argv=argv)
+
+    def signal_pid(pid: int, sig: int) -> bool:
+        """`V23-H`. One signal to one pid. Its callers pass only pids `orphans.attribute` attributed to the instant
+        being torn down, each re-checked by start time just before (`orphans.reap`)."""
+        try:
+            os.kill(pid, sig)
+        except (ProcessLookupError, PermissionError):
+            return False
+        return True
 
     #: `PF_EXITING` in `/proc/<pid>/stat`'s flags field: set by `do_exit()` before it drops `exe` and `cwd`.
     pf_exiting = 0x4
@@ -879,5 +930,7 @@ def default_probes(process_name: str = "claude", tmux_socket=_FROM_ENV, *,
                   pane_pid=pane_pid,
                   pane_pids=pane_pids, panes_dead=panes_dead, pane_commands=pane_commands,
                   parent_of=parent_of,
+                  proc_facts=proc_facts,
+                  signal_pid=signal_pid,
                   attachment=attachment,
                   list_session_names=list_session_names)

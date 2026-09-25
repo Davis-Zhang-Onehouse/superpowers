@@ -1527,15 +1527,24 @@ class TestOutwardState(CliCase):
 
         The admission is narrow on purpose: `_do_dispatch` may kill only on the FOREIGN verdict, and the
         NOT-DELIVERED verdict — the far commoner one — deliberately does not kill.
+
+        **The fifth site, `session.default_probes`, is not a session killer** (`V23-H`): its `signal_pid` sends one
+        signal to one pid, the seam `close`/`harvest` use to end the torn-down instant's own orphaned watchers.
         """
         killers = {site for site, node in self.functions.items()
                    if any(isinstance(child, ast.Call) and isinstance(child.func, ast.Attribute)
                           and child.func.attr == "kill" for child in ast.walk(node))}
         expected = {("cli", cli.VERBS[verb].handler.__name__)
                     for verb in ("harvest", "abort", "close", "dispatch")}
+        #: `V23-H`, admitted in writing (D-6 of the v23-h instant) rather than hidden under another attribute name,
+        #: which would make this audit vacuous. `default_probes.signal_pid` is `os.kill` on ONE pid and never ends a
+        #: session: it is the seam `close` and `harvest` reach only through `orphans.attribute`, for processes the
+        #: torn-down instant owned that `kill-session` structurally cannot end (their own session, no tty), each
+        #: re-checked by start time before the signal.
+        expected.add(("session", "default_probes"))
         self.assertEqual(killers, expected,
-                         f"session.kill() is called from {sorted(killers)}, which is not exactly the "
-                         "three lifecycle transactions plus dispatch's own rollback")
+                         f"a `.kill` call is made from {sorted(killers)}, which is not exactly the three lifecycle "
+                         "transactions, dispatch's own rollback, and the single-pid signal seam V23-H admitted")
 
     def test_dispatch_rollback_only_kills_its_started_session(self):
         """Direct launch now owns delivery; any failed launch must retain ownership until exit."""

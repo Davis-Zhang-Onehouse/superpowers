@@ -2,12 +2,19 @@
 and nothing could reap them. The attribution rule decides which slot holders are the torn-down instant's own; only
 those are ever signalled."""
 
+import os
+import shlex
+import shutil
 import signal
+import subprocess
+import time
 import unittest
+from pathlib import Path
 
 from fleet import orphans
 from fleet.orphans import NAME, REAP, REFUSE, Proc
 from fleet.pool import UnreadableHolder
+from fleet.session import Probes, SessionLayer, default_probes
 
 INST = "/i/00000000-09251054-inflight-append-orphanw"
 DONE = "/i/00000000-09251054-complete-append-orphanw"
@@ -154,3 +161,35 @@ class Reap(unittest.TestCase):
         att = self.units()
         done = orphans.reap(att.of(REAP), att.procs, self.live.get, self.signal_pid, self.slept.append, wait_s=0.2)
         self.assertEqual({how for _, how, _ in done}, {"survived"})
+
+
+class RealProcessFacts(unittest.TestCase):
+    """The real `/proc` reader and signal seam `default_probes` hands the attribution rule."""
+
+    def probes(self):
+        return default_probes(tmux_socket="itfleet-v23h-unused")
+
+    def test_facts_of_a_real_process(self):
+        child = subprocess.Popen(["sleep", "30"])
+        self.addCleanup(lambda: (child.kill(), child.wait()))
+        fact = self.probes().proc_facts(child.pid)
+        self.assertEqual((fact.pid, fact.ppid, fact.argv), (child.pid, os.getpid(), ("sleep", "30")))
+        self.assertTrue(fact.start.isdigit())
+
+    def test_a_gone_pid_has_no_facts(self):
+        child = subprocess.Popen(["true"])
+        child.wait()
+        self.assertIsNone(self.probes().proc_facts(child.pid))
+
+    def test_signal_pid_ends_the_process_it_was_given(self):
+        child = subprocess.Popen(["sleep", "30"])
+        self.addCleanup(lambda: (child.poll() is None and child.kill(), child.wait()))
+        self.assertTrue(self.probes().signal_pid(child.pid, signal.SIGTERM))
+        self.assertEqual(child.wait(timeout=5), -signal.SIGTERM)
+
+    def test_an_absent_probe_is_not_observable(self):
+        layer = SessionLayer(Probes(list_processes=list, capture_pane=lambda n: "", has_session=lambda n: False,
+                                    start_session=lambda *a: None, kill_session=lambda n: None))
+        self.assertFalse(layer.facts_observable())
+        self.assertIsNone(layer.proc_facts(1))
+        self.assertFalse(layer.signal_pid(1, 0))
