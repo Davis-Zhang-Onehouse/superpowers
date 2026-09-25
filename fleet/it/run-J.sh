@@ -346,7 +346,11 @@ j11_d_gone=1; it_tmux has-session -t "=$D_SESS" 2>/dev/null && j11_d_gone=0
 # Teardown of the refused fixture, through the verb's own override (and its process by exact pid).
 u_pid="$(it_tmux list-panes -s -t "=$U_SESS" -F '#{pane_pid}' 2>/dev/null | head -1)"
 fleet close --id "${U_TODO:-none}" --force > "$J11/close-force.out" 2>&1; j11_f_rc=$?
-[ -n "$u_pid" ] && kill "$u_pid" 2>/dev/null
+#: RV-15. The close above already killed the session, and its `sleep` normally dies with it; the pid may since be
+#: somebody else's. Kill only if it is still OUR process — the exact `sleep 900` this case exec'd.
+if [ -n "$u_pid" ] && [ "$(tr '\0' ' ' < "/proc/$u_pid/cmdline" 2>/dev/null)" = "sleep 900 " ]; then
+  kill "$u_pid" 2>/dev/null
+fi
 j11_facts="records=${U_TODO:+1}/${D_TODO:+1} pane_guard_rc=$j11_pg_rc unproven_close_rc=$j11_u_rc unproven_alive=$j11_u_alive names_why=$j11_u_why dead_shape=$j11_dead_shape dead_close_rc=$j11_d_rc dead_gone=$j11_d_gone force_rc=$j11_f_rc"
 printf '%s\n' "$j11_facts" > "$J11/facts.txt"
 if [ -z "${U_TODO:-}" ] || [ -z "${D_TODO:-}" ] || [ "$j11_dead_shape" != 1 ] || [ "$j11_pg_rc" != 14 ]; then
