@@ -279,8 +279,9 @@ class ForegroundIsProcessEvidence(_Teardown):
 
 
 class PaneGuardCodesUnchanged(_Teardown):
-    """D-2 collapsed pane-guard's two 14 branches into one `_box_unproven` call. This pins the whole matrix measured
-    at ab2225b3 (`evidence/01-remeasure/matrix-at-base-ab2225b3.txt`), so the collapse is shown behaviour-preserving."""
+    """D-2 collapsed pane-guard's two 14 branches into one `_box_unproven` call. This pins the pane-guard codes measured
+    at ab2225b3 (`evidence/01-remeasure/matrix-at-base-ab2225b3.txt`) for the claude, codex and shell frames, so the
+    collapse is shown behaviour-preserving on every row the D-2 argument rests on."""
 
     EXPECTED = {
         ("claude-idle.frame", True): cli.PANE_SAFE, ("claude-idle.frame", False): cli.PANE_SAFE,
@@ -289,6 +290,50 @@ class PaneGuardCodesUnchanged(_Teardown):
         ("claude-dialog.frame", True): cli.PANE_AWAITING_OPERATOR,
         ("claude-dialog.frame", False): cli.PANE_AWAITING_OPERATOR,
     }
+
+    #: RV-16. The codex half, measured at ab2225b3 (the same evidence file). Unattributed codex panes read 12 in
+    #: pane-guard — `_is_claude` answers False for codex before busy/draft (ISSUES OI-1) — and teardown refuses the
+    #: draft, the turn and the dialog anyway (`CODEX_TEARDOWN`). The fixture's foreground recording is `bash` there.
+    CODEX = {
+        "codex-idle.frame": (cli.PANE_SAFE, cli.PANE_NOT_CLAUDE),
+        "codex-queued.frame": (cli.PANE_QUEUED_TEXT, cli.PANE_NOT_CLAUDE),
+        "codex-tall-draft.frame": (cli.PANE_QUEUED_TEXT, cli.PANE_NOT_CLAUDE),
+        "codex-busy-bgterm-0156.frame": (cli.PANE_MID_TURN, cli.PANE_NOT_CLAUDE),
+        "codex-trust-0156.frame": (cli.PANE_AWAITING_OPERATOR, cli.PANE_NOT_CLAUDE),
+    }
+    CODEX_TEARDOWN = {"codex-queued.frame": "unsubmitted text", "codex-tall-draft.frame": "unsubmitted text",
+                      "codex-busy-bgterm-0156.frame": "mid-turn", "codex-trust-0156.frame": "operator dialog"}
+
+    def _codex(self, fleet, name, frame, attributed):
+        import dataclasses
+        self._worker(fleet, name, _frame(frame), attributed=True)
+        record = fleet.store.read(fleet.ids[name]); record.runtime = "codex"; fleet.store.write(record)
+        fleet.procs[:] = [dataclasses.replace(p, runtime="codex") for p in fleet.procs
+                          if attributed or p.name != f"dt-{name}"]
+
+    def test_codex_matrix(self):
+        for frame, codes in self.CODEX.items():
+            for attributed, code in zip((True, False), codes):
+                with self.subTest(frame=frame, attributed=attributed):
+                    fleet = self.fleet()
+                    self._codex(fleet, "c", frame, attributed)
+                    self.assertEqual(self._pane_guard(fleet, "c"), code)
+
+    def test_unattributed_codex_draft_turn_and_dialog_are_refused_by_teardown(self):
+        for frame, clause in self.CODEX_TEARDOWN.items():
+            with self.subTest(frame=frame):
+                fleet = self.fleet()
+                self._codex(fleet, "c", frame, attributed=False)
+                code, out, err = self._close(fleet, "c")
+                self.assertEqual(code, EXIT_REFUSED, f"{out}{err}")
+                self.assertIn(clause, out + err)
+
+    def test_shell_rows(self):
+        for frame in ("", "ubuntu@host:~$ sleep 900\n"):
+            with self.subTest(frame=frame):
+                fleet = self.fleet()
+                self._worker(fleet, "s", frame, attributed=False)
+                self.assertEqual(self._pane_guard(fleet, "s"), cli.PANE_NOT_CLAUDE)
 
     def test_matrix(self):
         for (name, attributed), code in self.EXPECTED.items():
