@@ -265,16 +265,16 @@ def tmux_server(argv, env):
     args = list(argv[1:])
     while args:
         arg = args.pop(0)
-        if arg in ("-S", "-L", "-c", "-f", "-T"):
-            value = args.pop(0) if args else ""
-            server = value if arg == "-S" else server
-            name = value if arg == "-L" else name
-        elif arg.startswith("-S") and len(arg) > 2:
-            server = arg[2:]
-        elif arg.startswith("-L") and len(arg) > 2:
-            name = arg[2:]
-        elif arg == "--" or not arg.startswith("-"):
+        if arg in ("--", "-") or not arg.startswith("-"):
             break
+        #: RV-26. A getopt cluster: `-uS path`, `-uSpath`, `-2L name`. The first of c/f/L/S/T takes the rest of
+        #: the cluster, or the next argument, as its value and ends the cluster.
+        for i, flag in enumerate(arg[1:], start=1):
+            if flag in "cfLST":
+                value = arg[i + 1:] or (args.pop(0) if args else "")
+                server = value if flag == "S" else server
+                name = value if flag == "L" else name
+                break
     if server is None:
         #: RV-25. tmux uses TMUX_TMPDIR only when it names an existing directory, and /tmp otherwise.
         tmpdir = env.get("TMUX_TMPDIR") or ""
