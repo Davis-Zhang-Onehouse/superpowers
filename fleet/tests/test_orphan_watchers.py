@@ -443,6 +443,8 @@ class HarvestReapsAttributed(CliCase):
         self.assertEqual(code, EXIT_REFUSED, out + err)
         self.assertIn("kill -TERM 500 501 502", err)
         self.assertEqual(facts.sent, [])
+        self.assertEqual(fleet.killed, [], "the refusal must come BEFORE the kill, not at the release")
+        self.assertIsNone(fleet.store.read(fleet.ids["doneWorker"]).harvested_at, "stamped on a refusing path")
 
     def test_a_process_in_another_slot_naming_the_instant_is_untouched(self):
         fleet = self.fleet()
