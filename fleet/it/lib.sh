@@ -208,7 +208,11 @@ it_guard_server() {       # it_guard_server <runner-pid> <socket>
   mkdir -m 700 -p "$uid_dir" || return 1
   tokenfile="$uid_dir/.$sock.guard"
   token="$$-$BASHPID-$RANDOM-$RANDOM"
-  printf '%s\n' "$token" > "$tokenfile.tmp.$BASHPID" && mv -f "$tokenfile.tmp.$BASHPID" "$tokenfile"
+  printf '%s\n' "$token" > "$tokenfile.tmp.$BASHPID" || return 1
+  mv -f "$tokenfile.tmp.$BASHPID" "$tokenfile" || {
+    unlink "$tokenfile.tmp.$BASHPID" 2>/dev/null || true
+    return 1
+  }
   python3 -c '
 import os, subprocess, sys, time
 sock, directory, tokenfile, token, expected_parent = sys.argv[2:7]
