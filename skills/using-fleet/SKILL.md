@@ -274,10 +274,11 @@ of about 400 characters no longer fits. `send` then confirms `draft-tail`. The b
 rows, and they must be exactly the message's own last rows as Claude Code wraps it. A frame taken 0.1 s later must
 show the same rows. Only then does the verb press Enter, and Enter submits the whole message, hidden head
 included. What the tail cannot see is the head. That the head is exactly ours rests on the box being empty when
-the send was admitted and on the single paste. So `draft-tail` is recorded apart from `draft`, and anything that
-changes the hidden rows during the send goes unseen: a human typing there, or a head lost in whole rows. Any other
-box, a tail cut mid-word or re-wrapped text included, still ends `uncertain-after-insertion` with the text left in
-the box.
+the send was admitted and on the single paste. So `draft-tail` is recorded apart from `draft`. Anything that
+changes the hidden rows without changing the visible ones goes unseen: a human typing there, or a lost head whose
+re-wrap ends in the same last rows, which greedy wrapping often does. Any box whose rows are not the message's own
+last rows, such as a tail cut mid-word or text re-wrapped into different rows, still ends
+`uncertain-after-insertion` with the text left in the box.
 
 **Every send that reached the pane is recorded (`B13`)** in the worker's `.fleet/sends.jsonl`: when, by whom
 (`--by`, else the sender's own `FLEET_INSTANT`), the message's sha256, size and first line, the outcome

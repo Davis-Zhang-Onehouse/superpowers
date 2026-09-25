@@ -106,8 +106,10 @@ def _is_scrolled_tail(draft, text) -> bool:
     #: RV-8. A suffix is not yet a SCROLLED view: a box that lost its head and re-wrapped what was left is a suffix too,
     #: and Enter would submit it truncated. A scrolled view shows the message's own last rows, so the visible rows
     #: must be exactly the last rows of the whole message wrapped at one width. Claude Code wraps greedily at word
-    #: boundaries: every real scrolled frame re-wraps this way (80 columns -> width 76). Only a head lost in WHOLE
-    #: rows still passes, and nothing in a frame can tell that from a scroll.
+    #: boundaries: every real scrolled frame re-wraps this way (80 columns -> width 76). RV-25, what still passes:
+    #: greedy wrapping resynchronises, so a head loss whose re-wrap re-converges before the visible rows ends in the
+    #: very same rows (the known-accept case in test_what_a_tail_is_not), and so does a loss that lines up at some
+    #: other width in the scanned range. No frame can tell either from a scroll; the rest are refused.
     #: RV-27. Rows are compared as drawn, spacing kept: Claude Code draws a run of spaces as typed (measured:
     #: "nine.  Two"), and its rows break earlier than a squashed wrap would.
     rows = [row.strip() for row in draft.split("\n")]
