@@ -6114,15 +6114,19 @@ def _is_claude(sessions, text: str, name: str = "", live=None) -> bool:
 
 
 def _box_unproven(sessions, text: str, name: str, live, agent: bool) -> bool:
-    """Whether this is an agent's pane whose input box could not be located, so nothing proves the box EMPTY.
+    """Whether this may be an agent's pane whose input box could not be located, so nothing proves the box EMPTY.
 
-    D-85/RV-19 for `pane-guard`, FB-130 for `close`/`abort`/`harvest --id`: ONE predicate, asked by both. The pane
-    is the agent's when a process is attributed to it OR its screen is claude's (`_is_claude`) — attribution
-    misses about one poll in a hundred, and a teardown that skipped `observe` for those closed a claude pane with
-    an unreadable box that `pane-guard` called 14. An `unknown` observation already excludes a dialog and, for
-    claude, a draft (`runtime._claude_draft` needs the located caret), so asking this before those is safe.
+    D-85/RV-19 for `pane-guard`, FB-130 for `close`/`abort`/`harvest --id`: ONE predicate, asked by both. Attribution
+    misses about one poll in a hundred, and a teardown that skipped `observe` for those closed a claude pane with an
+    unreadable box that `pane-guard` called 14. The pane counts as NOT the agent's only on positive evidence: no
+    process attributed, tmux answering that no pane's foreground command is the runtime (RV-13 — the absence of a
+    glyph is not evidence: a live worker's banner scrolls away), and nothing claude on screen. An unobservable
+    foreground fails closed. An `unknown` observation already excludes a dialog and, for claude, a draft
+    (`runtime._claude_draft` needs the located caret), so asking this before those is safe.
     """
-    return observe(sessions.runtime, text).state == 'unknown' and (agent or _is_claude(sessions, text, name, live))
+    if observe(sessions.runtime, text).state != 'unknown':
+        return False
+    return agent or sessions.agent_in_foreground(name) is not False or _is_claude(sessions, text, name, live)
 
 
 def _pane_subject(ctx: Ctx, parsed: Parsed):

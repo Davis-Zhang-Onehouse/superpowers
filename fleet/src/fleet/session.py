@@ -137,6 +137,11 @@ class Probes:
     #: the process is gone, the last screen stays), False when any pane is alive, None when unobservable. The
     #: screen's `Pane is dead` banner is text an agent can print, so tmux's own flag is the only evidence.
     panes_dead: Optional[Callable[[str], Optional[bool]]] = None
+    #: FB-130 RV-13. tmux's `#{pane_current_command}` for every pane of the session, or None when unobservable.
+    #: Measured `claude` for a real 2.1.282 worker even while one of its tools runs, `bash`/`sh` for a shell,
+    #: `sleep` for an exec'd sleep (`evidence/06-receive/pane-current-command-measured.txt` in the v23-q instant).
+    #: It is the process evidence that does not depend on the census attributing the agent.
+    pane_commands: Optional[Callable[[str], Optional[list]]] = None
 
 
 @dataclass(frozen=True)
@@ -456,6 +461,17 @@ class SessionLayer:
             return None
         return self.probes.panes_dead(name)
 
+    def agent_in_foreground(self, name: str) -> Optional[bool]:
+        """FB-130 RV-13. True when tmux reports this layer's runtime as the foreground command of any pane of
+        `name`, False when it answered and none is, None when that cannot be observed. Only False is evidence that
+        the pane is NOT the agent's; None is not."""
+        if not name or self.probes.pane_commands is None:
+            return None
+        commands = self.probes.pane_commands(name)
+        if not commands:
+            return None
+        return self.runtime in commands
+
     def pane_pid(self, name: str) -> Optional[int]:
         """The pid tmux started in this session's pane, or None if it cannot be observed.
 
@@ -766,6 +782,12 @@ def default_probes(process_name: str = "claude", tmux_socket=_FROM_ENV, *,
             return None
         return all(flag == "1" for flag in flags)
 
+    def pane_commands(name: str):
+        """FB-130 RV-13. Every pane's `#{pane_current_command}`; a failed or empty answer is None, never `[]`."""
+        done = run(tmux + ["list-panes", "-s", "-t", exact_session_target(name), "-F", "#{pane_current_command}"])
+        commands = [line.strip() for line in done.stdout.splitlines()] if done.returncode == 0 else []
+        return commands if commands and all(commands) else None
+
     def session_servers(name: str) -> list:
         """Every tmux server on this box with a session called `name`, socket names, sorted.
 
@@ -855,7 +877,7 @@ def default_probes(process_name: str = "claude", tmux_socket=_FROM_ENV, *,
                   start_session=start_session,
                   kill_session=kill_session,
                   pane_pid=pane_pid,
-                  pane_pids=pane_pids, panes_dead=panes_dead,
+                  pane_pids=pane_pids, panes_dead=panes_dead, pane_commands=pane_commands,
                   parent_of=parent_of,
                   attachment=attachment,
                   list_session_names=list_session_names)

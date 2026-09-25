@@ -202,6 +202,82 @@ class ReallyDeadPanesStayCloseable(_Teardown):
                 self.assertEqual(code, EXIT_OK, f"{out}{err}")
 
 
+def _bannerless_box(name: str, keep_footer: bool) -> str:
+    """RV-13. The BOX of a real 2.1.268 frame under an answer's prose, with the startup banner long scrolled away
+    (every live worker's shape) and its caret row redrawn, optionally with the status line clipped too. Nothing on
+    it matches `CLAUDE_MARKERS`, so the screen alone cannot say it is claude's."""
+    lines = [line for line in _caret_row_replaced(name, "\u00b7 editor redraw in progress").splitlines() if line.strip()]
+    box = lines[-4:] if keep_footer else lines[-4:-1]
+    return "\n".join(["\u25cf Updated fleet/src/fleet/cli.py and ran the suite.", ""] + box) + "\n"
+
+
+def _codex_caret_redrawn() -> str:
+    """RV-18. A real codex 0.154 idle frame whose bold input caret row is redrawn: the footer is there, the box is not."""
+    return "\n".join("  redraw" if plain(line).startswith("\u203a") else line
+                     for line in _frame("codex-idle.frame").splitlines()) + "\n"
+
+
+#: RV-13. Unlocatable boxes that carry NO claude glyph. Only process evidence can say whose pane they are.
+MARKERLESS = {
+    "idle-2.1.268-bannerless-footer-clipped": _bannerless_box("claude-idle.frame", keep_footer=False),
+    "idle-2.1.268-bannerless-accept-edits-footer": _bannerless_box("claude-idle.frame", keep_footer=False)
+        + "  \u23f5\u23f5 accept edits on\n",
+    "empty-capture-mid-redraw": "",
+}
+
+
+class ForegroundIsProcessEvidence(_Teardown):
+    """RV-13 (SI-38 / FI-180 family). Whether an unattributed pane is an agent's is decided from tmux's own
+    `#{pane_current_command}` — measured `claude` for a real 2.1.282 worker even while a tool of it runs
+    (`evidence/06-receive/pane-current-command-measured.txt`) — never from the ABSENCE of a glyph. Shape 3 ("not an
+    agent") needs tmux to say positively that no pane's foreground is the agent; unobservable fails closed."""
+
+    def _pane(self, fleet, name, frame, foreground, runtime="claude"):
+        self._worker(fleet, name, frame, attributed=False)
+        if runtime != "claude":
+            record = fleet.store.read(fleet.ids[name]); record.runtime = runtime; fleet.store.write(record)
+        fleet.sessions.probes.pane_commands = lambda n: foreground if n == f"dt-{name}" else None
+
+    def test_an_unattributed_claude_foreground_with_no_glyph_is_refused(self):
+        for label, frame in MARKERLESS.items():
+            for foreground in (["claude"], ["sleep", "claude"]):
+                with self.subTest(frame=label, foreground=foreground):
+                    fleet = self.fleet()
+                    self._pane(fleet, "miss", frame, foreground)
+                    self.assertEqual(self._pane_guard(fleet, "miss"), cli.PANE_INDETERMINATE)
+                    code, out, err = self._close(fleet, "miss")
+                    self.assertEqual(code, EXIT_REFUSED, f"closed an agent pane on a glyph's absence: {out}{err}")
+                    self.assertEqual(fleet.killed, [])
+
+    def test_an_unobservable_foreground_fails_closed(self):
+        for label, frame in MARKERLESS.items():
+            with self.subTest(frame=label):
+                fleet = self.fleet()
+                self._pane(fleet, "blind", frame, None)
+                self.assertEqual(self._close(fleet, "blind")[0], EXIT_REFUSED)
+
+    def test_a_pane_tmux_says_is_not_the_agent_still_closes(self):
+        """Neighbour: the same screens under a positively non-agent foreground (a shell, a sleep) are shape 3."""
+        for label, frame in MARKERLESS.items():
+            for foreground in (["bash"], ["sleep"], ["sh", "bash"]):
+                with self.subTest(frame=label, foreground=foreground):
+                    fleet = self.fleet()
+                    self._pane(fleet, "shell", frame, foreground)
+                    self.assertEqual(self._pane_guard(fleet, "shell"), cli.PANE_NOT_CLAUDE)
+                    code, out, err = self._close(fleet, "shell")
+                    self.assertEqual(code, EXIT_OK, f"{out}{err}")
+
+    def test_an_unattributed_codex_foreground_with_an_unlocatable_box_is_refused(self):
+        """RV-18. The codex twin: the footer is codex's, the caret is not locatable, tmux says `codex` runs there."""
+        fleet = self.fleet()
+        self._pane(fleet, "cx", _codex_caret_redrawn(), ["codex"], runtime="codex")
+        self.assertEqual(self._pane_guard(fleet, "cx"), cli.PANE_INDETERMINATE)
+        self.assertEqual(self._close(fleet, "cx")[0], EXIT_REFUSED)
+        fleet = self.fleet()
+        self._pane(fleet, "cxs", _codex_caret_redrawn(), ["bash"], runtime="codex")
+        self.assertEqual(self._close(fleet, "cxs")[0], EXIT_OK, "a codex-looking screen over a shell is shape 3")
+
+
 class PaneGuardCodesUnchanged(_Teardown):
     """D-2 collapsed pane-guard's two 14 branches into one `_box_unproven` call. This pins the whole matrix measured
     at ab2225b3 (`evidence/01-remeasure/matrix-at-base-ab2225b3.txt`), so the collapse is shown behaviour-preserving."""
