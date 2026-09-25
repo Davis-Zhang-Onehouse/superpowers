@@ -394,5 +394,58 @@ class TestTheGraceAfterTheClaim(unittest.TestCase):
         self.assertIn("watcher observed", s.note)
 
 
+
+class TestBriefSaysWhatTheBoardDoes(unittest.TestCase):
+    """RV-19. `brief` is how a worker checks itself; its phase row explains what `board` does with the claim.
+    After this bucket the board disregards a pre-relaunch attestation, tolerates a missing watcher for the
+    grace, and bounds a hold — and the row must say so, or a revived worker is told it is trusted."""
+
+    def setUp(self):
+        self.f = Fleet()
+        self.addCleanup(shutil.rmtree, self.f.tmp, True)
+        self.path = self.f.worker('briefed', slot='ws1', pane=IDLE_PANE)
+
+    def phase_row(self, at_clock=NOW):
+        with mock.patch('fleet.reconcile.time.time', return_value=_epoch(at_clock)):
+            code, out, err = self.f.run(['brief', '--instant', str(self.path), '--porcelain'])
+        self.assertEqual(code, 0, err)
+        rows = [line for line in out.splitlines() if line.startswith('phase\t')]
+        self.assertEqual(len(rows), 1, out)
+        return rows[0]
+
+    def test_a_pre_relaunch_attestation_is_said_to_be_disregarded(self):
+        _declare(self.path, phase='awaiting-ci', at='2026-07-30T10:00:00Z',
+                 watchers='attested: a peer session watching')
+        row = self.phase_row()
+        self.assertIn('relaunched', row)
+        self.assertIn('disregards the claim now', row)
+        self.assertNotIn('trusts it', row)
+
+    def test_an_attestation_made_after_the_launch_is_still_trusted(self):
+        """Control: the same attestation made by this session."""
+        _declare(self.path, phase='awaiting-ci', at='2026-07-30T12:00:00Z',
+                 watchers='attested: a peer session watching')
+        row = self.phase_row()
+        self.assertIn('trusts it', row)
+        self.assertNotIn('relaunched at', row)
+
+    def test_an_observed_claim_names_its_grace(self):
+        _declare(self.path, phase='awaiting-ci', at='2026-07-30T12:00:00Z', watchers='1 monitor')
+        row = self.phase_row('2026-07-30T12:01:00Z')
+        self.assertIn('GRACE', row)
+        self.assertIn('2026-07-30T12:05:00Z', row)
+        self.assertIn('fresh watcher', row)
+
+    def test_a_hold_is_shown_with_its_expiry_and_reason(self):
+        _declare(self.path, phase='holding', at='2026-07-30T12:00:00Z', hold_reason='told to wait',
+                 hold_until='2026-07-30T12:30:00Z')
+        row = self.phase_row()
+        self.assertIn('held until 2026-07-30T12:30:00Z', row)
+        self.assertIn('told to wait', row)
+        row = self.phase_row('2026-07-30T12:30:00Z')
+        self.assertIn('HOLD EXPIRED', row)
+        self.assertIn('counts against the WIP cap', row)
+
+
 if __name__ == '__main__':
     unittest.main()

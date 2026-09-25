@@ -754,6 +754,16 @@ def _stamp_s(stamp):
         return None
 
 
+def claim_predates_launch(declarations, launched_at) -> bool:
+    """`V23-G` (v2-10). True when the claim's `at` is strictly older than the record's `launched_at`, i.e. an
+    earlier session made it. Either stamp missing or unreadable is NOT MEASURED and answers False (`FI-7`).
+    The one predicate `_watcher_of`, `_grace_of` and `brief` share, so they cannot disagree about a claim."""
+    if declarations is None:
+        return False
+    claimed, launched = _stamp_s(declarations.declared_at()), _stamp_s(launched_at)
+    return claimed is not None and launched is not None and claimed < launched
+
+
 def _watcher_of(pane, sessions, instant, capture_failed=False, launched_at=None) -> tuple:
     """`(kind, text)`: what backs an `awaiting-ci` claim right now. OBSERVED is on the pane's status line
     at this moment; ATTESTED is the claimant's word recorded in `declare.json`; GONE is a watcher that
@@ -788,8 +798,7 @@ def _watcher_of(pane, sessions, instant, capture_failed=False, launched_at=None)
             #: was made by an earlier session. `resume` also stamps it when it ADOPTS a live session; that claim
             #: is disregarded too, which is the cap's under-trigger direction (a re-declare, never a leaked slot).
             #: Either stamp missing or unreadable is NOT MEASURED (`FI-7`) and the attestation stands as before.
-            claimed, launched = _stamp_s(declarations.declared_at()), _stamp_s(launched_at)
-            if claimed is not None and launched is not None and claimed < launched:
+            if claim_predates_launch(declarations, launched_at):
                 return WATCHER_GONE, (f"it was attested as: {said} — at {declarations.declared_at()}, with no pid "
                                       f"handle, and this record's session was relaunched at {launched_at} (`revive` "
                                       f"and `resume` stamp it), so nothing re-checks that word across the "
@@ -826,8 +835,7 @@ def _grace_of(declarations, launched_at, now=None) -> str:
     #: RV-20. No stamp, or one in the future (a hand edit, a clock stepped back), bounds nothing: no grace.
     if claimed is None or claimed > now:
         return ""
-    launched = _stamp_s(launched_at)
-    if launched is not None and claimed < launched:
+    if claim_predates_launch(declarations, launched_at):
         return ""
     ends = claimed + WATCHER_GRACE_S
     if now >= ends:

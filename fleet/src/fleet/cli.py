@@ -78,7 +78,8 @@ from fleet.markdown import fenced, prose
 from fleet.pool import Pool, ReapReport
 from fleet.profiles import Profile
 from fleet import root as root_mod
-from fleet.reconcile import (HOLD_DEFAULT_S, HOLD_MAX_S, PHASE_HOLDING)
+from fleet.reconcile import (HOLD_DEFAULT_S, HOLD_MAX_S, PHASE_HOLDING, WATCHER_GRACE_S, _grace_of, _hold_of,
+                             claim_predates_launch)
 from fleet.reconcile import (COMPLETE, COMPLETE_BUT_WORKING, KIND_WORKER, PARKED, PHASE_AWAITING_CI, PID_GONE,
                              PID_RUNNING, RUNNING, WATCHER_ATTESTED, WATCHER_OBSERVED, _watcher_of,
                              attested_pid_status, needs_a_human, pid_start, reconcile)
@@ -5389,19 +5390,35 @@ def _do_brief(ctx: Ctx, parsed: Parsed) -> int:
                 checked = f"{sentence}, so `fleet board` disregards the claim now"
             elif status:
                 checked = f"{sentence}, and `fleet board` disregards the claim once it is gone"
+            #: RV-19 (`V23-G` v2-10). The board disregards an unhandled attestation older than the record's
+            #: (re)launch; this row asks the same predicate, so a revived worker is not told it is trusted.
+            elif claim_predates_launch(declarations, getattr(own, "launched_at", None)):
+                checked = (f"no pid handle was recorded, and the claim at {declarations.declared_at()} predates "
+                           f"this record's session, relaunched at {own.launched_at} — so `fleet board` "
+                           f"disregards the claim now; re-declare if the watcher still holds")
             else:
                 checked = ("no pid handle was recorded at the claim, so nothing re-checks it — `fleet board` "
-                           "trusts it, labelled ATTESTED, until the claimant declares another phase")
+                           "trusts it, labelled ATTESTED, until the claimant declares another phase or its "
+                           "session is relaunched (`revive`/`resume`)")
             seen = f"ATTESTED by the claimant, NOT observed by this tool; {checked}"
         else:
-            seen = ("OBSERVED on the pane at claim time; `fleet board` re-reads the pane, and once that "
-                    "watcher is no longer on it the board disregards the claim (NO WATCHER OBSERVABLE)")
+            #: RV-19. The grace and the renewal, as the board applies them (`reconcile._grace_of`).
+            graced = _grace_of(declarations, getattr(own, "launched_at", None))
+            seen = ("OBSERVED on the pane at claim time; `fleet board` re-reads the pane, a fresh watcher on it "
+                    "renews the claim with no re-declare, and once no watcher is on it the board disregards the "
+                    f"claim (NO WATCHER OBSERVABLE) — except in the {WATCHER_GRACE_S // 60} minutes after the "
+                    f"claim" + (f"; this claim is {graced}" if graced else ", which have passed"))
         detail = (f"phase={declarations.phase() or '(none declared)'}, "
                   f"parked={declarations.parked() or '(not parked)'}, "
                   f"watcher={watchers} — {seen}")
     else:
         detail = (f"phase={declarations.phase() or '(none declared)'}, "
                   f"parked={declarations.parked() or '(not parked)'}")
+    if declarations.phase() == PHASE_HOLDING:
+        #: RV-19. The hold's reason and bound, from the reader the board uses (`reconcile._hold_of`).
+        live, said = _hold_of(child)
+        detail += (f", hold: {said} — `fleet board` keeps you out of the WIP cap until then" if live else
+                   f", hold: {said} — so `fleet board` disregards it and the worker counts against the WIP cap")
     rows.append(Row(kind="phase", subject=child.name, severity=INFO, detail=detail))
 
     gate = Review(child, now=ctx.now).gate(require_scope="all")
