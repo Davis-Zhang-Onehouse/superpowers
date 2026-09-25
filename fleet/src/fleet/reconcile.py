@@ -465,7 +465,7 @@ def _state_of(rec, folder_state, live, phase, parked, pane, sessions, instant, i
                 f"again."), False
         if rec.harvested_at:
             return HARVESTED, f"record harvested at {rec.harvested_at}; the work is over", False
-        if rec.closed_at:
+        if rec.closed_at and instant is None:
             return CLOSED, f"record closed at {rec.closed_at}; the session was intentionally closed", False
         if rec.launched_at is None:
             # READ from an absent field, never stamped. Back-filling it here is exactly the defect that

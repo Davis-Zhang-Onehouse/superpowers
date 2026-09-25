@@ -367,6 +367,16 @@ class TestTheCap(GuardCase):
         self.assertFalse(WipCap().evaluate(fleet.ctx()).allowed, "one active worker fills a cap of 1")
         self.assertTrue(WipCap().evaluate(fleet.ctx(cap=2)).allowed, "the cap cannot be raised")
 
+    def test_closed_unfinished_worker_still_fills_the_cap(self):
+        fleet = self.fleet()
+        folder = fleet.worker("closedWorker", slot="ws1", live=False)
+        rec = fleet.store.all()[0]
+        rec.closed_at = "2026-07-30T04:00:00Z"
+        fleet.store.write(rec)
+        verdict = WipCap().evaluate(fleet.ctx())
+        self.assertFalse(verdict.allowed, "closing a session did not finish its inflight work")
+        self.assertIn(folder, verdict.reason)
+
     def test_awaiting_ci_does_not_count_against_the_cap(self):
         # The declaration is the whole bargain: at a cap of 1 an undeclared waiter holds the effort's
         # only dev slot for the length of a CI queue.
