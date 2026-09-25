@@ -424,6 +424,50 @@ class TestTheWatchLoop(unittest.TestCase):
         self.assertEqual([0.25] * 4, ctx.slept)
         self.assertEqual(1.0, sum(ctx.slept))
 
+    def test_RV29_slow_captures_are_bounded_by_the_monotonic_deadline(self):
+        """RV-29. The window counted only the injected sleeps, so a capture that itself took seconds let the watch
+        run far past FLEET_TRUST_WATCH_SECONDS. Each capture here costs 3s of (patched) monotonic time."""
+        clock = [100.0]
+
+        class SlowLayer(FakeLayer):
+            def capture(self, name):
+                clock[0] += 3.0
+                return super().capture(name)
+
+        ctx = FakeCtx()
+        layer = SlowLayer(["Starting up..."])
+        with mock.patch.dict(os.environ, {cli.TRUST_WATCH_SECONDS: "8"}), \
+                mock.patch("time.monotonic", side_effect=lambda: clock[0]), \
+                mock.patch("time.sleep", side_effect=AssertionError("a real sleep")):
+            watch = cli._watch_launch(ctx, layer, "dt-x", "claude")
+        self.assertEqual("unobserved", watch.outcome)
+        self.assertEqual(3, len(layer.captured), "captures past the 8s deadline (3s each: at 3, 6, 9)")
+        self.assertEqual([0.25, 0.25], ctx.slept)
+
+    def test_RV29_fast_captures_still_stop_on_the_summed_sleeps(self):
+        """Neighbour: a clock that never moves (the hermetic case) still ends at the window by the sleep sum."""
+        ctx = FakeCtx()
+        with mock.patch.dict(os.environ, {cli.TRUST_WATCH_SECONDS: "1"}), \
+                mock.patch("time.monotonic", return_value=5.0), \
+                mock.patch("time.sleep", side_effect=AssertionError("a real sleep")):
+            watch = cli._watch_launch(ctx, FakeLayer(["Starting up..."]), "dt-x", "claude")
+        self.assertEqual("unobserved", watch.outcome)
+        self.assertEqual([0.25] * 4, ctx.slept)
+
+    def test_RV29_a_decisive_frame_after_the_deadline_is_not_looked_for(self):
+        """Neighbour: the deadline check comes after the look, so the first frame is always read."""
+        clock = [0.0]
+        trust_frame = TRUST_FRAME
+
+        class SlowLayer(FakeLayer):
+            def capture(self, name):
+                clock[0] += 60.0
+                return super().capture(name)
+
+        with mock.patch("time.monotonic", side_effect=lambda: clock[0]):
+            watch = cli._watch_launch(FakeCtx(), SlowLayer([trust_frame]), "dt-x", "claude")
+        self.assertEqual("trust-screen", watch.outcome)
+
     def test_a_capture_that_raises_is_unobserved_with_the_reason(self):
         class Broken:
             def capture(self, name):
