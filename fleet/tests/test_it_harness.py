@@ -542,6 +542,10 @@ class A8KillSiteAudit(unittest.TestCase):
             "bash -c string": "bash -c \"tmux kill-server\"\n",
             "heredoc body": "python3 - <<'PY'\nimport subprocess\nsubprocess.run(['tmux', 'kill-session', '-t', 'x'])\nPY\n",
             "-L default": "tmux -L default kill-server\n",
+            "CL-1 shell: an earlier tmux names a socket, the killing one does not":
+                "tmux -L priv has-session -t x && tmux kill-server\n",
+            "CL-1 embedded: same, inside python":
+                "python3 -c 'import subprocess; subprocess.run([\"tmux\", \"-L\", \"x\", \"ls\"]); subprocess.run([\"tmux\", \"kill-server\"])'\n",
         }.items():
             with self.subTest(label):
                 counts, out = self.audit(**{"run-X.sh": text})
