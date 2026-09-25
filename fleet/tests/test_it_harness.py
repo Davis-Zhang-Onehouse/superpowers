@@ -10,6 +10,7 @@ import os
 import pathlib
 import re
 import shutil
+import signal
 import subprocess
 import tempfile
 import time
@@ -600,7 +601,11 @@ class ServerGuardian(unittest.TestCase):
         self.assertEqual(started.returncode, 0, started.stderr)
         p.kill()
         p.wait()
-        time.sleep(3)
+        guardian_pid = int((self.it / ".guardians" / f"{self.socket}.pid").read_text())
+        deadline = time.monotonic() + 10
+        while pathlib.Path(f"/proc/{guardian_pid}").exists() and time.monotonic() < deadline:
+            time.sleep(0.1)
+        self.assertFalse(pathlib.Path(f"/proc/{guardian_pid}").exists(), "guardian did not exit")
         self.assertTrue(self._default_server_up(), "guardian killed a same-named default-dir server")
 
     def test_deleted_armed_directory_does_not_kill_default_server(self):
@@ -608,6 +613,23 @@ class ServerGuardian(unittest.TestCase):
 
     def test_moved_armed_directory_does_not_kill_default_server(self):
         self._assert_missing_armed_dir_preserves_default_server(move=True)
+
+    def test_missing_dir_case_waits_for_guardian_exit(self):
+        start = self._start_guarded_runner
+        paused = []
+        def pause_guardian(armed_dir):
+            runner = start(armed_dir)
+            pid = int((self.it / ".guardians" / f"{self.socket}.pid").read_text())
+            os.kill(pid, signal.SIGSTOP)
+            paused.append(pid)
+            return runner
+        self._start_guarded_runner = pause_guardian
+        try:
+            with self.assertRaisesRegex(AssertionError, "guardian did not exit"):
+                self._assert_missing_armed_dir_preserves_default_server(move=False)
+        finally:
+            for pid in paused:
+                os.kill(pid, signal.SIGCONT)
 
     def test_default_socket_fixture_is_unlinked_after_cleanup(self):
         case = ServerGuardian("test_deleted_armed_directory_does_not_kill_default_server")
