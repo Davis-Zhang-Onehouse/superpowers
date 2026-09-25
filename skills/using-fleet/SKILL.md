@@ -376,8 +376,8 @@ is its recorded tmux socket (empty for a legacy record whose server was never me
 `nested` lists nested agent PIDs folded into an owned or unowned pane's row, or `true` on a
 separate nested process row. `fleet peers` also appends `nested`; a nested child stays
 visible but is not an addressable peer. A worker with a standing parked question remains
-`PARKED` while its pane is busy; board `working=true` and `status --porcelain` reports `evidence.working=true` and
-the board note says work is progressing. A `PARKED` worker with `working=true` does not
+`PARKED` while its pane is busy; the board's `working` column is true, and `status --porcelain` reports
+`evidence.working=true`. A `PARKED` worker with `working=true` does not
 increase the human-attention count.
 
 ## `--dry-run`
