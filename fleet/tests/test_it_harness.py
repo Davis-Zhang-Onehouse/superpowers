@@ -618,6 +618,15 @@ class A8KillSiteAudit(unittest.TestCase):
         counts, out = self.audit(**{"run-X.sh": text})
         self.assertEqual(counts["kill_all"], 0, out)
 
+    def test_the_A8a_notes_carry_no_path_the_register_check_reads_as_leaked(self):
+        """CL2-5. run-A's last check fails the RUNNER (exit 1) on any absolute /tmp|/home|/var|/root path in its register,
+        and FB-119's A8a pass note said `outside /tmp/tmux-<uid>` — every §A run since exited 1 with every row PASS."""
+        leaked = re.compile(r"""(^|[\s"'(])/(tmp|home|var|root)/""")
+        notes = [line for line in (IT / "run-A.sh").read_text().splitlines() if re.search(r"a_(pass|fail) A8a\b", line)]
+        self.assertEqual(len(notes), 2, notes)
+        for line in notes:
+            self.assertIsNone(leaked.search(line), line[:200])
+
     def test_the_real_harness_has_no_unsafe_kill_site(self):
         files = [str(IT / "lib.sh")] + sorted(str(p) for p in IT.glob("run-*.sh"))
         done = subprocess.run([sys.executable, str(self.tmp / "a8audit.py"), *files], capture_output=True, text=True)
