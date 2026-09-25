@@ -371,7 +371,7 @@ def expect_tripwire():
     finally:
         seen.extend(_read_from(offset))
         with open(TRIPWIRE_LOG, "r+") as log:
-            log.truncate(offset)
+            log.truncate(min(offset, _log_size()))     # a nested run may have charged and emptied the log already
 
 
 def _install_host_tripwire():
@@ -381,13 +381,14 @@ def _install_host_tripwire():
     real_run = unittest.TestCase.run
 
     def run(self, result=None):
-        offset = _log_size()
         outcome = real_run(self, result)
-        tripped = _read_from(offset)
+        #: The WHOLE log, not only what this run wrote (RV-31): a record from setUpClass, setUpModule, an import or
+        #: a cleanup was written outside every test's run, and is charged to the first test that ends after it.
+        tripped = _read_from(0)
         if tripped:
-            #: Taken back off the log once charged, so the NEXT test starts clean and nothing is charged twice.
+            #: Taken off the log once charged, so the NEXT test starts clean and nothing is charged twice.
             with open(TRIPWIRE_LOG, "r+") as log:
-                log.truncate(offset)
+                log.truncate(0)
             target = result if result is not None else outcome
             try:
                 raise HostReached("the host tripwire recorded, during this test: " + " | ".join(tripped))
@@ -401,11 +402,20 @@ def _install_host_tripwire():
 
 
 def _remove_suite_dir():
-    """The suite's own tmux servers, then its directory. Only the process that made the directory does this."""
+    """The suite's own tmux servers, then its directory. Only the process that made the directory does this.
+
+    RV-31: a record still on the log here was written after the last test ended (tearDownClass, tearDownModule, a
+    late child) and was charged to nobody, so the suite process itself fails."""
+    uncharged = _read_from(0)
     sockets = pathlib.Path(SUITE_TMUX_TMPDIR) / f"tmux-{os.getuid()}"
     for sock in (sockets.iterdir() if sockets.is_dir() else ()):
         subprocess.run([REAL_TMUX, "-S", str(sock), "kill-server"], capture_output=True)
     shutil.rmtree(SUITE_DIR, ignore_errors=True)
+    if uncharged:
+        sys.stderr.write("HOST TRIPWIRE: records not charged to any test (written after the last test ended):\n  "
+                         + "\n  ".join(uncharged) + "\n")
+        sys.stderr.flush()
+        os._exit(1)
 
 
 _install_host_tripwire()

@@ -121,6 +121,33 @@ class TheBoundaryInAChild(unittest.TestCase):
         self.assertIn(os.path.realpath(f"/tmp/tmux-{os.getuid()}"), [os.path.realpath(f) for f in got["foreign"]], got)
 
 
+    def run_owner_suite(self, body):
+        """A fresh suite process (its own boundary, its own exit) over one generated module."""
+        with tempfile.TemporaryDirectory() as tmp:
+            pathlib.Path(tmp, "probe_mod.py").write_text(
+                "import os, subprocess, unittest\nimport tests\n" + body)
+            env = {k: v for k, v in os.environ.items() if not k.startswith("FLEET_SUITE_") and k != "TMUX_TMPDIR"}
+            env["PYTHONPATH"] = f"{FIXTURES.parent.parent / 'src'}{os.pathsep}{tmp}"
+            return subprocess.run([sys.executable, "-m", "unittest", "probe_mod"], cwd=FIXTURES.parent.parent,
+                                  env=env, capture_output=True, text=True, timeout=120)
+
+    TRIP = 'subprocess.run([os.environ["FLEET_CLAUDE_BIN"], "agents", "--json"], capture_output=True)\n'
+
+    def test_a_trip_in_setUpClass_fails_the_next_test(self):
+        """RV-31. A record written outside any test's run is charged to the next test that runs."""
+        done = self.run_owner_suite("class C(unittest.TestCase):\n    @classmethod\n    def setUpClass(cls):\n"
+                                    "        " + self.TRIP + "    def test_x(self):\n        pass\n")
+        self.assertNotEqual(done.returncode, 0, done.stderr)
+        self.assertIn("tripwire", done.stderr)
+
+    def test_a_trip_after_the_last_test_fails_the_suite_at_exit(self):
+        """RV-31. Nothing runs after tearDownClass to be charged, so the suite process itself fails."""
+        done = self.run_owner_suite("class C(unittest.TestCase):\n    def test_x(self):\n        pass\n"
+                                    "    @classmethod\n    def tearDownClass(cls):\n        " + self.TRIP)
+        self.assertNotEqual(done.returncode, 0, done.stderr)
+        self.assertIn("not charged to any test", done.stderr)
+
+
 class TheTripwire(unittest.TestCase):
     """The tripwire refuses and RECORDS; the record fails the test that caused it. Every case aims it at a
     decoy server this case created, so if the tripwire were broken the call would reach only the decoy."""
