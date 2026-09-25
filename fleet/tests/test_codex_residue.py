@@ -233,6 +233,34 @@ class VerbCase(unittest.TestCase):
         self.assertEqual(left(self.f.instants), sorted(RESIDUE), out)
         self.assertIn("4200", out)
 
+    def test_close_waits_briefly_for_the_killed_codex_to_exit_then_sweeps(self):
+        """RV-36. `close` kills the pane and sweeps at once, while the worker's own codex is still exiting and still
+        names the root; without a short wait the close that caused the residue could never remove it."""
+        self.codex_worker("cx")
+        plant(self.f.instants)
+        fake_process(self.proc, 4500, "node", "/x/bin/codex", "--add-dir", str(self.f.instants.resolve()))
+        slept = []
+
+        def sleep(seconds):                    # the worker's codex exits during the first wait
+            slept.append(seconds)
+            shutil.rmtree(self.proc / "4500", ignore_errors=True)
+        self.f.sleep = sleep
+        code, out, err = self.f.run(["close", "--id", self.f.ids["cx"]])
+        self.assertEqual(code, 0, err)
+        self.assertEqual(left(self.f.instants), [], out)
+        self.assertTrue(slept, "the sweep never waited")
+
+    def test_close_gives_up_waiting_on_a_codex_that_stays(self):
+        self.codex_worker("cx")
+        plant(self.f.instants)
+        fake_process(self.proc, 4501, "node", "/x/bin/codex", "--add-dir", str(self.f.instants.resolve()))
+        slept = []
+        self.f.sleep = slept.append
+        code, out, err = self.f.run(["close", "--id", self.f.ids["cx"]])
+        self.assertEqual(code, 0, err)
+        self.assertEqual(left(self.f.instants), sorted(RESIDUE), out)
+        self.assertLessEqual(sum(slept), 3, slept)
+
     def test_close_of_a_claude_worker_does_not_sweep(self):
         self.f.worker("cl", live=False)
         plant(self.f.instants)
