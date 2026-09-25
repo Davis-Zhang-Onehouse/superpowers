@@ -87,7 +87,7 @@ class RuntimeConcurrencyTests(unittest.TestCase):
                 raise RuntimeError('test barrier timed out')
         def submit(name):
             state['submits'] += 1
-            state['frame'] = 'esc to interrupt'
+            state['frame'] = '❯ \n? for shortcuts · esc to interrupt'
         self.f.sessions.probes.capture_pane = lambda name: state['frame']
         self.f.sessions.probes.send_literal = insert
         self.f.sessions.probes.submit = submit
