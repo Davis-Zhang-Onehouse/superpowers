@@ -428,10 +428,6 @@ def _state_of(rec, folder_state, live, phase, parked, pane, sessions, instant, i
         # what "a renamed instant is followed" means. `abort` is terminal too: W2-21's fix reached
         # inflight and complete and never abort, and abort is legal.
         return COMPLETE, f"the instant folder is `-{folder_state}-`; the work is over", False
-    if rec.harvested_at:
-        return HARVESTED, f"record harvested at {rec.harvested_at}; the work is over", False
-    if rec.closed_at:
-        return CLOSED, f"record closed at {rec.closed_at}; the session was intentionally closed", False
     observed = sessions.observe(rec.tmux).state if (live and rec.runtime == 'codex') else None
     if observed in ('unknown', 'dialog'):
         #: `RV-25`. Only a dialog fleet SAW is on the pane for an attached human to answer. `unknown` is
@@ -467,6 +463,10 @@ def _state_of(rec, folder_state, live, phase, parked, pane, sessions, instant, i
                 f"{getattr(sessions, 'socket', '') or 'the default server'!r}. Nothing has been observed "
                 f"about whether the work is alive: export FLEET_TMUX_SOCKET={rec.tmux_socket} and ask "
                 f"again."), False
+        if rec.harvested_at:
+            return HARVESTED, f"record harvested at {rec.harvested_at}; the work is over", False
+        if rec.closed_at:
+            return CLOSED, f"record closed at {rec.closed_at}; the session was intentionally closed", False
         if rec.launched_at is None:
             # READ from an absent field, never stamped. Back-filling it here is exactly the defect that
             # made the predecessor's report a writer.

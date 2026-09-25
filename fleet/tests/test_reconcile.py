@@ -283,6 +283,32 @@ class TestReconcile(unittest.TestCase):
         self.assertEqual(subjects["deadWorker-07300301"].state, DEAD)
         self.assertTrue(_counts_against_cap(subjects["deadWorker-07300301"]))
 
+    def test_terminal_stamp_does_not_hide_a_live_busy_session(self):
+        self.fleet.launch("dt-deadWorker", 404, "ws1", BUSY_PANE)
+        for stamp in ("closed_at", "harvested_at"):
+            with self.subTest(stamp=stamp):
+                rec = self.fleet.store.read("deadWorker-07300301")
+                rec.closed_at = rec.harvested_at = None
+                setattr(rec, stamp, "2026-07-30T04:00:00Z")
+                self.fleet.store.write(rec)
+                subject = next(s for s in self.fleet.reconcile() if s.identity == rec.todo_id)
+                self.assertEqual(subject.state, RUNNING)
+                self.assertTrue(_counts_against_cap(subject))
+                self.assertTrue(subject.holds_slot)
+
+    def test_terminal_stamp_does_not_hide_a_live_slot_holder_without_session(self):
+        self.fleet.procs.append(LiveSession(pid=405, cwd=self.fleet.slots_dir / "ws1", name=None))
+        for stamp in ("closed_at", "harvested_at"):
+            with self.subTest(stamp=stamp):
+                rec = self.fleet.store.read("deadWorker-07300301")
+                rec.closed_at = rec.harvested_at = None
+                setattr(rec, stamp, "2026-07-30T04:00:00Z")
+                self.fleet.store.write(rec)
+                subject = next(s for s in self.fleet.reconcile() if s.identity == rec.todo_id)
+                self.assertEqual(subject.state, UNREACHABLE)
+                self.assertIn("405", subject.note)
+                self.assertTrue(_counts_against_cap(subject))
+
     def test_a_live_process_with_no_record_is_reported_as_an_unknown(self):
         # OBS-48. A records-first join is structurally blind to this session; process-first is the only
         # direction that can see it.
