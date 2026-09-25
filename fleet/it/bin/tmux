@@ -66,6 +66,20 @@ def server_pid(real, socket):
     return found.stdout.strip() if found.returncode == 0 else None
 
 
+def session_id(real, socket, name):
+    try:
+        found = subprocess.run([real, "-S", socket, "list-sessions", "-F",
+                                "#{session_name}\t#{session_id}"], capture_output=True, text=True, timeout=2)
+    except subprocess.TimeoutExpired:
+        return None
+    if found.returncode == 0:
+        for line in found.stdout.splitlines():
+            listed_name, _, listed_id = line.partition("\t")
+            if listed_name == name and listed_id:
+                return listed_id
+    return None
+
+
 def refresh_result(rows):
     """A runner may kill in its EXIT trap, after its leave row was written."""
     path = os.environ.get("IT_TMUX_AUDIT_RESULTS")
@@ -129,8 +143,8 @@ def main():
                 current_inode = None
             current_pid = server_pid(real, socket) if private and created and current_inode \
                 and (destructive or creates) else None
-            sessions = next((r["sessions"] for r in reversed(history)
-                             if r.get("socket") == socket and "sessions" in r), [])
+            session_ids = next((r["session_ids"] for r in reversed(history)
+                                if r.get("socket") == socket and "session_ids" in r), {})
             if destructive or creates:
                 if not private:
                     row.update(decision="deny", reason="socket outside section private directories or reserved name")
@@ -145,7 +159,9 @@ def main():
                 elif destructive and current_inode is None:
                     row.update(decision="deny", reason="created socket no longer exists")
                 elif command == "kill-session" and (not row["target"] or not row["target"].startswith("=")
-                                                    or row["target"][1:] not in sessions):
+                                                    or row["target"][1:] not in session_ids
+                                                    or session_id(real, socket, row["target"][1:]) !=
+                                                    session_ids.get(row["target"][1:])):
                     row.update(decision="deny", reason="session target is not an exact created session")
                 elif creates and not option(rest, "-s"):
                     row.update(decision="deny", reason="new session has no auditable name")
@@ -182,12 +198,25 @@ def main():
                 else:
                     row["socket_inode"] = owned_inode
                     row["server_pid"] = owned_pid
+                owned_sessions = dict(session_ids)
                 if command == "kill-server":
-                    row["sessions"] = []
-                else:
-                    listed = subprocess.run([real, "-S", socket, "list-sessions", "-F", "#{session_name}"],
-                                            capture_output=True, text=True)
-                    row["sessions"] = listed.stdout.splitlines() if listed.returncode == 0 else []
+                    owned_sessions.clear()
+                elif creates:
+                    new_name = option(rest, "-s")
+                    new_id = session_id(real, socket, new_name)
+                    if new_id:
+                        owned_sessions[new_name] = new_id
+                elif command == "kill-session":
+                    owned_sessions.pop(row["target"][1:], None)
+                elif command == "rename-session":
+                    old = option(rest, "-t")
+                    renamed = rest[-1] if rest else ""
+                    if old and old.startswith("=") and old[1:] in owned_sessions and renamed:
+                        old_id = owned_sessions.pop(old[1:])
+                        if session_id(real, socket, renamed) == old_id:
+                            owned_sessions[renamed] = old_id
+                row["session_ids"] = owned_sessions
+                row["sessions"] = sorted(owned_sessions)
             stream.seek(0, os.SEEK_END)
             stream.write(json.dumps(row) + "\n")
             stream.flush()

@@ -728,7 +728,7 @@ class RuntimeTmuxKillAudit(unittest.TestCase):
         started = self.tmux("-L", "own", "new-session", "-d", "-s", "mine", "sleep 30")
         self.assertEqual(started.returncode, 0, started.stderr)
         killed = self.tmux("-L", "own", "kill-session", "-t", "=mine")
-        self.assertEqual(killed.returncode, 0, killed.stderr)
+        self.assertEqual(killed.returncode, 0, killed.stderr + self.ledger.read_text())
         rows = [json.loads(line) for line in self.ledger.read_text().splitlines()]
         self.assertEqual([r["command"] for r in rows], ["new-session", "kill-session"])
         self.assertEqual(rows[-1]["decision"], "allow")
@@ -756,6 +756,40 @@ class RuntimeTmuxKillAudit(unittest.TestCase):
         self.assertEqual(self.tmux("-L", "foreign", "kill-server").returncode, 97)
         self.assertEqual(subprocess.run([self.real, "-S", str(socket), "has-session"],
                                         capture_output=True).returncode, 0)
+
+    def test_foreign_session_on_owned_server_is_not_registered_by_a_read(self):
+        socket = self.private / f"tmux-{os.getuid()}" / "own"
+        self.assertEqual(self.tmux("-L", "own", "new-session", "-d", "-s", "mine", "sleep 30").returncode, 0)
+        self.addCleanup(self.tmux, "-L", "own", "kill-server")
+        self.assertEqual(subprocess.run([self.real, "-S", str(socket), "new-session", "-d", "-s", "foreign", "sleep 30"],
+                                        capture_output=True).returncode, 0)
+        self.assertEqual(self.tmux("-L", "own", "list-sessions").returncode, 0)
+        result = self.tmux("-L", "own", "kill-session", "-t", "=foreign")
+        self.assertEqual(result.returncode, 97, result.stderr)
+        self.assertEqual(subprocess.run([self.real, "-S", str(socket), "has-session", "-t", "=foreign"],
+                                        capture_output=True).returncode, 0)
+
+    def test_replaced_session_name_is_not_still_owned(self):
+        socket = self.private / f"tmux-{os.getuid()}" / "own"
+        for name in ("mine", "stay"):
+            self.assertEqual(self.tmux("-L", "own", "new-session", "-d", "-s", name, "sleep 30").returncode, 0)
+        self.addCleanup(self.tmux, "-L", "own", "kill-server")
+        self.assertEqual(subprocess.run([self.real, "-S", str(socket), "kill-session", "-t", "=mine"],
+                                        capture_output=True).returncode, 0)
+        self.assertEqual(subprocess.run([self.real, "-S", str(socket), "new-session", "-d", "-s", "mine", "sleep 30"],
+                                        capture_output=True).returncode, 0)
+        result = self.tmux("-L", "own", "kill-session", "-t", "=mine")
+        self.assertEqual(result.returncode, 97, result.stderr)
+        self.assertEqual(subprocess.run([self.real, "-S", str(socket), "has-session", "-t", "=mine"],
+                                        capture_output=True).returncode, 0)
+
+    def test_renamed_created_session_keeps_its_identity(self):
+        self.assertEqual(self.tmux("-L", "own", "new-session", "-d", "-s", "mine", "sleep 30").returncode, 0)
+        self.addCleanup(self.tmux, "-L", "own", "kill-server")
+        renamed = self.tmux("-L", "own", "rename-session", "-t", "=mine", "renamed")
+        self.assertEqual(renamed.returncode, 0, renamed.stderr)
+        killed = self.tmux("-L", "own", "kill-session", "-t", "=renamed")
+        self.assertEqual(killed.returncode, 0, killed.stderr)
 
     def test_missing_ledger_fails_closed(self):
         env = dict(self.env)
