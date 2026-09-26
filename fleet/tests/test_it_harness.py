@@ -910,6 +910,24 @@ sys.exit(0)
         self.assertIn("KILL-AUDIT-X\tFAIL", results.read_text())
         self.assertIn("1 non-kill deny", results.read_text())
 
+    def test_audit_rewrite_tolerates_an_ownership_seed_without_decision(self):
+        env, _ = self.stateful_recording_tmux()
+        socket = self.private / f"tmux-{os.getuid()}" / "own"
+        socket.parent.mkdir()
+        socket.touch()
+        self.ledger.write_text(json.dumps({"socket": str(socket), "created": True,
+                                           "socket_inode": [socket.stat().st_dev, socket.stat().st_ino],
+                                           "server_pid": "777", "session_ids": {}}) + "\n")
+        results = self.tmp / "legacy-results.tsv"
+        results.write_text("case\tverdict\tevidence\tnote\n"
+                           "KILL-AUDIT-X\tPASS\tfleet/it/X/tmux-audit.jsonl\t0 kill(s): (none)\n")
+        env.update(IT_TMUX_AUDIT_RESULTS=str(results), IT_TMUX_AUDIT_SECTION="X")
+        created = self.tmux("-L", "own", "new-session", "-d", "-s", "mine", env=env)
+        self.assertEqual(created.returncode, 0, created.stderr)
+        killed = self.tmux("-L", "own", "kill-server", env=env)
+        self.assertEqual(killed.returncode, 0, killed.stderr)
+        self.assertIn("KILL-AUDIT-X\tPASS", results.read_text())
+
     def test_control_mode_is_refused_on_foreign_socket(self):
         env, calls = self.recording_tmux()
         for flag in ("-C", "-CC"):

@@ -155,13 +155,13 @@ def refresh_result(rows):
     if not path or not section or not os.path.isfile(path):
         return
     case = f"KILL-AUDIT-{os.environ.get('IT_TMUX_AUDIT_CASE_SECTION') or section}"
-    kills = [r for r in rows if r["command"] in ("kill-server", "kill-session")]
-    nonkill_denies = [r for r in rows if r["decision"] == "deny" and
-                     r["command"] not in ("kill-server", "kill-session")]
+    kills = [r for r in rows if r.get("command") in ("kill-server", "kill-session")]
+    nonkill_denies = [r for r in rows if r.get("decision") == "deny" and
+                     r.get("command") not in ("kill-server", "kill-session")]
     names = [r["command"] + "@" + os.path.basename(r["socket"]) +
              (":" + str(r["target"]) if r["target"] else "") + "[" + r["decision"] + "]"
              for r in kills]
-    verdict = "FAIL" if any(r["decision"] == "deny" for r in rows) else "PASS"
+    verdict = "FAIL" if any(r.get("decision") == "deny" for r in rows) else "PASS"
     note = f"{len(kills)} kill(s): " + (", ".join(names) if names else "(none)") + \
         f"; {len(nonkill_denies)} non-kill deny(s)"
     replacement = f"{case}\t{verdict}\tfleet/it/{section}/tmux-audit.jsonl\t{note}\n"
