@@ -180,7 +180,7 @@ class TestClaimIsAtomicUnderConcurrency(unittest.TestCase):
 
         n = 6
         ctx = mp.get_context("fork")
-        with ctx.Manager() as manager:
+        with tests.short_manager(ctx) as manager:   # FB-131: not under $TMPDIR
             barrier = manager.Barrier(n)
             with ctx.Pool(n) as procs:
                 won = procs.map(_race_claimant, [(str(home), str(slot), i, barrier) for i in range(n)])
@@ -255,7 +255,7 @@ class TestFreeingIsIdempotentUnderAConcurrentFreer(unittest.TestCase):
         import multiprocessing as mp
         self.stale_leases()
         ctx = mp.get_context("fork")
-        with ctx.Manager() as manager:
+        with tests.short_manager(ctx) as manager:   # FB-131: not under $TMPDIR
             barrier = manager.Barrier(2)
             with ctx.Pool(2) as procs:
                 got = procs.map(_reaper, [(str(self.home), barrier)] * 2)

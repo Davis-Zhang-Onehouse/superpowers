@@ -165,7 +165,8 @@ class TheTripwire(unittest.TestCase):
     decoy server this case created, so if the tripwire were broken the call would reach only the decoy."""
 
     def setUp(self):
-        self.tmp = pathlib.Path(tempfile.mkdtemp(prefix="fleet-tripwire-"))
+        #: FB-131. Under /tmp, not $TMPDIR: the decoy's socket must fit sun_path however deep TMPDIR is.
+        self.tmp = pathlib.Path(tempfile.mkdtemp(prefix="fleet-tripwire-", dir="/tmp"))
         self.addCleanup(shutil.rmtree, self.tmp, True)
         self.decoy_dir = self.tmp / "decoy-tmux"
         self.decoy_dir.mkdir()

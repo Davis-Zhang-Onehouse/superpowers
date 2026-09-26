@@ -29,6 +29,17 @@ FLEET_ENV = ("FLEET_HOME", "FLEET_INSTANTS", "FLEET_RELEASES", "FLEET_TMUX_SOCKE
              "FLEET_TRUST_WATCH_SECONDS", "CLAUDE_CODE_SANDBOXED")
 
 
+def short_manager(ctx=None):
+    """FB-131. An unstarted multiprocessing `SyncManager` (start it, or enter it with `with`) whose AF_UNIX listener
+    sits under a short /tmp root. `ctx.Manager()` binds it under $TMPDIR, and sun_path holds 107 bytes, so a deep
+    TMPDIR failed with "AF_UNIX path too long"."""
+    import multiprocessing
+    from multiprocessing.managers import SyncManager
+    root = tempfile.mkdtemp(prefix="itf-mp-", dir="/tmp")
+    atexit.register(shutil.rmtree, root, True)
+    return SyncManager(address=os.path.join(root, "m"), ctx=ctx or multiprocessing.get_context())
+
+
 @contextlib.contextmanager
 def hermetic_environment(instants, home=None):
     """The environment a fixture-driven `cli.main` sees: this fixture's instants directory, and NOTHING
@@ -251,7 +262,9 @@ if _OWNER:
         str(pathlib.Path(os.environ.get("TMUX_TMPDIR") or "/tmp").resolve() / f"tmux-{os.getuid()}"),
         os.environ.get("TMUX", "").split(",")[0]))))
     REAL_RUNTIMES = _real_runtimes(AMBIENT_PATH)
-    SUITE_DIR = tempfile.mkdtemp(prefix="fleet-suite-")
+    #: FB-131. Under /tmp, not $TMPDIR: the suite's tmux sockets live below it, and sun_path holds 107 bytes, so a
+    #: TMPDIR past ~43 characters failed every real-tmux case with "File name too long" / AF_UNIX path too long.
+    SUITE_DIR = tempfile.mkdtemp(prefix="fleet-suite-", dir="/tmp")
     SUITE_TMUX_TMPDIR = os.path.join(SUITE_DIR, "tmux")
     os.mkdir(SUITE_TMUX_TMPDIR)
     TRIPWIRE_LOG = os.path.join(SUITE_DIR, "tripwire.log")
