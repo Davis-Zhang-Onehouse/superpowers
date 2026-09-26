@@ -4352,7 +4352,10 @@ def _slot_gate_before_kill(ctx: Ctx, record, child: Path, verb: str, reap: bool 
     layer = ctx.sessions_for(record)
     #: V23-T (RV-34). A session another record owns is not this record's: the verb will not end it, so none of its
     #: processes is spared and a holder in this slot is judged as for a session that is gone.
-    live = bool(record.tmux) and _session_taken_by(ctx, record) is None and layer.alive(record.tmux)
+    taken = _session_taken_by(ctx, record)
+    live = bool(record.tmux) and taken is None and layer.alive(record.tmux)
+    #: OR-2. Running, but another record's: the refusal says so rather than "not running".
+    owned_elsewhere = taken is not None and layer.alive(record.tmux)
     #: `RV-33`. What the real call then does is the verb's own, and the two differ (see the docstring).
     after_an_undecided_gate = (
         "the real call closes the session, waits once more, releases, and names the partial state if a "
@@ -4415,12 +4418,16 @@ def _slot_gate_before_kill(ctx: Ctx, record, child: Path, verb: str, reap: bool 
         return undecided
     why = (f"Those pid(s) are not processes of session {record.tmux!r}, so closing it would not free the "
            f"slot." if live else
+           f"Session {record.tmux} is running but belongs to {taken.todo_id}, so this {verb} leaves it alone "
+           f"and nothing it closes would free the slot." if owned_elsewhere else
            f"Session {record.tmux or '(none)'} is not running, so nothing this abort closes would free "
            f"the slot.")
+    state = ("still running" if live else f"still running (owned by {taken.todo_id}, left alone)"
+             if owned_elsewhere else "not running")
     raise Refused(
         f"{verb} of {child.name} refused before doing anything: {found} {why} They were given "
         f"{ABORT_RELEASE_WAIT_S}s to exit. Nothing was closed, released, renamed, applied or written — "
-        f"session {record.tmux or '(none)'} {'still running' if live else 'not running'}, slot "
+        f"session {record.tmux or '(none)'} {state}, slot "
         f"{record.slot!r} still leased, {child} unchanged, the roadmap untouched. Re-run the identical "
         f"`{verb}` command once the pid(s) named above exit." + _named_suffix(named),
         clears_when=found.clears_when,

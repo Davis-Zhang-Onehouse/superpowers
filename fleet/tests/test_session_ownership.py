@@ -419,7 +419,12 @@ class TheTeardownVerbsLeaveASessionThatIsNotTheirs(unittest.TestCase):
         self.assertNotEqual(code, 0, out)
         self.assertTrue(old.exists(), "nothing was renamed")
         self.assertFalse((old / ".fleet" / "abort.json").exists(), "nothing was written")
-        self.assertIn("is not running", err)
+        #: OR-2 (v23-t close review). `dt-mile` IS running — it is the re-dispatch's; the refusal said "is not running".
+        owner = fleet.ids["mile"]
+        self.assertIn(f"Session dt-mile is running but belongs to {owner}", err)
+        self.assertIn(f"session dt-mile still running (owned by {owner}, left alone)", err)
+        self.assertNotIn("is not running", err)
+        self.assertNotIn("dt-mile not running", err)
 
     def test_the_left_running_note_reads_an_owner_that_is_still_starting(self):
         """RV-41 (closure 1). Under D-4 the owner may not have launched yet; the note said `launched None`."""
