@@ -246,7 +246,9 @@ def _claude_path(rows: list) -> Optional[str]:
         return None
     start, hint = span
     screen = rows[start:hint]
-    if not any("one you trust" in row for row in screen):
+    #: OR-4. On the screen's whitespace-joined text, not one row: the TUI word-wraps the question at the pane width,
+    #: and the break can fall inside the phrase. Anchoring is the hint and option rows, both inside the window.
+    if "one you trust" not in " ".join(" ".join(screen).split()):
         return None
     header = _last(screen, lambda row: row.strip() == "Accessing workspace:")
     if header is None:
