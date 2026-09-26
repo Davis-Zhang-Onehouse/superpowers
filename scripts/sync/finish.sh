@@ -55,6 +55,8 @@ while rebase_in_progress; do
   # became empty, object store unwritable, a hook or signer refused). Discarding it leaves
   # the one-line "inspect the worktree" message and nothing to act on.
   if ! continue_out="$(GIT_EDITOR=true g "$WORKTREE" rebase --continue 2>&1)"; then
+    #: RV-S6Y-1: the continue stopped on the NEXT commit's conflict; the loop's top settles or reports it.
+    if g "$WORKTREE" diff --name-only --diff-filter=U | grep -q .; then continue; fi
     echo "git rebase --continue failed with no unmerged files — inspect $WORKTREE."
     echo "git said:"
     printf '%s\n' "$continue_out" | sed 's/^/    /'
@@ -63,6 +65,7 @@ while rebase_in_progress; do
 done
 
 auto="$(printf '%s' "$auto" | grep . | sort -u | tr '\n' ',' || true)"
-finalize_live "$NEW" "manual-resolved" "${auto%,}"
+auto="${auto%,}"
+finalize_live "$NEW" "$([ -n "$auto" ] && echo manual+manifest-resolved || echo manual-resolved)" "$auto"
 rm -f "$STATUS_FILE" "$PENDING_FILE"
 echo "Resolved and applied: live now on $NEW. Changes load on your next Claude session."

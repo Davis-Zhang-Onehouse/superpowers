@@ -16,7 +16,7 @@ FILES=(lib.sh sync.sh finish.sh rollback.sh apply.sh status.sh)
 CTRL="" MODE=write
 while [ $# -gt 0 ]; do
   case "$1" in
-    --ctrl) CTRL="${2:-}"; shift 2 ;;
+    --ctrl) [ $# -ge 2 ] || { echo "refresh-control: --ctrl needs a directory" >&2; exit 2; }; CTRL="$2"; shift 2 ;;
     --check) MODE=check; shift ;;
     --dry-run) MODE=dry-run; shift ;;
     *) echo "refresh-control: unknown argument '$1' (--ctrl <dir> [--check|--dry-run])" >&2; exit 2 ;;
@@ -32,7 +32,7 @@ for f in "${FILES[@]}"; do
   case "$MODE" in
     check)   echo "DIFFERS  $f" ;;
     dry-run) echo "would-write $f" ;;
-    write)   tmp="$(mktemp "$CTRL/.$f.XXXXXX")"; cp "$SRC/$f" "$tmp"; chmod 755 "$tmp"; mv -f "$tmp" "$CTRL/$f"; echo "wrote    $f" ;;
+    write)   tmp="$(mktemp "$CTRL/.$f.XXXXXX")"; cp "$SRC/$f" "$tmp"; chmod --reference="$CTRL/$f" "$tmp" 2>/dev/null || chmod --reference="$SRC/$f" "$tmp"; mv -f "$tmp" "$CTRL/$f"; echo "wrote    $f" ;;
   esac
 done
 [ "$MODE" = check ] && [ "$differ" = 1 ] && exit 1

@@ -69,4 +69,31 @@ run_sync
 assert_file "$CTRL/STATUS"
 assert_grep 'skills/foo/SKILL.md' "$CTRL/STATUS"
 . "$CTRL/state"; assert_eq "$BASE_TAG" "v1.0.1" base-still-old
+
+# 4. RV-S6Y-1/6: after a manual fix, finish.sh settles EVERY later release commit's version conflict in ONE run
+fresh
+g "$FORK" checkout -q live
+printf 'line1\nMY-EDIT\nline3\n' > "$FORK/skills/foo/SKILL.md"; g "$FORK" commit -qam "custom: edit foo line2"
+fleet_release 0.1.0; fleet_release 0.2.0
+printf 'line1\nUPSTREAM-EDIT\nline3\n' > "$UPSTREAM/skills/foo/SKILL.md"
+up_release v1.1.0 1.1.0
+run_sync
+assert_file "$CTRL/STATUS"                                         # the skill edit is a real conflict
+printf 'line1\nMY-EDIT\nline3\n' > "$WORKTREE/skills/foo/SKILL.md"; g "$WORKTREE" add skills/foo/SKILL.md
+run_finish                                                          # one run, two release commits after the fix
+assert_nofile "$CTRL/STATUS"
+. "$CTRL/state"; assert_eq "$BASE_TAG" "v1.1.0" finish-base-advanced
+assert_eq "$(version_of "$FORK/package.json")" "1.1.0+fleet.0.2.0" finish-package-version
+assert_grep '"result":"manual+manifest-resolved"' "$CTRL/history.ndjson"
+
+# 5. RV-S6Y-3: a recreated MERGE whose version line conflicts pauses (its "theirs" is the second parent)
+fresh
+g "$FORK" checkout -q live; fleet_release 1
+g "$FORK" checkout -q -b side; fleet_release 2
+g "$FORK" checkout -q live; fleet_release 3
+g "$FORK" merge -q --no-ff side -m "merge side" >/dev/null 2>&1 || { manifests_at "$FORK" "1.0.1+fleet.3"; g "$FORK" add -A; g "$FORK" commit -qm "merge side (kept fleet.3)"; }
+up_release v1.1.0 1.1.0
+run_sync
+assert_file "$CTRL/STATUS"
+assert_grep 'auto-resolved before the pause' "$CTRL/history.ndjson"    # RV-S6Y-5: said in history, not only STATUS
 pass
