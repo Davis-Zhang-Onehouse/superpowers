@@ -34,6 +34,9 @@ class PaneObservation:
     state: PaneState
     draft: str | None = None
     watcher: str = ""
+    #: S6 OR-1. Claude only: the input box's TEXT width, read off its located lower border (`CLAUDE_BOX_MARGIN` cells
+    #: narrower than the rule), or None when no border is located. `messaging` wraps a scrolled tail at this one width.
+    width: int | None = None
 
 
 def validate_runtime(value: str) -> RuntimeName:
@@ -101,10 +104,11 @@ def observe(runtime: RuntimeName, frame: str) -> PaneObservation:
         caret = _claude_caret_index(rows)
         draft = _claude_draft(rows, frame)
         watcher = claude_watchers(frame)
+        width = claude_box_width(rows)
         if claude_busy(frame):
-            return PaneObservation("busy" if caret is not None else "unknown", draft, watcher)
+            return PaneObservation("busy" if caret is not None else "unknown", draft, watcher, width)
         if draft:
-            return PaneObservation("queued", draft, watcher)
+            return PaneObservation("queued", draft, watcher, width)
         #: RV-19: idle needs the LOCATED caret, exactly as busy does — a caret echoed in the transcript above a
         #: box whose caret row cannot be read is not evidence of an empty box.
         prompt = caret is not None
@@ -184,6 +188,21 @@ def _claude_draft(rows, frame):
             content.append(_undim(_cells(row)[2:]))
     draft = '\n'.join(content).strip()
     return None if not draft or _is_placeholder(draft) else draft
+
+
+#: S6 OR-1. How many cells narrower than its border rule the box's text wraps: measured on Claude Code 2.1.282, an
+#: 80-cell rule around rows wrapped at 76 (every real scrolled frame, v23-s). Only 80 columns is measured; a wrong
+#: margin at another width can only refuse a tail (the send ends uncertain), never confirm foreign text.
+CLAUDE_BOX_MARGIN = 4
+
+
+def claude_box_width(rows):
+    """The input box's text width from its located lower border, or None when no border is located."""
+    border = _claude_border_index(rows)
+    if border is None:
+        return None
+    cells = len(plain(rows[border]).strip())
+    return cells - CLAUDE_BOX_MARGIN if cells > CLAUDE_BOX_MARGIN else None
 
 
 def _claude_border_index(rows):

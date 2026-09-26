@@ -73,7 +73,7 @@ class MessagingTests(unittest.TestCase):
                 tail = self.scrolled(name)
                 self.assertEqual(tail.state, 'queued')
                 self.assertTrue(text.startswith('Coordinator') and not tail.draft.startswith('Coordinator'))
-                self.assertEqual(CONFIRMED_BY_DRAFT_TAIL, confirms('claude', tail.draft, text))
+                self.assertEqual(CONFIRMED_BY_DRAFT_TAIL, confirms('claude', tail.draft, text, tail.width))
                 layer, events = self.runtime_fixture('claude', [PaneObservation('idle'), tail, tail,
                                                                 PaneObservation('busy')])
                 recorded = []
@@ -82,6 +82,15 @@ class MessagingTests(unittest.TestCase):
                                       sleep=lambda _: None, recorder=lambda o, c: recorded.append((o, c))))
                 self.assertEqual(events, [('literal', text), ('submit', None)])
                 self.assertEqual(recorded, [(SUBMITTED, CONFIRMED_BY_DRAFT_TAIL)])
+
+    def test_observe_reads_the_box_text_width_off_its_border(self):
+        """S6 OR-1. The box's text width comes from the frame, not from a scan: every real scrolled frame is an 80-cell
+        border around rows wrapped at 76 (v23-s measured 80 -> 76). A frame with no located border has no width."""
+        for name in ('claude-scrolled-box-282.frame', 'claude-scrolled-box-3rows-282.frame',
+                     'claude-scrolled-box-2lines-282.frame', 'claude-scrolled-box-2spaces-282.frame'):
+            with self.subTest(frame=name):
+                self.assertEqual(76, self.scrolled(name).width)
+        self.assertIsNone(observe('claude', '> hello\n').width)
 
     def test_a_tall_two_line_message_confirms_by_its_last_line_rows(self):
         """RV-24. Each hard line wraps on its own: a real 2.1.282 box at 80x20 holding "Reply OK." plus one long line shows
@@ -92,11 +101,11 @@ class MessagingTests(unittest.TestCase):
         text = 'Reply OK.\n' + long + '\n'
         tail = self.scrolled('claude-scrolled-box-2lines-282.frame')
         self.assertTrue(tail.draft.startswith('part 4 of eight.'))
-        self.assertEqual(CONFIRMED_BY_DRAFT_TAIL, confirms('claude', tail.draft, text))
+        self.assertEqual(CONFIRMED_BY_DRAFT_TAIL, confirms('claude', tail.draft, text, tail.width))
         rows = self.wrapped('First line of three.'.split()) + [''] + self.wrapped(long.split())
-        self.assertEqual(CONFIRMED_BY_DRAFT_TAIL, confirms('claude', '\n'.join(rows[-4:]), 'First line of three.\n\n' + long))
+        self.assertEqual(CONFIRMED_BY_DRAFT_TAIL, confirms('claude', '\n'.join(rows[-4:]), 'First line of three.\n\n' + long, width=76))
         with self.subTest('a head-lost first line re-wrapped into the last line is still refused'):
-            self.assertIsNone(confirms('claude', '\n'.join(self.wrapped(('Reply OK. ' + long).split())[-5:]), text))
+            self.assertIsNone(confirms('claude', '\n'.join(self.wrapped(('Reply OK. ' + long).split())[-5:]), text, width=76))
 
     @staticmethod
     def drawn(line, width=76):
@@ -120,12 +129,12 @@ class MessagingTests(unittest.TestCase):
         tail = self.scrolled('claude-scrolled-box-2spaces-282.frame')
         self.assertIn('nine.  Two', tail.draft)
         self.assertEqual([r.strip() for r in tail.draft.split('\n')], self.drawn(real)[-5:])   # the model is the real one
-        self.assertEqual(CONFIRMED_BY_DRAFT_TAIL, confirms('claude', tail.draft, real + '\n'))
+        self.assertEqual(CONFIRMED_BY_DRAFT_TAIL, confirms('claude', tail.draft, real + '\n', tail.width))
         #: One of the messages whose drawn rows a squashed wrap never reproduces at any width (found by search).
         words = 'alpha beta gamma delta epsilon zeta eta theta iota kappa lambda mu nu xi omicron pi rho sigma tau'.split()
         text = '  '.join('%s %s sentence number %d of the list.' % (words[i * 2 % 19], words[i * 3 % 19], i)
                          for i in range(1, 12))
-        self.assertEqual(CONFIRMED_BY_DRAFT_TAIL, confirms('claude', '\n'.join(self.drawn(text)[-5:]), text))
+        self.assertEqual(CONFIRMED_BY_DRAFT_TAIL, confirms('claude', '\n'.join(self.drawn(text)[-5:]), text, width=76))
 
     def test_a_tail_seen_once_is_never_submitted(self):
         """The tail cannot show the head, so it must agree across two consecutive frames before any Enter."""
@@ -169,7 +178,7 @@ class MessagingTests(unittest.TestCase):
         words = text.split()
         rows = self.wrapped(words)
         tail3 = '\n'.join(rows[-3:])                     # the last 3 rows of the wrapped message: the control
-        self.assertEqual(CONFIRMED_BY_DRAFT_TAIL, confirms('claude', tail3, text))
+        self.assertEqual(CONFIRMED_BY_DRAFT_TAIL, confirms('claude', tail3, text, width=76))
         cases = {
             'two rows are too few to be a scrolled box': '\n'.join(rows[-2:]),
             'a suffix cut mid-word is not a row start': '\n'.join(rows[-3:])[3:],
@@ -185,18 +194,24 @@ class MessagingTests(unittest.TestCase):
         }
         for why, draft in cases.items():
             with self.subTest(why):
-                self.assertIsNone(confirms('claude', draft, text))
+                self.assertIsNone(confirms('claude', draft, text, width=76))
         with self.subTest('KNOWN ACCEPT (RV-25): a head loss whose re-wrap re-converges before the visible rows'):
             #: Greedy wrapping resynchronises: this message with its first 10 words lost, re-wrapped, ends in the SAME
             #: 5 rows. No frame can tell that from a scroll, so it confirms. This is the residual the skill states.
             self.assertEqual(self.wrapped(words[10:])[-5:], rows[-5:])
-            self.assertEqual(CONFIRMED_BY_DRAFT_TAIL, confirms('claude', '\n'.join(self.wrapped(words[10:])[-5:]), text))
+            self.assertEqual(CONFIRMED_BY_DRAFT_TAIL, confirms('claude', '\n'.join(self.wrapped(words[10:])[-5:]), text, width=76))
         with self.subTest('codex is not measured to scroll, so it never confirms by tail'):
-            self.assertIsNone(confirms('codex', tail3, text))
+            self.assertIsNone(confirms('codex', tail3, text, width=76))
         with self.subTest('the whole text is still the strong kind'):
             self.assertEqual(CONFIRMED_BY_DRAFT, confirms('claude', '\n'.join(rows), text))
-        with self.subTest('the measured width is not the only one: any consistent width confirms'):
-            self.assertEqual(CONFIRMED_BY_DRAFT_TAIL, confirms('claude', '\n'.join(self.wrapped(words, 150)[-3:]), text))
+        with self.subTest('S6 OR-1: a tail that lines up only at ANOTHER width is refused at the box\'s real width'):
+            #: v23-s scanned every width and confirmed this; on a 3-row box that let 19 of 63 head losses through
+            #: (5 of 63 at the real width 76). The box's width is read from its border, so no other width is tried.
+            self.assertIsNone(confirms('claude', '\n'.join(self.wrapped(words, 150)[-3:]), text, width=76))
+            self.assertEqual(CONFIRMED_BY_DRAFT_TAIL,
+                             confirms('claude', '\n'.join(self.wrapped(words, 150)[-3:]), text, width=150))
+        with self.subTest('S6 OR-1: a box whose width is unknown (no located border) never confirms by tail'):
+            self.assertIsNone(confirms('claude', tail3, text))
 
     def test_the_retry_waits_for_the_same_tail_evidence(self):
         """After Enter the scrolled box still shows the tail: one retry on the same evidence, then the distinct
@@ -218,8 +233,8 @@ class MessagingTests(unittest.TestCase):
         """RV-11. Both retry frames confirming is not the same evidence: a tail that CHANGED between them, even into
         another valid tail of our message, refuses the retry."""
         tail = self.scrolled('claude-scrolled-box-282.frame')
-        other = PaneObservation('queued', '\n'.join(tail.draft.split('\n')[1:]))
-        self.assertEqual(CONFIRMED_BY_DRAFT_TAIL, confirms('claude', other.draft, self.SCROLLED_TEXT))
+        other = PaneObservation('queued', '\n'.join(tail.draft.split('\n')[1:]), width=tail.width)
+        self.assertEqual(CONFIRMED_BY_DRAFT_TAIL, confirms('claude', other.draft, self.SCROLLED_TEXT, other.width))
         with tempfile.TemporaryDirectory() as directory:
             layer, events = self.runtime_fixture('claude', [PaneObservation('idle'), tail, tail, tail, other])
             with self.assertRaisesRegex(FleetError, 'retry refused'):
