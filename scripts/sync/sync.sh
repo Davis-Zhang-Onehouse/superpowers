@@ -64,11 +64,16 @@ continue_step() { GIT_EDITOR=true g "$WORKTREE" rebase --continue; }
 # Upper bound on continue attempts: at most one per replayed commit (+ margin).
 maxsteps=$(( $(g "$WORKTREE" rev-list --count "$BASE_TAG..$LIVE_BRANCH") + 2 ))
 result="clean"
+auto=""                                           # manifests resolve_manifest_versions settled (D-136)
 if ! rebase_step; then
   steps=0
   while true; do
     if g "$WORKTREE" diff --name-only --diff-filter=U | grep -q .; then
-      result="paused"; break                      # genuine new conflict
+      if resolved="$(resolve_manifest_versions "$WORKTREE")"; then
+        auto="$auto$resolved"$'\n'                  # version-only manifest conflict: resolved and staged
+      else
+        result="paused"; break                    # genuine new conflict
+      fi
     fi
     steps=$((steps + 1))
     if [ "$steps" -gt "$maxsteps" ]; then
@@ -78,6 +83,9 @@ if ! rebase_step; then
     # else: rerere staged this step; loop to advance to the next commit
   done
 fi
+
+auto="$(printf '%s' "$auto" | grep . | sort -u | tr '\n' ',' || true)"; auto="${auto%,}"
+if [ -n "$auto" ] && [ "$result" != "paused" ]; then result="manifest-resolved"; fi
 
 if [ "$result" = "paused" ]; then
   conflicts="$(g "$WORKTREE" diff --name-only --diff-filter=U | tr '\n' ',' )"
@@ -90,10 +98,11 @@ if [ "$result" = "paused" ]; then
     echo "    # edit the files above: resolve <<<<<<< ======= >>>>>>> markers"
     echo "    git add -A"
     echo "    \"$CONTROL_DIR/finish.sh\"   # continues the rebase, adopts into live, refreshes the plugin"
+    if [ -n "$auto" ]; then echo "  (Version-only manifest conflicts were auto-resolved earlier in this rebase: $auto)"; fi
   } > "$STATUS_FILE"
   log_event paused "$NEW" "" "${conflicts%,}"
   exit 0
 fi
 
 # Success — adopt the rebased branch into live and snapshot.
-finalize_live "$NEW" "$result"
+finalize_live "$NEW" "$result" "$auto"

@@ -30,7 +30,13 @@ rebase_in_progress() {
 # remain (the one thing a human must fix), telling the user exactly what to do.
 maxsteps=$(( $(g "$WORKTREE" rev-list --count "$BASE_TAG..$LIVE_BRANCH" 2>/dev/null || echo 200) + 5 ))
 steps=0
+auto=""
 while rebase_in_progress; do
+  #: D-136. A later replayed release commit meets the same version-only manifest conflict: settle it here too.
+  if g "$WORKTREE" diff --name-only --diff-filter=U | grep -q . \
+     && resolved="$(resolve_manifest_versions "$WORKTREE")"; then
+    auto="$auto$resolved"$'\n'
+  fi
   if g "$WORKTREE" diff --name-only --diff-filter=U | grep -q .; then
     echo "⚠ Unresolved conflicts remain — edit these, then re-run finish.sh:"
     g "$WORKTREE" diff --name-only --diff-filter=U | sed 's/^/    /'
@@ -56,6 +62,7 @@ while rebase_in_progress; do
   fi
 done
 
-finalize_live "$NEW" "manual-resolved"
+auto="$(printf '%s' "$auto" | grep . | sort -u | tr '\n' ',' || true)"
+finalize_live "$NEW" "manual-resolved" "${auto%,}"
 rm -f "$STATUS_FILE" "$PENDING_FILE"
 echo "Resolved and applied: live now on $NEW. Changes load on your next Claude session."
