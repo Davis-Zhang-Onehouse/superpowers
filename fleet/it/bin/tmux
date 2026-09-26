@@ -164,6 +164,9 @@ def set_option_operand(words, command):
 def can_dispatch_commands(command, rest):
     # A compound argv can execute a later command after the first one. These tmux commands can
     # execute commands supplied as arguments or from a file; their effect is not proved by argv[0].
+    # new-session, new-window, split-window, respawn-pane/window and send-keys -X copy-pipe*
+    # take shell operands but are allowed by design: tmux launched inside a pane is outside
+    # this argv boundary, as documented for the IT harness.
     dispatchers = ("source-file", "if-shell", "confirm-before", "run-shell", "bind-key",
                    "set-hook", "command-prompt", "display-menu", "display-popup",
                    "display-panes", "choose-tree", "choose-client", "choose-buffer",
