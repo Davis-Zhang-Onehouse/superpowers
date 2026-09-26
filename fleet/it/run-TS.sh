@@ -32,7 +32,9 @@ REAL_CLAUDE="${P_REAL_CLAUDE:-/home/ubuntu/.local/bin/claude}"
 TS_WAIT="${TS_WAIT:-25}"
 
 #: Final review M4. The control must stay logged out, so no model is ever called: no ambient credential reaches claude.
-unset ANTHROPIC_API_KEY ANTHROPIC_AUTH_TOKEN CLAUDE_CODE_OAUTH_TOKEN
+#: OR-3 (v23-p review). CLAUDE_CODE_SANDBOXED too: set (a sandboxed agent's shell), Claude skips the trust screen
+#: under test, and the section would fail on the environment, not the product.
+unset ANTHROPIC_API_KEY ANTHROPIC_AUTH_TOKEN CLAUDE_CODE_OAUTH_TOKEN CLAUDE_CODE_SANDBOXED
 it_section TS
 it_fresh_store
 OUT="$EV/out"; rm -rf "$OUT"; mkdir -p "$OUT"
