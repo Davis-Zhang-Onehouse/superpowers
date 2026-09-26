@@ -473,6 +473,43 @@ class GitCase(unittest.TestCase):
                          "the patch-id delta must carry exactly the unreleased commits, whatever the "
                          "rebase did to their hashes")
 
+    def test_delta_survives_a_rebase_whose_conflict_resolution_changes_the_patch_id(self):
+        # RV-26. The nightly sync auto-resolves each replayed release commit's version-manifest conflict to
+        # the NEW upstream version plus our `+fleet.x` suffix, so the rewritten commit carries a different
+        # patch-id and `git cherry` alone re-listed all 43 shipped `fleet vX.Y.Z` commits in the next
+        # changelog. A rebase keeps author, author date and subject, and that identity survives any
+        # conflict resolution.
+        import os
+        import subprocess
+        from fleet.release_git import Repo
+        def commit(message, body):
+            (self.repo / "manifest.json").write_text(body)
+            self.run("add", "manifest.json")
+            self.run("commit", "-q", "-m", message)
+        commit("upstream v1.0.0", '{"version": "1.0.0"}\n')
+        self.run("branch", "upstream")
+        commit("fleet v0.1.0", '{"version": "1.0.0+fleet.0.1.0"}\n')             # our release commit
+        self.run("tag", "-a", "fleet/v0.1.0", "-m", "r1")
+        self._commit("b.txt")
+        self.run("checkout", "-q", "upstream")
+        commit("upstream v1.0.1", '{"version": "1.0.1"}\n')                       # upstream bumps the line
+        self.run("checkout", "-q", "live")
+        env = dict(os.environ, GIT_EDITOR="true")
+        stopped = subprocess.run(["git", "-C", str(self.repo), "rebase", "-q", "upstream"],
+                                 capture_output=True, text=True, env=env)
+        self.assertNotEqual(stopped.returncode, 0, "fixture is wrong: the rebase must stop on the manifest")
+        (self.repo / "manifest.json").write_text('{"version": "1.0.1+fleet.0.1.0"}\n')
+        self.run("add", "manifest.json")
+        subprocess.run(["git", "-C", str(self.repo), "rebase", "--continue"], check=True,
+                       capture_output=True, text=True, env=env)
+        self.assertFalse(Repo(self.repo).is_ancestor("fleet/v0.1.0", "HEAD"))
+        cherry = self.run("cherry", "fleet/v0.1.0", "HEAD").stdout
+        self.assertEqual(cherry.count("+ "), 3, "fixture is wrong: the resolved commit must look new to cherry")
+        after = sorted(s for _, s in Repo(self.repo).delta("fleet/v0.1.0"))
+        self.assertEqual(after, ["add b.txt", "upstream v1.0.1"],
+                         "the shipped release commit came back after its conflict was resolved; only the "
+                         "unreleased commit and upstream's genuinely new one belong in the delta")
+
     def test_a_rename_out_of_fleet_is_named_on_BOTH_sides_and_stays_requiring(self):
         """THE case every exemption test is blind to.
 

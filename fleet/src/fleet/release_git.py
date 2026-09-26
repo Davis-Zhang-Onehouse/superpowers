@@ -89,18 +89,45 @@ class Repo:
         wrong without being empty: it re-lists changes the previous release already shipped, under new
         hashes. `git cherry` compares patch-ids, which a rebase preserves, so a rewritten commit is
         still recognised as the same change and is reported once, in the release that first carried it.
+
+        A patch-id survives a CLEAN replay only (RV-26). The sync auto-resolves every replayed release
+        commit's version-manifest conflict to the new upstream version plus our `+fleet.x` suffix, which
+        changes that commit's patch-id, and `cherry` then re-listed all 43 shipped `fleet vX.Y.Z` commits.
+        So a `+` commit whose identity -- author email, author date, subject, all of which a rebase keeps
+        whatever it does to the diff -- matches a commit reachable from `prev_tag` counts as shipped too.
         """
         if prev_tag is None:
             return []
         out = self._git("cherry", "-v", prev_tag, "HEAD")
-        commits = []
+        candidates = []
         for line in out.splitlines():
             if not line.startswith("+ "):
                 continue                      # "- " means the change is already in the reference
             rest = line[2:]
             sha, _, subject = rest.partition(" ")
-            commits.append((sha[:7], subject.strip()))
+            candidates.append(sha)
+        if not candidates:
+            return []
+        shipped = {self._identity(row) for row in
+                   self._git("log", "--format=%ae%x00%at%x00%s", prev_tag).splitlines() if row}
+        rows = {}
+        for row in self._git("log", "--no-walk=unsorted", "--format=%H%x00%ae%x00%at%x00%s",
+                             *candidates).splitlines():
+            sha, _, identity = row.partition("\x00")
+            rows[sha] = identity
+        commits = []
+        for sha in candidates:                # cherry's order, oldest first
+            identity = self._identity(rows.get(sha, ""))
+            if identity in shipped:
+                continue                      # the same commit, rewritten by a rebase that changed its diff
+            commits.append((sha[:7], identity[-1].strip()))
         return commits
+
+    @staticmethod
+    def _identity(row: str) -> tuple:
+        """`(author email, author date, subject)` from one `%ae%x00%at%x00%s` row."""
+        parts = row.split("\x00", 2)
+        return tuple(parts) if len(parts) == 3 else (row,)
 
     def file_at(self, ref: str, path: str):
         """`(code, contents)` for one file at one ref -- git's exit status ALONGSIDE what it printed.
