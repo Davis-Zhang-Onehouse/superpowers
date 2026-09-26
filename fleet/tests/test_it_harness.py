@@ -894,6 +894,14 @@ sys.exit(0)
         self.assertIn(["-L", "own", "display", "-p", "#{pane_current_path}"],
                       [json.loads(line) for line in calls.read_text().splitlines()])
 
+    def test_control_mode_is_refused_on_foreign_socket(self):
+        env, calls = self.recording_tmux()
+        for flag in ("-C", "-CC"):
+            with self.subTest(flag=flag):
+                result = self.tmux("-L", "default", flag, "list-sessions", env=env)
+                self.assertEqual(result.returncode, 97, result.stderr)
+        self.assertFalse(calls.exists(), "control mode reached fake real-tmux")
+
     def test_nonprivate_print_flag_must_be_an_option_not_a_target_value(self):
         env, calls = self.recording_tmux()
         for command in (("display-message", "-t=people", "hello"),

@@ -15,10 +15,13 @@ def parse(argv):
     socket = None
     name = None
     shell_code = False
+    control_mode = False
     i = 0
     while i < len(argv) and argv[i].startswith("-") and argv[i] not in ("-", "--"):
         option = argv[i]
         for offset, flag in enumerate(option[1:], 1):
+            if flag == "C":
+                control_mode = True
             if flag in "cfLST":
                 value = option[offset + 1:]
                 if not value:
@@ -46,7 +49,7 @@ def parse(argv):
             socket = os.environ["TMUX"].split(",", 1)[0]
         else:
             socket = os.path.join(directory, f"tmux-{os.getuid()}", "default")
-    return os.path.realpath(socket), command, rest, shell_code
+    return os.path.realpath(socket), command, rest, shell_code, control_mode
 
 
 def canonical_command(command):
@@ -177,7 +180,7 @@ def refresh_result(rows):
 
 def main():
     argv = sys.argv[1:]
-    socket, command, rest, shell_code = parse(argv)
+    socket, command, rest, shell_code, control_mode = parse(argv)
     real = os.environ.get("IT_TMUX_REAL", "/usr/bin/tmux")
     if os.path.realpath(real) == os.path.realpath(__file__):
         print("IT tmux audit: real tmux resolves to the audit shim", file=sys.stderr)
@@ -277,6 +280,8 @@ def main():
                 row.update(decision="deny", reason="tmux format could execute a shell command")
             if shell_code:
                 row.update(decision="deny", reason="global -c shell command is unauditable")
+            if control_mode and not private:
+                row.update(decision="deny", reason="control-mode stdin is unauditable on a foreign socket")
             if indirect or compound_unsafe or leading_separator:
                 row.update(decision="deny", reason="compound or server-side command dispatch is unauditable")
             if row["decision"] == "noop":
