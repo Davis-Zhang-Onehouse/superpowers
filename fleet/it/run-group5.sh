@@ -589,7 +589,9 @@ section_M() {
   fleet enroll --slot "$SLOTS/ms1" >> "$EV/M-setup.out" 2>&1
   fleet set-golden --path "$DUMMY/alpha" >> "$EV/M-setup.out" 2>&1
   # a live pane the record can point at, so `board`/`status` have a slot-holding subject
-  it_tmux_new "itfleet-M-worker" "sh -c 'i=1; while [ \$i -le 200 ]; do echo filler line \$i; i=\$((i+1)); done; echo \"? for shortcuts\"; printf \"\\342\\235\\257\\302\\240\"; sleep 1200'"
+  # Keep the pane until it_cleanup_tmux tears down this section's server. A timed sleep can expire
+  # while the read-only verb sweep is still running, making M8 seed-check fail for fixture loss.
+  it_tmux_new "itfleet-M-worker" "sh -c 'i=1; while [ \$i -le 200 ]; do echo filler line \$i; i=\$((i+1)); done; echo \"? for shortcuts\"; printf \"\\342\\235\\257\\302\\240\"; exec tail -f /dev/null'"
   sleep 1
   fleet resume --instant "$INSTP" --slot ms1 --tmux "itfleet-M-worker" >> "$EV/M-setup.out" 2>&1
   TODO="$(python3 - <<'PY'
