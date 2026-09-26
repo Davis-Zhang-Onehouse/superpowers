@@ -194,17 +194,30 @@ dl_need_arg() { # <flag-name> <remaining $#>  rc 2 if there is no value after th
 # placeholder and can swallow an Enter sent in the same keystroke batch, so this state is real and
 # silent: on 2026-07-28 three of four live panes were holding one, including an authorization a
 # coordinator believed it had delivered.
-dl_pane_unsubmitted() { # <pane text> -> prints the queued text; rc 0 if there is any
-  local repo
-  repo="$(cd "$(dirname "${BASH_SOURCE[0]}")/../../.." && pwd)" || return 1
+#: OR-3 (v23-u review). Fails CLOSED: when the parser cannot run (no fleet/src beside this library, a python3 that
+#: cannot import it) the answer is rc 0, "treat as a draft", with the reason on stderr — never rc 1, "no draft".
+dl_pane_unsubmitted() { # <pane text> -> prints the queued text; rc 0 if there is any (or it cannot be read)
+  local repo rc
+  repo="$(cd "$(dirname "${BASH_SOURCE[0]}")/../../.." && pwd)" \
+    || { echo "dl_pane_unsubmitted: cannot locate fleet/src; treating the box as holding a draft" >&2; return 0; }
   printf '%s' "$1" | PYTHONPATH="$repo/fleet/src${PYTHONPATH:+:$PYTHONPATH}" python3 -c '
 import sys
-from fleet.runtime import claude_unsubmitted
-draft = claude_unsubmitted(sys.stdin.read())
+try:
+    from fleet.runtime import claude_unsubmitted
+    draft = claude_unsubmitted(sys.stdin.read())
+except Exception as exc:  # an uncaught one would exit 1, which reads as "no draft"
+    sys.stderr.write(f"dl_pane_unsubmitted: cannot run fleet.runtime ({exc}); treating the box as holding a draft\n")
+    sys.exit(3)
 if draft is None:
     sys.exit(1)
 sys.stdout.write(draft)
 '
+  rc=$?
+  case "$rc" in
+    0|1) return "$rc" ;;
+    3) return 0 ;;
+    *) echo "dl_pane_unsubmitted: the draft parser failed (rc $rc); treating the box as holding a draft" >&2; return 0 ;;
+  esac
 }
 
 # Mid-turn: the model is working and the pane is not a safe thing to destroy.
