@@ -8,7 +8,7 @@ from pathlib import Path
 from typing import Optional
 
 from fleet.errors import BadInput, FleetError, Refused
-from fleet.runtime import paste_placeholder
+from fleet.runtime import claude_echo, paste_placeholder
 from fleet.runtime_config import pane_lock
 
 #: `.fleet/sends.jsonl` in the WORKER's instant: one JSON object per line per attempt that touched the pane.
@@ -42,6 +42,9 @@ TAIL_MIN_ROWS = 3
 #: RV-9. How long a tail must hold still before Enter: over three times the 22-32 ms a measured draft took to render
 #: after the paste. Two captures a few ms apart show the same frame and could not see a paste still arriving.
 TAIL_SETTLE_S = 0.1
+#: S6 OR-4. Scrollback rows read for the transcript echo of a draft-tail send: the longest draft-tail is under 800
+#: characters (Claude turns longer pastes into a placeholder), about 11 rows at 76, plus a reply that may follow.
+ECHO_HISTORY_LINES = 200
 
 
 def validate_message(text):
@@ -140,6 +143,16 @@ def _wrap(line, width) -> list:
         else:
             row = f"{row} {token}"
     return [r.strip() for r in rows + [row or ""]]
+
+
+def _echo_holds(frame, text) -> bool:
+    """S6 OR-4. Whether the transcript echo in `frame` is `text` whole, from its first word. Chrome drawn after a
+    queued message (`ctrl+x ctrl+s to send now`) may follow it; nothing may precede it."""
+    echo = claude_echo(frame) if frame is not None else None
+    if not echo:
+        return False
+    seen, whole = _squash(echo), _squash(text)
+    return seen == whole or (seen.startswith(whole) and seen[len(whole)] == " ")
 
 
 def _typed_since(sessions, name, admitted_at) -> Optional[str]:
@@ -363,6 +376,19 @@ def send(home, sessions, record, text, *, timeout_s=10.0, clock=time.monotonic,
                     outcome = UNCERTAIN_AFTER_ENTER
                     raise FleetError('Delivery uncertain after Enter; inspect the worker before retrying')
                 sleep(0.02)
+            if confirmation == CONFIRMED_BY_DRAFT_TAIL:
+                #: S6 OR-4 (coordinator D-123). The box emptied, but a tail vouched only for the rows it showed: a
+                #: lost or prefixed head would be submitted and recorded as a clean `submitted`. The transcript echo
+                #: shows what was actually submitted, so the residual is never silent. Nothing is sent again.
+                reader = getattr(sessions, "capture_history", None)
+                deadline = clock() + timeout_s
+                while not _echo_holds(reader(record.tmux, ECHO_HISTORY_LINES) if reader else None, text):
+                    if reader is None or clock() >= deadline:
+                        outcome = UNCERTAIN_AFTER_ENTER
+                        raise FleetError('Delivery uncertain after Enter: the transcript echo does not show the whole '
+                                         'message (it was confirmed by its tail only); inspect the worker before '
+                                         'retrying')
+                    sleep(0.05)
         except FleetError:
             raise
         except Exception as exc:

@@ -3,6 +3,7 @@ from pathlib import Path
 import json
 import tempfile
 import unittest
+import unittest.mock
 from types import SimpleNamespace
 
 from fleet.errors import BadInput, FleetError, Refused
@@ -20,7 +21,10 @@ class MessagingTests(unittest.TestCase):
                                 send_literal=lambda name,text: events.append(('literal',text)),
                                 submit=lambda name: events.append(('submit',None)),
                                 #: S6 OR-2: nobody attached, the usual worker pane (`attended` answers otherwise).
-                                attachment=lambda name: Attachment(clients=0, last_input=0.0))
+                                attachment=lambda name: Attachment(clients=0, last_input=0.0),
+                                #: S6 OR-4: a healthy pane echoes what was pasted (a test that needs otherwise says so).
+                                capture_history=lambda name, lines: self.echoed(
+                                    next((t for kind, t in reversed(events) if kind == 'literal'), '')))
         return layer, events
 
     def test_only_matching_draft_is_submitted_once(self):
@@ -216,6 +220,13 @@ class MessagingTests(unittest.TestCase):
         with self.subTest('S6 OR-1: a box whose width is unknown (no located border) never confirms by tail'):
             self.assertIsNone(confirms('claude', tail3, text))
 
+    @staticmethod
+    def echoed(text):
+        """A frame whose transcript echoes `text` above an empty box, as Claude Code draws it after Enter."""
+        rows = MessagingTests.wrapped(text.split()) or ['']
+        rule = '─' * 80
+        return '\n'.join(['❯ ' + rows[0]] + ['  ' + row for row in rows[1:]] + ['', rule, '❯ ', rule, '  ⏵⏵ auto mode on'])
+
     def attended(self, layer, answers):
         """S6 OR-2. Give a fixture layer the `attachment` a real SessionLayer has, answering in turn from `answers`
         (each an Attachment, or None for NOT OBSERVABLE); the last answer repeats."""
@@ -265,6 +276,51 @@ class MessagingTests(unittest.TestCase):
                 layer, events = self.fixture([PaneObservation('idle'), PaneObservation('queued', 'hello'), PaneObservation('busy')])
                 self.attended(layer, [None])
                 self.assertEqual((SUBMITTED, CONFIRMED_BY_DRAFT), send(Path(directory), layer, SimpleNamespace(tmux='worker'), 'hello'))
+
+    ECHO_TEXT = 'Reply OK. ' + ' '.join('This single line is longer than the input box on purpose, sentence %d of nine.' % i
+                                        for i in range(1, 10))
+
+    def echo_frame(self):
+        """A real post-Enter history capture (IT SEND-6, v23-s at 14514176): the transcript echoes the whole message."""
+        root = Path(__file__).resolve().parents[1] / 'it/fixtures/runtime'
+        return (root / 'claude-echo-after-tall-send-282.frame').read_text()
+
+    def test_a_draft_tail_is_submitted_only_when_the_echo_holds_the_whole_message(self):
+        """S6 OR-4 (coordinator D-123). A tail vouches only for the rows it shows; a lost or prefixed head was
+        submitted and recorded `submitted/draft-tail` with no signal. After Enter, Claude echoes the WHOLE submitted
+        message into the transcript (`❯ <head>` and its indented rows), so a draft-tail send is `submitted` only when
+        that echo is the message; otherwise the residual is recorded, as `uncertain-after-enter`."""
+        tail = self.scrolled('claude-scrolled-box-282.frame')
+        real = self.echo_frame()
+        cases = {
+            'the echo is our whole message': (real, self.ECHO_TEXT, SUBMITTED),
+            'a keystroke prefixed the message (the echo head is not ours)':
+                (real.replace('❯ Reply OK.', '❯ /clear Reply OK.'), self.ECHO_TEXT, UNCERTAIN_AFTER_ENTER),
+            'the head was lost (the echo starts later in the message)':
+                (real.replace('❯ Reply OK. This single line', '❯ This single line'), self.ECHO_TEXT, UNCERTAIN_AFTER_ENTER),
+            'the echo is somebody else\'s message': (real, 'Something else entirely. ' + self.ECHO_TEXT[10:], UNCERTAIN_AFTER_ENTER),
+            'no history could be read': (None, self.ECHO_TEXT, UNCERTAIN_AFTER_ENTER),
+        }
+        for why, (frame, text, expected) in cases.items():
+            with self.subTest(why), tempfile.TemporaryDirectory() as directory:
+                if expected != SUBMITTED and frame is not None and text == self.ECHO_TEXT:
+                    self.assertNotEqual(frame, real)            # the case really edits the real capture
+                layer, events = self.runtime_fixture('claude', [PaneObservation('idle'), tail, tail] + [PaneObservation('idle')] * 3)
+                layer.capture_history = lambda name, lines: frame
+                recorded = []
+                run = lambda: send(Path(directory), layer, SimpleNamespace(tmux='worker'), text, timeout_s=0,
+                                   sleep=lambda _: None, recorder=lambda o, c: recorded.append((o, c)))
+                with unittest.mock.patch('fleet.messaging.confirms', return_value=CONFIRMED_BY_DRAFT_TAIL):
+                    if expected == SUBMITTED:
+                        self.assertEqual((SUBMITTED, CONFIRMED_BY_DRAFT_TAIL), run())
+                    else:
+                        with self.assertRaisesRegex(FleetError, 'uncertain after Enter.*echo'):
+                            run()
+                self.assertEqual(events, [('literal', text), ('submit', None)])     # never a second Enter
+                self.assertEqual(recorded, [(expected, CONFIRMED_BY_DRAFT_TAIL)])
+        with self.subTest('an exact draft needs no echo'), tempfile.TemporaryDirectory() as directory:
+            layer, events = self.fixture([PaneObservation('idle'), PaneObservation('queued', 'hello'), PaneObservation('busy')])
+            self.assertEqual((SUBMITTED, CONFIRMED_BY_DRAFT), send(Path(directory), layer, SimpleNamespace(tmux='worker'), 'hello'))
 
     def test_the_retry_waits_for_the_same_tail_evidence(self):
         """After Enter the scrolled box still shows the tail: one retry on the same evidence, then the distinct

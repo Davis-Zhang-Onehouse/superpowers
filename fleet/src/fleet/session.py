@@ -133,6 +133,10 @@ class Probes:
     pane_pids: Optional[Callable[[str], Optional[list]]] = None
     #: Read-only bulk census for a board invocation. None keeps injected legacy probes usable.
     list_session_names: Optional[Callable[[], Optional[set[str]]]] = None
+    #: S6 OR-4. The pane's text INCLUDING its last `lines` rows of scrollback (`capture-pane -S -<lines>`), or None when
+    #: the capture failed. `send` reads the transcript echo of a message it could not see whole; a short pane's reply
+    #: pushes that echo's head off the visible rows. Defaulted: absent reads as NOT OBSERVABLE.
+    capture_history: Optional[Callable[[str, int], Optional[str]]] = None
     #: FB-130. True when the session answers and EVERY pane of it reports tmux's `#{pane_dead}` (remain-on-exit:
     #: the process is gone, the last screen stays), False when any pane is alive, None when unobservable. The
     #: screen's `Pane is dead` banner is text an agent can print, so tmux's own flag is the only evidence.
@@ -312,6 +316,12 @@ class SessionLayer:
         if not name:
             raise BadInput("a pane capture needs a session name")
         return self.probes.capture_pane(name)
+
+    def capture_history(self, name: str, lines: int):
+        """The pane's text with its last `lines` rows of scrollback, or None if that could not be captured (S6 OR-4)."""
+        if not name or self.probes.capture_history is None:
+            return None
+        return self.probes.capture_history(name, lines)
 
     def pane(self, name: str) -> str:
         """The pane's text, with a failed capture flattened to `""`.
@@ -850,6 +860,11 @@ def default_probes(process_name: str = "claude", tmux_socket=_FROM_ENV, *,
         done = run(tmux + ["capture-pane", "-p", "-e", "-t", exact_pane_target(name)])
         return done.stdout if done.returncode == 0 else None
 
+    def capture_history(name: str, lines: int):
+        """`capture_pane` with `lines` rows of scrollback above the visible ones (S6 OR-4); `-e` for the same reason."""
+        done = run(tmux + ["capture-pane", "-p", "-e", "-S", f"-{int(lines)}", "-t", exact_pane_target(name)])
+        return done.stdout if done.returncode == 0 else None
+
     def has_session(name: str) -> bool:
         return run(tmux + ["has-session", "-t", exact_session_target(name)]).returncode == 0
 
@@ -1001,4 +1016,5 @@ def default_probes(process_name: str = "claude", tmux_socket=_FROM_ENV, *,
                   proc_facts=proc_facts,
                   signal_pid=signal_pid,
                   attachment=attachment,
-                  list_session_names=list_session_names)
+                  list_session_names=list_session_names,
+                  capture_history=capture_history)
