@@ -67,7 +67,7 @@ its control dir, which no release touched, so a sync fix never reached the cron.
 refresh them from the deployed export and keep both outputs as deploy evidence:
 
 ```bash
-bash "$FLEET_RELEASES/current/scripts/sync/refresh-control.sh" --ctrl <root>/.superpowers-sync --check   # DIFFERS rows, rc 1
+bash "$FLEET_RELEASES/current/scripts/sync/refresh-control.sh" --ctrl <root>/.superpowers-sync --check   # DIFFERS rows, rc 1, when this release changed the sync code; all `same`, rc 0, otherwise
 bash "$FLEET_RELEASES/current/scripts/sync/refresh-control.sh" --ctrl <root>/.superpowers-sync           # wrote rows
 bash "$FLEET_RELEASES/current/scripts/sync/refresh-control.sh" --ctrl <root>/.superpowers-sync --check   # all same, rc 0
 ```

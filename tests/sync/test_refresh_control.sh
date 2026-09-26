@@ -24,4 +24,12 @@ cmp -s "$CTRL/state" "$CTRL/state.before" || { echo "FAIL: state changed"; exit 
 # a directory that is not a control dir is refused
 set +e; bash "$R" --ctrl "$SANDBOX" > /dev/null 2>&1; rc=$?; set -e
 assert_eq "$rc" 2 not-a-control-dir
+# RV-37: a copy that fails leaves no temp file in the control dir
+S2="$SANDBOX/src"; mkdir -p "$S2"; cp "$SCRIPTS"/{refresh-control,lib,sync,finish,rollback,apply,status}.sh "$S2/"
+echo "# changed" >> "$S2/sync.sh"; chmod 000 "$S2/sync.sh"
+set +e; bash "$S2/refresh-control.sh" --ctrl "$CTRL" > "$SANDBOX/fail.out" 2>&1; rc=$?; set -e
+chmod 644 "$S2/sync.sh"
+[ "$rc" != 0 ] || { echo "FAIL: an unreadable source was copied (rc 0)"; exit 1; }
+left="$(find "$CTRL" -maxdepth 1 -name '.*.??????' | wc -l)"
+assert_eq "$left" 0 no-temp-left
 pass

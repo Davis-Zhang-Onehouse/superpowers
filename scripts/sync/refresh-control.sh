@@ -32,7 +32,7 @@ for f in "${FILES[@]}"; do
   case "$MODE" in
     check)   echo "DIFFERS  $f" ;;
     dry-run) echo "would-write $f" ;;
-    write)   tmp="$(mktemp "$CTRL/.$f.XXXXXX")"; cp "$SRC/$f" "$tmp"; chmod --reference="$CTRL/$f" "$tmp" 2>/dev/null || chmod --reference="$SRC/$f" "$tmp"; mv -f "$tmp" "$CTRL/$f"; echo "wrote    $f" ;;
+    write)   tmp="$(mktemp "$CTRL/.$f.XXXXXX")"; trap 'rm -f "$tmp"' EXIT; cp "$SRC/$f" "$tmp"; chmod --reference="$CTRL/$f" "$tmp" 2>/dev/null || chmod --reference="$SRC/$f" "$tmp"; mv -f "$tmp" "$CTRL/$f"; echo "wrote    $f" ;;
   esac
 done
 [ "$MODE" = check ] && [ "$differ" = 1 ] && exit 1
