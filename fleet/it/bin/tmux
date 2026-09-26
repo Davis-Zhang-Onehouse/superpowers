@@ -52,17 +52,51 @@ def parse(argv):
     return os.path.realpath(socket), command, rest, shell_code, control_mode
 
 
+# Names and aliases from tmux 3.2a cmd-*.c command entries. Keep the table pinned to
+# the IT host's tmux version so unknown and ambiguous input fails closed.
+TMUX_COMMANDS = frozenset("""
+attach-session bind-key break-pane capture-pane clear-history choose-tree choose-client
+choose-buffer customize-mode command-prompt confirm-before copy-mode clock-mode detach-client
+suspend-client display-menu display-popup display-message display-panes find-window if-shell
+join-pane move-pane kill-pane kill-server start-server kill-session kill-window
+unlink-window list-buffers list-clients list-keys list-commands list-panes list-sessions
+list-windows load-buffer lock-server lock-session lock-client move-window link-window
+new-session has-session new-window paste-buffer pipe-pane refresh-client rename-session
+rename-window resize-pane resize-window respawn-pane respawn-window rotate-window run-shell
+save-buffer show-buffer select-layout next-layout previous-layout select-pane last-pane
+select-window next-window previous-window last-window send-keys send-prefix set-buffer
+delete-buffer set-environment set-option set-window-option set-hook show-environment show-messages
+show-options show-window-options show-hooks source-file split-window swap-pane swap-window
+switch-client unbind-key wait-for
+""".split())
+TMUX_ALIASES = dict(pair.split("=", 1) for pair in """
+attach=attach-session bind=bind-key breakp=break-pane capturep=capture-pane clearhist=clear-history
+confirm=confirm-before detach=detach-client suspendc=suspend-client
+menu=display-menu popup=display-popup display=display-message displayp=display-panes findw=find-window
+if=if-shell joinp=join-pane movep=move-pane killp=kill-pane
+start=start-server killw=kill-window unlinkw=unlink-window lsb=list-buffers
+lsc=list-clients lsk=list-keys lscm=list-commands lsp=list-panes ls=list-sessions
+lsw=list-windows loadb=load-buffer lock=lock-server locks=lock-session lockc=lock-client
+movew=move-window linkw=link-window new=new-session has=has-session neww=new-window
+pasteb=paste-buffer pipep=pipe-pane refresh=refresh-client rename=rename-session renamew=rename-window
+resizep=resize-pane resizew=resize-window respawnp=respawn-pane respawnw=respawn-window rotatew=rotate-window
+run=run-shell saveb=save-buffer showb=show-buffer selectl=select-layout nextl=next-layout
+prevl=previous-layout selectp=select-pane lastp=last-pane selectw=select-window
+next=next-window prev=previous-window last=last-window send=send-keys setb=set-buffer
+deleteb=delete-buffer setenv=set-environment set=set-option setw=set-window-option
+showenv=show-environment showmsgs=show-messages show=show-options showw=show-window-options
+source=source-file splitw=split-window swapp=swap-pane swapw=swap-window switchc=switch-client
+unbind=unbind-key wait=wait-for
+""".split())
+
+
 def canonical_command(command):
-    aliases = {"display": "display-message", "displayp": "display-panes",
-               "popup": "display-popup", "menu": "display-menu"}
-    if command in aliases:
-        return aliases[command]
-    # tmux accepts unique command prefixes. Treat even an ambiguous kill prefix as destructive.
-    if command and "kill-server".startswith(command) and not "kill-session".startswith(command):
-        return "kill-server"
-    if command and "kill-session".startswith(command):
-        return "kill-session"
-    return command
+    if command in TMUX_COMMANDS:
+        return command
+    if command in TMUX_ALIASES:
+        return TMUX_ALIASES[command]
+    matches = [name for name in TMUX_COMMANDS if command and name.startswith(command)]
+    return matches[0] if len(matches) == 1 else None
 
 
 def option(rest, flag):
@@ -93,8 +127,7 @@ def can_dispatch_commands(command, rest):
                    "set-hook", "command-prompt", "display-menu", "display-popup",
                    "display-panes", "choose-tree", "choose-client", "choose-buffer",
                    "pipe-pane", "detach-client")
-    return bool(command and any(
-        name.startswith(command) for name in dispatchers))
+    return command in dispatchers
 
 
 def split_tmux_commands(words):
@@ -199,7 +232,7 @@ def main():
         os.path.commonpath((socket, directory)) == directory and socket != directory
         for directory in dirs)
     segments = split_tmux_commands([command, *rest])
-    command = canonical_command(segments[0][0]) if segments[0] else ""
+    command = (canonical_command(segments[0][0]) or "") if segments[0] else ""
     rest = segments[0][1:] if segments[0] else []
     destructive = command in ("kill-server", "kill-session")
     creates = command in ("new-session", "new")
@@ -283,6 +316,8 @@ def main():
                     row.update(decision="deny", reason="new session has no auditable name")
             if not private and not readonly_command(command, segments[0]):
                 row.update(decision="deny", reason="nonprivate socket permits read-only commands only")
+            if not command:
+                row.update(decision="deny", reason="unknown or ambiguous tmux command")
             if shell_format:
                 row.update(decision="deny", reason="tmux format could execute a shell command")
             if shell_code:

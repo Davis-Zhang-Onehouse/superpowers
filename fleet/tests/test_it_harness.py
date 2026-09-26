@@ -916,6 +916,18 @@ sys.exit(0)
         self.assertEqual(grouped.returncode, 97, grouped.stderr)
         self.assertFalse(calls.exists(), "a command-bearing operand reached fake real-tmux")
 
+    def test_exact_set_alias_precedes_set_hook_prefix(self):
+        env, calls = self.recording_tmux()
+        exact = self.tmux("-L", "own", "set", "-g", "status", "on", env=env)
+        self.assertEqual(exact.returncode, 0, exact.stderr)
+        self.assertEqual(json.loads(calls.read_text().splitlines()[-1]),
+                         ["-L", "own", "set", "-g", "status", "on"])
+        for command in ("set-h", "set-"):
+            with self.subTest(command=command):
+                result = self.tmux("-L", "own", command, "kill-server", env=env)
+                self.assertEqual(result.returncode, 97, result.stderr)
+        self.assertEqual(len(calls.read_text().splitlines()), 1)
+
     def test_audit_summary_counts_a_refused_nonkill_command(self):
         tmp = self.tmp / "audit-summary"
         it = harness_copy(tmp)
