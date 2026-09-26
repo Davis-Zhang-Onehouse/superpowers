@@ -887,6 +887,15 @@ sys.exit(0)
             with self.subTest(command=command):
                 self.assertEqual(self.tmux("-L", "default", *command, env=env).returncode, 0)
 
+    def test_nonprivate_print_flag_must_be_an_option_not_a_target_value(self):
+        env, calls = self.recording_tmux()
+        for command in (("display-message", "-t=people", "hello"),
+                        ("capture-pane", "-tpeople")):
+            with self.subTest(command=command):
+                self.assertEqual(self.tmux("-L", "default", *command, env=env).returncode, 97)
+        self.assertFalse(calls.exists(), "a non-printing command reached fake real-tmux")
+        self.assertEqual(self.tmux("-L", "default", "display-message", "-p", "#{pid}", env=env).returncode, 0)
+
     def test_tmux_handle_and_component_boundary_cannot_relabel_foreign_socket(self):
         env, calls = self.recording_tmux()
         outside = self.tmp / "outside"
