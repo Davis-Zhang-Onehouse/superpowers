@@ -11,9 +11,13 @@ it_own_cases 'SYNC-.*|ISOLATION-SYNC-(enter|leave)'
 it_section SYNC
 trap 'it_cleanup_tmux' EXIT
 OUT="$EV/out"
-mkdir -p "$OUT"
-if ! bash "$IT_ROOT/bin/sync-rows.sh" "$IT_ROOT/../../tests/sync" "$IT_RESULTS" "$OUT" "fleet/it/$SECTION/out"; then
-  IT_FAILED=1
-fi
+rm -rf "$OUT"; mkdir -p "$OUT"
+rows="$(bash "$IT_ROOT/bin/sync-rows.sh" "$IT_ROOT/../../tests/sync" "$OUT")"
+while IFS=$'\t' read -r case verdict log note; do
+  [ -n "$case" ] || continue
+  evidence="fleet/it/$SECTION/out/$log"; [ "$log" = - ] && evidence="tests/sync"
+  if [ "$verdict" = PASS ]; then it_pass "$case" "$evidence" "$note"; else it_fail "$case" "$evidence" "$note"; fi
+done <<< "$rows"
+[ -n "$rows" ] || it_fail SYNC-suite "tests/sync" "bin/sync-rows.sh printed no row at all"
 it_assert_isolation SYNC-leave
 [ "$IT_FAILED" -eq 0 ]
