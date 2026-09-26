@@ -271,14 +271,21 @@ single-line `[Pasted text #N]`, which states no length at all), and the record s
 **A message taller than Claude Code's input box is confirmed by its tail (`FB-134`).** The box shows only its
 last rows, and its height follows the pane's. At 80 columns a 20-line pane shows 5 rows, so a one-line message
 of about 400 characters no longer fits. `send` then confirms `draft-tail`. The box must show at least three
-rows, and they must be exactly the message's own last rows as Claude Code wraps it. A frame taken 0.1 s later must
-show the same rows. Only then does the verb press Enter, and Enter submits the whole message, hidden head
-included. What the tail cannot see is the head. That the head is exactly ours rests on the box being empty when
-the send was admitted and on the single paste. So `draft-tail` is recorded apart from `draft`. Anything that
-changes the hidden rows without changing the visible ones goes unseen: a human typing there, or a lost head whose
-re-wrap ends in the same last rows, which greedy wrapping often does. Any box whose rows are not the message's own
-last rows, such as a tail cut mid-word or text re-wrapped into different rows, still ends
-`uncertain-after-insertion` with the text left in the box.
+rows, and they must be exactly the message's own last rows as Claude Code wraps it at the box's own width, which
+is read off the box's border (80 columns wrap at 76; only that width is measured, and a wrong one can only refuse).
+A frame taken 0.1 s later must show the same rows, and tmux must report that no attached client gave the pane any
+input since the send was admitted: a keystroke that lands before the paste would sit, hidden, in front of our
+message. An observer client (read-only or control mode) or an attachment that cannot be read refuses too. Only
+then does the verb press Enter, and Enter submits the whole message, hidden head included. What the tail cannot see
+is the head, so after Enter the verb reads the transcript, where Claude Code echoes the submitted message, and
+records `submitted` only when that echo is the whole message from its first word. Otherwise it records
+`uncertain-after-enter`: the message was submitted, but not provably whole, so inspect the worker and never send it
+again blind. `draft-tail` is recorded apart from `draft` either way. What still passes the pre-Enter check is a
+head lost inside the box whose remaining rows end in the same last rows: for a two- or three-line message, losing
+whole leading lines always does, and a loss inside a line often re-converges. The echo check is what reports it. Any
+box whose rows are not the message's own last rows, such as a tail cut mid-word or text re-wrapped into different
+rows, still ends `uncertain-after-insertion` with the text left in the box. A word wider than the box is not yet
+modelled (how Claude Code breaks it is unmeasured), so such a message also ends `uncertain-after-insertion`.
 
 **Every send that reached the pane is recorded (`B13`)** in the worker's `.fleet/sends.jsonl`: when, by whom
 (`--by`, else the sender's own `FLEET_INSTANT`), the message's sha256, size and first line, the outcome
