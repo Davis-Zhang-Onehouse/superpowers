@@ -1092,7 +1092,7 @@ sys.exit(0)
         self.assertTrue(any(json.loads(line)[-1] == "bash -c 'cat x; exec sleep 100000'"
                             for line in calls.read_text().splitlines()))
         count = len(calls.read_text().splitlines())
-        for separator in (";", "\\;"):
+        for separator in (";",):
             with self.subTest(separator=separator):
                 denied = self.tmux("-L", "own", "list-sessions", separator,
                                    "kill-server", env=env)
@@ -1100,6 +1100,8 @@ sys.exit(0)
                 self.assertEqual(len(calls.read_text().splitlines()), count)
         allowed = self.tmux("-L", "own", "list-sessions", ";", "has-session", env=env)
         self.assertEqual(allowed.returncode, 0, allowed.stderr)
+        literal = self.tmux("-L", "own", "list-sessions", r"\;", "kill-server", env=env)
+        self.assertEqual(literal.returncode, 0, literal.stderr)
 
     def test_trailing_separator_cannot_hide_a_foreign_kill(self):
         env, calls = self.recording_tmux()

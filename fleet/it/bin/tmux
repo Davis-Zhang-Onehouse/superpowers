@@ -97,7 +97,7 @@ def split_tmux_commands(words):
     """Split tmux's argv separators, including an unescaped trailing semicolon."""
     parts = [[]]
     for arg in words:
-        if arg in (";", r"\;"):
+        if arg == ";":
             parts.append([])
         elif arg.endswith(";") and not arg.endswith(r"\;"):
             parts[-1].append(arg[:-1])
@@ -197,7 +197,7 @@ def main():
     destructive = command in ("kill-server", "kill-session")
     creates = command in ("new-session", "new")
     indirect = can_dispatch_commands(command, segments[0])
-    leading_separator = not segments[0]
+    leading_separator = not segments[0] or command in (";", r"\;")
     compound_unsafe = any(part and (not readonly_command(part[0], part[1:]) or
                                     can_dispatch_commands(part[0], part[1:])) for part in segments[1:])
     hidden_kills = nested_kills([word for part in segments[1:] for word in part]) if compound_unsafe else []
