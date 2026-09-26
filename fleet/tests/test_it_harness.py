@@ -685,6 +685,13 @@ class A8KillSiteAudit(unittest.TestCase):
                 counts, out = self.audit(**{"run-X.sh": text})
                 self.assertEqual((counts["kill_all"], counts["kill_unsafe"]), (1, 1), out)
 
+    def test_any_program_c_does_not_borrow_tmux_option_scope(self):
+        counts, out = self.audit(**{"run-X.sh":
+            'tmux -L x has-session -t s $(fish -c "tmux kill-server")\n'})
+        self.assertEqual((counts["kill_all"], counts["kill_unsafe"]), (1, 1), out)
+        counts, out = self.audit(**{"run-X.sh": 'tmux -L x -c tmux kill-server\n'})
+        self.assertEqual((counts["kill_all"], counts["kill_unsafe"]), (1, 0), out)
+
     def test_colon_before_kill_word_fails_closed_without_crashing(self):
         counts, out = self.audit(**{"run-X.sh": 'bash -c "tmux a:kill-server"\n'})
         self.assertEqual((counts["kill_all"], counts["kill_unsafe"]), (1, 1), out)

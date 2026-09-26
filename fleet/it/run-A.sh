@@ -1221,15 +1221,21 @@ KILL_WORDS = ("kill-server", "kill-session")
 def is_operand(tokens, i):
     """Whether tokens[i] is the VALUE of a tmux option (`-S x`, `-uS x`, `-L x`, `-c`, `-f`, `-T`), not a command."""
     prev = tokens[i - 1] if i > 0 else ""
-    if prev == "-c":
-        # A shell's -c owns its operand even inside $(...) or backquotes. Only tmux's own
-        # -c can make a following word an option value of the tmux invocation.
-        for earlier in reversed(tokens[:i - 1]):
-            if earlier in ("bash", "sh", "dash", "zsh", "python", "python3"):
-                return False
-            if earlier in ("tmux", "it_tmux") or earlier.endswith("/tmux"):
-                return True
-        return False
+    if prev.startswith("-") and not prev.startswith("--") and prev[1:].isalnum() and prev[-1] == "c":
+        # -c belongs to tmux only while its global option list is still open. A prior private
+        # tmux cannot lend its -c scope to fish, bash, or any other program in $(...) or a string.
+        start = next((j for j in range(i - 2, -1, -1)
+                      if tokens[j] in ("tmux", "it_tmux") or tokens[j].endswith("/tmux")), None)
+        if start is None:
+            return False
+        at = start + 1
+        while at < i - 1:
+            opt = tokens[at]
+            if not opt.startswith("-") or opt == "-":
+                return False       # tmux's command word (or another program) began
+            flag_at = next((n for n, ch in enumerate(opt[1:], 1) if ch in "cfLST"), None)
+            at += 2 if flag_at is not None and not opt[flag_at + 1:] else 1
+        return at == i - 1
     return prev.startswith("-") and not prev.startswith("--") and prev[1:].isalnum() and prev[-1] in "cfLST"
 
 
