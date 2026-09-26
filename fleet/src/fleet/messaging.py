@@ -142,6 +142,26 @@ def _wrap(line, width) -> list:
     return [r.strip() for r in rows + [row or ""]]
 
 
+def _typed_since(sessions, name, admitted_at) -> Optional[str]:
+    """Why somebody may have typed into `name` since `admitted_at` (an epoch), or None when tmux says nobody did.
+
+    S6 OR-2 (coordinator D-123). A tail cannot show the head, and a keystroke that lands between the admission capture
+    and the paste PREPENDS to our message: the box then holds `<their text><our message>` and its tail is ours. Only
+    tmux can see that keystroke: `attachment`'s `last_input` moves on an interactive client's keystroke and attach and
+    NOT on `paste-buffer` or `send-keys` (B24), in whole seconds, so input in the admission second counts. An observer
+    (read-only or control-mode) can `send-keys` without moving it, and an unobservable attachment cannot vouch for
+    anybody: both fail closed, as `attachment` requires of anything that types into a pane."""
+    reader = getattr(sessions, "attachment", None)
+    seen = reader(name) if reader is not None else None
+    if seen is None:
+        return "whether a client typed into the pane cannot be observed"
+    if seen.observers:
+        return f"{seen.observers} read-only or control-mode client(s) are attached, and their input is not observable"
+    if seen.clients and seen.last_input >= int(admitted_at):
+        return "an attached client gave the pane input after the send was admitted"
+    return None
+
+
 def digest(text: str) -> str:
     return hashlib.sha256(text.encode("utf-8")).hexdigest()
 
@@ -242,7 +262,7 @@ def read_sends(instant) -> list:
 
 
 def send(home, sessions, record, text, *, timeout_s=10.0, clock=time.monotonic,
-         sleep=time.sleep, validate=None, recorder=None, unrecorded=None):
+         sleep=time.sleep, validate=None, recorder=None, unrecorded=None, wall=time.time):
     """-> `(outcome, confirmation)`; `outcome` is `SUBMITTED` on success, and every other outcome is raised
     as the `FleetError` it always was. `recorder(outcome, confirmation)` is called ONCE for every attempt
     that reached the pane, success or not, before the error propagates — a send that pasted and then could
@@ -259,6 +279,7 @@ def send(home, sessions, record, text, *, timeout_s=10.0, clock=time.monotonic,
     with pane_lock(home, sessions.socket, record.tmux):
         if validate:
             validate()
+        admitted_at = wall()        # S6 OR-2: taken BEFORE the admission capture, so the window it opens covers it
         before = sessions.observe(record.tmux)
         if before.state not in ('idle', 'busy') or before.draft:
             raise not_idle(record)
@@ -279,6 +300,13 @@ def send(home, sessions, record, text, *, timeout_s=10.0, clock=time.monotonic,
                         again = sessions.observe(record.tmux)
                         if again.state not in ('queued', 'busy') or again.draft != observation.draft:
                             confirmation = ""
+                        elif (typed := _typed_since(sessions, record.tmux, admitted_at)) is not None:
+                            #: S6 OR-2. The hidden head is vouched for only by "nobody else typed": once that fails
+                            #: it cannot come back, so the text is left in the box for its owner, as before v23-s.
+                            outcome = UNCERTAIN_AFTER_INSERTION
+                            confirmation = ""
+                            raise FleetError(f'Delivery uncertain after insertion: {typed}, so the box\'s hidden head '
+                                             f'cannot be vouched for; inspect the draft before retrying')
                     if confirmation:
                         break
                 # A TUI redraw can temporarily omit its prompt/footer, and a BUSY pane can still show its
@@ -322,6 +350,10 @@ def send(home, sessions, record, text, *, timeout_s=10.0, clock=time.monotonic,
                                     or (kind == CONFIRMED_BY_DRAFT_TAIL and latest.draft != observation.draft)):
                                 outcome = UNCERTAIN_AFTER_ENTER
                                 raise FleetError('Delivery uncertain after Enter; retry refused because the input changed')
+                            if kind == CONFIRMED_BY_DRAFT_TAIL and (typed := _typed_since(sessions, record.tmux,
+                                                                                         admitted_at)) is not None:
+                                outcome = UNCERTAIN_AFTER_ENTER
+                                raise FleetError(f'Delivery uncertain after Enter; retry refused: {typed}')
                             sessions.submit(record.tmux)
                             retried = True
                             deadline = clock() + timeout_s
