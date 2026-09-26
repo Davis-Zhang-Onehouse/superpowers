@@ -4435,7 +4435,7 @@ def _slot_gate_before_kill(ctx: Ctx, record, child: Path, verb: str, reap: bool 
            f"slot." if live else
            f"Session {record.tmux} is running but belongs to {taken.todo_id}, so this {verb} leaves it alone "
            f"and nothing it closes would free the slot." if owned_elsewhere else
-           f"Session {record.tmux or '(none)'} is not running, so nothing this abort closes would free "
+           f"Session {record.tmux or '(none)'} is not running, so nothing this {verb} closes would free "
            f"the slot.")
     state = ("still running" if live else f"still running (owned by {taken.todo_id}, left alone)"
              if owned_elsewhere else "not running")
@@ -4460,8 +4460,31 @@ def _session_taken_by(ctx: Ctx, record):
     if record is None or not record.tmux:
         return None
     here = getattr(ctx.sessions, "socket", "") or ""
-    owner = session_owner(ctx.store.all(), here, ctx.pool).get((record.tmux_socket or here, record.tmux))
-    return owner if owner is not None and owner.todo_id != record.todo_id else None
+    #: S6 RV-S6S-3. `store.all()` refuses the whole store over one torn record, which turned every close, abort,
+    #: harvest and reap into exit 2 for records that have nothing to do with it. The readable records decide; an
+    #: unreadable one is a possible owner only of the session named after its own title (`dt-<title>`), and then the
+    #: answer fails closed: "somebody may own it", so nothing is killed and a lease is kept.
+    try:
+        records, unreadable = ctx.store.all(), []
+    except BadInput:
+        records, unreadable = ctx.store.readable()
+    owner = session_owner(records, here, ctx.pool).get((record.tmux_socket or here, record.tmux))
+    if owner is not None and owner.todo_id != record.todo_id:
+        return owner
+    hidden = [stem for stem in unreadable
+              if stem == "*" or not record.tmux.startswith("dt-") or record.tmux == f"dt-{stem.rsplit('-', 1)[0]}"]
+    return _UnreadableOwner(hidden) if hidden else None
+
+
+class _UnreadableOwner:
+    """S6 RV-S6S-3. The owner of a session when the only records that could own it cannot be read: every verb that
+    asks `_session_taken_by` then leaves the session alone, and says why."""
+    unreadable = True
+    launched_at = harvested_at = closed_at = child_instant = base_instant = None
+
+    def __init__(self, stems):
+        self.todo_id = "an unreadable record (" + ", ".join(f"{stem}.json" for stem in stems) + ")"
+        self.dispatched_at = "at a time that cannot be read"
 
 
 def _lease_session_live(ctx: Ctx):
@@ -4474,7 +4497,8 @@ def _lease_session_live(ctx: Ctx):
             record = ctx.store.read(lease.todo_id)
         except BadInput:
             return True
-        return _session_taken_by(ctx, record) is None
+        taken = _session_taken_by(ctx, record)
+        return taken is None or getattr(taken, "unreadable", False)     # RV-S6S-3: an unknown owner keeps the lease
     return live
 
 

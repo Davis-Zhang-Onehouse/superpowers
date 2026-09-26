@@ -158,6 +158,24 @@ class Store:
             raise BadInput(f"records at {self.records} cannot be read ({exc}); an unreadable store is not empty") from exc
         return [Record.from_json(_read_json(p, "record")) for p in paths]
 
+    def readable(self) -> tuple:
+        """`(records, unreadable)`: every record that parses, and the file stem of every one that does not — for a
+        reader that must go on past one torn record and account for it (S6 RV-S6S-3). A store whose directory cannot
+        be listed is `([], ["*"])`: nothing is known about any name."""
+        try:
+            paths = sorted(p for p in self.records.iterdir() if p.suffix == ".json")
+        except FileNotFoundError:
+            return ([], []) if not self.records.is_symlink() else ([], ["*"])
+        except OSError:
+            return [], ["*"]
+        records, unreadable = [], []
+        for path in paths:
+            try:
+                records.append(Record.from_json(_read_json(path, "record")))
+            except (BadInput, TypeError, ValueError, KeyError):
+                unreadable.append(path.stem)
+        return records, unreadable
+
     def resolve_id(self, partial: str) -> str:
         if (self.records / f"{partial}.json").is_file():
             return partial

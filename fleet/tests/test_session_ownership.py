@@ -835,3 +835,37 @@ class TheApplyWarningAsksTheProposersOwnSession(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class OneUnreadableRecordDoesNotStopATeardown(unittest.TestCase):
+    """S6 RV-S6S-3 (pre-cut state review). `_session_taken_by` read `store.all()`, which refuses the whole store over one
+    torn record, so close/abort/harvest/reap exited 2 for records that have nothing to do with it (0.6.15 did not read
+    the store there). The readable records decide; an unreadable record can own only `dt-<its title>`, and when it
+    could, nothing is killed and the lease is kept."""
+
+    def _fleet(self, broken):
+        fleet = Fleet()
+        self.addCleanup(shutil.rmtree, fleet.tmp, True)
+        fleet.worker("solo", state="abort", slot="ws1", pane=IDLE_PANE)
+        (fleet.home / "records" / f"{broken}.json").write_text("{ not json")
+        return fleet
+
+    def test_an_unrelated_unreadable_record_stops_neither_close_nor_reap(self):
+        fleet = self._fleet("zzbroken-09999999")
+        code, out, err = fleet.run(["close", "--id", fleet.ids["solo"]])
+        self.assertEqual(code, 0, f"rc={code}\n{out}\n{err}")
+        self.assertIn("dt-solo", fleet.killed)
+        fleet = self._fleet("zzbroken-09999999")
+        code, out, err = fleet.run(["reap", "--all"])
+        self.assertEqual(code, 0, f"rc={code}\n{out}\n{err}")
+
+    def test_an_unreadable_record_that_could_own_the_session_fails_closed(self):
+        fleet = self._fleet("solo-09999999")                   # its title is `solo`: it could own dt-solo
+        code, out, err = fleet.run(["close", "--id", fleet.ids["solo"]])
+        self.assertEqual(code, 0, f"rc={code}\n{out}\n{err}")
+        self.assertNotIn("dt-solo", fleet.killed, "a session an unreadable record may own was killed")
+        self.assertIn("an unreadable record (solo-09999999.json)", out)
+        fleet = self._fleet("solo-09999999")
+        code, out, err = fleet.run(["reap", "--all"])
+        self.assertEqual(code, 0, f"rc={code}\n{out}\n{err}")
+        self.assertIsNotNone(fleet.pool.lease("ws1"), "a lease whose session an unreadable record may own was freed")
