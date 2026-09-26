@@ -1150,3 +1150,20 @@ class TestAttachmentIsCollected(unittest.TestCase):
             self.assertIsNone(probes.attachment(name + "x"))
         finally:
             subprocess.run(tmux + ["kill-session", "-t", exact_session_target(name)], capture_output=True)
+
+
+class TestCaptureTimeoutSeam(unittest.TestCase):
+    """S6 RV-S6H-1. OR-5's `capture(name, timeout=…)` must not break an injected probe that takes only the name (every
+    fixture's): the launch watch used to swallow the TypeError as "the pane could not be watched"."""
+
+    def test_a_name_only_probe_is_called_without_the_timeout(self):
+        layer = SessionLayer(Probes(list_processes=lambda: [], has_session=lambda n: True, start_session=None,
+                                    kill_session=None, capture_pane=lambda name: f"frame of {name}"))
+        self.assertEqual("frame of a", layer.capture("a", timeout=1.0))
+
+    def test_a_probe_that_declares_timeout_receives_it(self):
+        seen = []
+        layer = SessionLayer(Probes(list_processes=lambda: [], has_session=lambda n: True, start_session=None,
+                                    kill_session=None, capture_pane=lambda name, timeout=None: seen.append(timeout) or "f"))
+        self.assertEqual("f", layer.capture("a", timeout=1.5))
+        self.assertEqual([1.5], seen)
