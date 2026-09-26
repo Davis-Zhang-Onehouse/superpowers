@@ -10,28 +10,224 @@ The whole fleet is built through the injected probes (`Probes`, `cwd_probe`, `al
 a suite can describe a fleet without owning one. Nothing here starts a process, a tmux or a repository.
 """
 import calendar
+import io
 import json
 import os
 import pathlib
 import shutil
+import subprocess
 import tempfile
 import time
 import unittest
 from unittest import mock
 from dataclasses import fields as dataclass_fields
+from types import SimpleNamespace
 
 from fleet.guards import CAP_EXCLUDED_STATES, _counts_against_cap
+from fleet.cli import Ctx, _do_board
 from fleet.pool import Pool
 from fleet.reconcile import (AWAITING_CI, BLOCKED, COMPLETE, DEAD, IDLE, KINDS, PARKED, RUNNING, STALE_WAIT_S, STATES,
                              UNKNOWN_SESSION, UNREACHABLE, Subject, _awaiting_note, _unknown_subject,
                              needs_a_human, reconcile)
-from fleet.session import LiveSession, Probes, SessionLayer
+from fleet.session import LiveSession, Probes, SessionLayer, default_probes
 from fleet.store import Declarations, Record, Store
 from tests.test_runtime_discovery import probe_unreadable
 
 #: Every enrolled slot. `ws9` is enrolled and NOT leased — the harvested subject's slot, which is what
 #: makes `holds_slot is False` a fact about the lease rather than about enrolment.
 SLOTS = ("ws1", "ws2", "ws3", "ws4", "ws5", "ws6", "ws7", "ws8", "ws9")
+
+
+class TestReadCensusBudget(unittest.TestCase):
+    """Historical records must not repeatedly sample processes or tmux."""
+
+    def test_thousand_harvested_records_share_one_census(self):
+        calls = {"processes": 0, "has_session": 0, "names": 0}
+
+        def processes():
+            calls["processes"] += 1
+            return []
+
+        def has_session(name):
+            calls["has_session"] += 1
+            return False
+
+        def names():
+            calls["names"] += 1
+            return set()
+
+        probes = Probes(list_processes=processes, capture_pane=lambda name: "",
+                        has_session=has_session, start_session=lambda *a: None,
+                        kill_session=lambda *a: None)
+        probes.list_session_names = names
+        records = [_record(todo_id=f"old-{i}", tmux=f"dt-old-{i}",
+                           harvested_at="2026-09-01T00:00:00Z")
+                   for i in range(1000)]
+        store = SimpleNamespace(all=lambda: records)
+        pool = SimpleNamespace(slots=lambda: [], lease=lambda slot: None)
+        seen = []
+
+        def subjects():
+            batch = reconcile(store, pool, SessionLayer(probes), pathlib.Path("/missing"))
+            seen.extend(batch)
+            return batch
+
+        output = io.StringIO()
+        ctx = SimpleNamespace(subjects=subjects, porcelain=True,
+                              home=pathlib.Path("/private/store"), out=output)
+        start = time.perf_counter()
+        _do_board(ctx, None)
+        elapsed = time.perf_counter() - start
+        self.assertIn("examined 1000 subject(s)", output.getvalue())
+        self.assertEqual(len(seen), 1000)
+        self.assertTrue(all(s.state == "HARVESTED" for s in seen))
+        self.assertLess(elapsed, 1.0)
+        self.assertLessEqual(calls["processes"], 1)
+        self.assertLessEqual(calls["has_session"], 1)
+        self.assertLessEqual(calls["names"], 1)
+
+    def test_real_probe_subprocesses_are_constant_at_thousand_records(self):
+        records = [_record(todo_id=f"old-{i}", tmux=f"dt-old-{i}",
+                           harvested_at="2026-09-01T00:00:00Z")
+                   for i in range(1000)]
+        store = SimpleNamespace(all=lambda: records)
+        pool = SimpleNamespace(slots=lambda: [], lease=lambda slot: None)
+        commands = []
+
+        def run(argv, **kwargs):
+            commands.append(argv)
+            if argv[0] == "pgrep" or "has-session" in argv:
+                return subprocess.CompletedProcess(argv, 1, "", "")
+            return subprocess.CompletedProcess(argv, 0, "", "")
+
+        with mock.patch("subprocess.run", side_effect=run):
+            probes = default_probes(tmux_socket="it-census-test", both_runtimes=True)
+            subjects = reconcile(store, pool, SessionLayer(probes), pathlib.Path("/missing"))
+        self.assertEqual(len(subjects), 1000)
+        self.assertTrue(all(s.state == "HARVESTED" for s in subjects))
+        self.assertLessEqual(len(commands), 4)
+
+    def test_bulk_list_failure_preserves_exact_session_fallback(self):
+        record = _record(todo_id="tmux-only", tmux="dt-one")
+        store = SimpleNamespace(all=lambda: [record])
+        pool = SimpleNamespace(slots=lambda: [], lease=lambda slot: None)
+
+        def run(argv, **kwargs):
+            if argv[0] == "pgrep":
+                return subprocess.CompletedProcess(argv, 1, "", "")
+            if "list-sessions" in argv:
+                return subprocess.CompletedProcess(argv, 1, "", "server exited unexpectedly")
+            if "has-session" in argv:
+                return subprocess.CompletedProcess(argv, 0, "", "")
+            return subprocess.CompletedProcess(argv, 0, "", "")
+
+        with mock.patch("subprocess.run", side_effect=run):
+            probes = default_probes(tmux_socket="it-census-test", both_runtimes=True)
+            subject, = reconcile(store, pool, SessionLayer(probes), pathlib.Path("/missing"))
+        self.assertEqual(subject.state, RUNNING)
+
+    def test_tmux_only_session_still_counts_as_live(self):
+        probes = Probes(list_processes=lambda: [], capture_pane=lambda name: "quiet",
+                        has_session=lambda name: False, start_session=lambda *a: None,
+                        kill_session=lambda *a: None)
+        probes.list_session_names = lambda: {"dt-here"}
+        record = _record(todo_id="here", tmux="dt-here")
+        store = SimpleNamespace(all=lambda: [record])
+        pool = SimpleNamespace(slots=lambda: [], lease=lambda slot: None)
+        subject, = reconcile(store, pool, SessionLayer(probes), pathlib.Path("/missing"))
+        self.assertEqual(subject.state, RUNNING)
+        self.assertEqual(subject.evidence["liveness"], "session")
+
+    def test_the_one_liveness_method_accepts_a_read_snapshot(self):
+        calls = {"processes": 0, "exact": 0}
+
+        def processes():
+            calls["processes"] += 1
+            return []
+
+        def exact(name):
+            calls["exact"] += 1
+            return False
+
+        probes = Probes(list_processes=processes, capture_pane=lambda name: "",
+                        has_session=exact, start_session=lambda *a: None,
+                        kill_session=lambda *a: None)
+        layer = SessionLayer(probes)
+        self.assertTrue(layer.alive("dt-one", process_names=set(), session_names={"dt-one"}))
+        self.assertEqual(calls, {"processes": 0, "exact": 0})
+
+    def test_cadence_and_read_only_board_share_one_process_census(self):
+        calls = {"processes": 0}
+
+        def processes():
+            calls["processes"] += 1
+            return []
+
+        probes = Probes(list_processes=processes, capture_pane=lambda name: "",
+                        has_session=lambda name: False, start_session=lambda *a: None,
+                        kill_session=lambda *a: None)
+        probes.list_session_names = lambda: set()
+        store = SimpleNamespace(all=lambda: [_record(todo_id="old", tmux="dt-old",
+                                                     harvested_at="2026-09-01T00:00:00Z")])
+        pool = SimpleNamespace(slots=lambda: [], lease=lambda slot: None)
+        ctx = Ctx(home=pathlib.Path("/private/store"), instants_dir=pathlib.Path("/missing"),
+                  store=store, pool=pool, sessions=SessionLayer(probes), harvest=None,
+                  out=io.StringIO(), err=io.StringIO())
+        ctx.share_read_census = True
+        ctx.live_work_now()  # main's cadence check runs before the board handler
+        self.assertEqual(len(ctx.subjects()), 1)
+        self.assertEqual(calls["processes"], 1)
+
+    def test_thousand_renamed_instants_resolve_within_budget(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = pathlib.Path(directory)
+            records = []
+            for i in range(1000):
+                stem = f"00000000-{i:08d}"
+                (root / f"{stem}-complete-append-job").mkdir()
+                records.append(_record(todo_id=f"old-{i}", tmux=f"dt-old-{i}",
+                                       child_instant=str(root / f"{stem}-inflight-append-job"),
+                                       harvested_at="2026-09-01T00:00:00Z"))
+            probes = Probes(list_processes=lambda: [], capture_pane=lambda name: "",
+                            has_session=lambda name: False, start_session=lambda *a: None,
+                            kill_session=lambda *a: None)
+            probes.list_session_names = lambda: set()
+            store = SimpleNamespace(all=lambda: records)
+            pool = SimpleNamespace(slots=lambda: [], lease=lambda slot: None)
+            start = time.perf_counter()
+            subjects = reconcile(store, pool, SessionLayer(probes), root)
+            elapsed = time.perf_counter() - start
+            self.assertEqual(len(subjects), 1000)
+            self.assertTrue(all(s.state == COMPLETE for s in subjects))
+            self.assertLess(elapsed, 1.0)
+
+    def test_foreign_servers_are_sampled_once_each_and_do_not_share_names(self):
+        calls = {"local": 0, "a": 0, "b": 0}
+
+        def layer(socket, names):
+            def processes():
+                calls[socket] += 1
+                return []
+            probes = Probes(list_processes=processes, capture_pane=lambda name: "quiet",
+                            has_session=lambda name: False, start_session=lambda *a: None,
+                            kill_session=lambda *a: None, socket=socket)
+            probes.list_session_names = lambda: names
+            return SessionLayer(probes)
+
+        local = layer("local", set())
+        foreign = {"a": layer("a", {"dt-shared"}), "b": layer("b", set())}
+        records = [_record(todo_id=f"a-{i}", tmux="dt-shared", tmux_socket="a")
+                   for i in range(20)]
+        records += [_record(todo_id=f"b-{i}", tmux="dt-shared", tmux_socket="b")
+                    for i in range(20)]
+        store = SimpleNamespace(all=lambda: records)
+        pool = SimpleNamespace(slots=lambda: [], lease=lambda slot: None)
+        subjects = reconcile(store, pool, local, pathlib.Path("/missing"),
+                             layer_for=lambda socket: foreign[socket])
+        states = {s.identity: s.state for s in subjects}
+        self.assertTrue(all(states[f"a-{i}"] == RUNNING for i in range(20)))
+        self.assertTrue(all(states[f"b-{i}"] == DEAD for i in range(20)))
+        self.assertEqual(calls, {"local": 1, "a": 1, "b": 1})
 
 OURS = "/i/00000000-07300312-inflight-append-fleetInfraRebuild"
 THEIRS = "/i/00000000-07290101-inflight-append-otherEffort"

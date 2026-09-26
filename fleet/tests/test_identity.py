@@ -146,6 +146,18 @@ class TestResolve(unittest.TestCase):
         with self.assertRaises(AmbiguousId):
             resolve(self.tmp / GOOD)
 
+    def test_indexed_lookup_keeps_ambiguity_and_exact_path_rules(self):
+        complete = self.tmp / InstantName.parse(GOOD).with_state("complete").format()
+        aborted = self.tmp / InstantName.parse(GOOD).with_state("abort").format()
+        complete.mkdir()
+        aborted.mkdir()
+        index = {}
+        with self.assertRaises(AmbiguousId):
+            resolve(self.tmp / GOOD, index)
+        exact = self.tmp / GOOD
+        exact.mkdir()
+        self.assertEqual(resolve(exact, index), exact)
+
 
 class TestSameInstant(unittest.TestCase):
     """`B08`. Two records of one instant written either side of its own rename differ in `state` alone."""

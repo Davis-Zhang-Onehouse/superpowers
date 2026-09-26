@@ -181,7 +181,7 @@ class Subject:
 
 
 def reconcile(store, pool, sessions, instants_dir: Path, idle_after_s: int = 1800,
-              layer_for=None) -> list:
+              layer_for=None, local_live_sessions=None) -> list:
     """Join every fact about the fleet into one subject list.
 
     Order is the join order: live processes first, then records nothing live matched, then leases no
@@ -199,6 +199,7 @@ def reconcile(store, pool, sessions, instants_dir: Path, idle_after_s: int = 180
     healthy board into a search over every server on the box.
     """
     instants_dir = Path(instants_dir)
+    resolution_index = {}
     #: One layer per distinct foreign socket, built at most once. The cost of following an address is a
     #: probe set per SERVER, not per record, and that is what makes this affordable on a board where a
     #: whole wave was dispatched somewhere else.
@@ -212,13 +213,27 @@ def reconcile(store, pool, sessions, instants_dir: Path, idle_after_s: int = 180
             layers[socket] = layer_for(socket)
         return layers[socket]
 
+    #: A census belongs to this join, not to SessionLayer: pane-guard and teardown must
+    #: continue to observe immediately before acting.
+    censuses = {}
+
+    def census(layer):
+        if layer not in censuses:
+            processes = (list(local_live_sessions) if layer is sessions and local_live_sessions is not None
+                         else list(layer.live()))
+            bulk = getattr(layer.probes, "list_session_names", None)
+            names = bulk() if bulk is not None else None
+            process_names = {item.name for item in processes if item.name}
+            censuses[layer] = (processes, process_names, names)
+        return censuses[layer]
+
     records = list(store.all())
     record_by_tmux = {}
     for rec in records:
         if rec.tmux and (not rec.tmux_socket or rec.tmux_socket == sessions.socket):
             record_by_tmux.setdefault(rec.tmux, rec)
 
-    live_sessions = list(sessions.live())
+    live_sessions, _, _ = census(sessions)
     subjects, seen_records, accounted_slots = [], set(), set()
     #: RV-29. Records dispatched on ANOTHER tmux server: a same-named pane here is not theirs, and neither is their lease.
     elsewhere = {rec.todo_id for rec in records if rec.tmux_socket and rec.tmux_socket != sessions.socket}
@@ -238,7 +253,8 @@ def reconcile(store, pool, sessions, instants_dir: Path, idle_after_s: int = 180
             seen_records.add(rec.todo_id)
             subject = _worker_subject(rec, pool, sessions, instants_dir, idle_after_s,
                                       live=True, sess=sess, live_sessions=live_sessions,
-                                      local_nested_sessions=live_sessions)
+                                      local_nested_sessions=live_sessions,
+                                      resolution_index=resolution_index)
             if subject.holds_slot:
                 accounted_slots.add(rec.slot)
             subjects.append(subject)
@@ -257,10 +273,13 @@ def reconcile(store, pool, sessions, instants_dir: Path, idle_after_s: int = 180
         #: was: the slot holder is process evidence and deliberately not re-asked, since `/proc` does not
         #: care which tmux server anybody is pointed at.
         layer = layer_of(rec.tmux_socket)
+        _, process_names, session_names = census(layer)
         subject = _worker_subject(rec, pool, layer, instants_dir, idle_after_s,
-                                  live=layer.alive(rec.tmux), sess=None,
+                                  live=layer.alive(rec.tmux, process_names=process_names,
+                                                   session_names=session_names), sess=None,
                                   live_sessions=live_sessions,
-                                  local_nested_sessions=live_sessions if layer is sessions else ())
+                                  local_nested_sessions=live_sessions if layer is sessions else (),
+                                  resolution_index=resolution_index)
         if subject.holds_slot:
             accounted_slots.add(rec.slot)
         subjects.append(subject)
@@ -270,7 +289,10 @@ def reconcile(store, pool, sessions, instants_dir: Path, idle_after_s: int = 180
         lease = pool.lease(slot)
         if lease is None or slot in accounted_slots or lease.todo_id in seen_records:
             continue
-        subjects.append(_lease_subject(slot, lease, sessions, live_sessions))
+        _, process_names, session_names = census(sessions)
+        subjects.append(_lease_subject(slot, lease, sessions, live_sessions,
+                                       alive=lambda name: sessions.alive(
+                                           name, process_names=process_names, session_names=session_names)))
 
     return subjects
 
@@ -301,10 +323,10 @@ def complete_work_is_live(rec, instant, phase, *, live: bool, busy: bool, watche
 
 
 def _worker_subject(rec, pool, sessions, instants_dir: Path, idle_after_s: int, live: bool, sess,
-                    live_sessions=(), local_nested_sessions=()):
+                    live_sessions=(), local_nested_sessions=(), resolution_index=None):
     if sessions.runtime != rec.runtime:
         sessions = SessionLayer(sessions.probes, rec.runtime)
-    instant = _instant_on_disk(rec, instants_dir)
+    instant = _instant_on_disk(rec, instants_dir, resolution_index)
     folder_state = _folder_state(instant)
     declared = Declarations(instant) if instant is not None else None
     phase = declared.phase() if declared is not None else None
@@ -1001,7 +1023,7 @@ def _slot_leased_to_pane(pool, sess, elsewhere=frozenset()) -> str:
 # --- leases nothing else accounts for --------------------------------------------------------------
 
 
-def _lease_subject(slot: str, lease, sessions, live_sessions: list):
+def _lease_subject(slot: str, lease, sessions, live_sessions: list, alive=None):
     """A lease with no record in this store.
 
     Live: an unknown holding a slot. Not live: a stale lease, and the note NAMES ITS OWNER — `RI-31`'s
@@ -1018,7 +1040,8 @@ def _lease_subject(slot: str, lease, sessions, live_sessions: list):
         "tmux": lease.tmux,
         "claimed_at": lease.claimed_at,
     }
-    if sessions.alive(lease.tmux) or any(Path(s.cwd) == Path(lease.path) for s in live_sessions):
+    if (alive(lease.tmux) if alive is not None else sessions.alive(lease.tmux)) or any(
+            Path(s.cwd) == Path(lease.path) for s in live_sessions):
         return Subject(kind=KIND_UNKNOWN, identity=f"lease:{slot}", state=UNKNOWN_SESSION,
                        holds_slot=True, evidence=evidence,
                        note=(f"slot {slot} is leased to {lease.todo_id} by {owner} with no record in "
@@ -1032,7 +1055,7 @@ def _lease_subject(slot: str, lease, sessions, live_sessions: list):
 # --- disk ------------------------------------------------------------------------------------------
 
 
-def _instant_on_disk(rec, instants_dir: Path):
+def _instant_on_disk(rec, instants_dir: Path, resolution_index=None):
     """The instant's CURRENT folder, following the rename the recorded path predates.
 
     Resolution goes through `identity.resolve`, which matches on the full stable key with only `state`
@@ -1043,9 +1066,9 @@ def _instant_on_disk(rec, instants_dir: Path):
     recorded = Path(rec.child_instant)
     if not recorded.is_absolute():
         recorded = instants_dir / recorded
-    found = resolve(recorded)
+    found = resolve(recorded, resolution_index)
     if found is None and recorded.parent != instants_dir:
-        found = resolve(instants_dir / recorded.name)
+        found = resolve(instants_dir / recorded.name, resolution_index)
     return found
 
 
