@@ -224,3 +224,23 @@ class TestFleetViewStates(unittest.TestCase):
                 found = scope["_find_sessions"]({"dt-a", "dt-b"})
         self.assertEqual(found, {})
         self.assertEqual([argv[3] for argv in calls], ["list-sessions"] * 3)
+
+    def test_an_unreachable_row_without_a_session_asks_status_once(self):
+        """V23-V OR-2. `_session_name` (a whole `fleet status`) ran once to build the lookup set and again per row."""
+        scope = runpy.run_path(str(REPO / "bin" / "fleet-view"))
+        board = scope["view_board"]
+        spawned = []
+
+        def run(verb, extra=()):
+            spawned.append((verb, *extra))
+            if verb == "board":
+                return [{"kind": "worker", "identity": "x-1", "state": "UNREACHABLE", "session": "", "note": "n"}], "", 0
+            return [{"field": "evidence.tmux", "value": "dt-x"}], "", 0
+
+        looked_up = []
+        with mock.patch.dict(board.__globals__, {"run": run, "_find_sessions": lambda names: (
+                looked_up.append(set(names)), {"dt-x": "other"})[1]}):
+            lines, _ = board(False)
+        self.assertEqual(looked_up, [{"dt-x"}])
+        self.assertIn("FOUND IT on socket 'other'", "\n".join(lines))
+        self.assertEqual(spawned, [("board",), ("status", "--id", "x-1")])

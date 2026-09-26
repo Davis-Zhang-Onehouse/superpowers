@@ -318,9 +318,10 @@ def view_board(wide):
     rows = _collapse(rows)
     if not rows:
         return ["  (no subjects)"] + scope, err
-    unreachable = {r.get("session") or _session_name(r.get("identity", ""))
+    #: One `status` per UNREACHABLE row with no session cell, not one for the set and another in the loop (OR-2).
+    unreachable = {id(r): r.get("session") or _session_name(r.get("identity", ""))
                    for r in rows if r.get("state") == "UNREACHABLE"}
-    found_sessions = _find_sessions(unreachable) if unreachable else {}
+    found_sessions = _find_sessions(set(unreachable.values())) if unreachable else {}
     entries = []
     for r in rows:
         state = r.get("state", "")
@@ -330,7 +331,7 @@ def view_board(wide):
         if pid and f"pid {pid}" not in note:
             note = f"pid {pid} · {note}" if note.strip() else f"pid {pid}"
         if state == "UNREACHABLE":
-            found = found_sessions.get(r.get("session") or _session_name(r.get("identity", "")))
+            found = found_sessions.get(unreachable[id(r)])
             if found:
                 note += (f"  →  FOUND IT on socket '{found}'. Run: "
                          f"export FLEET_TMUX_SOCKET={found}   (then re-run; "
