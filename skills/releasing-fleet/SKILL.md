@@ -62,6 +62,18 @@ that ships this check reads MISMATCH until the install has run; that is the corr
 Nothing in the chain rolls back on it (`release-rollback` is always a deliberate call). Do not roll back for an
 assertion-6-only MISMATCH: run the install and re-run postflight.
 
+**The sync control dir follows the deploy too (D-136).** The 03:30 upstream sync runs the scripts `bootstrap.sh` copied into
+its control dir, which no release touched, so a sync fix never reached the cron. Right after the deploy (and the codex install),
+refresh them from the deployed export and keep both outputs as deploy evidence:
+
+```bash
+bash "$FLEET_RELEASES/current/scripts/sync/refresh-control.sh" --ctrl <root>/.superpowers-sync --check   # DIFFERS rows, rc 1
+bash "$FLEET_RELEASES/current/scripts/sync/refresh-control.sh" --ctrl <root>/.superpowers-sync           # wrote rows
+bash "$FLEET_RELEASES/current/scripts/sync/refresh-control.sh" --ctrl <root>/.superpowers-sync --check   # all same, rc 0
+```
+
+It writes only the six code files; a PAUSED sync (STATUS, PENDING, its rebase worktree) and the config are never touched.
+
 **Mind the refusal window.** From the deploy that first ships the dispatch refusal until the install runs,
 every `fleet dispatch --runtime codex` on that root exits 4 ("cannot see the superpowers skills"). Run the
 install as part of the deploy step, before postflight, so the window is seconds rather than however long it
