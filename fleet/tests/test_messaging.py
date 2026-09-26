@@ -9,6 +9,7 @@ from fleet.errors import BadInput, FleetError, Refused
 from fleet.messaging import (CONFIRMED_BY_DRAFT, CONFIRMED_BY_DRAFT_TAIL, TAIL_SETTLE_S, CONFIRMED_BY_PLACEHOLDER, CONFIRMED_BY_PLACEHOLDER_UNCOUNTED, SUBMITTED, confirms, UNCERTAIN_AFTER_ENTER, line_count,
                              UNCERTAIN_AFTER_INSERTION, SendRecord, read_sends, record_send, send, sends_path)
 from fleet.runtime import PaneObservation, observe
+from fleet.session import Attachment
 
 
 class MessagingTests(unittest.TestCase):
@@ -17,7 +18,9 @@ class MessagingTests(unittest.TestCase):
         events = []
         layer = SimpleNamespace(socket='test', observe=lambda name: next(states),
                                 send_literal=lambda name,text: events.append(('literal',text)),
-                                submit=lambda name: events.append(('submit',None)))
+                                submit=lambda name: events.append(('submit',None)),
+                                #: S6 OR-2: nobody attached, the usual worker pane (`attended` answers otherwise).
+                                attachment=lambda name: Attachment(clients=0, last_input=0.0))
         return layer, events
 
     def test_only_matching_draft_is_submitted_once(self):
@@ -212,6 +215,56 @@ class MessagingTests(unittest.TestCase):
                              confirms('claude', '\n'.join(self.wrapped(words, 150)[-3:]), text, width=150))
         with self.subTest('S6 OR-1: a box whose width is unknown (no located border) never confirms by tail'):
             self.assertIsNone(confirms('claude', tail3, text))
+
+    def attended(self, layer, answers):
+        """S6 OR-2. Give a fixture layer the `attachment` a real SessionLayer has, answering in turn from `answers`
+        (each an Attachment, or None for NOT OBSERVABLE); the last answer repeats."""
+        answers = list(answers)
+        layer.attachment = lambda name: answers.pop(0) if len(answers) > 1 else answers[0]
+        return layer
+
+    def test_a_keystroke_after_admission_is_never_confirmed_with_our_tail(self):
+        """S6 OR-2 (coordinator D-123). A human who types between the admission capture and the paste leaves
+        `<their text><our message>` in the box; the head is hidden and the tail confirms, so Enter submitted their
+        fragment with our message (the review: 9 of 10 prefixes, `/clear ` among them). A tail is confirmed only while
+        tmux says no interactive client gave input since admission, and nobody could type unseen."""
+        tail = self.scrolled('claude-scrolled-box-282.frame')
+        admitted = 1_000_000.25
+        cases = {
+            'an interactive client typed in the admission second': Attachment(clients=1, last_input=1_000_000.0),
+            'an interactive client typed after admission': Attachment(clients=1, last_input=1_000_001.0),
+            'a control-mode or read-only observer can send-keys unseen': Attachment(clients=0, last_input=0.0, observers=1),
+            'the attachment cannot be observed': None,
+        }
+        for why, answer in cases.items():
+            with self.subTest(why), tempfile.TemporaryDirectory() as directory:
+                layer, events = self.runtime_fixture('claude', [PaneObservation('idle'), tail, tail, tail, tail])
+                self.attended(layer, [answer])
+                recorded = []
+                with self.assertRaisesRegex(FleetError, 'uncertain after insertion'):
+                    send(Path(directory), layer, SimpleNamespace(tmux='worker'), self.SCROLLED_TEXT, timeout_s=0,
+                         sleep=lambda _: None, wall=lambda: admitted, recorder=lambda o, c: recorded.append((o, c)))
+                self.assertEqual(events, [('literal', self.SCROLLED_TEXT)])
+                self.assertEqual(recorded, [(UNCERTAIN_AFTER_INSERTION, '')])
+        for why, answer in {'nobody attached': Attachment(clients=0, last_input=0.0),
+                            'the last keystroke came before the admission second': Attachment(clients=1, last_input=999_999.0)}.items():
+            with self.subTest(why), tempfile.TemporaryDirectory() as directory:
+                layer, events = self.runtime_fixture('claude', [PaneObservation('idle'), tail, tail, PaneObservation('busy')])
+                self.attended(layer, [answer])
+                self.assertEqual(SUBMITTED, send(Path(directory), layer, SimpleNamespace(tmux='worker'), self.SCROLLED_TEXT,
+                                                 sleep=lambda _: None, wall=lambda: admitted)[0])
+        with self.subTest('a keystroke before the RETRY refuses the retry'), tempfile.TemporaryDirectory() as directory:
+            layer, events = self.runtime_fixture('claude', [PaneObservation('idle'), tail, tail, tail, tail])
+            self.attended(layer, [Attachment(clients=1, last_input=999_999.0), Attachment(clients=1, last_input=1_000_003.0)])
+            with self.assertRaisesRegex(FleetError, 'retry refused: an attached client gave the pane input'):
+                send(Path(directory), layer, SimpleNamespace(tmux='worker'), self.SCROLLED_TEXT, timeout_s=0,
+                     sleep=lambda _: None, wall=lambda: admitted)
+            self.assertEqual(events, [('literal', self.SCROLLED_TEXT), ('submit', None)])
+        with self.subTest('an exact draft needs no attachment: the whole text is on screen'):
+            with tempfile.TemporaryDirectory() as directory:
+                layer, events = self.fixture([PaneObservation('idle'), PaneObservation('queued', 'hello'), PaneObservation('busy')])
+                self.attended(layer, [None])
+                self.assertEqual((SUBMITTED, CONFIRMED_BY_DRAFT), send(Path(directory), layer, SimpleNamespace(tmux='worker'), 'hello'))
 
     def test_the_retry_waits_for_the_same_tail_evidence(self):
         """After Enter the scrolled box still shows the tail: one retry on the same evidence, then the distinct
