@@ -7,6 +7,7 @@ server or the tracked RESULTS.tsv. Each class names the defect it pins and the R
 """
 import tests  # noqa: F401 — installs the suite's host boundary when this module runs alone (FB-118)
 import atexit
+import fcntl
 import json
 import os
 import pathlib
@@ -894,6 +895,27 @@ sys.exit(0)
                 break
             time.sleep(0.1)
         self.assertFalse(directory.exists(), directory)
+
+    def test_case_supersession_waits_for_results_rewrite_lock(self):
+        env, calls = self.recording_tmux()
+        tmp = self.tmp / "harness"
+        it = harness_copy(tmp)
+        results = self.tmp / "results.tsv"
+        results.write_text("case\tverdict\tevidence\tnote\nX\tPASS\t\told\n")
+        script = f'. "{it}/lib.sh"\nRESULTS="{results}"\nit_own_cases "X"\n'
+        with open(str(results) + ".lock", "w") as lock:
+            fcntl.flock(lock, fcntl.LOCK_EX)
+            child = subprocess.Popen(["bash", "-c", script], cwd=tmp,
+                                     env=clean_env({"IT_TMUX_REAL": env["IT_TMUX_REAL"],
+                                                    "FAKE_TMUX_RECORD": str(calls)}, home=self.tmp / "home"),
+                                     stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+            try:
+                time.sleep(0.2)
+                self.assertIsNone(child.poll(), "case rewrite ignored the shared result lock")
+            finally:
+                fcntl.flock(lock, fcntl.LOCK_UN)
+                stdout, stderr = child.communicate(timeout=5)
+        self.assertEqual(child.returncode, 0, stderr.decode())
 
     def test_end_of_options_and_combined_socket_flags_cannot_hide_a_kill(self):
         env, calls = self.recording_tmux()

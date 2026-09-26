@@ -365,10 +365,17 @@ it_section() {            # it_section <name> -> own FLEET_HOME, own slots, own 
   # section's audit row and remove its prior verdict, without touching another section's rows.
   if [ -n "${IT_OWN_RE:-}" ] && [ "$RESULTS" = "${IT_OWN_FILE:-}" ]; then
     if [ -f "$RESULTS" ]; then
-      local audit_tmp
-      audit_tmp="$(mktemp "$(dirname "$RESULTS")/.$(basename "$RESULTS").XXXXXX")" || return 1
-      IT_AUDIT_CASE="KILL-AUDIT-$IT_TMUX_AUDIT_CASE_SECTION" awk -F '\t' 'NR==1 || $1 != ENVIRON["IT_AUDIT_CASE"]' "$RESULTS" > "$audit_tmp" \
-        && mv "$audit_tmp" "$RESULTS" || return 1
+      local audit_tmp audit_lock audit_status=0
+      exec {audit_lock}>"$RESULTS.lock"
+      flock -x "$audit_lock"
+      audit_tmp="$(mktemp "$(dirname "$RESULTS")/.$(basename "$RESULTS").XXXXXX")" || audit_status=1
+      if [ "$audit_status" -eq 0 ]; then
+        IT_AUDIT_CASE="KILL-AUDIT-$IT_TMUX_AUDIT_CASE_SECTION" awk -F '\t' 'NR==1 || $1 != ENVIRON["IT_AUDIT_CASE"]' "$RESULTS" > "$audit_tmp" \
+          && mv "$audit_tmp" "$RESULTS" || audit_status=1
+      fi
+      flock -u "$audit_lock"
+      exec {audit_lock}>&-
+      [ "$audit_status" -eq 0 ] || return 1
     fi
     IT_OWN_RE="$IT_OWN_RE|KILL-AUDIT-$IT_TMUX_AUDIT_CASE_SECTION"
   fi
@@ -620,11 +627,13 @@ it_skip() { _it_row "$1" SKIP "${2:-}" "${3:-cannot run — reason must be state
 # cannot even be expressed in an append-only file: a NOT-RUN row has to be REPLACED, not annotated.
 # History is not lost — git holds it, which is the right home for a log.
 it_own_cases() {          # it_own_cases <extended regex matched against the whole case field>
-  local re="$1" tmp at
+  local re="$1" tmp at case_lock
   IT_OWN_RE="$re"
   IT_OWN_FILE="$RESULTS"
   IT_OWN_AT=""
   [ -f "$RESULTS" ] || return 0
+  exec {case_lock}>"$RESULTS.lock"
+  flock -x "$case_lock"
   # Staged NEXT TO the target, not in $TMPDIR. §A's A8c audit found this was the harness's only write that
   # left the instant altogether — and `mv` across filesystems is not atomic, so a temp in /tmp also gave up
   # the atomicity this function depends on. Same directory means same filesystem means a real rename.
@@ -638,6 +647,8 @@ it_own_cases() {          # it_own_cases <extended regex matched against the who
   at="$(IT_RE="^(OWN-)?($re)\$" awk -F'\t' 'NR>1 && $1 ~ ENVIRON["IT_RE"] {print NR; exit}' "$RESULTS")"
   IT_RE="^(OWN-)?($re)\$" awk -F'\t' 'NR==1 || $1 !~ ENVIRON["IT_RE"]' "$RESULTS" > "$tmp" && mv "$tmp" "$RESULTS"
   [ -n "$at" ] && IT_OWN_AT="$at"
+  flock -u "$case_lock"
+  exec {case_lock}>&-
   return 0
 }
 
