@@ -882,6 +882,15 @@ class TestTheFlagSpec(CliCase):
         self.assertGreater(with_required, 0,
                            "no verb declares a required flag, so the ordering half of FI-26 is untested")
 
+    def test_propose_help_names_the_actual_default_destination(self):
+        """The explicit --to override works; without it dispatch origin selects the coordinator."""
+        help_text = cli.usage("propose")
+        self.assertIn("defaults to the dispatch origin's coordinator", help_text)
+        self.assertNotIn("defaults to --instant", help_text)
+        advertised = set(re.findall(r"(?m)^    (--[a-z-]+)\s", help_text))
+        declared = {flag.name for flag in (*cli.VERBS["propose"].flags, *cli.COMMON_FLAGS)}
+        self.assertEqual(advertised, declared, "propose help advertises an undeclared option")
+
     def test_no_flag_exists_outside_a_verb_spec(self):
         # A hand-maintained second copy is the class. The strong half is the CROSS-verb probe: a flag
         # that exists on some other verb is exactly the flag a hand-rolled parser leaks.

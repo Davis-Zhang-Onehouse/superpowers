@@ -6,8 +6,8 @@ questions a dispatched instant could not previously ask about itself:
   * **which instant is my coordinator** — so `propose` has a destination without being told one; and
   * **which milestone was I dispatched for** — so a report can be joined back to the work it is about.
 
-Why this file exists at all (`SI-27`). `propose --to` defaults to `--instant`, so a worker that did not
-name a destination wrote a proposal into *its own* `proposals.json`; `harvest` then applied that proposal
+Why this file exists at all (`SI-27`). Before origin.json, `propose --to` defaulted to `--instant`, so a
+worker that did not name a destination wrote a proposal into *its own* `proposals.json`; `harvest` then applied that proposal
 into the worker's own roadmap, killed the session, released the slot and closed the record. Measured: the
 coordinator's inbox held **0 pending** and the worker's own held **1**. Nothing errored. The project-level
 roadmap simply never learned, and the only trace was inside a folder that had just been closed out.
