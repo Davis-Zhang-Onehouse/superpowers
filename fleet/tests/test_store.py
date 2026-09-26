@@ -37,6 +37,16 @@ class TestRecord(unittest.TestCase):
         self.assertEqual(got.schema_version, SCHEMA_VERSION)
         self.assertEqual(got.slot, "ws1")
 
+    def test_a_record_that_is_not_an_object_or_misses_a_field_is_bad_input(self):
+        """S6 workspace review RV-32. Valid JSON that is not an object raised AttributeError, and a valid-schema object
+        missing a required field raised TypeError — both past every `except BadInput` (the RV-S6S-3 owner lookup, reap),
+        where a torn record is supposed to be refused NAMING it."""
+        for value in ([], None, "x", 3):
+            with self.subTest(value=value), self.assertRaises(BadInput):
+                Record.from_json(value)
+        with self.assertRaises(BadInput):
+            Record.from_json({"schema_version": SCHEMA_VERSION, "todo_id": "t-1"})
+
     def test_an_unknown_schema_version_is_refused_not_guessed(self):
         # OBS-9 -> W2-5: `launched_at` then `harvested_at` each shipped with no migration path, and 11
         # records ended up demanding attention forever. A version the code does not know is BAD INPUT,

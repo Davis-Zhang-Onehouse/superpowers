@@ -106,6 +106,10 @@ class Record:
 
     @classmethod
     def from_json(cls, d: dict) -> "Record":
+        #: S6 RV-32. Valid JSON that is not an object, or an object missing a required field, raised AttributeError /
+        #: TypeError past every `except BadInput` — a torn record must be refused as bad input, like any other.
+        if not isinstance(d, dict):
+            raise BadInput(f"a record must be a JSON object, not {type(d).__name__}")
         if not isinstance(d.get('runtime', 'claude'), str) or d.get('runtime', 'claude') not in ('claude', 'codex'):
             raise BadInput(f"record {d.get('todo_id')!r} has unsupported runtime")
         for key in ('runtime_executable', 'runtime_config_dir', 'runtime_model'):
@@ -122,7 +126,10 @@ class Record:
         unknown = set(d) - known
         if unknown:
             raise BadInput(f"record {d.get('todo_id')!r} has unknown field(s): {sorted(unknown)}")
-        return cls(**d)
+        try:
+            return cls(**d)
+        except TypeError as exc:
+            raise BadInput(f"record {d.get('todo_id')!r} is missing or mistypes a field ({exc})") from exc
 
 
 class Store:
