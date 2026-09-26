@@ -203,3 +203,24 @@ class TestFleetViewStates(unittest.TestCase):
             with mock.patch("subprocess.run", side_effect=tmux):
                 found = scope["_find_sessions"]({"dt-a"})
         self.assertEqual(found, {"dt-a": "one"})
+
+    def test_unreachable_lookup_asks_a_dead_socket_once(self):
+        """V23-V OR-1. `no server running` already proves every name absent there; the per-name fallback doubled the
+        calls on every dead socket (98 for one UNREACHABLE row on a box with 49 dead sockets)."""
+        scope = runpy.run_path(str(REPO / "bin" / "fleet-view"))
+        calls = []
+
+        def tmux(argv, **kwargs):
+            calls.append(argv)
+            if argv[2] == "gone":
+                return subprocess.CompletedProcess(argv, 1, "", "no server running on /tmp/tmux-1000/gone")
+            if argv[2] == "stale":
+                return subprocess.CompletedProcess(
+                    argv, 1, "", "error connecting to /tmp/tmux-1000/stale (No such file or directory)")
+            return subprocess.CompletedProcess(argv, 0, "dt-z\n", "")
+
+        with mock.patch("os.listdir", return_value=["gone", "live", "stale"]):
+            with mock.patch("subprocess.run", side_effect=tmux):
+                found = scope["_find_sessions"]({"dt-a", "dt-b"})
+        self.assertEqual(found, {})
+        self.assertEqual([argv[3] for argv in calls], ["list-sessions"] * 3)

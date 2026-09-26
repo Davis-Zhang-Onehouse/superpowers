@@ -249,9 +249,12 @@ def _find_sessions(names):
             continue                      # already asked; that is why we are here
         r = subprocess.run(["tmux", "-L", sock, "list-sessions", "-F", "#{session_name}"],
                            capture_output=True, text=True)
+        error = r.stderr.strip()
         if r.returncode == 0:
             for name in set(r.stdout.splitlines()) & names:
                 found.setdefault(name, sock)
+        elif error.startswith("no server running on ") or error.endswith("(No such file or directory)"):
+            pass                          # no server: every name is absent (session.py's `_no_server` rule)
         else:
             # An unusual bulk failure does not prove each exact target absent. Keep the
             # prior verdict by asking those targets individually on this server.
