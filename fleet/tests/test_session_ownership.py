@@ -457,6 +457,38 @@ class TheTeardownVerbsLeaveASessionThatIsNotTheirs(unittest.TestCase):
 
 
 
+class ReapAsksWhoseSessionALeaseNames(unittest.TestCase):
+    """v23-t OR-3. `reap` judged a lease live by its session NAME alone, so an old, dead record's lease on ws1 read "its
+    worker is still running" through the re-dispatch's live `dt-mile` on ws2 and was never freed while that ran."""
+
+    def _dead_old_and_live_new(self):
+        from tests.test_cli import OURS
+        fleet = Fleet()
+        self.addCleanup(shutil.rmtree, fleet.tmp, True)
+        fleet.worker("mile", slot="ws1", live=False)                        # A: open, DEAD, still leased
+        rec = fleet.store.read(fleet.ids["mile"])
+        old_id = rec.todo_id
+        rec.launched_at = rec.dispatched_at = "2026-07-29T09:00:00Z"
+        fleet.store.write(rec)
+        fleet.worker("mile", slot="ws2", pane=IDLE_PANE)                    # B: the re-dispatch, live in dt-mile
+        return fleet, old_id, OURS
+
+    def test_reap_frees_the_dead_records_lease_and_keeps_the_owners(self):
+        fleet, old_id, ours = self._dead_old_and_live_new()
+        code, out, err = fleet.run(["reap", "--base", ours])
+        self.assertEqual(code, 0, f"{out}\n{err}")
+        self.assertIsNone(fleet.pool.lease("ws1"), f"A's lease read live through B's session\n{out}")
+        self.assertEqual(fleet.pool.lease("ws2").todo_id, fleet.ids["mile"], "B's own lease is still live")
+        self.assertIn("dt-mile", fleet.tmux_live)
+
+    def test_the_dry_run_says_the_same(self):
+        fleet, old_id, ours = self._dead_old_and_live_new()
+        code, out, err = fleet.run(["reap", "--dry-run", "--base", ours])
+        self.assertEqual(code, 0, f"{out}\n{err}")
+        self.assertRegex(out, rf"ws1 .*leased to {old_id} .*a real reap frees it")
+        self.assertRegex(out, rf"ws2 .*leased to {fleet.ids['mile']} .*its session is alive")
+
+
 class ResumeDoesNotAdoptASessionAnotherRecordOwns(unittest.TestCase):
     """RV-21. `resume` stamps `launched_at=now` when the session it names is alive, which is how D-1 reads "this record
     started it". Resuming an OLD folder whose `dt-<name>` is a re-dispatch's live session therefore handed that session

@@ -832,7 +832,7 @@ class Pool:
     # ---- reaping ---------------------------------------------------------------------------
 
     def reap(self, base_instant=None, all_efforts: bool = False, strict: bool = False,
-             min_claim_age_s: float = INTERRUPTED_CLAIM_AGE_S) -> "ReapReport":
+             min_claim_age_s: float = INTERRUPTED_CLAIM_AGE_S, live=None) -> "ReapReport":
         """Free every stale lease this caller OWNS, and report what it freed AND what it could not.
 
         A lease is stale when its tmux is not alive AND no live process holds its path as cwd. It is
@@ -849,7 +849,8 @@ class Pool:
         call freed, never every slot that ended up free, so a slot freed once is announced once. And a slot
         it could not free is named in `unfreed` rather than raised — the whole point of a reap is the report.
         """
-        plan = self.reap_plan(base_instant=base_instant, all_efforts=all_efforts, min_claim_age_s=min_claim_age_s)
+        plan = self.reap_plan(base_instant=base_instant, all_efforts=all_efforts, min_claim_age_s=min_claim_age_s,
+                              live=live)
         freed, unfreed, reclaimed = [], [], []
         skipped = list(plan.foreign)
         unattributable = list(plan.unattributable)
@@ -908,12 +909,16 @@ class Pool:
         )
 
     def reap_plan(self, base_instant=None, all_efforts: bool = False,
-                  min_claim_age_s: float = INTERRUPTED_CLAIM_AGE_S) -> ReapPlan:
+                  min_claim_age_s: float = INTERRUPTED_CLAIM_AGE_S, live=None) -> ReapPlan:
         """Classify every lease and bodiless claim the way `reap` judges them, writing nothing (`FB-85`).
 
         A lease is stale when its tmux is not alive AND no live process holds its path as cwd; it is this
         caller's when `all_efforts` is set, it carries no base (legacy), or its base is `base_instant`.
         An interrupted claim old enough to judge is reclaimable; a younger one is unattributable (`E9`).
+
+        `live(lease)` (v23-t OR-3), when given, is whether the lease's session is alive AND its todo's own — a
+        re-dispatch reuses the session name, so the name alone reads a dead record's lease live through the new
+        worker's session. Omitted, liveness is the name's.
         """
         plan = ReapPlan()
         # `SI-7` first, and it is FIRST on purpose: an interrupted claim makes a slot unclaimable, so
@@ -936,7 +941,7 @@ class Pool:
             if held is None:
                 continue
             owner = held.base_instant or ""
-            if self._alive(held.tmux):
+            if (live(held) if live is not None else self._alive(held.tmux)):
                 plan.live.append((slot, held))                   # its worker is still running
                 continue
             pids = self._holders(held)

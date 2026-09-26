@@ -4462,6 +4462,20 @@ def _session_taken_by(ctx: Ctx, record):
     return owner if owner is not None and owner.todo_id != record.todo_id else None
 
 
+def _lease_session_live(ctx: Ctx):
+    """v23-t OR-3. `reap`'s liveness of a lease: its session is alive by name AND no other record owns it
+    (`_session_taken_by`). A lease whose todo has no record keeps the name's answer."""
+    def live(lease) -> bool:
+        if not ctx.sessions.alive(lease.tmux):
+            return False
+        try:
+            record = ctx.store.read(lease.todo_id)
+        except BadInput:
+            return True
+        return _session_taken_by(ctx, record) is None
+    return live
+
+
 def _owns_live_session(ctx: Ctx, record, layer=None) -> bool:
     """V23-T (RV-35). Whether `record`'s session is alive AND its own: the per-record readers' one liveness question,
     so none reads a re-dispatch's session as a dead record's."""
@@ -5587,7 +5601,7 @@ def _do_reap(ctx: Ctx, parsed: Parsed) -> int:
         #: exit 0 over a foreign stale lease the real call refuses.
         from fleet.pool import UnreadableHolder
 
-        plan = ctx.pool.reap_plan(base_instant=base, all_efforts=every)
+        plan = ctx.pool.reap_plan(base_instant=base, all_efforts=every, live=_lease_session_live(ctx))
         rows = []
 
         def leased(lease):
@@ -5641,7 +5655,7 @@ def _do_reap(ctx: Ctx, parsed: Parsed) -> int:
 
     refusal = None
     try:
-        report = ctx.pool.reap(base_instant=base, all_efforts=every, strict=True)
+        report = ctx.pool.reap(base_instant=base, all_efforts=every, strict=True, live=_lease_session_live(ctx))
     except Refused as exc:
         refusal = exc
         report = getattr(exc, "report", None) or ReapReport()
