@@ -195,17 +195,16 @@ dl_need_arg() { # <flag-name> <remaining $#>  rc 2 if there is no value after th
 # silent: on 2026-07-28 three of four live panes were holding one, including an authorization a
 # coordinator believed it had delivered.
 dl_pane_unsubmitted() { # <pane text> -> prints the queued text; rc 0 if there is any
-  local pane="$1" line txt
-  line="$(printf '%s\n' "$pane" | tail -8 | grep -m1 -E '^[[:space:]]*❯[[:space:]]+[^[:space:]]' 2>/dev/null || true)"
-  [ -n "$line" ] || return 1
-  txt="$(printf '%s' "$line" | sed -E 's/^[[:space:]]*❯[[:space:]]+//; s/[[:space:]]+$//')"
-  [ -n "$txt" ] || return 1
-  # Precautionary: an empty box can render dim placeholder text, which is not a swallowed submit.
-  # The primary guard is the caller's idle gate; this only removes the shapes we know render there.
-  case "$txt" in
-    'Try "'*|'Ask '*|'/ for commands'*|'# for memory'*|'new task?'*) return 1;;
-  esac
-  printf '%s' "$txt"
+  local repo
+  repo="$(cd "$(dirname "${BASH_SOURCE[0]}")/../../.." && pwd)" || return 1
+  printf '%s' "$1" | PYTHONPATH="$repo/fleet/src${PYTHONPATH:+:$PYTHONPATH}" python3 -c '
+import sys
+from fleet.runtime import claude_unsubmitted
+draft = claude_unsubmitted(sys.stdin.read())
+if draft is None:
+    sys.exit(1)
+sys.stdout.write(draft)
+'
 }
 
 # Mid-turn: the model is working and the pane is not a safe thing to destroy.
