@@ -1012,6 +1012,31 @@ sys.exit(0)
         finally:
             slow.wait(timeout=4)
 
+    def test_post_call_bad_ledger_row_does_not_hide_executed_command(self):
+        fake = self.tmp / "corrupting-tmux"
+        calls = self.tmp / "corrupting-calls"
+        fake.write_text('''#!/usr/bin/env python3
+import json, os, sys
+with open(os.environ['FAKE_TMUX_RECORD'], 'a') as out:
+    out.write(json.dumps(sys.argv[1:]) + '\\n')
+with open(os.environ['IT_TMUX_AUDIT_LEDGER'], 'a') as out:
+    out.write(os.environ['FAKE_LEDGER_BAD'])
+''')
+        fake.chmod(0o755)
+        for index, bad in enumerate(("{bad json\n", "{bad json")):
+            with self.subTest(bad=bad):
+                ledger = self.tmp / f"damaged-ledger-{index}.jsonl"
+                env = dict(self.env, IT_TMUX_AUDIT_LEDGER=str(ledger), IT_TMUX_REAL=str(fake),
+                           FAKE_TMUX_RECORD=str(calls), FAKE_LEDGER_BAD=bad)
+                result = self.tmux("-L", "own", "list-clients", env=env)
+                self.assertEqual(result.returncode, 0, result.stderr)
+                self.assertEqual(json.loads(calls.read_text().splitlines()[-1]),
+                                 ["-L", "own", "list-clients"])
+                recorded = [json.loads(line) for line in ledger.read_text().splitlines()
+                            if line != "{bad json"]
+                self.assertEqual(recorded[-1]["command"], "list-clients")
+                self.assertEqual(recorded[-1]["status"], 0)
+
     def test_parallel_new_sessions_merge_owned_session_ids(self):
         fake = self.tmp / "parallel-tmux"
         started = self.tmp / "a-started"
@@ -1123,6 +1148,7 @@ sys.exit(0)
         directory = pathlib.Path(marker.read_text().strip())
         time.sleep(2.5)
         self.assertTrue(directory.exists(), "guardian removed a directory after the shim refused its kill")
+        self.assertIn("exit 97", (directory / ".guardian-retained").read_text())
 
     def test_case_supersession_waits_for_results_rewrite_lock(self):
         env, calls = self.recording_tmux()

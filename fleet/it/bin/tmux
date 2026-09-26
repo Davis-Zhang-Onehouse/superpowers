@@ -326,7 +326,21 @@ def main():
             finally:
                 fcntl.flock(stream, fcntl.LOCK_EX)
             stream.seek(0)
-            latest = [json.loads(line) for line in stream if line.strip()]
+            latest = []
+            invalid_rows = 0
+            needs_newline = False
+            for line in stream:
+                needs_newline = not line.endswith("\n")
+                if not line.strip():
+                    continue
+                try:
+                    latest.append(json.loads(line))
+                except json.JSONDecodeError:
+                    # The real command has already executed. Preserve its result row even if
+                    # another writer damaged the ledger while the lock was released.
+                    invalid_rows += 1
+            if invalid_rows:
+                row["reason"] = f"post-call ledger has {invalid_rows} invalid row(s)"
             session_ids = next((r["session_ids"] for r in reversed(latest)
                                 if r.get("socket") == socket and "session_ids" in r), {})
             owned_inode = next((r["socket_inode"] for r in reversed(latest)
@@ -371,6 +385,8 @@ def main():
                 row["session_ids"] = owned_sessions
                 row["sessions"] = sorted(owned_sessions)
             stream.seek(0, os.SEEK_END)
+            if needs_newline:
+                stream.write("\n")
             stream.write(json.dumps(row) + "\n")
             stream.flush()
             if destructive:
