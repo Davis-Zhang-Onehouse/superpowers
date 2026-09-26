@@ -86,11 +86,14 @@ assert_nofile "$CTRL/STATUS"
 assert_eq "$(version_of "$FORK/package.json")" "1.1.0+fleet.0.2.0" finish-package-version
 assert_grep '"result":"manual+manifest-resolved"' "$CTRL/history.ndjson"
 
-# 5. RV-S6Y-3: a recreated MERGE whose version line conflicts pauses (its "theirs" is the second parent)
+# 5. RV-S6Y-3: a recreated MERGE whose version line conflicts pauses (its "theirs" is the second parent). RV-31: the
+#    merge's parents differ ONLY in the manifests (no FLEET_VERSION file), so the MERGE_HEAD guard is what refuses.
+manifest_release() { local core; core="$(sed -n 's/.*"version": "\([^+"]*\).*/\1/p' "$FORK/package.json")"
+                     manifests_at "$FORK" "$core+fleet.$1"; g "$FORK" add -A; g "$FORK" commit -qm "fleet v$1 (manifests only)"; }
 fresh
-g "$FORK" checkout -q live; fleet_release 1
-g "$FORK" checkout -q -b side; fleet_release 2
-g "$FORK" checkout -q live; fleet_release 3
+g "$FORK" checkout -q live; manifest_release 1
+g "$FORK" checkout -q -b side; manifest_release 2
+g "$FORK" checkout -q live; manifest_release 3
 g "$FORK" merge -q --no-ff side -m "merge side" >/dev/null 2>&1 || { manifests_at "$FORK" "1.0.1+fleet.3"; g "$FORK" add -A; g "$FORK" commit -qm "merge side (kept fleet.3)"; }
 up_release v1.1.0 1.1.0
 run_sync
