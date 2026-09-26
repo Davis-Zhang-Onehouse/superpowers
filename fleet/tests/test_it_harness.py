@@ -42,6 +42,11 @@ def harness_copy(tmp: pathlib.Path) -> pathlib.Path:
     for name in ("lib.sh", "facts.env"):
         shutil.copy(IT / name, it / name)
     shutil.copytree(IT / "bin", it / "bin")
+    # S7 review RC-1: a release export is `chmod -R a-w` and copies keep the mode, so a test that edits or
+    # removes a copied file (and the tmp cleanup) failed only inside the gate. The copy is the test's own.
+    for path in [it, *it.rglob("*")]:
+        if not path.is_symlink():
+            path.chmod(path.stat().st_mode | 0o200)
     os.symlink(REPO / "fleet" / "src", tmp / "fleet" / "src")
     return it
 
