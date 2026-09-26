@@ -37,7 +37,7 @@ rm -rf "$FLEET_HOME"; mkdir -p "$FLEET_HOME"
 bash "$IT_ROOT/bin/source-pin.sh" before "$OUT" || exit 2
 
 PATH="$IT_ROOT/bin:$PATH"; export PATH
-trap 'it_cleanup_tmux; tmux -L "$IT_TMUX_SOCKET" kill-server 2>/dev/null' EXIT
+trap 'it_cleanup_tmux; { it_tmux list-sessions >/dev/null 2>&1 && tmux -L "$IT_TMUX_SOCKET" kill-server 2>/dev/null; }' EXIT
 
 # ---- the slot: one repo, three commits, the golden DIVERGED from the lineage base -------------------
 SLOT="$OUT/slot"

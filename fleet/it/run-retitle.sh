@@ -5,7 +5,7 @@ IT_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 IT_FAILED=0
 it_own_cases 'RETITLE|ISOLATION-RETITLE-(enter|leave)'
 it_section RETITLE
-trap 'it_cleanup_tmux; tmux -L "$IT_TMUX_SOCKET" kill-server 2>/dev/null' EXIT
+trap 'it_cleanup_tmux; { it_tmux list-sessions >/dev/null 2>&1 && tmux -L "$IT_TMUX_SOCKET" kill-server 2>/dev/null; }' EXIT
 it_fresh_store
 OUT="$EV/out"
 mkdir -p "$OUT"

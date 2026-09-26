@@ -28,7 +28,7 @@ rm -rf "$FLEET_HOME"; mkdir -p "$FLEET_HOME"      # a virgin store every run (se
 
 bash "$IT_ROOT/bin/source-pin.sh" before "$OUT" || exit 2
 
-trap 'it_cleanup_tmux; tmux -L "$IT_TMUX_SOCKET" kill-server 2>/dev/null' EXIT
+trap 'it_cleanup_tmux; { it_tmux list-sessions >/dev/null 2>&1 && tmux -L "$IT_TMUX_SOCKET" kill-server 2>/dev/null; }' EXIT
 
 # ==================================================================================================
 # O7 — A SYMLINK LOOP MAKES `lint` TERMINATE AND REPORT.
@@ -275,7 +275,7 @@ fi
 # ==================================================================================================
 O4D="$OUT/o4"; mkdir -p "$O4D/home/records" "$O4D/instants"
 o4_restore() { chmod 755 "$O4D/home/records" 2>/dev/null || true; }
-trap 'o4_restore; it_cleanup_tmux; tmux -L "$IT_TMUX_SOCKET" kill-server 2>/dev/null' EXIT
+trap 'o4_restore; it_cleanup_tmux; { it_tmux list-sessions >/dev/null 2>&1 && tmux -L "$IT_TMUX_SOCKET" kill-server 2>/dev/null; }' EXIT
 # The instant is created BEFORE the chmod, because `init` writes to FLEET_INSTANTS and never touches
 # records — aiming this case at `init` measured nothing (it exited 0, correctly). `resume` writes a RECORD,
 # so it is the verb an unreadable records directory must refuse cleanly.

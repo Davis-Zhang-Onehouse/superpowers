@@ -15,7 +15,7 @@ IT_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 IT_FAILED=0
 it_own_cases 'SO[0-9]+|ISOLATION-SO-(enter|leave)'
 it_section SO
-trap 'it_cleanup_tmux; tmux -L "$IT_TMUX_SOCKET" kill-server 2>/dev/null' EXIT
+trap 'it_cleanup_tmux; { it_tmux list-sessions >/dev/null 2>&1 && tmux -L "$IT_TMUX_SOCKET" kill-server 2>/dev/null; }' EXIT
 OUT="$EV/out"; rm -rf "$OUT"; mkdir -p "$OUT"
 export FLEET_INSTANTS="$EV/instants"; rm -rf "$FLEET_INSTANTS"
 it_fresh_store

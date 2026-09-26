@@ -27,7 +27,7 @@ it_section H
 # `itfleet-<SECTION>` prefix, so `it_cleanup_tmux` never sees it. Measured after the fact: `itfleet-H` was
 # still running `dt-joinedworker` long after the section finished. Harmless (a private socket the live server
 # cannot see) and still a leak, one per run. The private SERVER is therefore torn down outright at exit.
-trap 'it_cleanup_tmux; tmux -L "$IT_TMUX_SOCKET" kill-server 2>/dev/null' EXIT
+trap 'it_cleanup_tmux; { it_tmux list-sessions >/dev/null 2>&1 && tmux -L "$IT_TMUX_SOCKET" kill-server 2>/dev/null; }' EXIT
 OUT="$EV/out"; rm -rf "$OUT"; mkdir -p "$OUT"
 export FLEET_INSTANTS="$EV/instants"; rm -rf "$FLEET_INSTANTS"; mkdir -p "$FLEET_INSTANTS"
 it_fresh_store            # §H was measured inheriting a previous run's WIP-cap holder (H10)

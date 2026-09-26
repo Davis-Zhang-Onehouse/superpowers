@@ -57,7 +57,7 @@ it_section S
 #: isolation assertion, which is the correct outcome and an expensive way to learn it.
 #: S11 starts a holder process of its own; the trap kills it BY PID if the runner dies first (`RV-26`).
 S11_HOLDER=""
-trap 'it_cleanup_tmux; tmux -L "$IT_TMUX_SOCKET" kill-server 2>/dev/null; tmux -L "${TMUX_PREFIX}-otherserver" kill-server 2>/dev/null; [ -n "$S11_HOLDER" ] && kill "$S11_HOLDER" 2>/dev/null' EXIT
+trap 'it_cleanup_tmux; { it_tmux list-sessions >/dev/null 2>&1 && tmux -L "$IT_TMUX_SOCKET" kill-server 2>/dev/null; }; { tmux -L "${TMUX_PREFIX}-otherserver" list-sessions >/dev/null 2>&1 && tmux -L "${TMUX_PREFIX}-otherserver" kill-server 2>/dev/null; }; [ -n "$S11_HOLDER" ] && kill "$S11_HOLDER" 2>/dev/null' EXIT
 OUT="$EV/out"; rm -rf "$OUT"; mkdir -p "$OUT"
 export FLEET_INSTANTS="$EV/instants"; rm -rf "$FLEET_INSTANTS"; mkdir -p "$FLEET_INSTANTS"
 it_fresh_store
