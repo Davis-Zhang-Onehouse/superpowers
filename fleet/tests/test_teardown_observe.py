@@ -214,6 +214,7 @@ class ReallyDeadPanesStayCloseable(_Teardown):
             with self.subTest(frame=label):
                 fleet = self.fleet()
                 self._worker(fleet, "shell", frame, attributed=False)
+                fleet.foreground["dt-shell"] = ["sleep"]          # v23-q OR-2: stated, not the fixture's default
                 self.assertEqual(self._pane_guard(fleet, "shell"), cli.PANE_NOT_CLAUDE)
                 code, out, err = self._close(fleet, "shell")
                 self.assertEqual(code, EXIT_OK, f"{out}{err}")
@@ -342,6 +343,8 @@ class PaneGuardCodesUnchanged(_Teardown):
         record = fleet.store.read(fleet.ids[name]); record.runtime = "codex"; fleet.store.write(record)
         fleet.procs[:] = [dataclasses.replace(p, runtime="codex") for p in fleet.procs
                           if attributed or p.name != f"dt-{name}"]
+        if not attributed:
+            fleet.foreground[f"dt-{name}"] = ["bash"]            # the recording the base measurement ran under
 
     def test_codex_matrix(self):
         for frame, codes in self.CODEX.items():
@@ -365,6 +368,7 @@ class PaneGuardCodesUnchanged(_Teardown):
             with self.subTest(frame=frame):
                 fleet = self.fleet()
                 self._worker(fleet, "s", frame, attributed=False)
+                fleet.foreground["dt-s"] = ["sleep"]              # v23-q OR-2: stated, not the fixture's default
                 self.assertEqual(self._pane_guard(fleet, "s"), cli.PANE_NOT_CLAUDE)
 
     def test_matrix(self):

@@ -317,6 +317,8 @@ class Fleet:
         self.profiles_dir.mkdir()
 
         self.procs, self.panes, self.tmux_live, self.holders = [], {}, set(), {}
+        #: session name -> the `pane_commands` recording of an UNATTRIBUTED pane (e.g. `["bash"]`); absent is None.
+        self.foreground = {}
         self.started, self.killed = [], []
         #: `I-27`. The clock seam `abort`'s bounded wait reads (`ctx.sleep`). A no-op recorder by default —
         #: never a real sleep, so a case that never touches the wait costs nothing — and a case testing the
@@ -359,8 +361,9 @@ class Fleet:
             #: shape a record dispatched before a socket rename has.
             socket=self.socket,
             #: FB-130 RV-13. A recording of tmux's `#{pane_current_command}`: the attributed agent's runtime, else
-            #: `bash` (what a shell pane reports, measured) — a case modelling an attribution miss sets it itself.
-            pane_commands=lambda name: ([p.runtime for p in self.procs if p.name == name] or ["bash"])
+            #: None — UNOBSERVED, production's fail-closed default (v23-q OR-2). A case whose unattributed pane is a
+            #: shell says so (`self.foreground`), so no case reads "tmux proved no agent" without stating it.
+            pane_commands=lambda name: ([p.runtime for p in self.procs if p.name == name] or self.foreground.get(name))
                                        if name in self.tmux_live else None,
             session_servers=lambda name: ([self.socket] if name in self.tmux_live else [])
                                          + sorted(s for s, names in self.elsewhere.items()
@@ -2237,6 +2240,7 @@ class TestPaneGuard(CliCase):
         fleet.worker("midTurn", pane=BUSY_PANE)
         fleet.tmux_live.add("dt-shell")
         fleet.panes["dt-shell"] = SHELL_PANE
+        fleet.foreground["dt-shell"] = ["bash"]            # v23-q OR-2: a shell pane says it is one
         fleet.tmux_live.add("dt-asking")
         fleet.panes["dt-asking"] = DIALOG_PANE
 
@@ -2502,6 +2506,7 @@ class TestPaneGuard(CliCase):
         pane = "dt-emptyshell"
         fleet.tmux_live.add(pane)
         fleet.panes[pane] = ""                 # captured fine; there is simply nothing on screen
+        fleet.foreground[pane] = ["sleep"]     # v23-q OR-2: what tmux reports for that shell's `sleep 900`
         code, out, err = fleet.run(["pane-guard", "--porcelain", "--pane", pane])
         self.assertEqual(code, cli.PANE_NOT_CLAUDE,
                          f"an empty pane that captured cleanly is not reported not-claude: {out}{err}")
@@ -2556,6 +2561,7 @@ class TestPaneGuard(CliCase):
         fleet.worker("midTurn", pane=BUSY_PANE)
         fleet.tmux_live.add("dt-shell")
         fleet.panes["dt-shell"] = SHELL_PANE
+        fleet.foreground["dt-shell"] = ["bash"]            # v23-q OR-2: a shell pane says it is one
         fleet.tmux_live.add("dt-asking")
         fleet.panes["dt-asking"] = DIALOG_PANE
 
@@ -2619,6 +2625,7 @@ class TestPaneGuard(CliCase):
         empty_pane = "dt-emptyshell"
         fleet.tmux_live.add(empty_pane)
         fleet.panes[empty_pane] = ""
+        fleet.foreground[empty_pane] = ["sleep"]
         empty_target = fleet.tmp / "capture-empty.txt"
 
         code, out, err = fleet.run(["pane-guard", "--porcelain", "--pane", empty_pane,
