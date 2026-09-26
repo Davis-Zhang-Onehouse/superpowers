@@ -112,7 +112,7 @@ def camel(title: str) -> str:
     return out
 
 
-def resolve(recorded: Path) -> Path | None:
+def resolve(recorded: Path, index: dict | None = None) -> Path | None:
     """Follow a recorded instant path through a state rename.
 
     A worker renames its own folder as its completion signal, so the path recorded at dispatch time goes
@@ -127,15 +127,29 @@ def resolve(recorded: Path) -> Path | None:
     parent = recorded.parent
     if not parent.is_dir():
         return None
-    matches = []
-    for candidate in sorted(parent.iterdir()):
-        if not candidate.is_dir():
-            continue
-        try:
-            if InstantName.parse(candidate.name).stable_key() == want:
-                matches.append(candidate)
-        except InstantNameError:
-            continue
+    if index is None:
+        matches = []
+        for candidate in sorted(parent.iterdir()):
+            if not candidate.is_dir():
+                continue
+            try:
+                if InstantName.parse(candidate.name).stable_key() == want:
+                    matches.append(candidate)
+            except InstantNameError:
+                continue
+    else:
+        if parent not in index:
+            by_key = {}
+            for candidate in sorted(parent.iterdir()):
+                if not candidate.is_dir():
+                    continue
+                try:
+                    key = InstantName.parse(candidate.name).stable_key()
+                except InstantNameError:
+                    continue
+                by_key.setdefault(key, []).append(candidate)
+            index[parent] = by_key
+        matches = index[parent].get(want, [])
     if not matches:
         return None
     if len(matches) > 1:

@@ -554,17 +554,28 @@ class Ctx:
     cwd_ceiling: object = None
     #: FB-117. The process table the codex mount-residue sweep reads; `None` means the real `/proc`.
     proc_root: object = None
+    #: Read-only board/status/reconcile can reuse cadence's process sample. Mutating
+    #: handlers leave this False and continue to sample when their guards run.
+    share_read_census: bool = False
+    process_census: object = None
 
     def live_work_now(self) -> bool:
         if self.live_work is not None:
             return bool(self.live_work)
-        if list(self.sessions.live()):
+        if self.share_read_census:
+            if self.process_census is None:
+                self.process_census = list(self.sessions.live())
+            processes = self.process_census
+        else:
+            processes = list(self.sessions.live())
+        if processes:
             return True
         return any(record.harvested_at is None for record in self.store.all())
 
     def subjects(self) -> list:
         return reconcile(self.store, self.pool, self.sessions, self.instants_dir,
-                         layer_for=self.layer_for)
+                         layer_for=self.layer_for,
+                         local_live_sessions=self.process_census if self.share_read_census else None)
 
     def sessions_for(self, record) -> object:
         """The session layer for THIS record's own tmux server.
@@ -849,7 +860,8 @@ def default_context(parsed: Parsed, out, err) -> Ctx:
     return Ctx(home=home, instants_dir=instants, store=Store(home), pool=pool, sessions=sessions,
                harvest=Harvest(home), out=out, err=err, dry_run=parsed.on("dry-run"),
                porcelain=parsed.on("porcelain"), git=default_git(), runner=_default_runner(),
-               layer_for=layer_for, launch_settings=resolve_launch, launch_environment=environ)
+               layer_for=layer_for, launch_settings=resolve_launch, launch_environment=environ,
+               share_read_census=parsed.verb in ("board", "status", "reconcile"))
 
 
 def _cwd_holders(path, proc_root=Path("/proc")) -> list:

@@ -20,6 +20,7 @@ import shutil
 import subprocess
 import tempfile
 import unittest
+from unittest import mock
 
 REPO = pathlib.Path(__file__).resolve().parents[2]
 
@@ -169,3 +170,36 @@ class TestFleetViewStates(unittest.TestCase):
         styles = runpy.run_path(str(REPO / "bin" / "fleet-view"))["STATE_STYLE"]
         self.assertIn("COMPLETE-BUT-WORKING", styles)
         self.assertNotEqual(" ", styles["COMPLETE-BUT-WORKING"][1])
+
+    def test_unreachable_lookup_censuses_each_other_server_once(self):
+        scope = runpy.run_path(str(REPO / "bin" / "fleet-view"))
+        calls = []
+
+        def tmux(argv, **kwargs):
+            calls.append(argv)
+            if argv[2] == "one":
+                names = "dt-a\ndt-b\n"
+            else:
+                names = "dt-c\n"
+            return subprocess.CompletedProcess(argv, 0, names, "")
+
+        with mock.patch("os.listdir", return_value=["current", "one", "two"]):
+            with mock.patch("subprocess.run", side_effect=tmux):
+                with mock.patch.dict(os.environ, {"FLEET_TMUX_SOCKET": "current"}):
+                    found = scope["_find_sessions"]({"dt-a", "dt-b", "dt-c"})
+        self.assertEqual(found, {"dt-a": "one", "dt-b": "one", "dt-c": "two"})
+        self.assertEqual(len(calls), 2)
+
+    def test_unreachable_lookup_falls_back_to_exact_target_if_bulk_fails(self):
+        scope = runpy.run_path(str(REPO / "bin" / "fleet-view"))
+
+        def tmux(argv, **kwargs):
+            if argv[3] == "list-sessions":
+                return subprocess.CompletedProcess(argv, 1, "", "server exited unexpectedly")
+            self.assertEqual(argv[-1], "=dt-a")
+            return subprocess.CompletedProcess(argv, 0, "", "")
+
+        with mock.patch("os.listdir", return_value=["one"]):
+            with mock.patch("subprocess.run", side_effect=tmux):
+                found = scope["_find_sessions"]({"dt-a"})
+        self.assertEqual(found, {"dt-a": "one"})

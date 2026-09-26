@@ -131,6 +131,8 @@ class Probes:
     #: `kill-session` ends all of them, so each one roots the session's own process tree; `pane_pid` above
     #: answers for the first pane of the current window only. Defaulted like the fields above.
     pane_pids: Optional[Callable[[str], Optional[list]]] = None
+    #: Read-only bulk census for a board invocation. None keeps injected legacy probes usable.
+    list_session_names: Optional[Callable[[], Optional[set[str]]]] = None
 
 
 @dataclass(frozen=True)
@@ -224,19 +226,21 @@ class SessionLayer:
         """
         return list(self.probes.list_processes())
 
-    def alive(self, name: str) -> bool:
+    def alive(self, name: str, *, process_names=None, session_names=None) -> bool:
         """THE one liveness implementation.
 
         Prefers the live process — a real process holding a real cwd is the strongest evidence — and
         falls back to the session probe, which still answers for a session whose process the probe
-        cannot attribute.
+        cannot attribute. A read-only reconcile join may supply its invocation's census; safety callers
+        omit it and observe afresh.
         """
         if not name:
             return False
-        for session in self.live():
-            if session.name == name:
-                return True
-        return bool(self.probes.has_session(name))
+        if process_names is None:
+            process_names = {session.name for session in self.live() if session.name}
+        if name in process_names:
+            return True
+        return name in session_names if session_names is not None else bool(self.probes.has_session(name))
 
     def attachment(self, name: str) -> Optional[Attachment]:
         """Whether a HUMAN is at this session: its attached-client count and when a client last gave it
@@ -703,6 +707,13 @@ def default_probes(process_name: str = "claude", tmux_socket=_FROM_ENV, *,
     def has_session(name: str) -> bool:
         return run(tmux + ["has-session", "-t", exact_session_target(name)]).returncode == 0
 
+    def list_session_names() -> Optional[set[str]]:
+        """Names on this tmux server; None asks the join to use exact probes on failure."""
+        done = run(tmux + ["list-sessions", "-F", "#{session_name}"])
+        if done.returncode == 0:
+            return set(done.stdout.splitlines())
+        return set() if _no_server(done.stderr.strip()) else None
+
     def start_session(name: str, cwd: Path, command: str) -> None:
         done = run(tmux + ["new-session", "-d", "-x", "200", "-y", "50", "-s", name,
                            "-c", str(cwd), command])
@@ -826,4 +837,5 @@ def default_probes(process_name: str = "claude", tmux_socket=_FROM_ENV, *,
                   pane_pid=pane_pid,
                   pane_pids=pane_pids,
                   parent_of=parent_of,
-                  attachment=attachment)
+                  attachment=attachment,
+                  list_session_names=list_session_names)
