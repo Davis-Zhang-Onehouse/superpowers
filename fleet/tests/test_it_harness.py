@@ -764,7 +764,10 @@ if command == 'display-message':
     if socket.exists(): print('777'); sys.exit(0)
     sys.exit(1)
 if command == 'list-sessions':
-    if socket.exists(): print('mine\\t$1'); sys.exit(0)
+    session = os.environ.get('FAKE_TMUX_SESSION_MARKER')
+    if socket.exists():
+        if not session or pathlib.Path(session).exists(): print('mine\\t$1')
+        sys.exit(0)
     sys.exit(1)
 with open(os.environ['FAKE_TMUX_RECORD'], 'a') as out:
     out.write(json.dumps(args) + '\\n')
@@ -773,7 +776,15 @@ if command == 'new-session':
     socket.touch()
     if os.environ.get('FAKE_TMUX_STALE_MARKER'):
         pathlib.Path(os.environ['FAKE_TMUX_STALE_MARKER']).touch()
+    if os.environ.get('FAKE_TMUX_SESSION_MARKER'):
+        pathlib.Path(os.environ['FAKE_TMUX_SESSION_MARKER']).touch()
     sys.exit(0)
+if command == 'kill-session':
+    session = os.environ.get('FAKE_TMUX_SESSION_MARKER')
+    if session and pathlib.Path(session).exists():
+        pathlib.Path(session).unlink()
+        sys.exit(0)
+    sys.exit(1)
 if command == 'kill-server':
     if socket.exists(): socket.unlink(); sys.exit(0)
     sys.exit(1)
@@ -814,6 +825,23 @@ sys.exit(0)
         self.assertTrue(rows[-1].get("created"), rows[-1])
         self.assertEqual(self.tmux("-L", "own", "kill-server", env=env).returncode, 0)
         self.assertEqual(json.loads(calls.read_text().splitlines()[-1])[-1], "kill-server")
+
+    def test_repeat_owned_exact_session_kill_is_noop(self):
+        env, calls = self.stateful_recording_tmux()
+        env["FAKE_TMUX_SESSION_MARKER"] = str(self.tmp / "session-alive")
+        results = self.tmp / "results.tsv"
+        results.write_text("case\tverdict\tevidence\tnote\n"
+                           "KILL-AUDIT-X\tPASS\tfleet/it/X/tmux-audit.jsonl\t0 kill(s): (none)\n")
+        env.update(IT_TMUX_AUDIT_RESULTS=str(results), IT_TMUX_AUDIT_SECTION="X")
+        self.assertEqual(self.tmux("-L", "own", "new-session", "-d", "-s", "mine", env=env).returncode, 0)
+        self.assertEqual(self.tmux("-L", "own", "kill-session", "-t", "=mine", env=env).returncode, 0)
+        count = len(calls.read_text().splitlines())
+        repeated = self.tmux("-L", "own", "kill-session", "-t", "=mine", env=env)
+        self.assertEqual(repeated.returncode, 1, repeated.stderr)
+        self.assertEqual(len(calls.read_text().splitlines()), count)
+        self.assertIn("KILL-AUDIT-X\tPASS", results.read_text())
+        rows = [json.loads(line) for line in self.ledger.read_text().splitlines()]
+        self.assertEqual(rows[-1]["decision"], "noop")
 
     def test_nonprivate_socket_passes_only_explicit_reads(self):
         env, calls = self.recording_tmux()

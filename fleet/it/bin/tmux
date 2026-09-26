@@ -236,6 +236,14 @@ def main():
                     row.update(decision="deny", reason="socket was replaced after section created it")
                 elif destructive and current_inode is None:
                     row.update(decision="deny", reason="created socket no longer exists")
+                elif command == "kill-session" and row["target"] and row["target"].startswith("=") and \
+                        rest in (["-t", row["target"]], ["-t" + row["target"]]) and \
+                        row["target"][1:] not in session_ids and \
+                        any(r.get("socket") == socket and r.get("command") == "kill-session" and
+                            r.get("target") == row["target"] and r.get("decision") == "allow" and
+                            r.get("status") == 0 for r in history) and \
+                        session_id(real, socket, row["target"][1:]) is None:
+                    row.update(decision="noop", reason="previously owned session is already gone")
                 elif command == "kill-session" and (not row["target"] or not row["target"].startswith("=")
                                                     or row["target"][1:] not in session_ids
                                                     or session_id(real, socket, row["target"][1:]) !=
