@@ -4089,18 +4089,30 @@ def _slot_watchers(ctx: Ctx, child: Path) -> list:
         layer = ctx.sessions_for(record)
         if lease is None or lease.todo_id != record.todo_id or not layer.facts_observable():
             return []
-        found = orphans.naming_holders(ctx.pool.cwd_holders(record.slot), layer.proc_facts,
-                                       orphans.instant_spellings(record.child_instant, child),
+        spellings = orphans.instant_spellings(record.child_instant, child)
+        found = orphans.naming_holders(ctx.pool.cwd_holders(record.slot), layer.proc_facts, spellings,
                                        exclude=_caller_lineage(layer))
     except Exception:                      # RV-36: any failure to read is no warning, never a stopped rename
         return []
     if not found:
         return []
-    pids = " ".join(str(proc.pid) for proc in found)
-    return [("watchers", f"pid(s) {pids} hold slot {record.slot} and name this instant "
-                         f"({_argv_line(found[0].argv)[:120]}) — stop your watchers before complete (TaskStop the "
-                         f"Monitor, or: kill -TERM {pids}); `close`/`harvest` end only the ones attributable to "
-                         f"this instant")]
+    #: v23-h M-2. The kill command is offered only for holders whose FLEET_INSTANT says this worker started them: a
+    #: coordinator's `tail -F <worker>/…` run from the slot names the instant too, and is not the worker's to end.
+    mine = [proc for proc in found if proc.fleet_instant in spellings]
+    others = [proc for proc in found if proc.fleet_instant not in spellings]
+    rows = []
+    if mine:
+        pids = " ".join(str(proc.pid) for proc in mine)
+        rows.append(("watchers", f"pid(s) {pids} hold slot {record.slot} and name this instant "
+                                 f"({_argv_line(mine[0].argv)[:120]}) — stop your watchers before complete (TaskStop "
+                                 f"the Monitor, or: kill -TERM {pids}); `close`/`harvest` end only the ones "
+                                 f"attributable to this instant"))
+    if others:
+        rows.append(("watchers", f"pid(s) {' '.join(str(proc.pid) for proc in others)} hold slot {record.slot} and "
+                                 f"name this instant but were not started by this worker (their FLEET_INSTANT is "
+                                 f"another instant's or absent) — not yours to end; leave them to whoever started "
+                                 f"them"))
+    return rows
 
 
 # --- abort ----------------------------------------------------------------------------------------

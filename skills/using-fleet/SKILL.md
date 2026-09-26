@@ -468,7 +468,8 @@ whose environment carries that worker's `FLEET_INSTANT` and whose argv names tha
 names the instant, or is one of the session's own processes, but fails any of those conditions (a live child outside
 it, a terminal multiplexer, …) gets its exact `kill -TERM …` line and the reason in the
 refusal (or a `not-reaped` row from `close`) and is never signalled. `abort` does not reap. `complete` adds a
-`watchers` row, without changing its exit code, when processes in the slot name the instant.
+`watchers` row, without changing its exit code, when processes in the slot name the instant; it offers a `kill -TERM`
+line only for those whose `FLEET_INSTANT` is that worker's, and lists the others as not the worker's to end.
 
 A dry run of `abort` or `harvest --id` can take about 2 seconds. When a process outside the session holds the
 slot, it sleeps a fixed 2 seconds, as the real call does, then scans the slot once more before answering.
