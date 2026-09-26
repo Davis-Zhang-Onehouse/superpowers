@@ -162,6 +162,8 @@ def set_option_operand(words, command):
 
 
 def can_dispatch_commands(command, rest):
+    # `rest` is the command's operands without the command word, for the first segment and every
+    # later one alike (C-1).
     # A compound argv can execute a later command after the first one. These tmux commands can
     # execute commands supplied as arguments or from a file; their effect is not proved by argv[0].
     # new-session, new-window, split-window, respawn-pane/window and send-keys -X copy-pipe*
@@ -175,7 +177,7 @@ def can_dispatch_commands(command, rest):
         return True
     if command not in ("set-option", "set-window-option"):
         return False
-    operand = set_option_operand(rest[1:], command)
+    operand = set_option_operand(rest, command)
     if operand is None:
         return True  # An unparsed option list cannot prove the value harmless.
     if "#" in operand:
@@ -296,7 +298,7 @@ def main():
     rest = segments[0][1:] if segments[0] else []
     destructive = command in ("kill-server", "kill-session")
     creates = command in ("new-session", "new")
-    indirect = can_dispatch_commands(command, segments[0])
+    indirect = can_dispatch_commands(command, rest)
     leading_separator = not segments[0]
     compound_unsafe = any(part and (not readonly_command(part[0], part[1:]) or
                                     can_dispatch_commands(part[0], part[1:])) for part in segments[1:])

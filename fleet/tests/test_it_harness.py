@@ -951,6 +951,24 @@ sys.exit(0)
         self.assertEqual(len(calls.read_text().splitlines()), forwarded,
                          "an option that installs commands reached fake real-tmux")
 
+    def test_dispatch_classification_takes_one_operand_form_for_every_segment(self):
+        # C-1: the first segment and every later one must be classified from the same argv form,
+        # the command's operands without the command word, or a later `set` loses its first operand.
+        import importlib.machinery
+        import importlib.util
+        loader = importlib.machinery.SourceFileLoader("it_tmux_shim_c1", str(self.shim))
+        spec = importlib.util.spec_from_loader(loader.name, loader)
+        shim = importlib.util.module_from_spec(spec)
+        loader.exec_module(shim)
+        for command, operands in (("set-option", ["after-new-window", "kill-server"]),
+                                  ("set-option", ["-g", "after-new-window", "kill-server"]),
+                                  ("set-window-option", ["pane-died", "kill-server"]),
+                                  ("set-option", ["-s", "command-alias", "x=kill-server"])):
+            with self.subTest(command=command, operands=operands):
+                self.assertTrue(shim.can_dispatch_commands(command, operands))
+        self.assertFalse(shim.can_dispatch_commands("set-option", ["-g", "status", "on"]))
+        self.assertFalse(shim.can_dispatch_commands("set-option", ["status", "on"]))
+
     def test_later_read_aliases_are_canonicalized(self):
         env, calls = self.recording_tmux()
         for alias, operands in (("display", ("-p", "x")),
