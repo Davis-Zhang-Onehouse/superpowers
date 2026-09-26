@@ -65,6 +65,11 @@ def run_bash(script: str, cwd: pathlib.Path, env=None, stdin=subprocess.DEVNULL,
 class LiveStoreSnapshot(unittest.TestCase):
     """A prior lessee's ignored snapshot must not become this run's baseline."""
 
+    def test_per_run_snapshot_is_gitignored(self):
+        candidate = IT / "live-stores-run-example.sha256"
+        result = subprocess.run(["git", "-C", str(REPO), "check-ignore", "-q", str(candidate)])
+        self.assertEqual(result.returncode, 0, "a normal IT run dirties the slot with a snapshot")
+
     def test_stale_snapshot_is_not_compared_on_new_run(self):
         with tempfile.TemporaryDirectory(prefix="itf-", dir="/tmp") as tmp_name:
             tmp = pathlib.Path(tmp_name)
