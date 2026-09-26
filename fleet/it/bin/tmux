@@ -184,11 +184,14 @@ def main():
     creates = command in ("new-session", "new")
     segments = split_tmux_commands(rest)
     indirect = can_dispatch_commands(command, segments[0])
+    leading_separator = command in (";", r"\;")
     compound_unsafe = any(not part or not readonly_command(part[0], part[1:]) or
                           can_dispatch_commands(part[0], part[1:]) for part in segments[1:])
     hidden_kills = nested_kills([word for part in segments[1:] for word in part]) if compound_unsafe else []
     if indirect:
         hidden_kills.extend(nested_kills(segments[0]))
+    if leading_separator:
+        hidden_kills.extend(nested_kills(rest))
     row = {"argv": argv, "socket": socket, "command": command,
            "target": option(rest, "-t"), "decision": "allow", "reason": ""}
     if not ledger:
@@ -259,7 +262,7 @@ def main():
                 row.update(decision="deny", reason="nonprivate socket permits read-only commands only")
             if shell_code:
                 row.update(decision="deny", reason="global -c shell command is unauditable")
-            if indirect or compound_unsafe:
+            if indirect or compound_unsafe or leading_separator:
                 row.update(decision="deny", reason="compound or server-side command dispatch is unauditable")
             if row["decision"] == "noop":
                 row["status"] = 1

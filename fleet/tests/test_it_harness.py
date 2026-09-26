@@ -995,6 +995,15 @@ sys.exit(0)
         allowed = self.tmux("-L", "own", "list-sessions", ";", "has-session", env=env)
         self.assertEqual(allowed.returncode, 0, allowed.stderr)
 
+    def test_leading_tmux_separator_cannot_hide_a_kill(self):
+        env, calls = self.recording_tmux()
+        for separator in (";", "\\;"):
+            with self.subTest(separator=separator):
+                result = self.tmux("-S", str(self.private / "unborn"),
+                                   separator, "kill-server", env=env)
+                self.assertEqual(result.returncode, 97, result.stderr)
+        self.assertFalse(calls.exists(), "a leading separator reached fake real-tmux")
+
     def test_own_server_and_exact_session_kills_are_logged_and_allowed(self):
         started = self.tmux("-L", "own", "new-session", "-d", "-s", "mine", "sleep 30")
         self.assertEqual(started.returncode, 0, started.stderr)
