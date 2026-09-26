@@ -68,9 +68,12 @@ class LiveStoreSnapshot(unittest.TestCase):
     def test_per_run_snapshot_is_gitignored(self):
         #: S6 (0.6.16 gate, coordinator D-141). Asked of the REPO's own .gitignore in a scratch git repo: the gate runs
         #: this suite in the release export, which has no .git, and `git -C <export> check-ignore` answered 128 there.
-        #: RV-33: only the repo's own rule may answer — a global core.excludesFile listing *.sha256 made the positive assert
-        #: pass without it, so git reads no global or system config here.
-        env = dict(os.environ, GIT_CONFIG_GLOBAL="/dev/null", GIT_CONFIG_NOSYSTEM="1")
+        #: RV-33/RV-39: only the repo's own rule may answer — a global core.excludesFile, or git's DEFAULT excludes file
+        #: ($XDG_CONFIG_HOME/git/ignore, ~/.config/git/ignore), listing *.sha256 made the positive assert pass without it, and an
+        #: inherited GIT_DIR/GIT_WORK_TREE would redirect the scratch repo. No global/system config, no excludes file, no GIT_*.
+        env = {k: v for k, v in os.environ.items() if not k.startswith("GIT_")}
+        env.update(GIT_CONFIG_GLOBAL="/dev/null", GIT_CONFIG_NOSYSTEM="1", GIT_CONFIG_COUNT="1",
+                   GIT_CONFIG_KEY_0="core.excludesFile", GIT_CONFIG_VALUE_0="/dev/null")
         with tempfile.TemporaryDirectory(prefix="itf-ignore-", dir="/tmp") as tmp_name:
             tmp = pathlib.Path(tmp_name)
             subprocess.run(["git", "init", "-q", str(tmp)], check=True, capture_output=True, env=env)
