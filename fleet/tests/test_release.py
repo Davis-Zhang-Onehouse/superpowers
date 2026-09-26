@@ -590,7 +590,7 @@ class GitCase(unittest.TestCase):
                                  upstream_base="v6.2.0", prev_tag="fleet/v0.1.0",
                                  commits=[("deadbee", "did a thing")], rebased=True,
                                  when="2026-08-02T00:00:00Z")
-        self.assertIn("patch-id", text)
+        self.assertIn("patch-id and author identity", text)
         self.assertIn("no longer an ancestor", text)
         self.assertIn("- deadbee did a thing", text)
 

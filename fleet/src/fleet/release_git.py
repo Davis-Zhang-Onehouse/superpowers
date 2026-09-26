@@ -95,6 +95,10 @@ class Repo:
         changes that commit's patch-id, and `cherry` then re-listed all 43 shipped `fleet vX.Y.Z` commits.
         So a `+` commit whose identity -- author email, author date, subject, all of which a rebase keeps
         whatever it does to the diff -- matches a commit reachable from `prev_tag` counts as shipped too.
+
+        The trade-off, accepted: an amend, squash or fixup of a SHIPPED commit keeps its identity, so content
+        folded into it after the release is not listed again (S7 review RB-3). The payload section, which
+        diffs trees, still names the areas and skills that changed.
         """
         if prev_tag is None:
             return []
@@ -357,7 +361,7 @@ def changelog_section(version: Version, *, head: str, branch: str, upstream_base
     if rebased:
         lines.append("")
         lines.append(f"> {prev_tag} is no longer an ancestor of `{branch}` — an upstream rebase rewrote "
-                     f"the commits between. This delta was computed by patch-id, not by ancestry.")
+                     f"the commits between. This delta was computed by patch-id and author identity, not by ancestry.")
     lines.append("")
     lines.extend(f"- {sha} {subject}" for sha, subject in commits)
     return "\n".join(lines) + "\n"
