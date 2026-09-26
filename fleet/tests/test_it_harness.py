@@ -2214,5 +2214,19 @@ class SyncSuiteInGateRoster(unittest.TestCase):
         self.assertEqual(self.rows(done.stdout)["SYNC-suite"][1], "FAIL")
 
 
+
+class LiveServerReadsAfterSection(unittest.TestCase):
+    """S7 review RC-3: it_section exports a private TMUX_TMPDIR, so a bare `tmux ls` after it reads the section's
+    empty default socket, not the live server; A7 compared a live pre-image with that empty post-image."""
+
+    def test_run_a_reads_both_a7_images_through_the_live_helper(self):
+        text = (IT / "run-A.sh").read_text()
+        bare = [line for line in text.splitlines()
+                if re.match(r"\s*tmux ls\b", line) or re.search(r"[;&|(]\s*tmux ls\b", line)]
+        self.assertEqual(bare, [], "a bare `tmux ls` in run-A.sh reads whatever TMUX_TMPDIR it_section left")
+        self.assertEqual(text.count("it_live_tmux_sessions_created"), 2)
+        self.assertIn("it_live_tmux_sessions_created()", (IT / "lib.sh").read_text())
+
+
 if __name__ == "__main__":
     unittest.main()

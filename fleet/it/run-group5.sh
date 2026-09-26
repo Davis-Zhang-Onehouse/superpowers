@@ -1662,7 +1662,7 @@ PY
   # a claim that would hold if `close` had deleted every live session on the box. The binding form of this
   # check is `it_assert_isolation` (full live name-set vs the baseline); this is the in-case snapshot.
   it_live_tmux_sessions > "$EV/N9-live-sessions-after.txt"
-  dt_untouched=$(tmux ls 2>/dev/null | grep -c '^dt-')
+  dt_untouched=$(grep -c '^dt-' "$EV/N9-live-sessions-after.txt")
   named_other=$(grep -c "$OTHER" "$EV/N9.stdout" "$EV/N9.stderr" | awk -F: '{s+=$2} END{print s+0}')
   if [ "$n9rc" = 0 ] && [ "$own_gone" = gone ] && [ "$other_alive" = alive ] \
      && [ "$hist_alive" = alive ] && [ "$named_other" = 0 ]; then

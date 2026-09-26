@@ -92,7 +92,7 @@ A_LIVE_BEFORE="$OUT/live-sessions-before.txt"
 A_LIVE_CREATED_BEFORE="$OUT/live-sessions-created-before.txt"
 A_CLAUDE_BEFORE="$OUT/claude-pids-before.txt"
 it_live_tmux_sessions                                        > "$A_LIVE_BEFORE"
-tmux ls -F '#{session_name} #{session_created}' 2>/dev/null | sort > "$A_LIVE_CREATED_BEFORE"
+it_live_tmux_sessions_created                                > "$A_LIVE_CREATED_BEFORE"
 pgrep -x claude 2>/dev/null | sort -n                        > "$A_CLAUDE_BEFORE"
 
 #: The operator's REAL store. Recorded — existence, content AND mtime — and never written. `it_manifest`
@@ -1123,7 +1123,7 @@ a6() {
 a7() {
   local after="$OUT/live-sessions-after.txt" after_c="$OUT/live-sessions-created-after.txt"
   it_live_tmux_sessions > "$after"
-  tmux ls -F '#{session_name} #{session_created}' 2>/dev/null | sort > "$after_c"
+  it_live_tmux_sessions_created > "$after_c"
   grep '^dt-' "$A_LIVE_CREATED_BEFORE" > "$OUT/A7-dt-before.txt" 2>/dev/null || : > "$OUT/A7-dt-before.txt"
   grep '^dt-' "$after_c"               > "$OUT/A7-dt-after.txt"  2>/dev/null || : > "$OUT/A7-dt-after.txt"
   local ndt; ndt="$(grep -c . "$OUT/A7-dt-before.txt")"

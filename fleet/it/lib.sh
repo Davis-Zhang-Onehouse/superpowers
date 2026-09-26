@@ -732,6 +732,16 @@ it_live_tmux_sessions() {
   fi
 }
 
+# it_live_tmux_sessions_created — the same live read, as "<name> <created>" rows. Before or after it_section alike:
+# a bare `tmux ls` after it reads the section's private TMUX_TMPDIR, which is always empty (S7 review RC-3).
+it_live_tmux_sessions_created() {
+  if [ -n "$IT_AMBIENT_TMUX_TMPDIR" ]; then
+    TMUX_TMPDIR="$IT_AMBIENT_TMUX_TMPDIR" tmux -L default ls -F '#{session_name} #{session_created}' 2>/dev/null | sort
+  else
+    env -u TMUX_TMPDIR tmux -L default ls -F '#{session_name} #{session_created}' 2>/dev/null | sort
+  fi
+}
+
 # it_assert_no_private_leak <case-id> <private-names-file> [<note-suffix>]
 #
 # Every session name this section created on its PRIVATE server, asserted ABSENT from the default one.
