@@ -1,5 +1,130 @@
 # fleet — changelog
 
+## fleet/v0.6.16 — 2026-09-26T06:02:58Z
+Cut from 7739c52 on `stack/0.6.16` (upstream base snapshot/2026-09-22-152849). 117 commit(s) since fleet/v0.6.15.
+
+Every release ships the whole repository — all skills, `commands/`, `hooks/` and the plugin manifest, not only `fleet/`.
+Payload: fleet (54 files), skills (7 files), scripts (10 files), tests (3 files), docs (1 file), other (1 file).
+Skills changed: coordinating-instants, dispatchInstants, harvesting-an-instant, releasing-fleet, reviving-dead-panes, using-fleet, working-as-a-dispatched-instant.
+
+- 8124d6e Reuse one census for fleet read views
+- 2150002 V23-T (RV-S1 / S5-I1): one owner per tmux session when several records name it
+- 093ec6f RV-37: session_owner's docstring names the start window it does not yet cover
+- f28d558 RV-32: a start in progress owns the session it just started
+- c96c607 RV-21: resume does not adopt a live session another record owns
+- 125d2ff RV-33: seed-check asks each record only of a session it owns
+- 033e19e RV-34: the pre-kill slot gate reads only a session the record owns
+- 59350d6 RV-35: the runtime blocker, declare's watcher and complete's refusal ask whose session it is
+- c2457a8 RV-24: an executed revive makes the revived record the owner
+- d65afdc RV-32: pin that a start in progress is known by its OWN lease
+- c2241a9 RV-40: dispatch refuses before the claim while its session name is live
+- 9a755c2 RV-39: resume's ownership refusal blocks only a live claimant
+- dc82766 RV-41: the left-running note reads an owner that is still starting
+- 382f0f3 RV-42: session_owner's docstring no longer says a never-launched record never owns
+- a72cc6c RV-44: session_owner and the test module state the rule as the latest start
+- c7df64c fleet: close/abort/harvest observe an unattributed pane and refuse an unproven box (FB-130, V23-Q)
+- 46cf814 fleet/it: J11 — close refuses an unattributed claude pane with an unlocatable box and closes a dead pane (FB-130)
+- 250012c fleet: an unattributed pane is "not an agent" only when tmux says so, never on a missing glyph (RV-13)
+- 1b995f5 fleet tests: panes_dead is True only when every pane is dead (RV-21)
+- 15503e5 fleet tests: pin the codex and shell rows of the pane-guard matrix and the codex teardown refusals (RV-16)
+- 96db912 fleet tests: pin the unattributed busy pane with no located caret as a 14 refusal (RV-17)
+- f1faf43 fleet tests: say which teardown fixtures are edited or hand-built, not real captures (RV-20)
+- 14f4dba fleet/it: J11 kills its leftover sleep only while the pid is still that sleep (RV-15)
+- 1386724 using-fleet: the teardown guard paragraph says what the code decides, and names the codex 12 residual (RV-14)
+- 5c8a276 fleet tests: agent_in_foreground reads an empty tmux answer as unobservable, not as no agent (RV-13)
+- d5a614a fleet: add the attribution rule for slot holders (V23-H, part 1)
+- 64d263a fleet: a process-facts and single-pid signal seam in default_probes (V23-H, part 2)
+- fa6d54f fleet: an attributed unit must be a closed, detached session (V23-H, review fix)
+- e5bd76b fleet: harvest and close reap the torn-down instant's own orphaned watchers (V23-H, part 3)
+- 6c99c43 fleet: complete lists the worker's live watchers; skills say to stop them (V23-H, part 4)
+- 7932252 fleet: pin the two V23-H guards the mutation run found unpinned
+- 2ba5c51 fleet: a by-name reap needs the worker's own provenance (V23-H, review fix 3)
+- 46d0bed fleet: keep the session-leader/no-tty guard pinned under the provenance rule
+- fdd69bc fleet: V23-H final-review fixes -- a post-reap release refusal says what was signalled
+- 2207fde fleet: pin that a named holder refuses harvest before the kill, not at the release
+- 41c7f75 fleet: pin the launch bound and the caller-lineage exclusion at the verb level (RV-29)
+- f2a8bfe fleet: audit that signal_pid is reached only through the attributed reap (RV-30)
+- 8ec796f skills: using-fleet no longer says a refusing harvest signals nothing (RV-31)
+- 605f5a1 fleet: a terminal multiplexer is never reaped by name (RV-32)
+- 946c93a skills: harvesting-an-instant names the multiplexer case among the unsafe ones (RV-32)
+- a76fd48 skills: a session-own survivor that is not safe to end also gets a kill command (RV-33)
+- 2fb523d fleet: a foreign environment value cannot split the one-line kill command (RV-35)
+- a5e5000 fleet: no error while reading watchers can stop complete (RV-36)
+- a532afa fleet: pin that kill_command flattens its reason on its own (RV-35)
+- 789c36f V23-P Predict Claude folder trust read-only and recognise the trust screen
+- 2017ab9 V23-P Report UNKNOWN when git cannot bound the trust walk
+- 414e0b3 V23-P dispatch and revive report a launch that stops at the folder-trust screen
+- 7ba0337 V23-P route trust's git through workspace.default_git, bound the watch window, predict before the pane starts
+- f9b3a95 V23-P Real-agent IT runs outside the git checkout; §TS proves the trust-screen report on the real binary
+- a371826 V23-P Teach coordinators to answer a trust screen safely
+- 6aaf439 V23-P final review: runtime-specific trust remedy, interrupt-safe watch, docs
+- aea3c0a RV-24 anchor the trust-screen recognizer to the dialog window
+- 68f537e RV-25 run the post-launch watch after main releases the admission lock
+- 07330b4 RV-26 build the trust layouts under a temp root verified outside git
+- 85e99ed RV-27 predict unknown when only fleet's environment sets CLAUDE_CODE_SANDBOXED
+- 47e9d49 RV-28 join a wrapped codex trust-screen path like the claude one
+- df5a17e RV-29 bound the launch watch by a monotonic deadline as well as its sleeps
+- 31d3130 RV-30 scrub git's repository variables in it_outside_checkout_dir and pin TS2a to none
+- d87f086 RV-31 give the section P slot dir a stable name guarded by a pid file
+- 04ed85d RV-32 say the untrusted launch is predicted to stop at the trust screen
+- c4a13cb RV-33 choose the section TS scratch parent outside every .git entry
+- 8510a73 RV-34 build the trusted-config launch test under a verified non-repo root
+- 2219489 RV-35: keep the §P slot parent above every .git entry
+- 8bfa340 fleet: send confirms a claude draft taller than the input box by its tail (V23-S, FB-134)
+- ee46a94 fleet/it: SEND-3 reads the brief counts line v23-f introduced (V23-S I-1)
+- 8dce3e8 fleet: a draft-tail must be the message's own last rows at one width (V23-S RV-8)
+- 08cdceb fleet: a draft-tail is re-read after a settle interval, not back-to-back (V23-S RV-9)
+- 89274f4 fleet: the retry needs the same draft-tail twice, not two tails that each confirm (V23-S RV-11)
+- e926a8f fleet/it: SEND-6 proves the whole message was delivered, hidden head included (V23-S RV-10)
+- 13bccc0 skills/using-fleet: draft-tail is the message's own last rows, re-read after 0.1 s; the residual stated in full (V23-S RV-12)
+- f98e9ce fleet: say that draft-tail's suffix checks are a prefilter the row check subsumes (V23-S RV-8)
+- 122976f fleet: a draft-tail wraps each hard line on its own, so a tall multi-line message confirms (V23-S RV-24)
+- d650556 fleet: a draft-tail's rows are compared as drawn, spacing kept (V23-S RV-27)
+- e7e7c8c fleet, using-fleet: state draft-tail's residual as it is — a re-converged head loss passes (V23-S RV-25)
+- 5a77a26 fleet/it: SEND-6's OK must follow its own echo, not any earlier reply (V23-S RV-26)
+- e135e9f Keep hermetic tmux sockets short under deep TMPDIR
+- 31b005f Scope live-store snapshots to each IT run
+- 635b834 Keep the section M pane fixture alive until teardown
+- 17999bd Correct propose help for origin-based destinations
+- d8c22b6 Use fleet draft parsing in dispatch helper
+- f532f16 Ignore per-run IT store snapshots
+- a8e2ef7 Mark dispatch draft regression as executable
+- 3798b33 v23-t OR-1: revive records its start before starting the session
+- 20d27e7 v23-t OR-2: abort/harvest gate names the owner of a running session it will not close
+- 8db388f v23-v OR-3: foreign-server census test gives each record its own session
+- f3a1299 v23-v OR-1: fleet-view skips the per-name fallback on a socket with no server
+- 7adfd8f v23-v OR-2: fleet-view computes an UNREACHABLE row's session name once
+- 952c8f0 v23-t RV-46: pin resume's guard with a closed-only owner case
+- 4289926 v23-t RV-47: pin the RV-40 dispatch refusal for an open owner and an unrecorded session
+- 96719f1 v23-s OR-1: a scrolled tail is wrapped at the box's own width, read off its border
+- 06e03d7 v23-s OR-2: a tail is confirmed only while tmux says nobody typed since admission
+- 46d9999 v23-s OR-4: a draft-tail send is submitted only when the transcript echo holds the whole message
+- 8d21d7f v23-s OR-3: using-fleet states draft-tail as it now is — box width, keystroke check, echo check, residual
+- c056c8d v23-t x v23-h glue: close snapshots no session-own holders of a session another record owns
+- 4a3dc64 v23-h I-1: the session-own reap route requires a root detached from the pane
+- ed2d3f2 v23-h M-2: complete offers a kill command only for holders this worker started
+- 5c50d38 v23-h M-3: say plainly that a job detached in the slot is ended at close-out
+- 2922af7 v23-h M-5: pin ws1/ws10 path equality, a symlinked instant spelling and a real private tmux server
+- 3ac1b76 v23-t OR-3: reap asks whose session a lease names, not only whether the name is alive
+- c107fe9 v23-q OR-1: an interpreter in the pane's foreground is unobservable, not proof of no agent
+- 4dd33e8 v23-q OR-2: the test_cli fixture's unattributed foreground defaults to unobserved (None)
+- 48fd341 v23-p RV-37: resolve the §P parent before the .git walk so a relative path cannot loop
+- 3fd19ab v23-p RV-41: §TS teardown waits for every holder of the scratch root before removing it
+- f87c2e4 v23-p OR-3: §TS unsets CLAUDE_CODE_SANDBOXED with the token env before its tmux server starts
+- f3d7152 v23-p OR-4: match the Claude trust question across a line wrap
+- a347a69 v23-p OR-5: bound the post-launch watch's pane capture by the time left in the window
+- 9aa3514 v23-p glue: test_trust installs the suite's host boundary (FB-118)
+- 021e910 v23-u OR-3: dl_pane_unsubmitted fails closed when fleet's draft parser cannot run
+- 0a91396 v23-u FB-131: the suite's tmux dir, the tripwire decoy and the multiprocessing managers sit under short /tmp roots
+- e28f5b9 v23-s review: the echo must be a NEW whole echo; blank lines continue it; a one-second keystroke grace; the record never says submitted unverified
+- de1f339 glue v23-h M-5 x v23-u FB-131: the M-5 private tmux server's socket dir sits under /tmp
+- 9918314 v23-t review: one unreadable record no longer stops every teardown; an owner that cannot be read fails closed
+- df7e804 v23-p review: capture passes timeout= only to a probe that takes it; the watch-loop test pins its own window
+- 8af2ae5 sync: a replayed release commit's version-only manifest conflict resolves itself, logged as manifest-resolved
+- 244b1be sync: the release deploy refreshes the control dir's code (refresh-control.sh), so a sync fix reaches the cron
+- 455f1b1 sync review: finish.sh settles every later version conflict; only the declared field; never a merge step; CRLF untouched
+- 7739c52 IT glue: D12 asserts V23-T's pre-claim refusal; S13's stand-in draws the busy frame's empty box
+
 ## fleet/v0.6.15 — 2026-09-25T19:47:07Z
 Cut from 2caf55e on `stack/0.6.15` (upstream base snapshot/2026-09-22-152849). 1 commit(s) since fleet/v0.6.14.
 
