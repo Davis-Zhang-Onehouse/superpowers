@@ -25,10 +25,11 @@ cmp -s "$CTRL/state" "$CTRL/state.before" || { echo "FAIL: state changed"; exit 
 set +e; bash "$R" --ctrl "$SANDBOX" > /dev/null 2>&1; rc=$?; set -e
 assert_eq "$rc" 2 not-a-control-dir
 # RV-37: a copy that fails leaves no temp file in the control dir
-S2="$SANDBOX/src"; mkdir -p "$S2"; cp "$SCRIPTS"/{refresh-control,lib,sync,finish,rollback,apply,status}.sh "$S2/"
-echo "# changed" >> "$S2/sync.sh"; chmod 000 "$S2/sync.sh"
-set +e; bash "$S2/refresh-control.sh" --ctrl "$CTRL" > "$SANDBOX/fail.out" 2>&1; rc=$?; set -e
-chmod 644 "$S2/sync.sh"
+#: RV-41: the copy is made to fail by a cp stub on PATH (exit 1), not by an unreadable source — root's cp reads anyway.
+S2="$SANDBOX/src"; mkdir -p "$S2" "$SANDBOX/stub"; cp "$SCRIPTS"/{refresh-control,lib,sync,finish,rollback,apply,status}.sh "$S2/"
+echo "# changed" >> "$S2/sync.sh"
+printf '#!/bin/sh\necho "cp: stubbed failure" >&2\nexit 1\n' > "$SANDBOX/stub/cp"; chmod +x "$SANDBOX/stub/cp"
+set +e; PATH="$SANDBOX/stub:$PATH" bash "$S2/refresh-control.sh" --ctrl "$CTRL" > "$SANDBOX/fail.out" 2>&1; rc=$?; set -e
 [ "$rc" != 0 ] || { echo "FAIL: an unreadable source was copied (rc 0)"; exit 1; }
 left="$(find "$CTRL" -maxdepth 1 -name '.*.??????' | wc -l)"
 assert_eq "$left" 0 no-temp-left
