@@ -785,6 +785,20 @@ sys.exit(0)
         rows = [json.loads(line) for line in self.ledger.read_text().splitlines()]
         self.assertEqual(rows[-1]["decision"], "noop")
 
+    def test_nonprivate_socket_passes_only_explicit_reads(self):
+        env, calls = self.recording_tmux()
+        for command in (("kill-pane", "-a"), ("kill-window",), ("respawn-pane", "-k"),
+                        ("send-keys", "C-c"), ("set-option", "-s", "command-alias[99]", "zz=kill-server"),
+                        ("zz",), ("new-window",), ("display-message", "hello"),
+                        ("capture-pane", "-S", "-100")):
+            with self.subTest(command=command):
+                self.assertEqual(self.tmux("-L", "default", *command, env=env).returncode, 97)
+        self.assertFalse(calls.exists(), "a non-read reached fake real-tmux")
+        for command in (("has-session",), ("list-sessions",), ("show-options",),
+                        ("display-message", "-p", "#{pid}"), ("capture-pane", "-p")):
+            with self.subTest(command=command):
+                self.assertEqual(self.tmux("-L", "default", *command, env=env).returncode, 0)
+
     def test_end_of_options_and_combined_socket_flags_cannot_hide_a_kill(self):
         env, calls = self.recording_tmux()
         for args in (("-L", "default", "--", "kill-server"), ("--", "kill-server"),

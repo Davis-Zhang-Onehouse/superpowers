@@ -92,10 +92,12 @@ def split_tmux_commands(rest):
     return parts
 
 
-def readonly_command(command):
-    return command in ("has-session", "list-sessions", "list-windows", "list-panes",
-                       "list-clients", "ls", "lsc", "lsw", "lsp", "display-message",
-                       "capture-pane", "show-options", "show-window-options", "show-environment")
+def readonly_command(command, rest=()):
+    if command in ("has-session", "ls", "lsc", "lsw", "lsp") or command.startswith(("list-", "show-")):
+        return True
+    if command in ("display-message", "capture-pane"):
+        return any(arg.startswith("-") and "p" in arg[1:] for arg in rest)
+    return False
 
 
 def server_pid(real, socket):
@@ -165,7 +167,7 @@ def main():
     creates = command in ("new-session", "new")
     segments = split_tmux_commands(rest)
     indirect = can_dispatch_commands(command, segments[0])
-    compound_unsafe = any(not part or not readonly_command(part[0]) or
+    compound_unsafe = any(not part or not readonly_command(part[0], part[1:]) or
                           can_dispatch_commands(part[0], part[1:]) for part in segments[1:])
     hidden_kills = nested_kills([word for part in segments[1:] for word in part]) if compound_unsafe else []
     if indirect:
@@ -224,6 +226,8 @@ def main():
                     row.update(decision="deny", reason="session kill has unaudited options")
                 elif creates and not option(rest, "-s"):
                     row.update(decision="deny", reason="new session has no auditable name")
+            if not private and not readonly_command(command, segments[0]):
+                row.update(decision="deny", reason="nonprivate socket permits read-only commands only")
             if indirect or compound_unsafe:
                 row.update(decision="deny", reason="compound or server-side command dispatch is unauditable")
             if row["decision"] == "noop":
