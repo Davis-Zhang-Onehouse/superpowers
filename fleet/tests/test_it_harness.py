@@ -1017,12 +1017,13 @@ sys.exit(0)
         self.assertEqual(set(row["session_ids"]), {"base", "a", "b"})
 
     def test_guardian_removes_generated_section_socket_directory(self):
-        env, calls = self.recording_tmux()
+        env, calls = self.stateful_recording_tmux()
         tmp = self.tmp / "harness"
         it = harness_copy(tmp)
         marker = self.tmp / "socket-dir"
         script = (f'. "{it}/lib.sh"\n'
                   f'it_section X\n'
+                  f'it_tmux new-session -d -s mine\n'
                   f'printf "%s\\n" "$TMUX_TMPDIR" > "{marker}"\n')
         finished = run_bash(script, tmp, env={"IT_TMUX_REAL": env["IT_TMUX_REAL"],
                                                "FAKE_TMUX_RECORD": str(calls),
@@ -1035,6 +1036,22 @@ sys.exit(0)
                 break
             time.sleep(0.1)
         self.assertFalse(directory.exists(), directory)
+
+    def test_guardian_keeps_socket_directory_after_refused_kill(self):
+        env, calls = self.recording_tmux()
+        tmp = self.tmp / "harness-denied"
+        it = harness_copy(tmp)
+        marker = self.tmp / "denied-socket-dir"
+        script = (f'. "{it}/lib.sh"\n'
+                  f'it_section X\n'
+                  f'printf "%s\\n" "$TMUX_TMPDIR" > "{marker}"\n')
+        finished = run_bash(script, tmp, env={"IT_TMUX_REAL": env["IT_TMUX_REAL"],
+                                               "FAKE_TMUX_RECORD": str(calls),
+                                               "FLEET_SUITE_TRIPWIRE": ""}, home=self.tmp / "home")
+        self.assertEqual(finished.returncode, 0, finished.stderr)
+        directory = pathlib.Path(marker.read_text().strip())
+        time.sleep(2.5)
+        self.assertTrue(directory.exists(), "guardian removed a directory after the shim refused its kill")
 
     def test_case_supersession_waits_for_results_rewrite_lock(self):
         env, calls = self.recording_tmux()

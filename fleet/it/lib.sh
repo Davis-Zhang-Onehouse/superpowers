@@ -252,6 +252,7 @@ it_guard_server() {       # it_guard_server <runner-pid> <socket>
 import atexit, os, shutil, subprocess, sys, time
 sock, directory, tokenfile, token, expected_parent, cleanup_dir = sys.argv[2:8]
 parent_exited = False
+kill_completed = False
 try:
     cleanup_armed = os.stat(cleanup_dir) if cleanup_dir else None
 except OSError:
@@ -261,7 +262,7 @@ def cleanup_token():
         with open(tokenfile, encoding="ascii") as stream:
             if stream.read().strip() == token:
                 os.unlink(tokenfile)
-                if parent_exited and cleanup_armed is not None:
+                if parent_exited and kill_completed and cleanup_armed is not None:
                     try:
                         current = os.stat(cleanup_dir)
                         if (current.st_dev, current.st_ino) == (cleanup_armed.st_dev, cleanup_armed.st_ino):
@@ -297,8 +298,9 @@ try:
             sys.exit(0)
 except OSError:
     sys.exit(0)
-subprocess.run(["tmux", "-S", os.path.join(directory, "tmux-" + str(os.getuid()), sock), "kill-server"],
-               stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+result = subprocess.run(["tmux", "-S", os.path.join(directory, "tmux-" + str(os.getuid()), sock), "kill-server"],
+                        stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+kill_completed = result.returncode in (0, 1)
   ' it-guardian "$sock" "$dir" "$tokenfile" "$token" "$expected_parent" "${IT_TMUX_OWN_TMPDIR:-}" </dev/null >/dev/null 2>&1 &
   printf '%s\n' "$!" > "$pidfile"
   disown 2>/dev/null || true
