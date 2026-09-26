@@ -894,6 +894,15 @@ sys.exit(0)
         self.assertIn(["-L", "own", "display", "-p", "#{pane_current_path}"],
                       [json.loads(line) for line in calls.read_text().splitlines()])
 
+    def test_popup_and_menu_aliases_cannot_dispatch_commands(self):
+        env, calls = self.recording_tmux()
+        for alias, argument in (("popup", "printf should-not-run"),
+                                ("menu", "kill-server")):
+            with self.subTest(alias=alias):
+                result = self.tmux("-L", "own", alias, "-E", argument, env=env)
+                self.assertEqual(result.returncode, 97, result.stderr)
+        self.assertFalse(calls.exists(), "a dispatcher alias reached fake real-tmux")
+
     def test_audit_summary_counts_a_refused_nonkill_command(self):
         tmp = self.tmp / "audit-summary"
         it = harness_copy(tmp)

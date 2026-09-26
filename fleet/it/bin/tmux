@@ -53,8 +53,10 @@ def parse(argv):
 
 
 def canonical_command(command):
-    if command == "display":
-        return "display-message"
+    aliases = {"display": "display-message", "popup": "display-popup",
+               "menu": "display-menu"}
+    if command in aliases:
+        return aliases[command]
     # tmux accepts unique command prefixes. Treat even an ambiguous kill prefix as destructive.
     if command and "kill-server".startswith(command) and not "kill-session".startswith(command):
         return "kill-server"
