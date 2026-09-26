@@ -928,6 +928,16 @@ sys.exit(0)
                 self.assertEqual(result.returncode, 97, result.stderr)
         self.assertEqual(len(calls.read_text().splitlines()), 1)
 
+    def test_later_read_aliases_are_canonicalized(self):
+        env, calls = self.recording_tmux()
+        for alias, operands in (("display", ("-p", "x")),
+                                ("show", ("-g", "status")),
+                                ("has", ("-t", "x"))):
+            with self.subTest(alias=alias):
+                result = self.tmux("-L", "own", "ls", ";", alias, *operands, env=env)
+                self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(len(calls.read_text().splitlines()), 3)
+
     def test_audit_summary_counts_a_refused_nonkill_command(self):
         tmp = self.tmp / "audit-summary"
         it = harness_copy(tmp)

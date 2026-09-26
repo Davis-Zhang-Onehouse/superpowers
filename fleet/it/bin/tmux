@@ -232,7 +232,9 @@ def main():
         os.path.commonpath((socket, directory)) == directory and socket != directory
         for directory in dirs)
     segments = split_tmux_commands([command, *rest])
-    command = (canonical_command(segments[0][0]) or "") if segments[0] else ""
+    segments = [[canonical_command(part[0]) or "", *part[1:]] if part else []
+                for part in segments]
+    command = segments[0][0] if segments[0] else ""
     rest = segments[0][1:] if segments[0] else []
     destructive = command in ("kill-server", "kill-session")
     creates = command in ("new-session", "new")
