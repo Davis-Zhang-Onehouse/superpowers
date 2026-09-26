@@ -205,6 +205,33 @@ def claude_box_width(rows):
     return cells - CLAUDE_BOX_MARGIN if cells > CLAUDE_BOX_MARGIN else None
 
 
+def claude_echo(frame):
+    """S6 OR-4. The newest prompt the transcript shows ABOVE the input box — its caret row and the indented rows
+    that continue it — as drawn text, or None when no box or no such prompt is located.
+
+    After Enter, Claude Code echoes the whole submitted message there (`❯ <head>`, continuation rows indented two
+    cells; measured in IT SEND-6 on 2.1.282), and a message queued behind a turn is listed at the same place. The
+    box's own rows are below its upper border and are never read."""
+    rows = _rendered(frame or "")
+    border = _claude_border_index(rows)
+    if border is None:
+        return None
+    top = next((i for i in range(border - 1, -1, -1) if plain(rows[i]).strip().startswith(('────', '━━━━'))), None)
+    if top is None:
+        return None
+    start = next((i for i in range(top - 1, -1, -1)
+                  if plain(rows[i])[:1] in _CARET and plain(rows[i])[1:2] in (' ', '\xa0')), None)
+    if start is None:
+        return None
+    content = [plain(rows[start])[1:].strip()]
+    for row in rows[start + 1:top]:
+        visible = plain(row)
+        if not visible.startswith('  ') or not visible.strip():
+            break
+        content.append(visible.strip())
+    return '\n'.join(content)
+
+
 def _claude_border_index(rows):
     """The input box's LOWER border: the last rule row in the bottom window, or None for a borderless capture."""
     return next((i for i in range(len(rows) - 1, max(-1, len(rows) - PROMPT_TAIL_LINES - 1), -1)
