@@ -317,6 +317,21 @@ class TrustScreenCase(unittest.TestCase):
                          "/tmp/v23p-wrap.WLO3/a-deliberately-long-slot-directory-name/"
                          "that-wraps-past-eighty-columns/on-the-trust-screen")
 
+    def test_OR4_claude_trust_phrase_wrapped_across_rows_is_still_the_trust_screen(self):
+        """OR-4 (v23-p review). SYNTHETIC: the real 2.1.282 frame with its "Quick safety check" paragraph re-wrapped
+        at narrower widths, so the word-wrap falls inside "one you trust" (between "one you" and "trust?", and
+        between "one" and "you trust?"). The screen is still the trust screen, and its path still reads."""
+        rows = self.frame("claude-trust-2.1.282.frame").splitlines()
+        at = next(i for i, row in enumerate(rows) if "one you trust" in row)
+        paragraph = " ".join(" ".join(rows[at:at + 2]).split())
+        for cut in ("one you", "one"):
+            with self.subTest(cut=cut):
+                head, tail = paragraph.split(cut + " ", 1)
+                wrapped = [" " + head + cut, " " + tail[:60], " " + tail[60:]]
+                self.assertFalse(any("one you trust" in row for row in wrapped))
+                frame = "\n".join(rows[:at] + wrapped + rows[at + 2:])
+                self.assertEqual(trust.trust_screen_path("claude", frame), "/tmp/v23p-m.YM7x/plain/sub")
+
     def test_claude_under_home_draws_the_absolute_path(self):
         """Final review I3: measured on 2.1.282 with the cwd under a scratch HOME — the screen shows the absolute
         path, never `~/slot`."""
