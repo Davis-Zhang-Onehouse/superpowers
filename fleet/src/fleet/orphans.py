@@ -19,7 +19,9 @@ The harness's watcher is exactly the shape this admits: `setsid`, no controlling
 `evidence/01-repro/harness-shape.txt` in the v23-h instant).
 
 **A unit is REAPED** when it is closed and either its root is a process the recorded session owned before this call
-killed it (same pid, same start time), or its root is ORPHANED (ppid 1), leads its own session with no controlling
+killed it (same pid, same start time) and is DETACHED from the pane — it leads its own session with no controlling tty,
+the harness watcher's measured shape (review I-1: `kill-session` only HUPs the pane and returns, so the pane's own agent
+is still exiting, on the pane's pty, when this runs, and must not get TERM then KILL mid transcript flush) — or its root is ORPHANED (ppid 1), leads its own session with no controlling
 tty, STARTED AFTER the worker was launched, and some member's argv names the instant (D-2, D-9). The start bound is
 what keeps a childless tmux or screen server out: fleet's own servers carry the first dispatch's command line — which
 names that instant — and have ppid 1, their own session and no tty, but every one of them started before the
@@ -179,6 +181,10 @@ def attribute(holders, facts: Callable, spellings, *, session_own=None, exclude=
         elif outside and (named or owned):
             units.append(Unit(root, members, NAME, f"it has live children outside the unit ({_pids(outside)}), which "
                                                    f"ending it would take down too; not ended automatically"))
+        elif owned and not (head.sid == root and head.tty == 0):
+            units.append(Unit(root, members, NAME, f"pid {root} is the recorded session's own process but not detached "
+                                                   f"from the pane (session {head.sid}, tty {head.tty}): it may still "
+                                                   f"be exiting from the kill, so it is not ended automatically"))
         elif owned:
             units.append(Unit(root, members, REAP, f"pid {root} was the recorded session's own process before the "
                                                    f"kill and survived it"))

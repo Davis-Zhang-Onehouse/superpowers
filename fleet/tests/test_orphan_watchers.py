@@ -105,6 +105,17 @@ class AttributionRule(unittest.TestCase):
         self.assertEqual(att.pids(REAP), [600])
         self.assertIn("session", att.of(REAP)[0].why)
 
+    def test_a_sessions_own_process_still_on_the_panes_terminal_is_never_reaped(self):
+        """v23-h I-1. `kill-session` only HUPs the pane: its agent (tty = the pane's pty) may still be exiting — flushing
+        a transcript — when attribution runs. The session-own route requires a DETACHED root (its own session, no tty)."""
+        for proc in (Proc(600, 6999, "s600", ("claude",), sid=600, tty=34817, children=()),
+                     Proc(600, 1, "s600", ("claude",), sid=600, tty=34817, children=()),
+                     Proc(600, 1, "s600", ("node", "codex.js"), sid=599, tty=0, children=())):
+            with self.subTest(proc=proc):
+                att = orphans.attribute([600], table(proc).get, self.spell(), session_own={600: "s600"},
+                                        not_before=LAUNCHED)
+                self.assertEqual(att.pids(REAP), [])
+
     def test_a_recycled_pid_is_not_the_sessions_process(self):
         facts = table(Proc(600, 1, "s-new", ("node", "worker.js"), sid=600, children=()))
         att = orphans.attribute([600], facts.get, self.spell(), session_own={600: "s600"}, not_before=LAUNCHED)
@@ -633,6 +644,23 @@ class CloseReapsAttributed(CliCase):
         self.assertEqual([pid for pid, _ in facts.sent], [501])
         self.assertIn("reaped", out)
         self.assertIsNotNone(fleet.pool.lease("ws1"), "close must not release the lease")
+
+    def test_close_never_signals_the_panes_own_agent_that_outlives_the_kill(self):
+        """v23-h I-1 at the verb. `kill-session` returns before the pane's agent has exited: here it leaves the agent
+        (tty-attached, the pane's own process) alive in the slot, and only the detached watcher is reaped."""
+        fleet = self.fleet()
+        facts = FactsFixture(fleet)
+        self.live_worker(fleet, facts)
+        kill = fleet.sessions.probes.kill_session
+
+        def kill_leaves_the_agent_exiting(n):
+            kill(n)
+            facts.table[7000] = Proc(7000, 6999, "sp", ("claude",), sid=7000, tty=34817, children=())
+            fleet.holders[str(fleet.pool.slot_path("ws1"))].append(7000)
+        fleet.sessions.probes.kill_session = kill_leaves_the_agent_exiting
+        code, out, err = fleet.run(["close", "--id", fleet.ids["liveOne"]])
+        self.assertEqual(code, EXIT_OK, out + err)
+        self.assertEqual([pid for pid, _ in facts.sent], [501], "the pane's own agent was signalled")
 
     def test_close_dry_run_signals_nothing(self):
         fleet = self.fleet()

@@ -458,8 +458,9 @@ as an UNDECIDED holder of a slot when it descends from one that sits there; a te
 into the lease before its kill, so they keep the slot held while they live (FB-90).
 
 `close` and `harvest --id` end the slot holders ATTRIBUTABLE to the instant they tear down, and only those (V23-H):
-the session's own processes that survive its kill (a harness watcher runs in its own session with no terminal —
-so `close` of an in-flight worker also ends its detached background jobs in the slot), and a detached orphan in the
+the session's own processes that survive its kill detached from the pane (a harness watcher runs in its own session
+with no terminal — so `close` of an in-flight worker also ends its detached background jobs in the slot; one still on
+the pane's terminal, such as the agent still exiting from the kill, is never signalled), and a detached orphan in the
 slot (parent init, its own session, no terminal, no live child outside it) that started after the worker launched,
 whose environment carries that worker's `FLEET_INSTANT` and whose argv names that instant. Each one is named in a
 `reaped` row (`would-reap` in a dry run, which signals nothing). A call refused before the kill signals nothing; a
