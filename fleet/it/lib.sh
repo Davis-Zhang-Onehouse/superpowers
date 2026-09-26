@@ -560,6 +560,9 @@ _it_row() {               # _it_row <case> <verdict> <evidence> <note>
   local case="$1" verdict="$2" line tmp
   line="$(printf '%s\t%s\t%s\t%s' "$1" "$2" "$3" "$4")"
   IT_LAST_VERDICT="$verdict"
+  local row_lock
+  exec {row_lock}>"$RESULTS.lock"
+  flock -x "$row_lock"
   if [ -n "${IT_OWN_AT:-}" ] && [ "$RESULTS" = "${IT_OWN_FILE:-}" ] && [ -f "$RESULTS" ]; then
     # The insertion line is re-derived from the FILE on every write — after the last row this runner
     # owns, or at the remembered line when none is there yet — never from a counter: a row written inside
@@ -577,6 +580,8 @@ _it_row() {               # _it_row <case> <verdict> <evidence> <note>
   else
     printf '%s\n' "$line" >> "$RESULTS"
   fi
+  flock -u "$row_lock"
+  exec {row_lock}>&-
   if [ -n "${IT_OWN_RE:-}" ] && [ "$RESULTS" = "${IT_OWN_FILE:-}" ] \
      && ! printf '%s' "$case" | grep -qE "^(OWN-)?(${IT_OWN_RE})\$"; then
     case "$case" in OWN-*) ;; *)

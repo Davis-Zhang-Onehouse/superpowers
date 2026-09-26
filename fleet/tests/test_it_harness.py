@@ -737,6 +737,54 @@ class RuntimeTmuxKillAudit(unittest.TestCase):
         fake.chmod(0o755)
         return dict(self.env, IT_TMUX_REAL=str(fake), FAKE_TMUX_RECORD=str(calls)), calls
 
+    def stateful_recording_tmux(self):
+        """A fake real-tmux with a socket lifecycle; it never invokes tmux."""
+        env, calls = self.recording_tmux()
+        fake = self.tmp / "stateful-tmux"
+        fake.write_text('''#!/usr/bin/env python3
+import json, os, pathlib, sys
+args = sys.argv[1:]
+if args[0] == '-S':
+    socket, command, rest = pathlib.Path(args[1]), args[2], args[3:]
+else:
+    socket = pathlib.Path(os.environ['TMUX_TMPDIR']) / ('tmux-' + str(os.getuid())) / args[1]
+    command, rest = args[2], args[3:]
+if command == 'display-message':
+    if socket.exists(): print('777'); sys.exit(0)
+    sys.exit(1)
+if command == 'list-sessions':
+    if socket.exists(): print('mine\\t$1'); sys.exit(0)
+    sys.exit(1)
+with open(os.environ['FAKE_TMUX_RECORD'], 'a') as out:
+    out.write(json.dumps(args) + '\\n')
+if command == 'new-session':
+    socket.parent.mkdir(parents=True, exist_ok=True)
+    socket.touch()
+    sys.exit(0)
+if command == 'kill-server':
+    if socket.exists(): socket.unlink(); sys.exit(0)
+    sys.exit(1)
+sys.exit(0)
+''')
+        fake.chmod(0o755)
+        return dict(env, IT_TMUX_REAL=str(fake)), calls
+
+    def test_repeat_owned_server_kill_is_noop_and_row_stays_pass(self):
+        env, calls = self.stateful_recording_tmux()
+        results = self.tmp / "results.tsv"
+        results.write_text("case\tverdict\tevidence\tnote\n"
+                           "KILL-AUDIT-X\tPASS\tfleet/it/X/tmux-audit.jsonl\t0 kill(s): (none)\n")
+        env.update(IT_TMUX_AUDIT_RESULTS=str(results), IT_TMUX_AUDIT_SECTION="X")
+        self.assertEqual(self.tmux("-L", "own", "new-session", "-d", "-s", "mine", env=env).returncode, 0)
+        self.assertEqual(self.tmux("-L", "own", "kill-server", env=env).returncode, 0)
+        first_count = len(calls.read_text().splitlines())
+        repeated = self.tmux("-L", "own", "kill-server", env=env)
+        self.assertEqual(repeated.returncode, 1, repeated.stderr)
+        self.assertEqual(len(calls.read_text().splitlines()), first_count)
+        self.assertIn("KILL-AUDIT-X\tPASS", results.read_text())
+        rows = [json.loads(line) for line in self.ledger.read_text().splitlines()]
+        self.assertEqual(rows[-1]["decision"], "noop")
+
     def test_end_of_options_and_combined_socket_flags_cannot_hide_a_kill(self):
         env, calls = self.recording_tmux()
         for args in (("-L", "default", "--", "kill-server"), ("--", "kill-server"),
