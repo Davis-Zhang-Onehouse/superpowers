@@ -61,6 +61,9 @@ rebase_step() {
 }
 continue_step() { GIT_EDITOR=true g "$WORKTREE" rebase --continue; }
 
+# RV-27: a version-only resolution rerere kept from an earlier run must not pre-empt resolve_manifest_versions.
+forget_version_only_resolutions "$REPO" >/dev/null
+
 # Upper bound on continue attempts: at most one per replayed commit (+ margin).
 maxsteps=$(( $(g "$WORKTREE" rev-list --count "$BASE_TAG..$LIVE_BRANCH") + 2 ))
 result="clean"
@@ -88,6 +91,7 @@ auto="$(printf '%s' "$auto" | grep . | sort -u | tr '\n' ',' || true)"; auto="${
 if [ -n "$auto" ] && [ "$result" != "paused" ]; then result="manifest-resolved"; fi
 
 if [ "$result" = "paused" ]; then
+  forget_version_only_resolutions "$REPO" >/dev/null   # RV-27: the stops before this pause recorded some
   conflicts="$(g "$WORKTREE" diff --name-only --diff-filter=U | tr '\n' ',' )"
   echo "$NEW" > "$PENDING_FILE"
   {

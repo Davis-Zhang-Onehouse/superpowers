@@ -69,6 +69,7 @@ finalize_live() { # finalize_live NEWTAG RESULT [DETAIL] — adopt sync-rebase i
     g "$REPO" branch -D sync-rebase >/dev/null 2>&1 || true
   fi
   set_state BASE_TAG "$newtag"
+  forget_version_only_resolutions "$REPO" >/dev/null   # RV-27: no manifest resolution outlives the run
   stamp="$(new_snapshot_tag)"
   g "$REPO" tag -a "$stamp" -m "sync onto $newtag ($result)"
   log_event "$result" "$newtag" "$stamp" "$detail"
@@ -81,6 +82,53 @@ finalize_live() { # finalize_live NEWTAG RESULT [DETAIL] — adopt sync-rebase i
     # resolution logged refresh-failed and left the plugin cache stale.
     ( cd "$REPO" && eval "$SPSYNC_REFRESH_CMD" ) || log_event refresh-failed "$newtag" "$stamp"
   fi
+}
+
+# forget_version_only_resolutions REPO — RV-27. rerere records every resolution made during a rebase, including each one
+# resolve_manifest_versions makes, and would REPLAY it (rerere.autoupdate stages it) the next time the identical conflict
+# appears — a stale-base re-run — before the resolver is asked. Drop every recorded resolution whose preimage is a
+# version-only conflict, the exact class the resolver owns, so it stays the only thing that settles one. Resolutions
+# of any other conflict (the operator's README merge) are kept. Prints how many it dropped; never fails the sync.
+forget_version_only_resolutions() {
+  local cache
+  cache="$(g "$1" rev-parse --path-format=absolute --git-common-dir 2>/dev/null)/rr-cache" || return 0
+  [ -d "$cache" ] || { echo 0; return 0; }
+  python3 - "$cache" <<'PY' || echo 0
+import pathlib, re, shutil, sys
+cache = pathlib.Path(sys.argv[1])
+block = re.compile(r"<<<<<<<[^\n]*\n(.*?)(?:\|\|\|\|\|\|\|[^\n]*\n.*?)?=======\n(.*?)>>>>>>>[^\n]*\n", re.S)
+version = re.compile(r'^(\s*"?version"?\s*:\s*"?)([^",\s]+)("?,?\s*)$')
+
+def version_only(text):
+    hunks = block.findall(text)
+    if not hunks:
+        return False
+    for ours, theirs in hunks:
+        a, b = ours.splitlines(), theirs.splitlines()
+        if len(a) != len(b):
+            return False
+        differing = [(x, y) for x, y in zip(a, b) if x != y]
+        if not differing:
+            return False
+        for x, y in differing:
+            vx, vy = version.match(x.rstrip("\r")), version.match(y.rstrip("\r"))
+            if not (vx and vy and vx.group(1) == vy.group(1) and vx.group(3) == vy.group(3)):
+                return False
+    return True
+
+dropped = 0
+for entry in sorted(cache.iterdir()):
+    pre = entry / "preimage"
+    if entry.is_dir() and pre.is_file():
+        try:
+            text = pre.read_text(errors="replace")
+        except OSError:
+            continue
+        if version_only(text):
+            shutil.rmtree(entry, ignore_errors=True)
+            dropped += 1
+print(dropped)
+PY
 }
 
 # resolve_manifest_versions WORKTREE — S6 / coordinator D-136. Resolve the conflict a replayed fleet release commit
