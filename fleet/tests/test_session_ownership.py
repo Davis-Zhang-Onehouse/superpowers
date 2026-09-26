@@ -737,6 +737,34 @@ class DispatchDoesNotStartOverALiveSessionOfTheSameName(unittest.TestCase):
                                     "--title", "mile", "--base", "00000000"])
         self.assertEqual(code, 4, f"{out}{err}")
 
+    def test_the_refusal_names_an_open_launched_owner_and_how_to_end_it(self):
+        """RV-47. The RV-40 scenario itself: the live `dt-mile` is an OPEN, launched worker's."""
+        fleet = Fleet()
+        self.addCleanup(shutil.rmtree, fleet.tmp, True)
+        fleet.worker("mile", slot="ws1", pane=IDLE_PANE)
+        owner = fleet.ids["mile"]
+        before_records, before_leases = fleet.record_state(), fleet.pool_state()
+        code, out, err = fleet.run(["dispatch", "--profile", str(fleet.profile("worker")), "--title", "mile",
+                                    "--base", "00000000"])
+        self.assertEqual(code, 4, f"{out}{err}")
+        self.assertIn(f"session dt-mile is live on this server and belongs to record {owner}", err)
+        self.assertIn(f"fleet close --id {owner}", err)
+        self.assertEqual((fleet.record_state(), fleet.pool_state()), (before_records, before_leases))
+        self.assertEqual((fleet.started, fleet.killed), ([], []))
+
+    def test_the_refusal_names_an_unrecorded_live_session(self):
+        """RV-47. A live `dt-mile` no record claims: the refusal says so and routes to the title, not to `close`."""
+        fleet = Fleet()
+        self.addCleanup(shutil.rmtree, fleet.tmp, True)
+        fleet.tmux_live.add("dt-mile")
+        code, out, err = fleet.run(["dispatch", "--profile", str(fleet.profile("worker")), "--title", "mile",
+                                    "--base", "00000000"])
+        self.assertEqual(code, 4, f"{out}{err}")
+        self.assertIn("belongs to no record in this store (an unrecorded session)", err)
+        self.assertIn("dt-mile is gone, or the title differs", err)
+        self.assertNotIn("fleet close --id", err)
+        self.assertEqual((fleet.started, fleet.killed), ([], []))
+
     def test_a_dispatch_whose_session_name_is_free_still_starts(self):
         """Neighbour: the same harvested record, its session gone."""
         fleet = Fleet()
