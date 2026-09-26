@@ -729,7 +729,11 @@ fi
 # ==================================================================================================
 S13_CHILD="$(s_dispatch midTurnAbort -)"
 S13_TMUX="$(awk -F'\t' '$1=="tmux"{print $2; exit}' "$OUT/dispatch-midTurnAbort.out")"
+#: S6: a real busy frame keeps its EMPTY input box under the spinner; v23-q (like v23-f's RV-19 before it, S5's M10 fix)
+#: reads a busy pane whose box cannot be located as 14 indeterminate on purpose, so the stand-in draws the caret row too.
 tmux -L "$IT_TMUX_SOCKET" send-keys -t "=$S13_TMUX:" -l 'Thinking...   esc to interrupt' 2> "$OUT/S13-keys.err"
+tmux -L "$IT_TMUX_SOCKET" send-keys -t "=$S13_TMUX:" Enter 2>> "$OUT/S13-keys.err"
+tmux -L "$IT_TMUX_SOCKET" send-keys -t "=$S13_TMUX:" -l $'\u276f\u00a0' 2>> "$OUT/S13-keys.err"
 s13_busy=0
 for _ in 1 2 3 4 5 6 7 8 9 10; do
   tmux -L "$IT_TMUX_SOCKET" capture-pane -p -t "=$S13_TMUX:" 2>/dev/null | grep -qF 'esc to interrupt' && { s13_busy=1; break; }

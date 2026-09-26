@@ -703,36 +703,39 @@ d10b_child_path_is_a_live_instant() {
 }
 
 # ==================================================================================================
-# D12 — tmux refuses the session after the claim: exit 5 and rows on STDOUT (V23-B, v2-05/v2-14)
+# D12 — a session name already live on the server: refused BEFORE the claim, and said on STDOUT (V23-B → V23-T RV-40)
 # ==================================================================================================
 
 d12_tmux_refusal_says_what_it_did() {
   d_home d12 1
-  #: The session name `dispatch` will pick is already taken on THIS section's private server, so
-  #: `tmux new-session` refuses after the lease is claimed. Before V23-B that exited 2 (the caller-typo
-  #: code) with ZERO lines on stdout, and a wrapper reading stdout saw nothing at all.
+  #: The session name `dispatch` will pick is already taken on THIS section's private server. Before V23-B that exited 2
+  #: with ZERO lines on stdout; V23-B made the post-claim `tmux new-session` refusal exit 5 with rows. S6: V23-T (RV-40)
+  #: now refuses this exact case BEFORE the claim — no lease, no record, no instant — so the rows are a `refused` row
+  #: naming the live session and exit 4. The post-claim exit-5 rows stay pinned hermetically
+  #: (tests/test_dispatch_says.py TestAFailureAfterTheClaimIsNotStarted, an injected start refusal).
   it_tmux new-session -d -s dt-d12Taken 'sleep 100000'
   fleet dispatch --profile "$P_WORKER" --title "d12 taken" --base "$BASE" --cap 9 --porcelain \
     > "$CD/dispatch.stdout" 2> "$CD/dispatch.stderr"
-  local rc=$? err_row step_row lease_row title_row leases
+  local rc=$? refused_row title_row leases instants
   it_tmux kill-session -t '=dt-d12Taken' 2>/dev/null
-  err_row="$(awk -F'\t' '$1=="error"{print $2}' "$CD/dispatch.stdout")"
-  step_row="$(awk -F'\t' '$1=="step"{print $2}' "$CD/dispatch.stdout")"
-  lease_row="$(awk -F'\t' '$1=="left_lease"{print $2}' "$CD/dispatch.stdout")"
+  refused_row="$(awk -F'\t' '$1=="refused"{print $2}' "$CD/dispatch.stdout")"
   title_row="$(awk -F'\t' '$1=="title_as_used"{print $2}' "$CD/dispatch.stdout")"
   leases="$(d_n_leases)"
+  instants="$(find "$FLEET_INSTANTS" -maxdepth 1 -name '*d12Taken*' 2>/dev/null | wc -l)"
   {
-    printf 'exit\t%s\nerror row\t%s\nstep row\t%s\nlease row\t%s\ntitle_as_used\t%s\nlease dirs left\t%s\n' \
-      "$rc" "$err_row" "$step_row" "$lease_row" "$title_row" "$leases"
+    printf 'exit\t%s\nrefused row\t%s\ntitle_as_used\t%s\nlease dirs left\t%s\nd12Taken instants\t%s\n' \
+      "$rc" "$refused_row" "$title_row" "$leases" "$instants"
+    printf -- '--- stdout\n'; cat "$CD/dispatch.stdout"
   } > "$CD/says.tsv"
-  case "$err_row" in "BadInput: tmux refused to start 'dt-d12Taken'"*) local named=1 ;; *) local named=0 ;; esac
-  if [ "$rc" = 5 ] && [ "$named" = 1 ] && [ "$step_row" = "tmux new-session" ] \
-     && [ "$lease_row" = given-back ] && [ "$title_row" = d12Taken ] && [ "$leases" = 0 ]; then
+  local named=0
+  grep -qF 'session dt-d12Taken is live' "$CD/dispatch.stdout" && grep -qF 'unrecorded session' "$CD/dispatch.stdout" && named=1
+  if [ "$rc" = 4 ] && [ -n "$refused_row" ] && [ "$named" = 1 ] && [ "$title_row" = d12Taken ] \
+     && [ "$leases" = 0 ] && [ "$instants" = 0 ]; then
     d_pass D12 "$CD/says.tsv" \
-      "a REAL tmux refusal after the claim (the session name already taken on the private server) exits 5 not-started and says so on STDOUT: an error row naming tmux's own refusal, step=tmux new-session, lease given back, title_as_used=d12Taken; 0 lease dirs left"
+      "a REAL live session under the name dispatch would use (the name taken on the private server) is refused BEFORE the claim (V23-T RV-40): exit 4 with a refused row on STDOUT naming the live, unrecorded session dt-d12Taken, title_as_used=d12Taken, 0 lease dirs and no instant created (the post-claim exit-5 rows are pinned hermetically)"
   else
     d_fail D12 "$CD/says.tsv" \
-      "exit $rc error_row_names_tmux=$named step='$step_row' lease='$lease_row' title_as_used='$title_row' leases=$leases"
+      "exit $rc refused_row='$refused_row' names_live_session=$named title_as_used='$title_row' leases=$leases instants=$instants"
   fi
 }
 
