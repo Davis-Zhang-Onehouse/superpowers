@@ -315,16 +315,21 @@ class SessionLayer:
 
     # --- pane --------------------------------------------------------------------------------
 
-    def capture(self, name: str):
+    def capture(self, name: str, timeout=None):
         """The pane's text, or None if the capture failed. `FI-7`.
 
         The ONLY way to distinguish "tmux could not answer" from "the pane is empty". Everything that
         merely wants text should use `pane()`; anything DECIDING on absence must use this, because on
         this distinction rests whether a live pane may be destroyed.
+
+        OR-5 (v23-p review). `timeout` (seconds) bounds a tmux that does not answer; the capture then FAILED
+        (None). Passed on only when given, so a probe without the parameter is still called as before.
         """
         if not name:
             raise BadInput("a pane capture needs a session name")
-        return self.probes.capture_pane(name)
+        if timeout is None:
+            return self.probes.capture_pane(name)
+        return self.probes.capture_pane(name, timeout=timeout)
 
     def capture_history(self, name: str, lines: int):
         """The pane's text with its last `lines` rows of scrollback, or None if that could not be captured (S6 OR-4)."""
@@ -843,8 +848,8 @@ def default_probes(process_name: str = "claude", tmux_socket=_FROM_ENV, *,
 
     # Every `-t` below is EXACT (`FI-23`). `new-session -s` is not a target and needs no marker: it
     # NAMES the session being created rather than resolving an existing one.
-    def capture_pane(name: str):
-        """The pane's text, or **None if the capture FAILED**.
+    def capture_pane(name: str, timeout=None):
+        """The pane's text, or **None if the capture FAILED** (or did not answer within `timeout`, OR-5).
 
         `FI-7`. This returned `""` on failure, so "tmux could not answer" and "the pane is empty" were
         the same value — and every caller then read the same falsy thing and drew the permissive
@@ -873,7 +878,10 @@ def default_probes(process_name: str = "claude", tmux_socket=_FROM_ENV, *,
         interpreted in exactly one place and are text nowhere. `tests/test_session.py` asserts this argv
         still carries `-e`, because the failure mode of losing it again is silent.
         """
-        done = run(tmux + ["capture-pane", "-p", "-e", "-t", exact_pane_target(name)])
+        try:
+            done = run(tmux + ["capture-pane", "-p", "-e", "-t", exact_pane_target(name)], timeout=timeout)
+        except subprocess.TimeoutExpired:
+            return None
         return done.stdout if done.returncode == 0 else None
 
     def capture_history(name: str, lines: int):

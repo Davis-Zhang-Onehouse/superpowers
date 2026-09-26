@@ -408,7 +408,7 @@ class FakeLayer:
     def __init__(self, frames):
         self.frames, self.captured = list(frames), []
 
-    def capture(self, name):
+    def capture(self, name, timeout=None):
         self.captured.append(name)
         return self.frames.pop(0) if len(self.frames) > 1 else self.frames[0]
 
@@ -444,7 +444,7 @@ class TestTheWatchLoop(unittest.TestCase):
         clock = [100.0]
 
         class SlowLayer(FakeLayer):
-            def capture(self, name):
+            def capture(self, name, timeout=None):
                 clock[0] += 3.0
                 return super().capture(name)
 
@@ -474,7 +474,7 @@ class TestTheWatchLoop(unittest.TestCase):
         trust_frame = TRUST_FRAME
 
         class SlowLayer(FakeLayer):
-            def capture(self, name):
+            def capture(self, name, timeout=None):
                 clock[0] += 60.0
                 return super().capture(name)
 
@@ -482,9 +482,55 @@ class TestTheWatchLoop(unittest.TestCase):
             watch = cli._watch_launch(FakeCtx(), SlowLayer([trust_frame]), "dt-x", "claude")
         self.assertEqual("trust-screen", watch.outcome)
 
+    def test_OR5_each_capture_is_bounded_by_the_time_left_in_the_window(self):
+        """OR-5 (v23-p review). The deadline was checked only after a capture returned, and a capture has no timeout
+        of its own: each look is handed what is left of the window."""
+        seen = []
+
+        class TimedLayer(FakeLayer):
+            def capture(self, name, timeout=None):
+                seen.append(timeout)
+                return super().capture(name)
+
+        with mock.patch.dict(os.environ, {cli.TRUST_WATCH_SECONDS: "1"}), \
+                mock.patch("time.sleep", side_effect=AssertionError("a real sleep")):
+            watch = cli._watch_launch(FakeCtx(), TimedLayer(["Starting up..."]), "dt-x", "claude")
+        self.assertEqual("unobserved", watch.outcome)
+        self.assertTrue(seen and all(t is not None and 0 < t <= 1.0 for t in seen), seen)
+
+    def test_OR5_a_tmux_capture_that_blocks_ends_at_the_window(self):
+        """OR-5. End to end over the real probes: a `tmux` that never answers (a stopped server) must not hold the
+        watch, and so `fleet dispatch`, past the window."""
+        import threading
+        from fleet.session import SessionLayer, default_probes
+        tmp = tempfile.mkdtemp(prefix="itf-", dir="/tmp")
+        self.addCleanup(__import__("shutil").rmtree, tmp, True)
+        pids = os.path.join(tmp, "pids")
+        fake = os.path.join(tmp, "tmux")
+        with open(fake, "w") as f:
+            f.write(f"#!/bin/sh\necho $$ >> {pids}\nexec sleep 30\n")
+        os.chmod(fake, 0o755)
+
+        def reap():
+            for pid in (open(pids).read().split() if os.path.exists(pids) else []):
+                try:
+                    os.kill(int(pid), 9)
+                except (OSError, ValueError):
+                    pass
+        self.addCleanup(reap)
+        layer = SessionLayer(default_probes(tmux_socket="itfleet-or5-none"))
+        result = []
+        with mock.patch.dict(os.environ, {cli.TRUST_WATCH_SECONDS: "1", "PATH": tmp + os.pathsep + os.environ["PATH"]}):
+            worker = threading.Thread(target=lambda: result.append(
+                cli._watch_launch(FakeCtx(), layer, "dt-x", "claude")), daemon=True)
+            worker.start()
+            worker.join(8)
+        self.assertFalse(worker.is_alive(), "the watch was still blocked in a capture 8s into a 1s window")
+        self.assertEqual("unobserved", result[0].outcome, result)
+
     def test_a_capture_that_raises_is_unobserved_with_the_reason(self):
         class Broken:
-            def capture(self, name):
+            def capture(self, name, timeout=None):
                 raise OSError("tmux went away")
 
         watch = cli._watch_launch(FakeCtx(), Broken(), "dt-x", "claude")
