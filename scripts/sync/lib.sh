@@ -93,49 +93,79 @@ resolve_manifest_versions() {
   local wt="$1" files
   files="$(g "$wt" diff --name-only --diff-filter=U)"
   [ -n "$files" ] || return 1
+  # RV-S6Y-3: a recreated merge's "theirs" is its second parent, not the replayed commit: never resolve a merge step.
+  g "$wt" rev-parse -q --verify MERGE_HEAD >/dev/null 2>&1 && return 1
   # shellcheck disable=SC2086  # manifest paths carry no whitespace; word splitting is the argument list
   python3 - "$wt" $files <<'PY' || return 1
-import json, pathlib, re, sys
+import copy, json, pathlib, re, sys
 wt, files = pathlib.Path(sys.argv[1]), sys.argv[2:]
 try:
-    manifests = {entry["path"] for entry in json.loads((wt / ".version-bump.json").read_text())["files"]}
+    fields = {entry["path"]: entry["field"] for entry in json.loads((wt / ".version-bump.json").read_text())["files"]}
 except (OSError, ValueError, KeyError, TypeError):
     sys.exit(1)
-if not files or any(f not in manifests for f in files):
+if not files or any(f not in fields for f in files):
     sys.exit(1)
 block = re.compile(r"<<<<<<< [^\n]*\n(.*?)(?:\|\|\|\|\|\|\|[^\n]*\n.*?)?=======\n(.*?)>>>>>>> [^\n]*\n", re.S)
 version = re.compile(r'^(\s*"?version"?\s*:\s*"?)([^",\s]+)("?,?\s*)$')
+
+def at(doc, path):
+    for key in path:
+        doc = doc[int(key)] if isinstance(doc, list) else doc[key]
+    return doc
+
+def put(doc, path, value):
+    for key in path[:-1]:
+        doc = doc[int(key)] if isinstance(doc, list) else doc[key]
+    last = path[-1]
+    doc[int(last) if isinstance(doc, list) else last] = value
+
 resolved = {}
 for name in files:
-    text = (wt / name).read_text()
-    failed = False
+    #: RV-S6Y-4: bytes as they are — newline="" keeps a CRLF file CRLF.
+    with open(wt / name, newline="") as handle:
+        text = handle.read()
+    changes = []                                  # (ours version, new version, prefix) per differing line
     def merge(m):
-        global failed
         ours, theirs = m.group(1).splitlines(True), m.group(2).splitlines(True)
         if len(ours) != len(theirs):
-            failed = True; return m.group(0)
+            changes.append(None); return m.group(0)
         out = []
         for a, b in zip(ours, theirs):
             if a == b:
                 out.append(a); continue
-            va, vb = version.match(a.rstrip("\n")), version.match(b.rstrip("\n"))
+            ea = a[len(a.rstrip("\r\n")):]
+            va, vb = version.match(a.rstrip("\r\n")), version.match(b.rstrip("\r\n"))
             if not (va and vb and va.group(1) == vb.group(1) and va.group(3) == vb.group(3)):
-                failed = True; return m.group(0)
+                changes.append(None); return m.group(0)
             core = va.group(2).split("+", 1)[0]
             build = "+" + vb.group(2).split("+", 1)[1] if "+" in vb.group(2) else ""
-            out.append(f"{va.group(1)}{core}{build}{va.group(3)}" + ("\n" if a.endswith("\n") else ""))
+            changes.append((va.group(2), core + build, va.group(1)))
+            out.append(f"{va.group(1)}{core}{build}{va.group(3)}{ea}")
         return "".join(out)
     new, count = block.subn(merge, text)
-    if failed or count == 0 or "<<<<<<<" in new or ">>>>>>>" in new:
+    #: RV-S6Y-2: exactly ONE differing line per file, and it must be the field .version-bump.json declares.
+    if count == 0 or "<<<<<<<" in new or ">>>>>>>" in new or len(changes) != 1 or changes[0] is None:
         sys.exit(1)
+    before, after, prefix = changes[0]
+    field = str(fields[name]).split(".")
     if name.endswith(".json"):
         try:
-            json.loads(new)
-        except ValueError:
+            ours_doc = json.loads(block.sub(lambda m: m.group(1), text))
+            new_doc = json.loads(new)
+            if at(ours_doc, field) != before:
+                sys.exit(1)
+            expected = copy.deepcopy(ours_doc)
+            put(expected, field, after)
+        except (ValueError, KeyError, IndexError, TypeError):
             sys.exit(1)
+        if expected != new_doc:
+            sys.exit(1)
+    elif field != ["version"] or not prefix.startswith("version"):   # YAML: the top-level key only
+        sys.exit(1)
     resolved[name] = new
 for name, new in resolved.items():
-    (wt / name).write_text(new)
+    with open(wt / name, "w", newline="") as handle:
+        handle.write(new)
     print(name)
 PY
   # shellcheck disable=SC2086

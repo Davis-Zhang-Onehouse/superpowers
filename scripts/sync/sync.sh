@@ -100,7 +100,7 @@ if [ "$result" = "paused" ]; then
     echo "    \"$CONTROL_DIR/finish.sh\"   # continues the rebase, adopts into live, refreshes the plugin"
     if [ -n "$auto" ]; then echo "  (Version-only manifest conflicts were auto-resolved earlier in this rebase: $auto)"; fi
   } > "$STATUS_FILE"
-  log_event paused "$NEW" "" "${conflicts%,}"
+  log_event paused "$NEW" "" "${conflicts%,}${auto:+; auto-resolved before the pause: $auto}"
   exit 0
 fi
 
