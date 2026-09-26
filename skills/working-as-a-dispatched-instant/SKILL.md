@@ -293,6 +293,10 @@ sweep:
   in its own session: it survives your pane's close, holds the slot, and blocked a harvest with 21 pids until
   someone killed them by hand. Stop each one (TaskStop) first; `fleet complete` lists any it can still see in a
   `watchers` row, and `close`/`harvest` end only the ones attributable to your instant.
+- **Nothing you detach in the slot outlives your close-out.** "Attributable" is wider than watchers: a job you
+  start with `setsid` from the slot (a benchmark you meant to finish after you hand off) carries your
+  `FLEET_INSTANT`, leads its own session with no terminal, and `close`/`harvest` end it exactly as they end a
+  watcher. Let it finish before you propose done, or run it outside the slot and say where in your report.
 - **Empty the slot of scratch** once its scripts are copied into `evidence/`. A private `.m2` is 22 GB,
   and the next lessee inherits it.
 
