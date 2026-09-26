@@ -894,6 +894,22 @@ sys.exit(0)
         self.assertIn(["-L", "own", "display", "-p", "#{pane_current_path}"],
                       [json.loads(line) for line in calls.read_text().splitlines()])
 
+    def test_audit_summary_counts_a_refused_nonkill_command(self):
+        tmp = self.tmp / "audit-summary"
+        it = harness_copy(tmp)
+        ledger = self.tmp / "nonkill.jsonl"
+        ledger.write_text(json.dumps({"command": "display", "socket": str(self.private / "own"),
+                                      "target": None, "decision": "deny"}) + "\n")
+        results = self.tmp / "summary.tsv"
+        results.write_text("case\tverdict\tevidence\tnote\n")
+        script = (f'. "{it}/lib.sh"\n'
+                  f'SECTION=X RESULTS="{results}" IT_TMUX_AUDIT_LEDGER="{ledger}" IT_FAILED=0\n'
+                  f'it_kill_audit_result\n')
+        completed = run_bash(script, tmp, home=self.tmp / "home")
+        self.assertEqual(completed.returncode, 1, completed.stderr)
+        self.assertIn("KILL-AUDIT-X\tFAIL", results.read_text())
+        self.assertIn("1 non-kill deny", results.read_text())
+
     def test_control_mode_is_refused_on_foreign_socket(self):
         env, calls = self.recording_tmux()
         for flag in ("-C", "-CC"):

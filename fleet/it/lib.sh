@@ -336,11 +336,14 @@ it_kill_audit_result() {
 import json, os, sys
 rows = [json.loads(line) for line in open(sys.argv[1], encoding='utf-8') if line.strip()]
 kills = [r for r in rows if r['command'] in ('kill-server', 'kill-session')]
+nonkill_denies = [r for r in rows if r['decision'] == 'deny' and
+                 r['command'] not in ('kill-server', 'kill-session')]
 names = [r['command'] + '@' + os.path.basename(r['socket']) +
          (':' + str(r['target']) if r['target'] else '') + '[' + r['decision'] + ']'
          for r in kills]
-print(('FAIL' if any(r['decision'] == 'deny' for r in kills) else 'PASS') + '|' +
-      str(len(kills)) + ' kill(s): ' + (', '.join(names) if names else '(none)'))
+print(('FAIL' if any(r['decision'] == 'deny' for r in rows) else 'PASS') + '|' +
+      str(len(kills)) + ' kill(s): ' + (', '.join(names) if names else '(none)') +
+      '; ' + str(len(nonkill_denies)) + ' non-kill deny(s)')
 PY
 )" || { it_fail "$audit_case" "" "tmux audit ledger cannot be parsed"; return 1; }
   verdict="${summary%%|*}"
