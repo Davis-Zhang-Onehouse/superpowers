@@ -132,5 +132,18 @@ out8="$(helper X IT_REAL_AGENT_PARENT="$TMP/rv35-dir/under" 2>"$TMP/err8")"; rc=
 check "IT_REAL_AGENT_PARENT under a .git entry: non-zero, no dir printed" "nonzero|" "$([ "$rc" != 0 ] && echo nonzero || echo zero)|$out8"
 check "IT_REAL_AGENT_PARENT under a .git entry: one line on stderr" 1 "$(grep -c . "$TMP/err8")"
 
+# --- 9. RV-37: a RELATIVE override, or an IT_ROOT whose `cd` fails, must not loop ------------------------------------
+# `dirname` of a relative path stops at `.`, never `/`, so an unresolved walk never ends. Bounded by `timeout 10`:
+# rc 124 is the hang.
+mkdir -p "$TMP/rel/trusted"
+d9="$(cd "$TMP" && env HOME="$TMP/home" IT_ROOT="$ITROOT" FN="$FN" IT_REAL_AGENT_PARENT=rel/trusted \
+        timeout 10 bash -c 'eval "$FN"; it_outside_checkout_dir X')"; rc=$?
+check "a relative IT_REAL_AGENT_PARENT: resolved against the cwd, no hang" "0|$TMP/rel/trusted" "$rc|$(dirname "$d9")"
+out9="$(cd "$TMP" && env HOME="$TMP/home" IT_ROOT="$TMP/no-such-it-root" FN="$FN" \
+          timeout 10 bash -c 'eval "$FN"; it_outside_checkout_dir X' 2>"$TMP/err9")"; rc=$?
+check "an IT_ROOT that does not exist: fails (not a hang), no dir printed" "fail|" \
+  "$(case "$rc" in 0) echo zero ;; 124) echo hang ;; *) echo fail ;; esac)|$out9"
+check "an IT_ROOT that does not exist: says so on stderr" yes "$(grep -q 'it_outside_checkout_dir' "$TMP/err9" && echo yes || echo no)"
+
 if [ "$fails" = 0 ]; then echo "it-outside-checkout-dir: all ok"; else echo "it-outside-checkout-dir: FAILED"; fi
 exit "$fails"

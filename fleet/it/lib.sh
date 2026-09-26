@@ -374,6 +374,8 @@ it_fresh_store() {
 #: Shared with run-TS.sh's `ts_scratch_parent`.
 it_no_dot_git_above() {
   local a="$1"
+  #: RV-37. `dirname` of a relative path ends at `.`, never `/`: refuse one rather than walk forever.
+  case "$a" in /*) ;; *) printf '%s\n' "$a (not an absolute path)"; return 1 ;; esac
   while :; do
     [ -e "$a/.git" ] && { printf '%s\n' "$a/.git"; return 1; }
     [ "$a" = / ] && return 0
@@ -386,8 +388,13 @@ it_outside_checkout_dir() {   # it_outside_checkout_dir <name> -> prints a FRESH
   #: under this checkout asks about the checkout even when the slot above it is trusted. The default parent is the
   #: first directory above the checkout that is in no git work tree: the leased slot dir, which the operator trusts.
   local parent="${IT_REAL_AGENT_PARENT:-}" top hit
-  if [ -z "$parent" ]; then
-    parent="$(cd "$IT_ROOT" && pwd -P)"
+  #: RV-37. Resolved to an absolute path first: the walks below end only at `/`.
+  if [ -n "$parent" ]; then
+    parent="$(cd "$parent" 2>/dev/null && pwd -P)" \
+      || { echo "it_outside_checkout_dir: IT_REAL_AGENT_PARENT=$IT_REAL_AGENT_PARENT is not a directory" >&2; return 3; }
+  else
+    parent="$(cd "$IT_ROOT" 2>/dev/null && pwd -P)" \
+      || { echo "it_outside_checkout_dir: IT_ROOT=$IT_ROOT is not a directory" >&2; return 3; }
     #: RV-30. Scrubbed: an exported GIT_DIR / GIT_WORK_TREE makes git describe THAT repository from any dir (the
     #: walk ran to `/`, or never ended), and a ceiling would hide the repository around the checkout.
     #: RV-35. Up until the parent is in no work tree AND has no `.git` entry on itself or any ancestor: past a
