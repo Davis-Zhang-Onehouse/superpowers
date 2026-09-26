@@ -19,6 +19,7 @@ import tempfile
 import time
 import unittest
 
+from fleet.errors import BadInput
 from fleet import guards as G
 from fleet.pool import Pool
 from fleet import reconcile as R
@@ -600,6 +601,85 @@ class AnExecutedReviveOwnsItsSession(unittest.TestCase):
         self.assertIn("evidence.liveness\tsession", out)
         code, out, err = fleet.run(["status", "--id", b.todo_id, "--porcelain"])
         self.assertIn("evidence.liveness\tnone", out)
+
+    def _older_revivable_and_later_harvested(self, verified=True):
+        """RV-24's pair: A (ws7, launched 11.00, holds its lease, DEAD) and B, a later dispatch of the same title
+        (launched 11.30, harvested). `verified` is what revive's verification answers."""
+        fleet = Fleet(slots=8)
+        self.addCleanup(shutil.rmtree, fleet.tmp, True)
+        args = fleet.revival_fixture()
+        a_id = fleet.ids["recoverable"]
+        rec = fleet.store.read(a_id)
+        rec.launched_at = "2026-07-30T11:00:00Z"
+        fleet.store.write(rec)
+        fleet.worker("recoverable", state="complete", live=False)
+        b = fleet.store.read(fleet.ids["recoverable"])
+        b.launched_at = "2026-07-30T11:30:00Z"
+        b.harvested_at = b.closed_at = "2026-07-30T11:45:00Z"
+        fleet.store.write(b)
+        original = fleet.context
+
+        def context():
+            build = original()
+
+            def with_verdict(parsed, out, err):
+                ctx = build(parsed, out, err)
+                ctx.resume_verified = lambda record, session_id: verified
+                return ctx
+            return with_verdict
+        fleet.context = context
+        return fleet, args, a_id, b.todo_id
+
+    def _owner(self, fleet):
+        return R.session_owner(fleet.store.all(), fleet.socket, fleet.pool)[(fleet.socket, "dt-recoverable")].todo_id
+
+    def _the_started_session_comes_up_busy(self, fleet):
+        """What the real start leaves behind: a live session with a working agent in A's slot."""
+        fleet.tmux_live.add("dt-recoverable")
+        fleet.panes["dt-recoverable"] = BUSY_PANE
+        fleet.procs.append(LiveSession(pid=5151, cwd=fleet.pool.slot_path("ws7"), name="dt-recoverable"))
+
+    def test_the_revived_record_owns_its_session_from_the_moment_it_starts(self):
+        """OR-1 (v23-t close review). Revive stamped `launched_at` only after its verify, so from `layer.start` until
+        then A ranked by its OLD launch and the harvested B owned the session A had just started."""
+        fleet, args, a_id, b_id = self._older_revivable_and_later_harvested()
+        during = []
+        original_start = fleet.sessions.probes.start_session
+        fleet.sessions.probes.start_session = lambda name, cwd, cmd: (original_start(name, cwd, cmd),
+                                                                      during.append(self._owner(fleet)))
+        code, out, err = fleet.run(["revive", *args])
+        self.assertEqual(code, 0, err)
+        self.assertEqual(during, [a_id], "while the session starts it is the revived record's")
+        self.assertEqual(self._owner(fleet), a_id, "and after the revive too")
+
+    def test_a_revive_whose_verify_fails_still_owns_the_session_it_started(self):
+        """OR-1. The verify failed, the session was left running and the lease retained — the session is A's. Before
+        the fix the stamp was never written, so B (harvested) read COMPLETE-BUT-WORKING on A's pid and A UNREACHABLE."""
+        fleet, args, a_id, b_id = self._older_revivable_and_later_harvested(verified=False)
+        code, out, err = fleet.run(["revive", *args])
+        self.assertNotEqual(code, 0, f"{out}{err}")
+        self.assertIn("Resume not verified", err)
+        self.assertEqual([name for name, _, _ in fleet.started], ["dt-recoverable"])
+        self._the_started_session_comes_up_busy(fleet)
+        self.assertEqual(self._owner(fleet), a_id)
+        code, out, err = fleet.run(["status", "--id", a_id, "--porcelain"])
+        self.assertIn("evidence.liveness\tprocess", out)
+        code, out, err = fleet.run(["status", "--id", b_id, "--porcelain"])
+        self.assertIn("evidence.liveness\tnone", out)
+        self.assertNotIn(COMPLETE_BUT_WORKING, out)
+
+    def test_a_revive_that_tmux_refuses_to_start_claims_no_session(self):
+        """OR-1's rollback. The start is recorded before `layer.start`; when tmux refuses the start, the record goes
+        back to its old launch, so it does not claim a session it does not have."""
+        fleet, args, a_id, b_id = self._older_revivable_and_later_harvested()
+
+        def refused(name, cwd, cmd):
+            raise BadInput("tmux refused to start 'dt-recoverable': duplicate session: dt-recoverable")
+        fleet.sessions.probes.start_session = refused
+        code, out, err = fleet.run(["revive", *args])
+        self.assertNotEqual(code, 0, f"{out}{err}")
+        self.assertEqual(fleet.store.read(a_id).launched_at, "2026-07-30T11:00:00Z")
+        self.assertEqual(self._owner(fleet), b_id, "the later launch still owns the name nobody started")
 
 
 class DispatchDoesNotStartOverALiveSessionOfTheSameName(unittest.TestCase):
