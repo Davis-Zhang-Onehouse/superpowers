@@ -291,7 +291,8 @@ mkdir -p "$OUT/w1-11"
   LIVE_TMUX_SNAPSHOT_REAL="$LIVE_TMUX_SNAPSHOT"   # this run's own baseline (FB-60: per run), set by it_section above
   LIVE_TMUX_SNAPSHOT="$OUT/w1-11/tmux-baseline.txt"; cp "$LIVE_TMUX_SNAPSHOT_REAL" "$LIVE_TMUX_SNAPSHOT"
   LIVE_TMUX_HANDOVER="$OUT/w1-11/tmux-handover.txt"   # never the shared handover from a negative control (RV-31)
-  LIVE_SNAPSHOT="$OUT/w1-11/stores-baseline.sha256"; cp "$IT_ROOT/live-stores.sha256" "$LIVE_SNAPSHOT"
+  LIVE_SNAPSHOT_REAL="$LIVE_SNAPSHOT"
+  LIVE_SNAPSHOT="$OUT/w1-11/stores-baseline.sha256"; cp "$LIVE_SNAPSHOT_REAL" "$LIVE_SNAPSHOT"
 
   it_assert_isolation W1-11-baseline >/dev/null 2>&1     # establishes over the EMPTY pretend tree
 

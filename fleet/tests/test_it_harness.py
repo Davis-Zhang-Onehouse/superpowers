@@ -62,6 +62,23 @@ def run_bash(script: str, cwd: pathlib.Path, env=None, stdin=subprocess.DEVNULL,
                           capture_output=True, text=True, timeout=timeout)
 
 
+class LiveStoreSnapshot(unittest.TestCase):
+    """A prior lessee's ignored snapshot must not become this run's baseline."""
+
+    def test_stale_snapshot_is_not_compared_on_new_run(self):
+        with tempfile.TemporaryDirectory(prefix="itf-", dir="/tmp") as tmp_name:
+            tmp = pathlib.Path(tmp_name)
+            it = harness_copy(tmp)
+            (it / "live-stores.sha256").write_text("stale prior lessee\n")
+            result = run_bash(f'. "{it}/lib.sh"\nit_section SNAP\nprintf "snapshot=%s\\n" '
+                              '"$LIVE_SNAPSHOT"', tmp,
+                              env={"IT_RESULTS": str(tmp / "results.tsv")}, home=tmp / "home")
+            self.assertEqual(result.returncode, 0, result.stderr)
+            self.assertNotIn("THE LIVE STORES CHANGED", (tmp / "results.tsv").read_text())
+            self.assertNotEqual((it / "live-stores.sha256").resolve(),
+                                pathlib.Path(result.stdout.split("snapshot=")[-1].strip()).resolve())
+
+
 class WrapperExecutable(unittest.TestCase):
     """B18. The wrapper must be reachable from the harness's own idioms — `timeout`, `env -u`, `exec` — which
     cannot invoke a bash function, and it must be the harness's one SUBPROCESS route to the product. RED:
