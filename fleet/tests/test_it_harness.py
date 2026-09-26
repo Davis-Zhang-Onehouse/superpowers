@@ -30,7 +30,7 @@ FLEET_DESTINATIONS = ("FLEET_HOME", "FLEET_INSTANTS", "FLEET_ROOT", "FLEET_INSTA
 #: regression cases start no server outside it: they observe, through the suite's tripwire (FB-118), that the
 #: guardian makes no tmux call aimed at the box's default directory (S5 glue, v23-l x v23-n).
 #: (`tempfile.gettempdir()` would be /tmp, which IS tmux's default — found in review.)
-PRIVATE_TMUX_DIR = tempfile.mkdtemp(prefix="it-harness-tmux-")
+PRIVATE_TMUX_DIR = tempfile.mkdtemp(prefix="itf-", dir="/tmp")
 atexit.register(shutil.rmtree, PRIVATE_TMUX_DIR, True)
 
 
@@ -69,7 +69,7 @@ class WrapperExecutable(unittest.TestCase):
     b18-classifier-wrapped-base.txt (the same mint through the wrapper, FAIL)."""
 
     def setUp(self):
-        self.tmp = pathlib.Path(tempfile.mkdtemp(prefix="it-harness-"))
+        self.tmp = pathlib.Path(tempfile.mkdtemp(prefix="itf-", dir="/tmp"))
         self.addCleanup(shutil.rmtree, self.tmp, True)
         self.it = harness_copy(self.tmp)
 
@@ -165,7 +165,7 @@ class RowOwnership(unittest.TestCase):
     fb75-76-sectionF-real-base.txt (nine duplicate ids, the section moved from line 117 to 335)."""
 
     def setUp(self):
-        self.tmp = pathlib.Path(tempfile.mkdtemp(prefix="it-harness-"))
+        self.tmp = pathlib.Path(tempfile.mkdtemp(prefix="itf-", dir="/tmp"))
         self.addCleanup(shutil.rmtree, self.tmp, True)
         self.it = harness_copy(self.tmp)
         self.results = self.tmp / "RESULTS.tsv"
@@ -316,7 +316,7 @@ class HarnessTmuxBoundary(unittest.TestCase):
     def setUp(self):
         if shutil.which("tmux") is None:
             self.skipTest("tmux is not on PATH")
-        self.tmp = pathlib.Path(tempfile.mkdtemp(prefix="it-harness-"))
+        self.tmp = pathlib.Path(tempfile.mkdtemp(prefix="itf-", dir="/tmp"))
         self.addCleanup(shutil.rmtree, self.tmp, True)
         self.it = harness_copy(self.tmp)
         self.decoy = self.tmp / "pane-server"
@@ -361,7 +361,7 @@ class ZeroDelta(unittest.TestCase):
     evidence/01-red/fb38-zero-delta-rc-base.txt (P-refused PASS on a status call that exited 2)."""
 
     def setUp(self):
-        self.tmp = pathlib.Path(tempfile.mkdtemp(prefix="it-harness-"))
+        self.tmp = pathlib.Path(tempfile.mkdtemp(prefix="itf-", dir="/tmp"))
         self.addCleanup(shutil.rmtree, self.tmp, True)
         self.it = harness_copy(self.tmp)
         self.results = self.tmp / "RESULTS.tsv"
@@ -463,7 +463,7 @@ class StdinImmunity(unittest.TestCase):
     harness's pipe forever (J5). RED: evidence/01-red/fb99-stdin-base.txt (rc 124 under a pipe)."""
 
     def setUp(self):
-        self.tmp = pathlib.Path(tempfile.mkdtemp(prefix="it-harness-"))
+        self.tmp = pathlib.Path(tempfile.mkdtemp(prefix="itf-", dir="/tmp"))
         self.addCleanup(shutil.rmtree, self.tmp, True)
         self.it = harness_copy(self.tmp)
         (self.tmp / "inner.sh").write_text(
@@ -504,7 +504,7 @@ class A8KillSiteAudit(unittest.TestCase):
     ANCHOR = 'cat > "$PY_DIR/a8audit.py" <<\'PY\'\n'
 
     def setUp(self):
-        self.tmp = pathlib.Path(tempfile.mkdtemp(prefix="it-harness-a8-"))
+        self.tmp = pathlib.Path(tempfile.mkdtemp(prefix="itf-", dir="/tmp"))
         self.addCleanup(shutil.rmtree, self.tmp, True)
         src = (IT / "run-A.sh").read_text()
         self.assertEqual(src.count(self.ANCHOR), 1, "the A8 audit block is not uniquely anchored in run-A.sh")
@@ -639,7 +639,7 @@ class ServerGuardian(unittest.TestCase):
     def setUp(self):
         if shutil.which("tmux") is None:
             self.skipTest("tmux is not on PATH, so the guardian cannot be exercised here")
-        self.tmp = pathlib.Path(tempfile.mkdtemp(prefix="it-harness-"))
+        self.tmp = pathlib.Path(tempfile.mkdtemp(prefix="itf-", dir="/tmp"))
         self.addCleanup(shutil.rmtree, self.tmp, True)
         self.it = harness_copy(self.tmp)
         # A sandbox may map every test process to the same small PID, so the socket name stays unique
