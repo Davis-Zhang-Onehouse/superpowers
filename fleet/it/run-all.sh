@@ -105,6 +105,9 @@ RUNNERS=(
   # V23-T: one owner per reused `dt-<name>` on a real server — the aborted record reads no pid and `close` of it
   # leaves the re-dispatch's session alive. About a minute (it waits out one minute boundary: SI-20).
   "SO:bash $IT_ROOT/run-SO.sh"
+  #: OI-13: the upstream-sync suite (tests/sync) was run by no gate, so a sync fix shipped proved only by
+  #: instant evidence. Seconds, sandbox repos only, no tmux server.
+  "SYNC:bash $IT_ROOT/run-sync.sh"
 )
 
 # The sections added after this orchestrator was written. No prerequisites — checked per runner: each

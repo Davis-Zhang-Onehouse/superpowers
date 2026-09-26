@@ -2118,5 +2118,47 @@ class ServerGuardian(unittest.TestCase):
         self.assertFalse(tokenfile.exists(), "guardian left its own token behind")
 
 
+class SyncSuiteInGateRoster(unittest.TestCase):
+    """OI-13: tests/sync ran in no gate, so a sync fix shipped proved only by instant evidence."""
+
+    def test_the_default_roster_runs_the_sync_suite(self):
+        text = (IT / "run-all.sh").read_text()
+        default = text.split("RUNNERS=(", 1)[1].split("\n)\n", 1)[0]
+        self.assertIn('"SYNC:bash $IT_ROOT/run-sync.sh"', default)
+        self.assertTrue((IT / "run-sync.sh").is_file())
+
+    def test_each_sync_script_is_one_row_and_a_failure_is_a_fail_row(self):
+        tmp = pathlib.Path(tempfile.mkdtemp(prefix="it-sync-rows-"))
+        self.addCleanup(shutil.rmtree, tmp, True)
+        suite = tmp / "sync"
+        suite.mkdir()
+        (suite / "test_good.sh").write_text("echo fine\n")
+        (suite / "test_bad.sh").write_text("echo broken >&2; exit 1\n")
+        (suite / "harness.sh").write_text("exit 1\n")          # sourced by tests, never run as one
+        results = tmp / "RESULTS.tsv"
+        results.write_text("case\tverdict\tevidence\tnote\n")
+        logs = tmp / "logs"
+        done = subprocess.run(["bash", str(IT / "bin" / "sync-rows.sh"), str(suite), str(results), str(logs)],
+                              text=True, capture_output=True, stdin=subprocess.DEVNULL, timeout=60)
+        self.assertEqual(done.returncode, 1, done.stdout + done.stderr)
+        rows = {line.split("\t")[0]: line.split("\t") for line in results.read_text().splitlines()[1:]}
+        self.assertEqual(sorted(rows), ["SYNC-test_bad", "SYNC-test_good"])
+        self.assertEqual(rows["SYNC-test_good"][1], "PASS")
+        self.assertEqual(rows["SYNC-test_bad"][1], "FAIL")
+        self.assertIn("broken", (logs / "test_bad.log").read_text())
+
+    def test_an_empty_sync_suite_is_a_fail_not_a_silent_pass(self):
+        tmp = pathlib.Path(tempfile.mkdtemp(prefix="it-sync-empty-"))
+        self.addCleanup(shutil.rmtree, tmp, True)
+        (tmp / "sync").mkdir()
+        results = tmp / "RESULTS.tsv"
+        results.write_text("case\tverdict\tevidence\tnote\n")
+        done = subprocess.run(["bash", str(IT / "bin" / "sync-rows.sh"), str(tmp / "sync"), str(results),
+                               str(tmp / "logs")], text=True, capture_output=True,
+                              stdin=subprocess.DEVNULL, timeout=60)
+        self.assertEqual(done.returncode, 1)
+        self.assertIn("SYNC-suite\tFAIL", results.read_text())
+
+
 if __name__ == "__main__":
     unittest.main()
