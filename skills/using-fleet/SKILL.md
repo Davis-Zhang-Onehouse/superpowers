@@ -272,13 +272,17 @@ single-line `[Pasted text #N]`, which states no length at all), and the record s
 last rows, and its height follows the pane's. At 80 columns a 20-line pane shows 5 rows, so a one-line message
 of about 400 characters no longer fits. `send` then confirms `draft-tail`. The box must show at least three
 rows, and they must be exactly the message's own last rows as Claude Code wraps it at the box's own width, which
-is read off the box's border (80 columns wrap at 76; only that width is measured, and a wrong one can only refuse).
+is read off the box's border (80 columns wrap at 76; only that width is measured). A box whose border is not among
+its last eight rows (a long suggestion list under it) has no width, and its tail never confirms.
 A frame taken 0.1 s later must show the same rows, and tmux must report that no attached client gave the pane any
 input since the send was admitted: a keystroke that lands before the paste would sit, hidden, in front of our
-message. An observer client (read-only or control mode) or an attachment that cannot be read refuses too. Only
+message (input from the second before admission on counts). An observer client (read-only or control mode, such
+as iTerm2's `-CC`) or an attachment that cannot be read refuses too. Text another program types with `send-keys` is
+invisible to this check; only the echo check below catches it. Only
 then does the verb press Enter, and Enter submits the whole message, hidden head included. What the tail cannot see
 is the head, so after Enter the verb reads the transcript, where Claude Code echoes the submitted message, and
-records `submitted` only when that echo is the whole message from its first word. Otherwise it records
+records `submitted` only when a NEW echo, one more than the screen held before Enter, is the whole message from its
+first word (a blank line of the message is a blank row inside it). Otherwise, or when the echo cannot be read, it records
 `uncertain-after-enter`: the message was submitted, but not provably whole, so inspect the worker and never send it
 again blind. `draft-tail` is recorded apart from `draft` either way. What still passes the pre-Enter check is a
 head lost inside the box whose remaining rows end in the same last rows: for a two- or three-line message, losing
