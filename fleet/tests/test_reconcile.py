@@ -214,11 +214,13 @@ class TestReadCensusBudget(unittest.TestCase):
             probes.list_session_names = lambda: names
             return SessionLayer(probes)
 
+        #: V23-V OR-3. Each record names its OWN session: v23-t gives a (server, name) one owner, so 20 records on one
+        #: name would read as one live worker. The same 20 names on both servers keep the no-sharing check.
         local = layer("local", set())
-        foreign = {"a": layer("a", {"dt-shared"}), "b": layer("b", set())}
-        records = [_record(todo_id=f"a-{i}", tmux="dt-shared", tmux_socket="a")
+        foreign = {"a": layer("a", {f"dt-w{i}" for i in range(20)}), "b": layer("b", set())}
+        records = [_record(todo_id=f"a-{i}", tmux=f"dt-w{i}", tmux_socket="a")
                    for i in range(20)]
-        records += [_record(todo_id=f"b-{i}", tmux="dt-shared", tmux_socket="b")
+        records += [_record(todo_id=f"b-{i}", tmux=f"dt-w{i}", tmux_socket="b")
                     for i in range(20)]
         store = SimpleNamespace(all=lambda: records)
         pool = SimpleNamespace(slots=lambda: [], lease=lambda slot: None)
