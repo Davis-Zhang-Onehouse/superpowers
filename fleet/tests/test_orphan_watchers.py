@@ -3,6 +3,7 @@ and nothing could reap them. The attribution rule decides which slot holders are
 those are ever signalled."""
 
 import os
+import pathlib
 import shlex
 import shutil
 import signal
@@ -668,6 +669,59 @@ class CloseReapsAttributed(CliCase):
         self.assertIn("COMPLETE-BUT-WORKING", err)
         self.assertEqual(facts.sent, [], "close signalled a COMPLETE-BUT-WORKING worker's watcher")
         self.assertEqual(fleet.killed, [])
+
+
+class CloseReapsNothingOfASessionItDoesNotOwn(CliCase):
+    """t x h (stack glue). `close` of an OLD record whose `dt-` session a newer record owns (V23-T) kills nothing — and
+    so must not snapshot that session's processes as its own either: a process of the OWNER's session that sits in the
+    old record's slot would otherwise read "the recorded session's own process that survived the kill" and be reaped."""
+
+    def owner_holds_the_old_slot(self):
+        fleet = self.fleet()
+        facts = FactsFixture(fleet)
+        fleet.worker("mile", state="complete", slot="ws1", live=False)
+        old_id = fleet.ids["mile"]
+        rec = fleet.store.read(old_id)
+        rec.launched_at = rec.dispatched_at = "2026-07-29T09:00:00Z"
+        fleet.store.write(rec)
+        fleet.worker("mile", slot="ws2", pane=IDLE_PANE)                  # the re-dispatch owns dt-mile, live
+        pane = 7000
+        facts.table[pane] = Proc(pane, 6999, "sp", ("claude",), sid=pane, tty=34817, children=(501,))
+        #: The owner's detached helper, cwd the OLD slot: exactly the shape the session-own route reaps.
+        facts.hold("ws1", Proc(501, pane, "s501", ("zsh", "-c", "watch"), sid=501, children=()))
+        fleet.sessions.probes.pane_pids = lambda n: [pane] if n in fleet.tmux_live else None
+        fleet.sessions.probes.parent_of = lambda pid: facts.table[pid].ppid if pid in facts.table else 0
+        return fleet, facts, old_id
+
+    def test_close_signals_nothing_of_the_owners_session(self):
+        fleet, facts, old_id = self.owner_holds_the_old_slot()
+        code, out, err = fleet.run(["close", "--id", old_id])
+        self.assertEqual(code, EXIT_OK, out + err)
+        self.assertNotIn("dt-mile", fleet.killed)
+        self.assertEqual(facts.sent, [], "close signalled a process of a session another record owns")
+
+    def test_close_dry_run_would_reap_nothing_of_the_owners_session(self):
+        fleet, facts, old_id = self.owner_holds_the_old_slot()
+        code, out, err = fleet.run(["close", "--dry-run", "--id", old_id])
+        self.assertEqual(code, EXIT_OK, out + err)
+        self.assertNotIn("would-reap", out)
+        self.assertEqual(facts.sent, [])
+
+    def test_control_harvest_snapshots_nothing_of_the_owners_session_either(self):
+        """`_slot_gate_before_kill` reads a taken session as not live, so harvest's snapshot is already empty: the
+        owner's process in the old slot is judged as a stranger's and harvest refuses before anything, both ways."""
+        fleet, facts, old_id = self.owner_holds_the_old_slot()
+        rec = fleet.store.read(old_id)
+        rec.closed_at = None
+        fleet.store.write(rec)
+        fleet.reviewed(pathlib.Path(rec.child_instant))
+        for argv in (["harvest", "--dry-run", "--id", old_id], ["harvest", "--id", old_id]):
+            code, out, err = fleet.run(argv)
+            self.assertEqual(code, EXIT_REFUSED, f"{argv}: {out}\n{err}")
+            self.assertIn("refused before doing anything", err)
+            self.assertNotIn("would-reap", out)
+            self.assertEqual(facts.sent, [], f"{argv}: rc={code}\n{out}\n{err}")
+        self.assertNotIn("dt-mile", fleet.killed)
 
 
 def _stat(pid):
