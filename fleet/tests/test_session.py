@@ -44,8 +44,10 @@ class TestSessionLayerForeground(unittest.TestCase):
 
     def test_the_three_answers(self):
         s, _, _ = layer(sessions=("dt-a",))
+        #: v23-q OR-1: an interpreter (codex's npm wrapper reads `node`) is not evidence of "not the agent".
         cases = [(None, None), ([], None), (["claude"], True), (["sleep", "claude"], True), (["bash"], False),
-                 (["sh", "sleep"], False)]
+                 (["sh", "sleep"], False), (["node"], None), (["bash", "python3.12"], None), (["bun"], None),
+                 (["node", "claude"], True)]
         for answer, expected in cases:
             with self.subTest(answer=answer):
                 s.probes.pane_commands = lambda name, answer=answer: answer
@@ -53,6 +55,8 @@ class TestSessionLayerForeground(unittest.TestCase):
         s.probes.pane_commands = None
         self.assertIsNone(s.agent_in_foreground("dt-a"))
         self.assertIsNone(SessionLayer(s.probes, "codex").agent_in_foreground(""))
+        s.probes.pane_commands = lambda name: ["node"]
+        self.assertIsNone(SessionLayer(s.probes, "codex").agent_in_foreground("dt-a"), "a real codex pane reads node")
 
 
 class TestOwnProcesses(unittest.TestCase):

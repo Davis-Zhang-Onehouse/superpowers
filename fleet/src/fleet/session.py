@@ -154,6 +154,15 @@ class Probes:
     signal_pid: Optional[Callable[[int, int], bool]] = None
 
 
+#: v23-q OR-1. Foreground names that run an unnamed program (`agent_in_foreground`): a pane showing one is unobservable.
+_INTERPRETERS = frozenset({"node", "nodejs", "bun", "deno", "python", "ruby", "perl"})
+
+
+def _interpreter(command: str) -> bool:
+    """Whether a `#{pane_current_command}` is an interpreter, versioned spellings included (`python3.12`, `node20`)."""
+    return command.rstrip("0123456789.") in _INTERPRETERS
+
+
 @dataclass(frozen=True)
 class Attachment:
     """`B24`. INTERACTIVE clients attached to a session and the epoch of the last input one of them gave it,
@@ -480,13 +489,20 @@ class SessionLayer:
     def agent_in_foreground(self, name: str) -> Optional[bool]:
         """FB-130 RV-13. True when tmux reports this layer's runtime as the foreground command of any pane of
         `name`, False when it answered and none is, None when that cannot be observed. Only False is evidence that
-        the pane is NOT the agent's; None is not."""
+        the pane is NOT the agent's; None is not.
+
+        v23-q OR-1. An INTERPRETER in the foreground is None, not False: tmux names the process-group leader, and
+        this box's codex is the npm wrapper (`#!/usr/bin/env node` spawning the native binary in its group), so a
+        real codex pane reads `node`; an npm- or bun-launched claude can too. The name says nothing about what the
+        interpreter runs, so it fails closed. Shells, `sleep` and `claude` itself are unaffected."""
         if not name or self.probes.pane_commands is None:
             return None
         commands = self.probes.pane_commands(name)
         if not commands:
             return None
-        return self.runtime in commands
+        if self.runtime in commands:
+            return True
+        return None if any(_interpreter(command) for command in commands) else False
 
     def facts_observable(self) -> bool:
         """`V23-H`. Whether this layer can read process facts at all. False is NOT OBSERVABLE, so the attribution
