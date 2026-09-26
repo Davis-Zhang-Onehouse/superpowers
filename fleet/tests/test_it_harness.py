@@ -896,6 +896,17 @@ sys.exit(0)
         self.assertFalse(calls.exists(), "a non-printing command reached fake real-tmux")
         self.assertEqual(self.tmux("-L", "default", "display-message", "-p", "#{pid}", env=env).returncode, 0)
 
+    def test_nonprivate_read_cannot_evaluate_shell_command_format(self):
+        env, calls = self.recording_tmux()
+        for prefix, command in (("default", ("list-sessions", "-F", "#(/usr/bin/tmux kill-server)")),
+                                ("default", ("display-message", "-p", "#(/usr/bin/tmux kill-session)")),
+                                ("private", ("list-sessions", "-F", "#(/usr/bin/tmux kill-server)"))):
+            with self.subTest(prefix=prefix, command=command):
+                self.assertEqual(self.tmux("-L", prefix, *command, env=env).returncode, 97)
+        self.assertFalse(calls.exists(), "a shell format reached fake real-tmux")
+        self.assertEqual(self.tmux("-L", "default", "list-sessions", "-F", "#{session_name}",
+                                   env=env).returncode, 0)
+
     def test_tmux_handle_and_component_boundary_cannot_relabel_foreign_socket(self):
         env, calls = self.recording_tmux()
         outside = self.tmp / "outside"

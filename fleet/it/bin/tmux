@@ -192,6 +192,9 @@ def main():
         hidden_kills.extend(nested_kills(segments[0]))
     if leading_separator:
         hidden_kills.extend(nested_kills(rest))
+    shell_format = any("#(" in arg for arg in argv)
+    if shell_format:
+        hidden_kills.extend(nested_kills(rest))
     row = {"argv": argv, "socket": socket, "command": command,
            "target": option(rest, "-t"), "decision": "allow", "reason": ""}
     if not ledger:
@@ -260,6 +263,8 @@ def main():
                     row.update(decision="deny", reason="new session has no auditable name")
             if not private and not readonly_command(command, segments[0]):
                 row.update(decision="deny", reason="nonprivate socket permits read-only commands only")
+            if shell_format:
+                row.update(decision="deny", reason="tmux format could execute a shell command")
             if shell_code:
                 row.update(decision="deny", reason="global -c shell command is unauditable")
             if indirect or compound_unsafe or leading_separator:
