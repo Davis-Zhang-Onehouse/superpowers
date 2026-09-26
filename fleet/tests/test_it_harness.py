@@ -969,6 +969,53 @@ sys.exit(0)
         finally:
             slow.wait(timeout=4)
 
+    def test_parallel_new_sessions_merge_owned_session_ids(self):
+        fake = self.tmp / "parallel-tmux"
+        started = self.tmp / "a-started"
+        fake.write_text('''#!/usr/bin/env python3
+import os, pathlib, sys, time
+args = sys.argv[1:]
+socket = pathlib.Path(args[1]) if args[0] == '-S' else pathlib.Path(os.environ['TMUX_TMPDIR']) / ('tmux-' + str(os.getuid())) / args[1]
+command = args[2]
+if command == 'display-message': print('777'); sys.exit(0)
+if command == 'list-sessions':
+    for name in ('base', 'a', 'b'):
+        if pathlib.Path(os.environ['FAKE_STATE'] + '-' + name).exists(): print(name + '\\t$' + name)
+    sys.exit(0)
+if command == 'new-session':
+    name = args[args.index('-s') + 1]
+    if name == 'a':
+        pathlib.Path(os.environ['FAKE_STARTED']).touch()
+        time.sleep(0.6)
+    pathlib.Path(os.environ['FAKE_STATE'] + '-' + name).touch()
+    sys.exit(0)
+sys.exit(0)
+''')
+        fake.chmod(0o755)
+        socket = self.private / f"tmux-{os.getuid()}" / "own"
+        socket.parent.mkdir()
+        socket.touch()
+        state = str(self.tmp / "session")
+        pathlib.Path(state + "-base").touch()
+        self.ledger.write_text(json.dumps({"socket": str(socket), "created": True,
+                                           "socket_inode": [socket.stat().st_dev, socket.stat().st_ino],
+                                           "server_pid": "777", "session_ids": {"base": "$base"}}) + "\n")
+        env = dict(self.env, IT_TMUX_REAL=str(fake), FAKE_STATE=state, FAKE_STARTED=str(started))
+        slow = subprocess.Popen([str(self.shim), "-L", "own", "new-session", "-d", "-s", "a"], env=env,
+                                stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+        try:
+            for _ in range(100):
+                if started.exists(): break
+                time.sleep(0.01)
+            self.assertTrue(started.exists())
+            fast = self.tmux("-L", "own", "new-session", "-d", "-s", "b", env=env)
+            self.assertEqual(fast.returncode, 0, fast.stderr)
+        finally:
+            _, stderr = slow.communicate(timeout=3)
+        self.assertEqual(slow.returncode, 0, stderr.decode())
+        row = json.loads(self.ledger.read_text().splitlines()[-1])
+        self.assertEqual(set(row["session_ids"]), {"base", "a", "b"})
+
     def test_guardian_removes_generated_section_socket_directory(self):
         env, calls = self.recording_tmux()
         tmp = self.tmp / "harness"

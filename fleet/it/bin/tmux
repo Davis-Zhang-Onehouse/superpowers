@@ -320,6 +320,14 @@ def main():
                 result = subprocess.run([real, *argv])
             finally:
                 fcntl.flock(stream, fcntl.LOCK_EX)
+            stream.seek(0)
+            latest = [json.loads(line) for line in stream if line.strip()]
+            session_ids = next((r["session_ids"] for r in reversed(latest)
+                                if r.get("socket") == socket and "session_ids" in r), {})
+            owned_inode = next((r["socket_inode"] for r in reversed(latest)
+                                if r.get("socket") == socket and r.get("socket_inode")), owned_inode)
+            owned_pid = next((r["server_pid"] for r in reversed(latest)
+                              if r.get("socket") == socket and r.get("server_pid")), owned_pid)
             row["status"] = result.returncode
             if result.returncode == 0 and unverified_existing:
                 # A stale socket may let tmux start a new server, but a new-session on an existing
