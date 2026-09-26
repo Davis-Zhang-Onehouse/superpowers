@@ -298,9 +298,15 @@ try:
             sys.exit(0)
 except OSError:
     sys.exit(0)
-result = subprocess.run(["tmux", "-S", os.path.join(directory, "tmux-" + str(os.getuid()), sock), "kill-server"],
-                        stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
-kill_completed = result.returncode in (0, 1)
+socket_path = os.path.join(directory, "tmux-" + str(os.getuid()), sock)
+if not os.path.lexists(socket_path):
+    # Several IT sections never start tmux. There is no server to kill, and asking the
+    # audit shim to kill one would record a false deny after the section has exited.
+    kill_completed = True
+else:
+    result = subprocess.run(["tmux", "-S", os.path.join(directory, "tmux-" + str(os.getuid()), sock), "kill-server"],
+                            stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+    kill_completed = result.returncode in (0, 1)
   ' it-guardian "$sock" "$dir" "$tokenfile" "$token" "$expected_parent" "${IT_TMUX_OWN_TMPDIR:-}" </dev/null >/dev/null 2>&1 &
   printf '%s\n' "$!" > "$pidfile"
   disown 2>/dev/null || true

@@ -1071,6 +1071,33 @@ sys.exit(0)
             time.sleep(0.1)
         self.assertFalse(directory.exists(), directory)
 
+    def test_guardian_without_server_removes_directory_and_keeps_audit_pass(self):
+        env, calls = self.recording_tmux()
+        tmp = self.tmp / "harness-never-created"
+        it = harness_copy(tmp)
+        marker = self.tmp / "never-created-socket-dir"
+        results = self.tmp / "never-created-results.tsv"
+        results.write_text("case\tverdict\tevidence\tnote\n")
+        script = (f'. "{it}/lib.sh"\n'
+                  f'RESULTS="{results}"\n'
+                  f'it_section X\n'
+                  f'printf "%s\\n" "$TMUX_TMPDIR" > "{marker}"\n'
+                  f'it_kill_audit_result\n')
+        finished = run_bash(script, tmp, env={"IT_TMUX_REAL": env["IT_TMUX_REAL"],
+                                               "FAKE_TMUX_RECORD": str(calls),
+                                               "FLEET_SUITE_TRIPWIRE": ""}, home=self.tmp / "home")
+        self.assertEqual(finished.returncode, 0, finished.stderr)
+        directory = pathlib.Path(marker.read_text().strip())
+        for _ in range(50):
+            if not directory.exists():
+                break
+            time.sleep(0.1)
+        self.assertFalse(directory.exists(), directory)
+        self.assertIn("KILL-AUDIT-X\tPASS", results.read_text())
+        forwarded = [json.loads(line) for line in calls.read_text().splitlines()] if calls.exists() else []
+        self.assertFalse(any("kill-server" in argv for argv in forwarded),
+                         "guardian called real tmux for a server never created")
+
     def test_guardian_keeps_socket_directory_after_refused_kill(self):
         env, calls = self.recording_tmux()
         tmp = self.tmp / "harness-denied"
@@ -1078,6 +1105,7 @@ sys.exit(0)
         marker = self.tmp / "denied-socket-dir"
         script = (f'. "{it}/lib.sh"\n'
                   f'it_section X\n'
+                  f': > "$TMUX_TMPDIR/tmux-$(id -u)/$IT_TMUX_SOCKET"\n'
                   f'printf "%s\\n" "$TMUX_TMPDIR" > "{marker}"\n')
         finished = run_bash(script, tmp, env={"IT_TMUX_REAL": env["IT_TMUX_REAL"],
                                                "FAKE_TMUX_RECORD": str(calls),
