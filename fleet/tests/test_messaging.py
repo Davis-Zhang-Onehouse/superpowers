@@ -7,9 +7,9 @@ import unittest.mock
 from types import SimpleNamespace
 
 from fleet.errors import BadInput, FleetError, Refused
-from fleet.messaging import (CONFIRMED_BY_DRAFT, CONFIRMED_BY_DRAFT_TAIL, TAIL_SETTLE_S, CONFIRMED_BY_PLACEHOLDER, CONFIRMED_BY_PLACEHOLDER_UNCOUNTED, SUBMITTED, confirms, UNCERTAIN_AFTER_ENTER, line_count,
+from fleet.messaging import (QUEUED_BEHIND_TURN, CONFIRMED_BY_DRAFT, CONFIRMED_BY_DRAFT_TAIL, TAIL_SETTLE_S, CONFIRMED_BY_PLACEHOLDER, CONFIRMED_BY_PLACEHOLDER_UNCOUNTED, SUBMITTED, confirms, UNCERTAIN_AFTER_ENTER, line_count,
                              UNCERTAIN_AFTER_INSERTION, SendRecord, read_sends, record_send, send, sends_path)
-from fleet.runtime import PaneObservation, observe
+from fleet.runtime import PaneObservation, claude_echoes, observe
 from fleet.session import Attachment
 
 
@@ -24,7 +24,8 @@ class MessagingTests(unittest.TestCase):
                                 attachment=lambda name: Attachment(clients=0, last_input=0.0),
                                 #: S6 OR-4: a healthy pane echoes what was pasted (a test that needs otherwise says so).
                                 capture_history=lambda name, lines: self.echoed(
-                                    next((t for kind, t in reversed(events) if kind == 'literal'), '')))
+                                    next((t for kind, t in reversed(events) if kind == 'literal'), ''))
+                                if ('submit', None) in events else self.echoed(''))
         return layer, events
 
     def test_only_matching_draft_is_submitted_once(self):
@@ -243,6 +244,8 @@ class MessagingTests(unittest.TestCase):
         admitted = 1_000_000.25
         cases = {
             'an interactive client typed in the admission second': Attachment(clients=1, last_input=1_000_000.0),
+            #: RV-S6N-4: stamped in the second BEFORE admission, a keystroke can still be drawn after the capture.
+            'an interactive client typed in the second before admission': Attachment(clients=1, last_input=999_999.0),
             'an interactive client typed after admission': Attachment(clients=1, last_input=1_000_001.0),
             'a control-mode or read-only observer can send-keys unseen': Attachment(clients=0, last_input=0.0, observers=1),
             'the attachment cannot be observed': None,
@@ -258,7 +261,7 @@ class MessagingTests(unittest.TestCase):
                 self.assertEqual(events, [('literal', self.SCROLLED_TEXT)])
                 self.assertEqual(recorded, [(UNCERTAIN_AFTER_INSERTION, '')])
         for why, answer in {'nobody attached': Attachment(clients=0, last_input=0.0),
-                            'the last keystroke came before the admission second': Attachment(clients=1, last_input=999_999.0)}.items():
+                            'the last keystroke came two seconds before admission': Attachment(clients=1, last_input=999_998.0)}.items():
             with self.subTest(why), tempfile.TemporaryDirectory() as directory:
                 layer, events = self.runtime_fixture('claude', [PaneObservation('idle'), tail, tail, PaneObservation('busy')])
                 self.attended(layer, [answer])
@@ -266,7 +269,7 @@ class MessagingTests(unittest.TestCase):
                                                  sleep=lambda _: None, wall=lambda: admitted)[0])
         with self.subTest('a keystroke before the RETRY refuses the retry'), tempfile.TemporaryDirectory() as directory:
             layer, events = self.runtime_fixture('claude', [PaneObservation('idle'), tail, tail, tail, tail])
-            self.attended(layer, [Attachment(clients=1, last_input=999_999.0), Attachment(clients=1, last_input=1_000_003.0)])
+            self.attended(layer, [Attachment(clients=1, last_input=999_998.0), Attachment(clients=1, last_input=1_000_003.0)])
             with self.assertRaisesRegex(FleetError, 'retry refused: an attached client gave the pane input'):
                 send(Path(directory), layer, SimpleNamespace(tmux='worker'), self.SCROLLED_TEXT, timeout_s=0,
                      sleep=lambda _: None, wall=lambda: admitted)
@@ -306,7 +309,7 @@ class MessagingTests(unittest.TestCase):
                 if expected != SUBMITTED and frame is not None and text == self.ECHO_TEXT:
                     self.assertNotEqual(frame, real)            # the case really edits the real capture
                 layer, events = self.runtime_fixture('claude', [PaneObservation('idle'), tail, tail] + [PaneObservation('idle')] * 3)
-                layer.capture_history = lambda name, lines: frame
+                layer.capture_history = lambda name, lines: frame if ('submit', None) in events else self.echoed('')
                 recorded = []
                 run = lambda: send(Path(directory), layer, SimpleNamespace(tmux='worker'), text, timeout_s=0,
                                    sleep=lambda _: None, recorder=lambda o, c: recorded.append((o, c)))
@@ -321,6 +324,79 @@ class MessagingTests(unittest.TestCase):
         with self.subTest('an exact draft needs no echo'), tempfile.TemporaryDirectory() as directory:
             layer, events = self.fixture([PaneObservation('idle'), PaneObservation('queued', 'hello'), PaneObservation('busy')])
             self.assertEqual((SUBMITTED, CONFIRMED_BY_DRAFT), send(Path(directory), layer, SimpleNamespace(tmux='worker'), 'hello'))
+
+    @staticmethod
+    def echo_rows(text):
+        """Claude Code's transcript echo of `text`: `❯ ` then rows indented two cells, each hard line wrapped on its own;
+        an EMPTY hard line is an empty row (capture-pane trims trailing spaces). From the S6 send review."""
+        out = []
+        for line in text.strip().split('\n'):
+            out.extend(MessagingTests.wrapped(line.split()) if line.strip() else [''])
+        return ['❯ ' + out[0]] + [('  ' + r) if r else '' for r in out[1:]]
+
+    def test_rv_s6n_review_fixes_to_the_echo_check(self):
+        """The S6 pre-cut send review (evidence/review-precut/send in the S6 instant) proved four gaps in OR-4/OR-2."""
+        rule, footer = '─' * 80, '  ⏵⏵ auto mode on (shift+tab to cycle) · esc to interrupt'
+        with self.subTest('RV-S6N-1: a delivered message with a blank line is recorded submitted'):
+            long = ' '.join('This second paragraph is long on purpose so the box scrolls, part %d of eight.' % i
+                            for i in range(1, 9))
+            text = 'Coordinator: two things.\n\n' + long + '\n'
+            rows = self.wrapped('Coordinator: two things.'.split()) + [''] + self.wrapped(long.split())
+            tail = PaneObservation('queued', '\n'.join(rows[-5:]), width=76)
+            after = '\n'.join(self.echo_rows(text) + ['', '● OK', '', rule, '❯ ', rule, footer])
+            self.assertEqual(['Coordinator: two things.\n\n' + '\n'.join(self.wrapped(long.split()))], claude_echoes(after))
+            with tempfile.TemporaryDirectory() as directory:
+                layer, events = self.runtime_fixture('claude', [PaneObservation('idle'), tail, tail] + [PaneObservation('idle')] * 3)
+                layer.capture_history = lambda name, lines: after if ('submit', None) in events else self.echoed('')
+                self.assertEqual((SUBMITTED, CONFIRMED_BY_DRAFT_TAIL), send(Path(directory), layer, SimpleNamespace(tmux='worker'),
+                                                                            text, timeout_s=0, sleep=lambda _: None))
+        text = self.SCROLLED_TEXT
+        old_turn = '\n'.join(self.echo_rows(text) + ['', '', '✢ Puttering…', rule, '❯ ', rule, footer])
+        lost_head = text.split(' ', 6)[-1]
+        queued = lambda second: '\n'.join(self.echo_rows(text) + [''] + self.echo_rows(second) + ['  ctrl+x ctrl+s to send now', '',
+                                           '✢ Puttering…', rule, '❯ Press up to edit queued messages', rule, footer])
+        for why, later, expected in (('RV-S6N-3: an OLDER echo of the same text is not this send\'s echo', queued(lost_head), None),
+                                     ('RV-S6N-3 control: a NEW whole echo of the same text is', queued(text), QUEUED_BEHIND_TURN)):
+            with self.subTest(why), tempfile.TemporaryDirectory() as directory:
+                busy_tail = PaneObservation('busy', 'x\ny\nz', width=76)
+                layer, events = self.runtime_fixture('claude', [PaneObservation('busy'), busy_tail, busy_tail] + [PaneObservation('busy')] * 3)
+                layer.capture_history = lambda name, lines, later=later: later if ('submit', None) in events else old_turn
+                recorded = []
+                run = lambda: send(Path(directory), layer, SimpleNamespace(tmux='worker'), text, timeout_s=0,
+                                   sleep=lambda _: None, recorder=lambda o, c: recorded.append((o, c)))
+                with unittest.mock.patch('fleet.messaging.confirms', return_value=CONFIRMED_BY_DRAFT_TAIL):
+                    if expected is None:
+                        with self.assertRaisesRegex(FleetError, 'uncertain after Enter'):
+                            run()
+                        self.assertEqual(recorded, [(UNCERTAIN_AFTER_ENTER, CONFIRMED_BY_DRAFT_TAIL)])
+                    else:
+                        self.assertEqual((expected, CONFIRMED_BY_DRAFT_TAIL), run())
+        with self.subTest('RV-S6N-5: an echo read that raises is recorded uncertain-after-enter'), tempfile.TemporaryDirectory() as directory:
+            tail = self.scrolled('claude-scrolled-box-282.frame')
+            layer, events = self.runtime_fixture('claude', [PaneObservation('idle'), tail, tail] + [PaneObservation('idle')] * 3)
+
+            def history(name, lines):
+                if ('submit', None) in events:
+                    raise OSError('tmux went away')
+                return self.echoed('')
+            layer.capture_history = history
+            recorded = []
+            with self.assertRaisesRegex(FleetError, 'uncertain'):
+                send(Path(directory), layer, SimpleNamespace(tmux='worker'), text, timeout_s=0,
+                     sleep=lambda _: None, recorder=lambda o, c: recorded.append((o, c)))
+            self.assertEqual(recorded, [(UNCERTAIN_AFTER_ENTER, CONFIRMED_BY_DRAFT_TAIL)])
+        with self.subTest('RV-S6N-10: a retry that confirms by tail after an exact draft is echo-checked too'), \
+                tempfile.TemporaryDirectory() as directory:
+            tail = self.scrolled('claude-scrolled-box-282.frame')
+            exact = PaneObservation('queued', text)
+            layer, events = self.runtime_fixture('claude', [PaneObservation('idle'), exact, tail, tail] + [PaneObservation('idle')] * 3)
+            layer.capture_history = lambda name, lines: self.echoed('')          # never a new echo
+            recorded = []
+            with self.assertRaisesRegex(FleetError, 'uncertain after Enter'):
+                send(Path(directory), layer, SimpleNamespace(tmux='worker'), text, timeout_s=0,
+                     sleep=lambda _: None, recorder=lambda o, c: recorded.append((o, c)))
+            self.assertEqual(events, [('literal', text), ('submit', None), ('submit', None)])
+            self.assertEqual(recorded, [(UNCERTAIN_AFTER_ENTER, CONFIRMED_BY_DRAFT)])
 
     def test_the_retry_waits_for_the_same_tail_evidence(self):
         """After Enter the scrolled box still shows the tail: one retry on the same evidence, then the distinct

@@ -191,8 +191,9 @@ def _claude_draft(rows, frame):
 
 
 #: S6 OR-1. How many cells narrower than its border rule the box's text wraps: measured on Claude Code 2.1.282, an
-#: 80-cell rule around rows wrapped at 76 (every real scrolled frame, v23-s). Only 80 columns is measured; a wrong
-#: margin at another width can only refuse a tail (the send ends uncertain), never confirm foreign text.
+#: 80-cell rule around rows wrapped at 76 (every real scrolled frame, v23-s). Only 80 columns is measured. At another
+#: width a wrong margin mostly refuses a tail (the send ends uncertain); a head loss that happens to line up at the
+#: wrong width would still confirm there (RV-S6N-8), which is what the post-Enter echo check reports.
 CLAUDE_BOX_MARGIN = 4
 
 
@@ -205,31 +206,51 @@ def claude_box_width(rows):
     return cells - CLAUDE_BOX_MARGIN if cells > CLAUDE_BOX_MARGIN else None
 
 
-def claude_echo(frame):
-    """S6 OR-4. The newest prompt the transcript shows ABOVE the input box — its caret row and the indented rows
-    that continue it — as drawn text, or None when no box or no such prompt is located.
+def claude_echoes(frame) -> list:
+    """S6 OR-4. Every prompt the transcript shows ABOVE the input box, oldest first, as drawn text: a caret row at the
+    margin and the rows that continue it. [] when no box is located.
 
     After Enter, Claude Code echoes the whole submitted message there (`❯ <head>`, continuation rows indented two
-    cells; measured in IT SEND-6 on 2.1.282), and a message queued behind a turn is listed at the same place. The
-    box's own rows are below its upper border and are never read."""
+    cells; measured in IT SEND-6 on 2.1.282), and a message queued behind a turn is listed at the same place. RV-S6N-1:
+    an empty line of the message is an empty row inside the echo, so one blank row followed by an indented row
+    continues it; a row at the margin (a reply's `●`, the next caret) or two blank rows end it. The box's own rows are
+    below its upper border and are never read."""
     rows = _rendered(frame or "")
     border = _claude_border_index(rows)
     if border is None:
-        return None
+        return []
     top = next((i for i in range(border - 1, -1, -1) if plain(rows[i]).strip().startswith(('────', '━━━━'))), None)
     if top is None:
-        return None
-    start = next((i for i in range(top - 1, -1, -1)
-                  if plain(rows[i])[:1] in _CARET and plain(rows[i])[1:2] in (' ', '\xa0')), None)
-    if start is None:
-        return None
-    content = [plain(rows[start])[1:].strip()]
-    for row in rows[start + 1:top]:
+        return []
+    echoes, current, blank = [], None, 0
+    for row in rows[:top]:
         visible = plain(row)
-        if not visible.startswith('  ') or not visible.strip():
-            break
-        content.append(visible.strip())
-    return '\n'.join(content)
+        if visible[:1] in _CARET and visible[1:2] in (' ', '\xa0'):
+            if current is not None:
+                echoes.append('\n'.join(current))
+            current, blank = [visible[1:].strip()], 0
+        elif current is None:
+            continue
+        elif not visible.strip():
+            blank += 1
+            if blank > 1:
+                echoes.append('\n'.join(current))
+                current = None
+        elif visible.startswith('  '):
+            current.extend([''] * blank + [visible.strip()])
+            blank = 0
+        else:
+            echoes.append('\n'.join(current))
+            current = None
+    if current is not None:
+        echoes.append('\n'.join(current))
+    return echoes
+
+
+def claude_echo(frame):
+    """The newest prompt `claude_echoes` finds above the box, or None."""
+    found = claude_echoes(frame)
+    return found[-1] if found else None
 
 
 def _claude_border_index(rows):

@@ -8,7 +8,7 @@ from pathlib import Path
 from typing import Optional
 
 from fleet.errors import BadInput, FleetError, Refused
-from fleet.runtime import claude_echo, paste_placeholder
+from fleet.runtime import claude_echoes, paste_placeholder
 from fleet.runtime_config import pane_lock
 
 #: `.fleet/sends.jsonl` in the WORKER's instant: one JSON object per line per attempt that touched the pane.
@@ -145,14 +145,14 @@ def _wrap(line, width) -> list:
     return [r.strip() for r in rows + [row or ""]]
 
 
-def _echo_holds(frame, text) -> bool:
-    """S6 OR-4. Whether the transcript echo in `frame` is `text` whole, from its first word. Chrome drawn after a
-    queued message (`ctrl+x ctrl+s to send now`) may follow it; nothing may precede it."""
-    echo = claude_echo(frame) if frame is not None else None
-    if not echo:
-        return False
-    seen, whole = _squash(echo), _squash(text)
-    return seen == whole or (seen.startswith(whole) and seen[len(whole)] == " ")
+def _echo_count(frame, text) -> Optional[int]:
+    """S6 OR-4. How many transcript echoes in `frame` are `text` whole, from its first word (chrome drawn after a
+    queued message, `ctrl+x ctrl+s to send now`, may follow; nothing may precede); None when there is no frame."""
+    if frame is None:
+        return None
+    whole = _squash(text)
+    return sum(1 for echo in claude_echoes(frame)
+               if (seen := _squash(echo)) == whole or (seen.startswith(whole) and seen[len(whole)] == " "))
 
 
 def _typed_since(sessions, name, admitted_at) -> Optional[str]:
@@ -161,7 +161,7 @@ def _typed_since(sessions, name, admitted_at) -> Optional[str]:
     S6 OR-2 (coordinator D-123). A tail cannot show the head, and a keystroke that lands between the admission capture
     and the paste PREPENDS to our message: the box then holds `<their text><our message>` and its tail is ours. Only
     tmux can see that keystroke: `attachment`'s `last_input` moves on an interactive client's keystroke and attach and
-    NOT on `paste-buffer` or `send-keys` (B24), in whole seconds, so input in the admission second counts. An observer
+    NOT on `paste-buffer` or `send-keys` (B24), in whole seconds, so input from the second before admission on counts. An observer
     (read-only or control-mode) can `send-keys` without moving it, and an unobservable attachment cannot vouch for
     anybody: both fail closed, as `attachment` requires of anything that types into a pane."""
     reader = getattr(sessions, "attachment", None)
@@ -170,7 +170,8 @@ def _typed_since(sessions, name, admitted_at) -> Optional[str]:
         return "whether a client typed into the pane cannot be observed"
     if seen.observers:
         return f"{seen.observers} read-only or control-mode client(s) are attached, and their input is not observable"
-    if seen.clients and seen.last_input >= int(admitted_at):
+    #: RV-S6N-4: a keystroke stamped in the second BEFORE admission can still be drawn after the admission capture.
+    if seen.clients and seen.last_input >= int(admitted_at) - 1:
         return "an attached client gave the pane input after the send was admitted"
     return None
 
@@ -330,6 +331,14 @@ def send(home, sessions, record, text, *, timeout_s=10.0, clock=time.monotonic,
                     outcome = UNCERTAIN_AFTER_INSERTION
                     raise FleetError('Delivery uncertain after insertion; inspect the draft before retrying')
                 sleep(0.02)
+            #: S6 OR-4 / RV-S6N-3. The echoes of this very text already on screen BEFORE Enter (an earlier send's, a
+            #: turn still running on it) are not this send's: the check after Enter needs one more than this.
+            reader = getattr(sessions, "capture_history", None) if runtime == "claude" else None
+            try:
+                echoed_before = _echo_count(reader(record.tmux, ECHO_HISTORY_LINES), text) if reader else None
+            except Exception:
+                echoed_before = None        # unreadable: a tail send then ends uncertain-after-enter, never unverified
+            tail_seen = confirmation == CONFIRMED_BY_DRAFT_TAIL
             sessions.submit(record.tmux)
             deadline = clock() + timeout_s
             retried = False
@@ -363,6 +372,7 @@ def send(home, sessions, record, text, *, timeout_s=10.0, clock=time.monotonic,
                                     or (kind == CONFIRMED_BY_DRAFT_TAIL and latest.draft != observation.draft)):
                                 outcome = UNCERTAIN_AFTER_ENTER
                                 raise FleetError('Delivery uncertain after Enter; retry refused because the input changed')
+                            tail_seen = tail_seen or kind == CONFIRMED_BY_DRAFT_TAIL     # RV-S6N-10
                             if kind == CONFIRMED_BY_DRAFT_TAIL and (typed := _typed_since(sessions, record.tmux,
                                                                                          admitted_at)) is not None:
                                 outcome = UNCERTAIN_AFTER_ENTER
@@ -376,18 +386,22 @@ def send(home, sessions, record, text, *, timeout_s=10.0, clock=time.monotonic,
                     outcome = UNCERTAIN_AFTER_ENTER
                     raise FleetError('Delivery uncertain after Enter; inspect the worker before retrying')
                 sleep(0.02)
-            if confirmation == CONFIRMED_BY_DRAFT_TAIL:
+            if tail_seen:
                 #: S6 OR-4 (coordinator D-123). The box emptied, but a tail vouched only for the rows it showed: a
                 #: lost or prefixed head would be submitted and recorded as a clean `submitted`. The transcript echo
                 #: shows what was actually submitted, so the residual is never silent. Nothing is sent again.
-                reader = getattr(sessions, "capture_history", None)
+                #: RV-S6N-5: the record says uncertain until the echo is seen, even if reading it raises.
+                label, outcome = outcome, UNCERTAIN_AFTER_ENTER
                 deadline = clock() + timeout_s
-                while not _echo_holds(reader(record.tmux, ECHO_HISTORY_LINES) if reader else None, text):
-                    if reader is None or clock() >= deadline:
-                        outcome = UNCERTAIN_AFTER_ENTER
+                while True:
+                    after = _echo_count(reader(record.tmux, ECHO_HISTORY_LINES), text) if reader else None
+                    if echoed_before is not None and after is not None and after > echoed_before:
+                        outcome = label
+                        break
+                    if reader is None or echoed_before is None or clock() >= deadline:
                         raise FleetError('Delivery uncertain after Enter: the transcript echo does not show the whole '
-                                         'message (it was confirmed by its tail only); inspect the worker before '
-                                         'retrying')
+                                         'message as a new prompt (it was confirmed by its tail only); inspect the '
+                                         'worker before retrying')
                     sleep(0.05)
         except FleetError:
             raise
