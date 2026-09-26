@@ -1022,6 +1022,37 @@ sys.exit(0)
         allowed = self.tmux("-L", "own", "list-sessions", ";", "has-session", env=env)
         self.assertEqual(allowed.returncode, 0, allowed.stderr)
 
+    def test_trailing_separator_cannot_hide_a_foreign_kill(self):
+        env, calls = self.recording_tmux()
+        for args in (("-L", "default", "list-sessions;", "kill-server"),
+                     ("-L", "default", "has-session", "-t", "x;", "kill-server"),
+                     ("-L", "default", "ls", "x;", "kill-server")):
+            with self.subTest(args=args):
+                result = self.tmux(*args, env=env)
+                self.assertEqual(result.returncode, 97, result.stderr)
+        self.assertFalse(calls.exists(), "a hidden kill reached fake real-tmux")
+
+    def test_trailing_separator_on_owned_kill_is_classified_as_kill(self):
+        env, calls = self.stateful_recording_tmux()
+        self.assertEqual(self.tmux("-L", "own", "new-session", "-d", "-s", "mine", env=env).returncode, 0)
+        before = len(calls.read_text().splitlines())
+        result = self.tmux("-L", "own", "kill-server;", env=env)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(len(calls.read_text().splitlines()), before + 1)
+        row = json.loads(self.ledger.read_text().splitlines()[-1])
+        self.assertEqual(row["command"], "kill-server")
+        self.assertEqual(row["decision"], "allow")
+
+    def test_shell_operand_trailing_semicolon_and_escaped_semicolon_are_data(self):
+        env, calls = self.recording_tmux()
+        shell = self.tmux("-L", "own", "new-session", "-d", "-s", "mine", "echo hi;", env=env)
+        self.assertEqual(shell.returncode, 0, shell.stderr)
+        escaped = self.tmux("-L", "default", "ls", r"x\;", "kill-server", env=env)
+        self.assertEqual(escaped.returncode, 0, escaped.stderr)
+        forwarded = [json.loads(line) for line in calls.read_text().splitlines()]
+        self.assertIn(["-L", "own", "new-session", "-d", "-s", "mine", "echo hi;"], forwarded)
+        self.assertIn(["-L", "default", "ls", r"x\;", "kill-server"], forwarded)
+
     def test_leading_tmux_separator_cannot_hide_a_kill(self):
         env, calls = self.recording_tmux()
         for separator in (";", "\\;"):

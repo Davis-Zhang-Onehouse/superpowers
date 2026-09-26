@@ -35,12 +35,6 @@ def parse(argv):
     if i < len(argv) and argv[i] == "--":
         i += 1
     command = argv[i] if i < len(argv) else ""
-    # tmux accepts unique command prefixes. Treat even an ambiguous kill prefix as destructive;
-    # real tmux may reject it, but the audit must never pass a recognized kill spelling through.
-    if command and "kill-server".startswith(command) and not "kill-session".startswith(command):
-        command = "kill-server"
-    elif command and "kill-session".startswith(command):
-        command = "kill-session"
     rest = argv[i + 1:]
     directory = os.environ.get("TMUX_TMPDIR") or "/tmp"
     if not os.path.isdir(directory):
@@ -53,6 +47,15 @@ def parse(argv):
         else:
             socket = os.path.join(directory, f"tmux-{os.getuid()}", "default")
     return os.path.realpath(socket), command, rest, shell_code
+
+
+def canonical_command(command):
+    # tmux accepts unique command prefixes. Treat even an ambiguous kill prefix as destructive.
+    if command and "kill-server".startswith(command) and not "kill-session".startswith(command):
+        return "kill-server"
+    if command and "kill-session".startswith(command):
+        return "kill-session"
+    return command
 
 
 def option(rest, flag):
@@ -85,11 +88,14 @@ def can_dispatch_commands(command, rest):
         name.startswith(command) for name in dispatchers))
 
 
-def split_tmux_commands(rest):
-    """A shell command's semicolon is data; only a whole tmux separator splits argv."""
+def split_tmux_commands(words):
+    """Split tmux's argv separators, including an unescaped trailing semicolon."""
     parts = [[]]
-    for arg in rest:
+    for arg in words:
         if arg in (";", r"\;"):
+            parts.append([])
+        elif arg.endswith(";") and not arg.endswith(r"\;"):
+            parts[-1].append(arg[:-1])
             parts.append([])
         else:
             parts[-1].append(arg)
@@ -180,13 +186,15 @@ def main():
     private = name not in ("default", "fleet", "fleet-davis") and any(
         os.path.commonpath((socket, directory)) == directory and socket != directory
         for directory in dirs)
+    segments = split_tmux_commands([command, *rest])
+    command = canonical_command(segments[0][0]) if segments[0] else ""
+    rest = segments[0][1:] if segments[0] else []
     destructive = command in ("kill-server", "kill-session")
     creates = command in ("new-session", "new")
-    segments = split_tmux_commands(rest)
     indirect = can_dispatch_commands(command, segments[0])
-    leading_separator = command in (";", r"\;")
-    compound_unsafe = any(not part or not readonly_command(part[0], part[1:]) or
-                          can_dispatch_commands(part[0], part[1:]) for part in segments[1:])
+    leading_separator = not segments[0]
+    compound_unsafe = any(part and (not readonly_command(part[0], part[1:]) or
+                                    can_dispatch_commands(part[0], part[1:])) for part in segments[1:])
     hidden_kills = nested_kills([word for part in segments[1:] for word in part]) if compound_unsafe else []
     if indirect:
         hidden_kills.extend(nested_kills(segments[0]))
