@@ -7,6 +7,8 @@ fleet/it/*/slot/
 fleet/it/*/slots/
 fleet/it/RESULTS-*.tsv
 fleet/it/*.log
+# RESULTS*.tsv.lock: the row lock _it_row / it_own_cases take beside a results register (S7 review RC-5).
+fleet/it/*.lock
 # fleet: the dummy-project fixture is unpacked from it/fixtures/dummy-project.tar.gz on demand.
 fleet/it/dummy-project/
 
