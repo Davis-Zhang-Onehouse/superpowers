@@ -80,5 +80,15 @@ grep -q 'case "$TS_ROOT" in "$TS_PARENT"/fleet-it-ts.\*) rm -rf "$TS_ROOT"' "$TS
   && note "ok   the rm guard is the chosen parent's fleet-it-ts.* only" \
   || { note "FAIL run-TS.sh's rm guard or mktemp still names /tmp"; fails=1; }
 
+# OR-3 (v23-p review). The real claude §TS launches inherits the runner's environment through the private tmux
+# server fleet starts, so everything that changes its behaviour must be gone BEFORE `it_section TS`: the token env
+# (the control must stay logged out) and CLAUDE_CODE_SANDBOXED (set, Claude skips the trust screen under test).
+PRE="$(awk '/^it_section TS/{exit} /^unset /' "$TS")"
+left="$(env ANTHROPIC_API_KEY=x ANTHROPIC_AUTH_TOKEN=x CLAUDE_CODE_OAUTH_TOKEN=x CLAUDE_CODE_SANDBOXED=1 \
+          bash -c "$PRE"'
+          for v in ANTHROPIC_API_KEY ANTHROPIC_AUTH_TOKEN CLAUDE_CODE_OAUTH_TOKEN CLAUDE_CODE_SANDBOXED; do
+            [ -n "${!v+set}" ] && printf "%s " "$v"; done')"
+check "run-TS.sh unsets the token env and CLAUDE_CODE_SANDBOXED before it_section TS" "" "$left"
+
 if [ "$fails" = 0 ]; then echo "run-ts-scratch-root: all ok"; else echo "run-ts-scratch-root: FAILED"; fi
 exit "$fails"
