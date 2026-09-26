@@ -219,6 +219,8 @@ def claude_echoes(frame) -> list:
     border = _claude_border_index(rows)
     if border is None:
         return []
+    #: RV-34: the upper border is the first rule row scanning up. A draft holding its own rule line would move it into the box
+    #: before Enter; that fails safe — a partial echo never equals the whole message, and after Enter the box is empty.
     top = next((i for i in range(border - 1, -1, -1) if plain(rows[i]).strip().startswith(('────', '━━━━'))), None)
     if top is None:
         return []
