@@ -34,8 +34,10 @@ def pipeline(root=500, ppid=1, path=INST):
     grep (argv names nothing). `evidence/01-repro/base-334fb1d5.txt`."""
     return (Proc(root, ppid, "s500", ("zsh", "-c", "tail -n0 -F $INSTANT/evidence/INDEX.md | grep DONE"),
                  sid=root, children=(root + 1, root + 2), started_at=LATER, fleet_instant=path),
-            Proc(root + 1, root, "s501", ("tail", "-n0", "-F", f"{path}/evidence/INDEX.md"), sid=root, children=()),
-            Proc(root + 2, root, "s502", ("grep", "--line-buffered", "DONE"), sid=root, children=()))
+            Proc(root + 1, root, "s501", ("tail", "-n0", "-F", f"{path}/evidence/INDEX.md"), sid=root, children=(),
+                 fleet_instant=path),
+            Proc(root + 2, root, "s502", ("grep", "--line-buffered", "DONE"), sid=root, children=(),
+                 fleet_instant=path))
 
 
 class AttributionRule(unittest.TestCase):
@@ -882,6 +884,25 @@ class CompleteWarns(CliCase):
         self.assertIn("stop your watchers", out)
         self.assertEqual(facts.sent, [], "complete must never signal")
         self.assertFalse(path.exists(), "complete did not rename")
+
+    def test_a_holder_this_worker_did_not_start_is_never_offered_a_kill_command(self):
+        """v23-h M-2. A coordinator's `tail -F <worker>/evidence/INDEX.md` run from the worker's slot names the instant
+        too; its FLEET_INSTANT is the coordinator's (or absent). The row offers `kill -TERM` only for this worker's own."""
+        fleet = self.fleet()
+        facts = FactsFixture(fleet)
+        path = self.worker_in_slot(fleet)
+        facts.hold("ws1", *pipeline(ppid=7000, path=str(path)),
+                   Proc(800, 4242, "s800", ("tail", "-F", f"{path}/evidence/INDEX.md"), sid=4242, children=(),
+                        fleet_instant="/i/00000000-09200000-inflight-append-coordinator"),
+                   Proc(801, 4242, "s801", ("less", f"{path}/HANDOFF.md"), sid=4242, children=()))
+        code, out, err = fleet.run(["complete", "--instant", str(path)])
+        self.assertEqual(code, EXIT_OK, out + err)
+        self.assertIn("kill -TERM 501", out)
+        for pid in ("800", "801"):
+            self.assertIn(pid, out, "the other holders are still listed")
+            self.assertNotRegex(out, rf"kill -TERM[0-9 ]* {pid}\b")
+        self.assertIn("not started by this worker", out)
+        self.assertEqual(facts.sent, [])
 
     def test_the_dry_run_warns_too(self):
         fleet = self.fleet()
