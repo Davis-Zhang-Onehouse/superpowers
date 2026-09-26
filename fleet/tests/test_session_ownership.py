@@ -839,9 +839,6 @@ class TheApplyWarningAsksTheProposersOwnSession(unittest.TestCase):
         self.assertNotIn("reads ALIVE", out + err)
 
 
-if __name__ == "__main__":
-    unittest.main()
-
 
 class OneUnreadableRecordDoesNotStopATeardown(unittest.TestCase):
     """S6 RV-S6S-3 (pre-cut state review). `_session_taken_by` read `store.all()`, which refuses the whole store over one
@@ -892,3 +889,7 @@ class OneUnreadableRecordDoesNotStopATeardown(unittest.TestCase):
         code, out, err = fleet.run(["reap", "--all"])
         self.assertEqual(code, 0, f"rc={code}\n{out}\n{err}")
         self.assertIsNotNone(fleet.pool.lease("ws1"), "a lease whose session an unreadable record may own was freed")
+
+
+if __name__ == "__main__":
+    unittest.main()
