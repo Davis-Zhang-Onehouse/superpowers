@@ -1,5 +1,13 @@
 # fleet — changelog
 
+## fleet/v0.6.17 — 2026-09-26T07:57:03Z
+Cut from 907af01 on `stack/0.6.16` (upstream base snapshot/2026-09-22-152849). 1 commit(s) since fleet/v0.6.16.
+
+Every release ships the whole repository — all skills, `commands/`, `hooks/` and the plugin manifest, not only `fleet/`.
+Payload: fleet (1 file).
+
+- 907af01 v23-u fix: the per-run snapshot ignore test asks the repo's .gitignore in a scratch git repo, not the enclosing checkout
+
 ## fleet/v0.6.16 — 2026-09-26T06:02:58Z
 Cut from 7739c52 on `stack/0.6.16` (upstream base snapshot/2026-09-22-152849). 117 commit(s) since fleet/v0.6.15.
 
