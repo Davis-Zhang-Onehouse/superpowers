@@ -89,10 +89,22 @@ scripts/sync/            # source of truth (this dir), committed on `live`
   apply.sh       commit local edits + snapshot + refresh plugin
   rollback.sh    snapshot timeline / rollback / rework / promote
   status.sh      health + history (read-only)
-  lib.sh         shared helpers
+  lib.sh         shared helpers (incl. resolve_manifest_versions)
+  refresh-control.sh  copy the six code files above into a control dir (--check / --dry-run)
   config.template
 ```
 
-Scripts are copied into `~/.superpowers-sync/` by `bootstrap.sh`. To ship a fix: edit here on
-`live`, `apply.sh -m "…"`, then re-run `bootstrap.sh` (or copy the changed script into the
-control dir).
+Scripts are copied into `~/.superpowers-sync/` by `bootstrap.sh`. A fleet release deploy refreshes them from the
+DEPLOYED export (`releasing-fleet`: `bash "$FLEET_RELEASES/current/scripts/sync/refresh-control.sh" --ctrl <control dir>`),
+which writes only the six code files — never `config`, `state`, `STATUS`, `PENDING`, `history.ndjson` or the rebase
+worktree. By hand: `refresh-control.sh --ctrl <dir>` from this checkout, or re-run `bootstrap.sh`.
+
+## Version-manifest conflicts resolve themselves (D-136)
+
+Every fleet release commit stamps `"version": "<upstream>+fleet.<x>"` into the manifests `.version-bump.json` names, and
+every upstream release bumps the same line, so each replayed release commit used to conflict on every upstream tag
+(2026-09-26: v6.4.1 → v6.4.2 paused on exactly those files). When EVERY unmerged path is such a manifest and EVERY
+conflict hunk differs only in the version value, `sync.sh` (and `finish.sh`, for the commits after a manual fix) takes
+upstream's version with the replayed commit's `+fleet.<x>` suffix, stages it and continues. The run is logged as
+`"result":"manifest-resolved"` with the resolved files in `conflicts` — never silently as `clean`. Any other conflict — a
+non-manifest file, or a manifest hunk touching anything besides the version — still pauses exactly as before.
