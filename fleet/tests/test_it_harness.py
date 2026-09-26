@@ -786,7 +786,13 @@ if command == 'kill-session':
         sys.exit(0)
     sys.exit(1)
 if command == 'kill-server':
-    if socket.exists(): socket.unlink(); sys.exit(0)
+    if socket.exists():
+        if os.environ.get('FAKE_TMUX_LEAVE_STALE'):
+            stale = os.environ.get('FAKE_TMUX_STALE_MARKER')
+            if stale and pathlib.Path(stale).exists(): pathlib.Path(stale).unlink()
+        else:
+            socket.unlink()
+        sys.exit(0)
     sys.exit(1)
 sys.exit(0)
 ''')
@@ -837,6 +843,23 @@ sys.exit(0)
         self.assertEqual(self.tmux("-L", "own", "kill-session", "-t", "=mine", env=env).returncode, 0)
         count = len(calls.read_text().splitlines())
         repeated = self.tmux("-L", "own", "kill-session", "-t", "=mine", env=env)
+        self.assertEqual(repeated.returncode, 1, repeated.stderr)
+        self.assertEqual(len(calls.read_text().splitlines()), count)
+        self.assertIn("KILL-AUDIT-X\tPASS", results.read_text())
+        rows = [json.loads(line) for line in self.ledger.read_text().splitlines()]
+        self.assertEqual(rows[-1]["decision"], "noop")
+
+    def test_repeat_server_kill_with_stale_socket_is_noop(self):
+        env, calls = self.stateful_recording_tmux()
+        env.update(FAKE_TMUX_STALE_MARKER=str(self.tmp / "server-alive"), FAKE_TMUX_LEAVE_STALE="1")
+        results = self.tmp / "results.tsv"
+        results.write_text("case\tverdict\tevidence\tnote\n"
+                           "KILL-AUDIT-X\tPASS\tfleet/it/X/tmux-audit.jsonl\t0 kill(s): (none)\n")
+        env.update(IT_TMUX_AUDIT_RESULTS=str(results), IT_TMUX_AUDIT_SECTION="X")
+        self.assertEqual(self.tmux("-L", "own", "new-session", "-d", "-s", "mine", env=env).returncode, 0)
+        self.assertEqual(self.tmux("-L", "own", "kill-server", env=env).returncode, 0)
+        count = len(calls.read_text().splitlines())
+        repeated = self.tmux("-L", "own", "kill-server", env=env)
         self.assertEqual(repeated.returncode, 1, repeated.stderr)
         self.assertEqual(len(calls.read_text().splitlines()), count)
         self.assertIn("KILL-AUDIT-X\tPASS", results.read_text())

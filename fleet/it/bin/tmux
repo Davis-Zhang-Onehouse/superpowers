@@ -212,7 +212,7 @@ def main():
                 current_inode = None
             current_pid = server_pid(real, socket) if private and created and current_inode \
                 and (destructive or creates) else None
-            stale_owned_socket = bool(creates and created and current_inode == owned_inode and
+            stale_owned_socket = bool((creates or destructive) and created and current_inode == owned_inode and
                                       owned_pid and current_pid is None and
                                       not socket_accepts_connection(socket))
             unverified_existing = creates and created and current_inode and (
@@ -226,7 +226,8 @@ def main():
                     row.update(decision="deny", reason="server existed before section created it")
                 elif destructive and not created:
                     row.update(decision="deny", reason="server not created by section")
-                elif destructive and current_inode is None and owned_inode and owned_pid:
+                elif destructive and owned_inode and owned_pid and \
+                        (current_inode is None or stale_owned_socket):
                     row.update(decision="noop", reason="owned server is already gone")
                 elif destructive and (owned_pid is None or current_pid is None):
                     row.update(decision="deny", reason="created server PID cannot be verified")
