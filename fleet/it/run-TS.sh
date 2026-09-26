@@ -19,6 +19,7 @@
 #   TS1c  the pre-flight prediction row reads `untrusted` before the launch
 #   TS2a  control: the trusted slot's pane reaches the prompt, and the dispatch reports no trust screen
 #   TS2b  the pre-flight prediction row reads `trusted` for it
+#   TS3   teardown: no process still holds the scratch root when it is removed, and it is gone (RV-41)
 #
 # Run: bash fleet/it/run-TS.sh      Budget: two real claude launches, ~40s, no model tokens.
 IT_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -71,6 +72,22 @@ if ! TS_PARENT="$(ts_scratch_parent "${TS_TMP_PARENT:-}" /tmp /var/tmp)"; then
 fi
 TS_ROOT="$(mktemp -d "$TS_PARENT/fleet-it-ts.XXXXXX")" || exit 2
 TODOS=()
+#: RV-41. `ts_root_holders <root>`: the pids (not this shell) whose cwd, an open fd, or whose environment (the
+#: pane's CLAUDE_CONFIG_DIR) reaches <root>. `ts_release_root <root> <seconds>`: 0 once none is left; else prints
+#: them and returns 1 at the bound.
+ts_root_holders() {
+  [ -n "$1" ] || return 0
+  { find /proc/[0-9]*/cwd /proc/[0-9]*/fd -maxdepth 1 \( -lname "$1" -o -lname "$1/*" \) 2>/dev/null
+    grep -lzF -e "=$1" /proc/[0-9]*/environ 2>/dev/null
+  } | sed -n 's|^/proc/\([0-9]*\)/.*|\1|p' | sort -un | grep -vx -e "$$" -e "$BASHPID" | tr '\n' ' '
+}
+ts_release_root() {
+  local deadline=$(( $(date +%s) + $2 )) held
+  while held="$(ts_root_holders "$1")"; [ -n "$held" ]; do
+    [ "$(date +%s)" -ge "$deadline" ] && { printf '%s\n' "${held% }"; return 1; }
+    sleep 0.2
+  done
+}
 cleanup_TS() {
   for todo in "${TODOS[@]}"; do
     fleet close --id "$todo" --force --porcelain >> "$OUT/teardown.out" 2>&1
@@ -78,7 +95,19 @@ cleanup_TS() {
   done
   it_cleanup_tmux
   it_tmux kill-server 2>/dev/null
-  case "$TS_ROOT" in "$TS_PARENT"/fleet-it-ts.*) rm -rf "$TS_ROOT" ;; esac
+  #: RV-41. kill-server returns once tmux has sent SIGHUP; the dying claude still flushes into $TS_ROOT/.claude after
+  #: that, and a late write re-created the root after the rm. Wait (bounded) for every holder, then remove, then check.
+  local held="" left=""
+  case "$TS_ROOT" in "$TS_PARENT"/fleet-it-ts.*)
+    held="$(ts_release_root "$TS_ROOT" "${TS_RELEASE_WAIT:-10}")" || held="still held after ${TS_RELEASE_WAIT:-10}s by pid(s) $held"
+    case "$TS_ROOT" in "$TS_PARENT"/fleet-it-ts.*) rm -rf "$TS_ROOT" ;; esac
+    [ -e "$TS_ROOT" ] && left="$TS_ROOT is still there after rm -rf"
+    if [ -n "$held$left" ]; then
+      it_fail TS3 "" "teardown residue: ${held:+$held; }$left (check for a leftover $TS_PARENT/fleet-it-ts.* dir)"
+    else
+      it_pass TS3 "" "teardown: no process held the scratch root once the server was killed, and it is gone"
+    fi ;;
+  esac
 }
 trap cleanup_TS EXIT
 
