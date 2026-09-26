@@ -319,8 +319,8 @@ def session_owner(records, here: str, pool=None) -> dict:
     """`(server, session name) -> record` that owns the session, for every name some record claims. V23-T, D-1.
 
     The owner is the record with the latest START, and that is read off the writers rather than guessed: every
-    successful start stamps `launched_at` on the record that started (dispatch after seed delivery, `revive` after its
-    verify, `resume` when it adopts a session no open record claims), and no start is attempted while a same-named
+    successful start stamps `launched_at` on the record that started (dispatch after seed delivery, `revive` as it
+    starts (OR-1), `resume` when it adopts a session no open record claims), and no start is attempted while a same-named
     session is live (dispatch refuses before its claim, RV-40; `revive` refuses an occupied pane; tmux refuses the
     duplicate). So of the records naming a live session, the latest launch is the one whose pane it is. A start in progress counts too (RV-32): dispatch starts the session, delivers the
     seed and only then stamps `launched_at`, so for those seconds the new record is known by its lease — held, unstamped

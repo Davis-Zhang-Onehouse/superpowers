@@ -2012,11 +2012,22 @@ def _do_revive(ctx: Ctx, parsed: Parsed) -> int:
     record.child_instant = str(child)
     launcher = runtime_launch.prepare(settings, record, child / '.fleet/seed.txt', revive_env,
                                      session_id=session_id)
-    layer.start(record.tmux, lease.path, shlex.join(['bash', str(launcher)]))
+    #: V23-T OR-1. The start is recorded BEFORE `layer.start`: the record already has its old `launched_at`, so it is
+    #: not a start in progress (RV-32) and would rank by that old launch — any later-launched sibling of the title,
+    #: even a harvested one, would own the session this revive starts, and for good if the verify below fails.
+    #: Rolled back only when tmux refuses the start; after a failed verify the session is still this record's.
+    previous_launch = record.launched_at
+    record.launched_at = ctx.now()
+    ctx.store.write(record)
+    try:
+        layer.start(record.tmux, lease.path, shlex.join(['bash', str(launcher)]))
+    except BaseException:
+        record.launched_at = previous_launch
+        ctx.store.write(record)
+        raise
     if not _verify_resume(ctx, layer, record, session_id):
         raise FleetError('Resume not verified; the lease is retained. Inspect the pane before retrying')
     record.runtime_executable, record.runtime_config_dir = settings.executable, settings.config_dir
-    record.launched_at = ctx.now()
     ctx.store.write(record)
     #: V23-P (FB-126). `_verify_resume` read argv, which is right while the pane waits at the trust screen. Watched
     #: after the record is written, so an observation problem is a row and never a failed revive (D-3).
