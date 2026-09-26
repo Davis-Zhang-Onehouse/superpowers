@@ -853,6 +853,21 @@ class OneUnreadableRecordDoesNotStopATeardown(unittest.TestCase):
         (fleet.home / "records" / f"{broken}.json").write_text("{ not json")
         return fleet
 
+    def test_harvest_of_a_reviewed_record_refuses_on_an_unreadable_possible_owner(self):
+        """RV-40. harvest --id gets past its review gate and reaches _refuse_a_guarded_pane, where an owner that cannot be
+        read refuses (rc 4, dry run and real alike) before anything is applied, killed, stamped or released."""
+        fleet = Fleet()
+        self.addCleanup(shutil.rmtree, fleet.tmp, True)
+        fleet.reviewed(fleet.worker("solo", state="complete", slot="ws1", pane=IDLE_PANE))
+        (fleet.home / "records" / "solo-09999999.json").write_text("{ not json")
+        for dry in (["--dry-run"], []):
+            code, out, err = fleet.run(["harvest", *dry, "--id", fleet.ids["solo"]])
+            self.assertEqual(code, 4, f"{dry} rc={code}\n{out}\n{err}")
+            self.assertIn("solo-09999999.json", out + err)
+        self.assertEqual(fleet.killed, [])
+        self.assertIsNone(fleet.store.read(fleet.ids["solo"]).harvested_at)
+        self.assertIsNotNone(fleet.pool.lease("ws1"))
+
     def test_an_unrelated_unreadable_record_stops_neither_close_nor_reap(self):
         fleet = self._fleet("zzbroken-09999999")
         code, out, err = fleet.run(["close", "--id", fleet.ids["solo"]])
