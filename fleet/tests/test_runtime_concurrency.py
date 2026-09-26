@@ -5,6 +5,7 @@ import shutil
 import unittest
 
 from fleet.runtime_config import read_runtime, write_runtime
+from tests import short_manager
 from tests.test_cli import Fleet
 
 
@@ -75,7 +76,8 @@ class RuntimeConcurrencyTests(unittest.TestCase):
 
     def test_send_serializes_other_senders_and_close_until_submission(self):
         self.f.worker('target', slot='ws1', pane='❯ \n? for shortcuts')
-        manager = mp.Manager()
+        manager = short_manager()   # FB-131: its socket not under $TMPDIR
+        manager.start()
         self.addCleanup(manager.shutdown)
         state = manager.dict(frame='❯ \n? for shortcuts', inserts=0, submits=0)
         entered, release = mp.Event(), mp.Event()
