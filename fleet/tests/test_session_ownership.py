@@ -513,6 +513,22 @@ class ResumeDoesNotAdoptASessionAnotherRecordOwns(unittest.TestCase):
         code, out, err = fleet.run(["resume", "--instant", str(orphan)])
         self.assertEqual(code, 0, f"{out}{err}")
 
+    def test_a_closed_only_record_does_not_block_adopting_a_live_orphan(self):
+        """RV-46. The guard's closed half on its own: `fleet close` stamps `closed_at` and not `harvested_at`."""
+        fleet = Fleet()
+        self.addCleanup(shutil.rmtree, fleet.tmp, True)
+        fleet.worker("mile", state="complete", live=False)
+        rec = fleet.store.read(fleet.ids["mile"])
+        rec.launched_at = "2026-07-29T09:00:00Z"
+        rec.closed_at = "2026-07-29T10:00:00Z"
+        fleet.store.write(rec)
+        orphan = fleet.orphan("mile")
+        fleet.procs.append(LiveSession(pid=4242, cwd=orphan, name="dt-mile"))
+        fleet.panes["dt-mile"] = IDLE_PANE
+        fleet.tmux_live.add("dt-mile")
+        code, out, err = fleet.run(["resume", "--instant", str(orphan)])
+        self.assertEqual(code, 0, f"{out}{err}")
+
     def test_resuming_the_owner_still_adopts_its_session(self):
         """Control: the refusal is about another record's session, not about a live one."""
         fleet, _, _, new = self._pair()
