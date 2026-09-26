@@ -807,6 +807,24 @@ sys.exit(0)
             with self.subTest(command=command):
                 self.assertEqual(self.tmux("-L", "default", *command, env=env).returncode, 0)
 
+    def test_tmux_handle_and_component_boundary_cannot_relabel_foreign_socket(self):
+        env, calls = self.recording_tmux()
+        outside = self.tmp / "outside"
+        outside.mkdir()
+        link = self.private / "linked"
+        link.symlink_to(outside, target_is_directory=True)
+        prefix = self.tmp / "private-evil"
+        prefix.mkdir()
+        for args, overrides in (
+                (("kill-server",), {"TMUX": str(outside / "live") + ",1,0"}),
+                (("-2Ldefault", "kill-server"), {}),
+                (("-uS", str(link / "live"), "kill-server"), {}),
+                (("-S", str(prefix / "live"), "kill-server"), {}),
+                (("-S", str(prefix / "new"), "new-session", "-d", "-s", "mine"), {})):
+            with self.subTest(args=args):
+                self.assertEqual(self.tmux(*args, env=dict(env, **overrides)).returncode, 97)
+        self.assertFalse(calls.exists(), "a foreign kill reached fake real-tmux")
+
     def test_real_tmux_cannot_resolve_to_the_shim(self):
         env, calls = self.recording_tmux()
         env["IT_TMUX_REAL"] = str(self.shim)
