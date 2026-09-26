@@ -66,9 +66,17 @@ class LiveStoreSnapshot(unittest.TestCase):
     """A prior lessee's ignored snapshot must not become this run's baseline."""
 
     def test_per_run_snapshot_is_gitignored(self):
-        candidate = IT / "live-stores-run-example.sha256"
-        result = subprocess.run(["git", "-C", str(REPO), "check-ignore", "-q", str(candidate)])
-        self.assertEqual(result.returncode, 0, "a normal IT run dirties the slot with a snapshot")
+        #: S6 (0.6.16 gate, coordinator D-141). Asked of the REPO's own .gitignore in a scratch git repo: the gate runs
+        #: this suite in the release export, which has no .git, and `git -C <export> check-ignore` answered 128 there.
+        with tempfile.TemporaryDirectory(prefix="itf-ignore-", dir="/tmp") as tmp_name:
+            tmp = pathlib.Path(tmp_name)
+            subprocess.run(["git", "init", "-q", str(tmp)], check=True, capture_output=True)
+            shutil.copyfile(REPO / ".gitignore", tmp / ".gitignore")
+            candidate = "fleet/it/live-stores-run-example.sha256"
+            result = subprocess.run(["git", "-C", str(tmp), "check-ignore", "-q", candidate], capture_output=True)
+            self.assertEqual(result.returncode, 0, "a normal IT run dirties the slot with a snapshot")
+            control = subprocess.run(["git", "-C", str(tmp), "check-ignore", "-q", "fleet/it/run-A.sh"], capture_output=True)
+            self.assertEqual(control.returncode, 1, "the check must be able to say NOT ignored (a runner is tracked)")
 
     def test_stale_snapshot_is_not_compared_on_new_run(self):
         with tempfile.TemporaryDirectory(prefix="itf-", dir="/tmp") as tmp_name:
