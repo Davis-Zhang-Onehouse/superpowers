@@ -729,9 +729,15 @@ class AnExecutedReviveOwnsItsSession(unittest.TestCase):
         def refused(name, cwd, cmd):
             raise BadInput("tmux refused to start 'dt-recoverable': duplicate session: dt-recoverable")
         fleet.sessions.probes.start_session = refused
+        #: RV-35: the early start-stamp write also persists the re-resolved child_instant; the rollback restores it too.
+        rec = fleet.store.read(a_id)
+        spelled = rec.child_instant.rstrip("/") + "/."
+        rec.child_instant = spelled
+        fleet.store.write(rec)
         code, out, err = fleet.run(["revive", *args])
         self.assertNotEqual(code, 0, f"{out}{err}")
         self.assertEqual(fleet.store.read(a_id).launched_at, "2026-07-30T11:00:00Z")
+        self.assertEqual(fleet.store.read(a_id).child_instant, spelled, "the rollback left the re-resolved child_instant")
         self.assertEqual(self._owner(fleet), b_id, "the later launch still owns the name nobody started")
 
 

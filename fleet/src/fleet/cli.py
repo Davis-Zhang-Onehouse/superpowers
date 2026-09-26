@@ -2011,6 +2011,7 @@ def _do_revive(ctx: Ctx, parsed: Parsed) -> int:
                             ('transcript', str(transcript)), *policy_rows, *_trust_rows(prediction),
                             ('dry-run', 'nothing started')])
         return EXIT_OK
+    previous_child = record.child_instant
     record.child_instant = str(child)
     launcher = runtime_launch.prepare(settings, record, child / '.fleet/seed.txt', revive_env,
                                      session_id=session_id)
@@ -2024,7 +2025,7 @@ def _do_revive(ctx: Ctx, parsed: Parsed) -> int:
     try:
         layer.start(record.tmux, lease.path, shlex.join(['bash', str(launcher)]))
     except BaseException:
-        record.launched_at = previous_launch
+        record.launched_at, record.child_instant = previous_launch, previous_child     # RV-35: both early writes
         ctx.store.write(record)
         raise
     if not _verify_resume(ctx, layer, record, session_id):
