@@ -887,6 +887,13 @@ sys.exit(0)
             with self.subTest(command=command):
                 self.assertEqual(self.tmux("-L", "default", *command, env=env).returncode, 0)
 
+    def test_display_alias_is_a_read_and_not_a_dispatcher(self):
+        env, calls = self.recording_tmux()
+        result = self.tmux("-L", "own", "display", "-p", "#{pane_current_path}", env=env)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertIn(["-L", "own", "display", "-p", "#{pane_current_path}"],
+                      [json.loads(line) for line in calls.read_text().splitlines()])
+
     def test_nonprivate_print_flag_must_be_an_option_not_a_target_value(self):
         env, calls = self.recording_tmux()
         for command in (("display-message", "-t=people", "hello"),

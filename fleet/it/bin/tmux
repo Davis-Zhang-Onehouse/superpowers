@@ -50,6 +50,8 @@ def parse(argv):
 
 
 def canonical_command(command):
+    if command == "display":
+        return "display-message"
     # tmux accepts unique command prefixes. Treat even an ambiguous kill prefix as destructive.
     if command and "kill-server".startswith(command) and not "kill-session".startswith(command):
         return "kill-server"
