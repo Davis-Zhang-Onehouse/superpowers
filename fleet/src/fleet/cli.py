@@ -1823,7 +1823,9 @@ def _watch_launch(ctx, layer, tmux, runtime) -> LaunchWatch:
         #: summed sleeps still end a hermetic run whose injected sleep costs no time.
         deadline = time.monotonic() + window
         while True:
-            frame = layer.capture(tmux)
+            #: OR-5. The capture itself is bounded by what is left of the window: tmux has no timeout of its own,
+            #: and a wedged server held the watch past the deadline, which is checked only after a look.
+            frame = layer.capture(tmux, timeout=max(0.5, min(window, deadline - time.monotonic())))
             if frame:
                 state = observe(runtime, frame).state
                 if state == "dialog":
