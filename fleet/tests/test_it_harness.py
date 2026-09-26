@@ -731,9 +731,10 @@ class RuntimeTmuxKillAudit(unittest.TestCase):
         """A fake real-tmux that records argv and never contacts a tmux server."""
         fake = self.tmp / "recording-tmux"
         calls = self.tmp / "recorded-argv.jsonl"
-        fake.write_text('#!/usr/bin/env python3\nimport json, os, sys\n'
+        fake.write_text('#!/usr/bin/env python3\nimport json, os, sys, time\n'
                         'with open(os.environ["FAKE_TMUX_RECORD"], "a") as f:\n'
-                        '    f.write(json.dumps(sys.argv[1:]) + "\\n")\n')
+                        '    f.write(json.dumps(sys.argv[1:]) + "\\n")\n'
+                        'if os.environ.get("FAKE_TMUX_SLOW_COMMAND") in sys.argv[1:]: time.sleep(2)\n')
         fake.chmod(0o755)
         return dict(self.env, IT_TMUX_REAL=str(fake), FAKE_TMUX_RECORD=str(calls)), calls
 
@@ -798,6 +799,27 @@ sys.exit(0)
                         ("display-message", "-p", "#{pid}"), ("capture-pane", "-p")):
             with self.subTest(command=command):
                 self.assertEqual(self.tmux("-L", "default", *command, env=env).returncode, 0)
+
+    def test_real_tmux_cannot_resolve_to_the_shim(self):
+        env, calls = self.recording_tmux()
+        env["IT_TMUX_REAL"] = str(self.shim)
+        result = subprocess.run([str(self.shim), "-L", "own", "list-sessions"], env=env,
+                                capture_output=True, text=True, timeout=1)
+        self.assertEqual(result.returncode, 97, result.stderr)
+        self.assertFalse(calls.exists())
+
+    def test_slow_real_tmux_does_not_hold_the_ledger_lock(self):
+        env, calls = self.recording_tmux()
+        env["FAKE_TMUX_SLOW_COMMAND"] = "list-clients"
+        slow = subprocess.Popen([str(self.shim), "-L", "own", "list-clients"], env=env,
+                                stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+        try:
+            time.sleep(0.1)
+            fast = subprocess.run([str(self.shim), "-L", "own", "list-sessions"], env=env,
+                                  capture_output=True, text=True, timeout=0.8)
+            self.assertEqual(fast.returncode, 0, fast.stderr)
+        finally:
+            slow.wait(timeout=4)
 
     def test_end_of_options_and_combined_socket_flags_cannot_hide_a_kill(self):
         env, calls = self.recording_tmux()

@@ -157,6 +157,9 @@ def main():
     argv = sys.argv[1:]
     socket, command, rest = parse(argv)
     real = os.environ.get("IT_TMUX_REAL", "/usr/bin/tmux")
+    if os.path.realpath(real) == os.path.realpath(__file__):
+        print("IT tmux audit: real tmux resolves to the audit shim", file=sys.stderr)
+        return 97
     ledger = os.environ.get("IT_TMUX_AUDIT_LEDGER")
     dirs = [os.path.realpath(p) for p in os.environ.get("IT_TMUX_AUDIT_PRIVATE_DIRS", "").split(":") if p]
     name = os.path.basename(socket)
@@ -259,7 +262,13 @@ def main():
                 fcntl.flock(stream, fcntl.LOCK_UN)
                 stream.close()
                 os.execv(real, [real, *argv])
-            result = subprocess.run([real, *argv])
+            # A client may block waiting on a pane or server. Other audited calls must still be
+            # able to read/write the ledger while the real executable runs.
+            fcntl.flock(stream, fcntl.LOCK_UN)
+            try:
+                result = subprocess.run([real, *argv])
+            finally:
+                fcntl.flock(stream, fcntl.LOCK_EX)
             row["status"] = result.returncode
             if result.returncode == 0 and unverified_existing:
                 # A stale socket may let tmux start a new server, but a new-session on an existing
