@@ -677,6 +677,13 @@ class A8KillSiteAudit(unittest.TestCase):
             'tmux -L x has-session -t s && bash -c "tmux kill-server"\n'})
         self.assertEqual((counts["kill_all"], counts["kill_unsafe"]), (1, 1), out)
 
+    def test_bash_c_inside_command_substitution_does_not_hide_kill(self):
+        for text in ('tmux -L x has-session -t s $(bash -c "tmux kill-server")\n',
+                     'tmux -L x has-session -t s "$(bash -c \'tmux kill-server\')"\n'):
+            with self.subTest(text=text):
+                counts, out = self.audit(**{"run-X.sh": text})
+                self.assertEqual((counts["kill_all"], counts["kill_unsafe"]), (1, 1), out)
+
     def test_colon_before_kill_word_fails_closed_without_crashing(self):
         counts, out = self.audit(**{"run-X.sh": 'bash -c "tmux a:kill-server"\n'})
         self.assertEqual((counts["kill_all"], counts["kill_unsafe"]), (1, 1), out)

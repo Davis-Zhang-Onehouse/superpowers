@@ -1221,6 +1221,15 @@ KILL_WORDS = ("kill-server", "kill-session")
 def is_operand(tokens, i):
     """Whether tokens[i] is the VALUE of a tmux option (`-S x`, `-uS x`, `-L x`, `-c`, `-f`, `-T`), not a command."""
     prev = tokens[i - 1] if i > 0 else ""
+    if prev == "-c":
+        # A shell's -c owns its operand even inside $(...) or backquotes. Only tmux's own
+        # -c can make a following word an option value of the tmux invocation.
+        for earlier in reversed(tokens[:i - 1]):
+            if earlier in ("bash", "sh", "dash", "zsh", "python", "python3"):
+                return False
+            if earlier in ("tmux", "it_tmux") or earlier.endswith("/tmux"):
+                return True
+        return False
     return prev.startswith("-") and not prev.startswith("--") and prev[1:].isalnum() and prev[-1] in "cfLST"
 
 
