@@ -747,6 +747,23 @@ class RuntimeTmuxKillAudit(unittest.TestCase):
                 self.assertEqual(self.tmux(*args, env=env).returncode, 97)
         self.assertFalse(calls.exists(), "a kill reached fake real-tmux")
 
+    def test_shell_semicolon_is_data_but_tmux_separator_is_classified(self):
+        env, calls = self.recording_tmux()
+        benign = self.tmux("-L", "own", "new-session", "-d", "-s", "mine",
+                           "bash -c 'cat x; exec sleep 100000'", env=env)
+        self.assertEqual(benign.returncode, 0, benign.stderr)
+        self.assertTrue(any(json.loads(line)[-1] == "bash -c 'cat x; exec sleep 100000'"
+                            for line in calls.read_text().splitlines()))
+        count = len(calls.read_text().splitlines())
+        for separator in (";", "\\;"):
+            with self.subTest(separator=separator):
+                denied = self.tmux("-L", "own", "list-sessions", separator,
+                                   "kill-server", env=env)
+                self.assertEqual(denied.returncode, 97, denied.stderr)
+                self.assertEqual(len(calls.read_text().splitlines()), count)
+        allowed = self.tmux("-L", "own", "list-sessions", ";", "has-session", env=env)
+        self.assertEqual(allowed.returncode, 0, allowed.stderr)
+
     def test_own_server_and_exact_session_kills_are_logged_and_allowed(self):
         started = self.tmux("-L", "own", "new-session", "-d", "-s", "mine", "sleep 30")
         self.assertEqual(started.returncode, 0, started.stderr)

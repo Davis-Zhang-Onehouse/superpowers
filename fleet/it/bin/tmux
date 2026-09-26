@@ -77,8 +77,25 @@ def can_dispatch_commands(command, rest):
     # execute commands supplied as arguments or from a file; their effect is not proved by argv[0].
     dispatchers = ("source-file", "if-shell", "confirm-before", "run-shell", "bind-key",
                    "set-hook", "command-prompt", "display-menu", "display-popup")
-    return any(";" in arg for arg in rest) or bool(command and any(
+    return bool(command and any(
         name.startswith(command) for name in dispatchers))
+
+
+def split_tmux_commands(rest):
+    """A shell command's semicolon is data; only a whole tmux separator splits argv."""
+    parts = [[]]
+    for arg in rest:
+        if arg in (";", r"\;"):
+            parts.append([])
+        else:
+            parts[-1].append(arg)
+    return parts
+
+
+def readonly_command(command):
+    return command in ("has-session", "list-sessions", "list-windows", "list-panes",
+                       "list-clients", "ls", "lsc", "lsw", "lsp", "display-message",
+                       "capture-pane", "show-options", "show-window-options", "show-environment")
 
 
 def server_pid(real, socket):
@@ -144,8 +161,13 @@ def main():
         for directory in dirs)
     destructive = command in ("kill-server", "kill-session")
     creates = command in ("new-session", "new")
-    indirect = can_dispatch_commands(command, rest)
-    hidden_kills = nested_kills(rest) if indirect else []
+    segments = split_tmux_commands(rest)
+    indirect = can_dispatch_commands(command, segments[0])
+    compound_unsafe = any(not part or not readonly_command(part[0]) or
+                          can_dispatch_commands(part[0], part[1:]) for part in segments[1:])
+    hidden_kills = nested_kills([word for part in segments[1:] for word in part]) if compound_unsafe else []
+    if indirect:
+        hidden_kills.extend(nested_kills(segments[0]))
     row = {"argv": argv, "socket": socket, "command": command,
            "target": option(rest, "-t"), "decision": "allow", "reason": ""}
     if not ledger:
@@ -198,7 +220,7 @@ def main():
                     row.update(decision="deny", reason="session kill has unaudited options")
                 elif creates and not option(rest, "-s"):
                     row.update(decision="deny", reason="new session has no auditable name")
-            if indirect:
+            if indirect or compound_unsafe:
                 row.update(decision="deny", reason="compound or server-side command dispatch is unauditable")
             if row["decision"] == "deny":
                 denied_rows = [dict(row, status=97)]
