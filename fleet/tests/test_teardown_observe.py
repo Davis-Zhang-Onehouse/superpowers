@@ -273,6 +273,17 @@ class ForegroundIsProcessEvidence(_Teardown):
                 self._pane(fleet, "blind", frame, None)
                 self.assertEqual(self._close(fleet, "blind")[0], EXIT_REFUSED)
 
+    def test_an_interpreter_foreground_is_unobservable_not_proof_of_no_agent(self):
+        """v23-q OR-1. An interpreter's name says nothing about the program it runs — codex's npm wrapper reads `node`,
+        an npm-installed claude may too — so it fails closed like an unanswered tmux, for either runtime."""
+        for runtime in ("claude", "codex"):
+            for foreground in (["node"], ["python3"], ["bun"]):
+                with self.subTest(runtime=runtime, foreground=foreground):
+                    fleet = self.fleet()
+                    self._pane(fleet, "interp", MARKERLESS["empty-capture-mid-redraw"], foreground, runtime=runtime)
+                    self.assertEqual(self._close(fleet, "interp")[0], EXIT_REFUSED)
+                    self.assertEqual(fleet.killed, [])
+
     def test_a_pane_tmux_says_is_not_the_agent_still_closes(self):
         """Neighbour: the same screens under a positively non-agent foreground (a shell, a sleep) are shape 3."""
         for label, frame in MARKERLESS.items():
@@ -286,10 +297,14 @@ class ForegroundIsProcessEvidence(_Teardown):
 
     def test_an_unattributed_codex_foreground_with_an_unlocatable_box_is_refused(self):
         """RV-18. The codex twin: the footer is codex's, the caret is not locatable, tmux says `codex` runs there."""
-        fleet = self.fleet()
-        self._pane(fleet, "cx", _codex_caret_redrawn(), ["codex"], runtime="codex")
-        self.assertEqual(self._pane_guard(fleet, "cx"), cli.PANE_INDETERMINATE)
-        self.assertEqual(self._close(fleet, "cx")[0], EXIT_REFUSED)
+        #: v23-q OR-1. This box's codex is the npm wrapper (`#!/usr/bin/env node` spawning the native binary in its own
+        #: process group), so tmux — which reports the group leader — reads a real codex pane's foreground as `node`.
+        for foreground in (["codex"], ["node"], ["bash", "node"]):
+            with self.subTest(foreground=foreground):
+                fleet = self.fleet()
+                self._pane(fleet, "cx", _codex_caret_redrawn(), foreground, runtime="codex")
+                self.assertEqual(self._pane_guard(fleet, "cx"), cli.PANE_INDETERMINATE)
+                self.assertEqual(self._close(fleet, "cx")[0], EXIT_REFUSED)
         fleet = self.fleet()
         self._pane(fleet, "cxs", _codex_caret_redrawn(), ["bash"], runtime="codex")
         self.assertEqual(self._close(fleet, "cxs")[0], EXIT_OK, "a codex-looking screen over a shell is shape 3")
