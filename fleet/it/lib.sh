@@ -249,13 +249,25 @@ it_guard_server() {       # it_guard_server <runner-pid> <socket>
   IT_GUARD_LAST_TOKENFILES[$sock]="$tokenfile"
   IT_GUARD_LAST_TOKENS[$sock]="$token"
   python3 -c '
-import atexit, os, subprocess, sys, time
-sock, directory, tokenfile, token, expected_parent = sys.argv[2:7]
+import atexit, os, shutil, subprocess, sys, time
+sock, directory, tokenfile, token, expected_parent, cleanup_dir = sys.argv[2:8]
+parent_exited = False
+try:
+    cleanup_armed = os.stat(cleanup_dir) if cleanup_dir else None
+except OSError:
+    cleanup_armed = None
 def cleanup_token():
     try:
         with open(tokenfile, encoding="ascii") as stream:
             if stream.read().strip() == token:
                 os.unlink(tokenfile)
+                if parent_exited and cleanup_armed is not None:
+                    try:
+                        current = os.stat(cleanup_dir)
+                        if (current.st_dev, current.st_ino) == (cleanup_armed.st_dev, cleanup_armed.st_ino):
+                            shutil.rmtree(cleanup_dir)
+                    except OSError:
+                        pass
     except OSError:
         pass
 atexit.register(cleanup_token)
@@ -272,6 +284,7 @@ except OSError:
     sys.exit(0)
 while os.getppid() == parent:
     time.sleep(2)
+parent_exited = True
 try:
     current = os.stat(directory)
 except OSError:
@@ -286,7 +299,7 @@ except OSError:
     sys.exit(0)
 subprocess.run(["tmux", "-S", os.path.join(directory, "tmux-" + str(os.getuid()), sock), "kill-server"],
                stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
-  ' it-guardian "$sock" "$dir" "$tokenfile" "$token" "$expected_parent" </dev/null >/dev/null 2>&1 &
+  ' it-guardian "$sock" "$dir" "$tokenfile" "$token" "$expected_parent" "${IT_TMUX_OWN_TMPDIR:-}" </dev/null >/dev/null 2>&1 &
   printf '%s\n' "$!" > "$pidfile"
   disown 2>/dev/null || true
 }
@@ -343,6 +356,7 @@ it_section() {            # it_section <name> -> own FLEET_HOME, own slots, own 
     return 2
   fi
   SECTION="$1"
+  IT_TMUX_OWN_TMPDIR=""
   IT_TMUX_AUDIT_CASE_SECTION="$SECTION"
   local suffix="${SECTION##*-}"
   case "$suffix" in ''|*[!0-9]*) ;; *) IT_TMUX_AUDIT_CASE_SECTION="${SECTION%-*}" ;; esac
@@ -383,6 +397,7 @@ it_section() {            # it_section <name> -> own FLEET_HOME, own slots, own 
     fi
     mkdir -p "$socket_root"
     TMUX_TMPDIR="$(mktemp -d "$socket_root/itk-$SECTION.XXXXXX")" || return 1
+    IT_TMUX_OWN_TMPDIR="$TMUX_TMPDIR"
   fi
   export TMUX_TMPDIR
   IT_TMUX_AUDIT_LEDGER="$EV/tmux-audit.jsonl"; export IT_TMUX_AUDIT_LEDGER

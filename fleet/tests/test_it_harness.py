@@ -821,6 +821,26 @@ sys.exit(0)
         finally:
             slow.wait(timeout=4)
 
+    def test_guardian_removes_generated_section_socket_directory(self):
+        env, calls = self.recording_tmux()
+        tmp = self.tmp / "harness"
+        it = harness_copy(tmp)
+        marker = self.tmp / "socket-dir"
+        script = (f'. "{it}/lib.sh"\n'
+                  f'it_section X\n'
+                  f'printf "%s\\n" "$TMUX_TMPDIR" > "{marker}"\n')
+        finished = run_bash(script, tmp, env={"IT_TMUX_REAL": env["IT_TMUX_REAL"],
+                                               "FAKE_TMUX_RECORD": str(calls),
+                                               "FLEET_SUITE_TRIPWIRE": ""}, home=self.tmp / "home")
+        self.assertEqual(finished.returncode, 0, finished.stderr)
+        directory = pathlib.Path(marker.read_text().strip())
+        self.assertTrue(directory.name.startswith("itk-X."), directory)
+        for _ in range(50):
+            if not directory.exists():
+                break
+            time.sleep(0.1)
+        self.assertFalse(directory.exists(), directory)
+
     def test_end_of_options_and_combined_socket_flags_cannot_hide_a_kill(self):
         env, calls = self.recording_tmux()
         for args in (("-L", "default", "--", "kill-server"), ("--", "kill-server"),
