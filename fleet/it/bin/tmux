@@ -28,6 +28,8 @@ def parse(argv):
                     name = value
                 break
         i += 1
+    if i < len(argv) and argv[i] == "--":
+        i += 1
     command = argv[i] if i < len(argv) else ""
     # tmux accepts unique command prefixes. Treat even an ambiguous kill prefix as destructive;
     # real tmux may reject it, but the audit must never pass a recognized kill spelling through.

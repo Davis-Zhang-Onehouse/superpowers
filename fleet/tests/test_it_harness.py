@@ -727,6 +727,26 @@ class RuntimeTmuxKillAudit(unittest.TestCase):
     def tmux(self, *args, env=None):
         return subprocess.run([str(self.shim), *args], env=env or self.env, text=True, capture_output=True)
 
+    def recording_tmux(self):
+        """A fake real-tmux that records argv and never contacts a tmux server."""
+        fake = self.tmp / "recording-tmux"
+        calls = self.tmp / "recorded-argv.jsonl"
+        fake.write_text('#!/usr/bin/env python3\nimport json, os, sys\n'
+                        'with open(os.environ["FAKE_TMUX_RECORD"], "a") as f:\n'
+                        '    f.write(json.dumps(sys.argv[1:]) + "\\n")\n')
+        fake.chmod(0o755)
+        return dict(self.env, IT_TMUX_REAL=str(fake), FAKE_TMUX_RECORD=str(calls)), calls
+
+    def test_end_of_options_and_combined_socket_flags_cannot_hide_a_kill(self):
+        env, calls = self.recording_tmux()
+        for args in (("-L", "default", "--", "kill-server"), ("--", "kill-server"),
+                     ("-Lfleet", "--", "kill-ser"), ("-2L", "default", "--", "kill-session"),
+                     ("-uS", str(self.tmp / "outside"), "--", "kill-server"),
+                     ("-L", "own", "-S", str(self.tmp / "outside"), "--", "kill-server")):
+            with self.subTest(args=args):
+                self.assertEqual(self.tmux(*args, env=env).returncode, 97)
+        self.assertFalse(calls.exists(), "a kill reached fake real-tmux")
+
     def test_own_server_and_exact_session_kills_are_logged_and_allowed(self):
         started = self.tmux("-L", "own", "new-session", "-d", "-s", "mine", "sleep 30")
         self.assertEqual(started.returncode, 0, started.stderr)
