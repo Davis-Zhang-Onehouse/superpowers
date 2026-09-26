@@ -4272,11 +4272,12 @@ def _launch_bound(launched_at):
 
 def _own_snapshot(ctx: Ctx, record) -> dict:
     """`V23-H`. `{pid: start}` of the slot holders that are the LIVE session's own processes, read before the kill: the
-    ones among them that survive it (their own session, no tty) are the session's, and `orphans` reaps them by this."""
+    ones among them that survive it (their own session, no tty) are the session's, and `orphans` reaps them by this.
+    Empty for a session another record owns (V23-T): the verb does not kill it, and its processes are not this one's."""
     if record is None or not record.slot or not record.tmux:
         return {}
     layer = ctx.sessions_for(record)
-    if not layer.facts_observable() or not layer.alive(record.tmux):
+    if not layer.facts_observable() or not _owns_live_session(ctx, record, layer):
         return {}
     own = layer.own_processes(record.tmux, ctx.pool.cwd_holders(record.slot)) or set()
     return {pid: fact.start for pid in own if (fact := layer.proc_facts(int(pid))) is not None}
