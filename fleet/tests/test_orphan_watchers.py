@@ -862,6 +862,88 @@ class RealOrphanPipeline(CliCase):
                          "a refusing harvest signalled a real process")
         self.assertIsNotNone(fleet.pool.lease("ws1"))
 
+    def test_a_holder_of_ws10_is_not_a_holder_of_ws1(self):
+        """v23-h M-5(c). Holders are found by resolved-path EQUALITY (`_cwd_holders`), never by prefix: a naming orphan
+        with the worker's own FLEET_INSTANT, sitting in `ws10`, is not in `ws1` and is never signalled by its harvest."""
+        from fleet import cli
+        fleet, watcher = self.real_fleet()
+        ws10 = fleet.pool.slot_path("ws1").parent / "ws10"
+        ws10.mkdir()
+        neighbour = _spawn_orphan(ws10, watcher, instant=self.inflight)
+        self.roots.append(neighbour)
+        before = _session_members(neighbour)
+        self.assertGreaterEqual(len(before), 3, "control: the fixture pipeline did not start")
+        self.assertIn(neighbour, cli._cwd_holders(ws10), "control: the neighbour holds ws10")
+        self.assertNotIn(neighbour, cli._cwd_holders(fleet.pool.slot_path("ws1")))
+        code, out, err = fleet.run(["harvest", "--id", fleet.ids["realDone"]])
+        self.assertEqual(code, EXIT_OK, out + err)
+        self.assertEqual(_session_members(neighbour), before, "a process in ws10 was signalled by ws1's harvest")
+
+    def test_a_symlinked_instant_spelling_is_this_instant(self):
+        """v23-h M-5(d). The record names the instant through a symlinked directory (as dispatched); the watcher's
+        FLEET_INSTANT and argv carry either that spelling or the resolved one. Both are this instant's and reaped."""
+        from fleet import cli
+        for spelled in ("as-recorded", "resolved"):
+            with self.subTest(spelled=spelled):
+                fleet = self.fleet()
+                real = default_probes(tmux_socket="itfleet-v23h-unused")
+                fleet.sessions.probes.proc_facts = real.proc_facts
+                fleet.sessions.probes.signal_pid = real.signal_pid
+                fleet.pool._cwd_probe = cli._cwd_holders
+                path = fleet.worker("linkDone", state="complete", slot="ws1", pane=IDLE_PANE, live=False)
+                fleet.reviewed(path)
+                link = fleet.tmp / "instants-link"
+                link.symlink_to(fleet.instants, target_is_directory=True)
+                rec = fleet.store.read(fleet.ids["linkDone"])
+                rec.child_instant = str(link / path.name)
+                fleet.store.write(rec)
+                base = link if spelled == "as-recorded" else fleet.instants.resolve()
+                inflight = str(base / path.name.replace("-complete-", "-inflight-"))
+                ours = _spawn_orphan(fleet.pool.slot_path("ws1"),
+                                     f"tail -n0 -F {inflight}/evidence/INDEX.md | grep --line-buffered DONE",
+                                     instant=inflight)
+                self.roots.append(ours)
+                members = _session_members(ours)
+                self.assertGreaterEqual(len(members), 3, "control: the fixture pipeline did not start")
+                code, out, err = fleet.run(["harvest", "--id", fleet.ids["linkDone"]])
+                self.assertEqual(code, EXIT_OK, out + err)
+                self.assertEqual(_session_members(ours), [], "the symlink-spelled watcher is still alive")
+
+    @unittest.skipUnless(shutil.which("tmux"), "needs tmux on PATH")
+    def test_a_real_tmux_server_started_in_the_slot_is_never_signalled(self):
+        """v23-h M-5(b). A PRIVATE tmux server (its own socket under a mkdtemp dir) started from inside the slot with the
+        worker's FLEET_INSTANT, after the launch, its command naming the instant: detached, orphaned, late and ours by
+        environment — every by-name condition but one. Its pane is a live child in another session. harvest refuses
+        and signals nothing; the server and its pane live on."""
+        import tempfile
+        fleet, _ = self.real_fleet()
+        sockdir = tempfile.mkdtemp(prefix="itfleet-v23h-m5-")
+        sock = os.path.join(sockdir, "s")
+        tmux = ["tmux", "-S", sock]
+
+        def retire():
+            subprocess.run(tmux + ["kill-server"], capture_output=True)
+            shutil.rmtree(sockdir, True)
+        self.addCleanup(retire)
+        subprocess.run(tmux + ["new-session", "-d", "-s", "m5", "-c", str(fleet.pool.slot_path("ws1")),
+                               f"sleep 900 # {self.inflight}/evidence/INDEX.md"],
+                       cwd=str(fleet.pool.slot_path("ws1")), check=True, capture_output=True, start_new_session=True,
+                       env=dict(os.environ, FLEET_INSTANT=self.inflight))
+        server = int(subprocess.run(tmux + ["display-message", "-p", "-t", "m5", "#{pid}"], capture_output=True,
+                                    text=True, check=True).stdout)
+        pane = int(subprocess.run(tmux + ["display-message", "-p", "-t", "m5", "#{pane_pid}"], capture_output=True,
+                                  text=True, check=True).stdout)
+        from fleet import cli
+        before = (_stat(server)[19], _stat(pane)[19])
+        self.assertEqual(_stat(server)[1], "1", "control: the server is orphaned to init")
+        self.assertLessEqual({server, pane}, set(cli._cwd_holders(fleet.pool.slot_path("ws1"))),
+                             "control: the server and its pane hold the slot")
+        code, out, err = fleet.run(["harvest", "--id", fleet.ids["realDone"]])
+        self.assertEqual(code, EXIT_REFUSED, out + err)
+        self.assertEqual((_stat(server)[19], _stat(pane)[19]), before, "the tmux server or its pane was signalled")
+        self.assertIn(f"kill -TERM {server}  # it has live children outside the unit ({pane})", err)
+        self.assertIsNotNone(fleet.pool.lease("ws1"))
+
 
 class CompleteWarns(CliCase):
     """`complete` lists the worker's live watchers — slot holders naming its own instant — and still completes. It never
