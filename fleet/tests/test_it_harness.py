@@ -79,6 +79,35 @@ class LiveStoreSnapshot(unittest.TestCase):
                                 pathlib.Path(result.stdout.split("snapshot=")[-1].strip()).resolve())
 
 
+class MFixtureLifetime(unittest.TestCase):
+    """The §M pane fixture lives until the section tears its server down."""
+
+    def test_m_worker_does_not_expire_when_sleep_returns(self):
+        source = (IT / "run-group5.sh").read_text()
+        line = next(line for line in source.splitlines()
+                    if line.strip().startswith('it_tmux_new "itfleet-M-worker" '))
+        with tempfile.TemporaryDirectory(prefix="itf-", dir="/tmp") as tmp_name:
+            tmp = pathlib.Path(tmp_name)
+            sleep = tmp / "sleep"
+            sleep.write_text("#!/bin/sh\nexit 0\n")
+            sleep.chmod(0o755)
+            extract = subprocess.run(["bash", "-c", 'it_tmux_new() { printf "%s" "$2"; }; ' + line],
+                                     capture_output=True, text=True, check=True)
+            env = clean_env({"PATH": f"{tmp}:{os.environ['PATH']}"})
+            fixture = subprocess.Popen(["sh", "-c", extract.stdout], env=env, start_new_session=True,
+                                       stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL,
+                                       stderr=subprocess.DEVNULL)
+            try:
+                time.sleep(0.3)
+                self.assertIsNone(fixture.poll(), "§M fixture ended before section teardown")
+            finally:
+                try:
+                    os.killpg(fixture.pid, signal.SIGTERM)
+                except ProcessLookupError:
+                    pass
+                fixture.wait(timeout=5)
+
+
 class WrapperExecutable(unittest.TestCase):
     """B18. The wrapper must be reachable from the harness's own idioms — `timeout`, `env -u`, `exec` — which
     cannot invoke a bash function, and it must be the harness's one SUBPROCESS route to the product. RED:
