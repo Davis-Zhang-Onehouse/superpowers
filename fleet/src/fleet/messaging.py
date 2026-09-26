@@ -68,7 +68,7 @@ def _squash(text) -> str:
     return " ".join(str(text or "").split())
 
 
-def confirms(runtime, draft, text) -> Optional[str]:
+def confirms(runtime, draft, text, width=None) -> Optional[str]:
     """How the observed `draft` confirms that `text` is what the box holds, or None when it does not.
 
     Two shapes confirm (FB-27). The draft IS the text, modulo the whitespace a TUI rearranges — the strong
@@ -76,10 +76,12 @@ def confirms(runtime, draft, text) -> Optional[str]:
     Claude Code shows `[Pasted text #N +M lines]` for 4+ lines (M = newlines), codex `[Pasted Content C
     chars]` above ~1000 characters — measured, `runtime.paste_placeholder`. A placeholder whose counts
     disagree is somebody else's paste, or a concatenation, and confirms nothing.
+
+    `width` is the box's text width as `observe` read it off the frame (S6 OR-1); without it no tail confirms.
     """
     if draft and _squash(draft) == _squash(text):
         return CONFIRMED_BY_DRAFT
-    if runtime == "claude" and _is_scrolled_tail(draft, text):
+    if runtime == "claude" and width and _is_scrolled_tail(draft, text, width):
         return CONFIRMED_BY_DRAFT_TAIL
     placeholder = paste_placeholder(runtime, draft)
     if placeholder is not None and placeholder.describes(text):
@@ -89,7 +91,7 @@ def confirms(runtime, draft, text) -> Optional[str]:
     return None
 
 
-def _is_scrolled_tail(draft, text) -> bool:
+def _is_scrolled_tail(draft, text, width) -> bool:
     """Whether `draft` is what a scrolled claude box shows of `text`: at least `TAIL_MIN_ROWS` rows whose words
     are the message's LAST words, starting at a word boundary (claude wraps at words, so a scrolled view begins
     on one). Not a prefix: a paste still arriving shows its head, and a view that ends before our last word is
@@ -106,19 +108,18 @@ def _is_scrolled_tail(draft, text) -> bool:
     #: RV-8. A suffix is not yet a SCROLLED view: a box that lost its head and re-wrapped what was left is a suffix too,
     #: and Enter would submit it truncated. A scrolled view shows the message's own last rows, so the visible rows
     #: must be exactly the last rows of the whole message wrapped at one width. Claude Code wraps greedily at word
-    #: boundaries: every real scrolled frame re-wraps this way (80 columns -> width 76). RV-25, what still passes:
-    #: greedy wrapping resynchronises, so a head loss whose re-wrap re-converges before the visible rows ends in the
-    #: very same rows (the known-accept case in test_what_a_tail_is_not), and so does a loss that lines up at some
-    #: other width in the scanned range. No frame can tell either from a scroll; the rest are refused.
+    #: boundaries: every real scrolled frame re-wraps this way (80 columns -> width 76). S6 OR-1: that width is the
+    #: box's own, read off its border — scanning every width let a head loss that lined up at SOME width through
+    #: (19 of 63 on a 3-row box, against 5 of 63 at 76). RV-25, what still passes: greedy wrapping resynchronises,
+    #: so a head loss whose re-wrap re-converges before the visible rows ends in the very same rows (the
+    #: known-accept case in test_what_a_tail_is_not). No frame can tell that from a scroll; the rest are refused.
     #: RV-27. Rows are compared as drawn, spacing kept: Claude Code draws a run of spaces as typed (measured:
     #: "nine.  Two"), and its rows break earlier than a squashed wrap would.
     rows = [row.strip() for row in draft.split("\n")]
     #: RV-24. Each hard line wraps on its own (measured: a tall 2-line box shows its last line's rows), so the
-    #: message's rows are its lines' rows, in order. A width past the longest line wraps nothing, so no wider one
-    #: can draw anything new.
+    #: message's rows are its lines' rows, in order.
     lines = text.strip().split("\n")
-    longest = max(map(len, lines))
-    return any(_rows(lines, width)[-len(rows):] == rows for width in range(max(map(len, rows)), longest + 2))
+    return _rows(lines, width)[-len(rows):] == rows
 
 
 def _rows(lines, width) -> list:
@@ -269,7 +270,7 @@ def send(home, sessions, record, text, *, timeout_s=10.0, clock=time.monotonic,
             while True:
                 observation = sessions.observe(record.tmux)
                 if observation.state in ('queued', 'busy'):
-                    confirmation = confirms(runtime, observation.draft, text) or ""
+                    confirmation = confirms(runtime, observation.draft, text, observation.width) or ""
                     if confirmation == CONFIRMED_BY_DRAFT_TAIL:
                         #: FB-134. The tail cannot show the head, so it must hold still: a frame taken
                         #: TAIL_SETTLE_S later has to show the SAME tail before any Enter. An exact draft needs no
@@ -305,7 +306,7 @@ def send(home, sessions, record, text, *, timeout_s=10.0, clock=time.monotonic,
                     outcome = UNCERTAIN_AFTER_ENTER
                     raise FleetError('Delivery uncertain after Enter; inspect the worker before retrying')
                 if clock() >= deadline:
-                    if observation.draft and confirms(runtime, observation.draft, text):
+                    if observation.draft and confirms(runtime, observation.draft, text, observation.width):
                         if not retried:
                             # The first Enter may have landed during the wait. Check the pane
                             # again immediately before retrying; a dialog or another draft
@@ -314,7 +315,7 @@ def send(home, sessions, record, text, *, timeout_s=10.0, clock=time.monotonic,
                             if latest.state in ('busy', 'idle') and not latest.draft:
                                 outcome = (QUEUED_BEHIND_TURN if runtime == 'claude' else SUBMITTED_MID_TURN) if before.state == 'busy' else SUBMITTED
                                 break
-                            kind = confirms(runtime, latest.draft, text)
+                            kind = confirms(runtime, latest.draft, text, latest.width)
                             #: RV-11. A tail cannot show the head, so the retry needs the SAME tail twice, as the
                             #: first Enter did; two different tails that each confirm are not that evidence.
                             if (latest.state not in ('queued', 'busy') or not kind
