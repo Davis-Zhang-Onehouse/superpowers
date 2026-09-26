@@ -903,6 +903,19 @@ sys.exit(0)
                 self.assertEqual(result.returncode, 97, result.stderr)
         self.assertFalse(calls.exists(), "a dispatcher alias reached fake real-tmux")
 
+    def test_all_tmux_32a_template_commands_are_refused(self):
+        env, calls = self.recording_tmux()
+        for command in ("display-panes", "displayp", "choose-tree", "choose-client",
+                        "choose-buffer", "pipe-pane"):
+            with self.subTest(command=command):
+                result = self.tmux("-L", "own", command, "kill-server", env=env)
+                self.assertEqual(result.returncode, 97, result.stderr)
+        result = self.tmux("-L", "own", "detach-client", "-E", "kill-server", env=env)
+        self.assertEqual(result.returncode, 97, result.stderr)
+        grouped = self.tmux("-L", "own", "detach-client", "-aEkill-server", env=env)
+        self.assertEqual(grouped.returncode, 97, grouped.stderr)
+        self.assertFalse(calls.exists(), "a command-bearing operand reached fake real-tmux")
+
     def test_audit_summary_counts_a_refused_nonkill_command(self):
         tmp = self.tmp / "audit-summary"
         it = harness_copy(tmp)

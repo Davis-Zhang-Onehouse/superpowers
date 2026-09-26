@@ -53,8 +53,8 @@ def parse(argv):
 
 
 def canonical_command(command):
-    aliases = {"display": "display-message", "popup": "display-popup",
-               "menu": "display-menu"}
+    aliases = {"display": "display-message", "displayp": "display-panes",
+               "popup": "display-popup", "menu": "display-menu"}
     if command in aliases:
         return aliases[command]
     # tmux accepts unique command prefixes. Treat even an ambiguous kill prefix as destructive.
@@ -90,7 +90,9 @@ def can_dispatch_commands(command, rest):
     # A compound argv can execute a later command after the first one. These tmux commands can
     # execute commands supplied as arguments or from a file; their effect is not proved by argv[0].
     dispatchers = ("source-file", "if-shell", "confirm-before", "run-shell", "bind-key",
-                   "set-hook", "command-prompt", "display-menu", "display-popup")
+                   "set-hook", "command-prompt", "display-menu", "display-popup",
+                   "display-panes", "choose-tree", "choose-client", "choose-buffer",
+                   "pipe-pane", "detach-client")
     return bool(command and any(
         name.startswith(command) for name in dispatchers))
 
