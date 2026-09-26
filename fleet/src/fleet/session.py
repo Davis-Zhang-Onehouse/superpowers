@@ -163,6 +163,16 @@ def _interpreter(command: str) -> bool:
     return command.rstrip("0123456789.") in _INTERPRETERS
 
 
+def _accepts_timeout(probe) -> bool:
+    """Whether `probe` can be called with `timeout=` (S6 RV-S6H-1)."""
+    import inspect
+    try:
+        params = inspect.signature(probe).parameters.values()
+    except (TypeError, ValueError):
+        return False
+    return any(p.name == "timeout" or p.kind is inspect.Parameter.VAR_KEYWORD for p in params)
+
+
 @dataclass(frozen=True)
 class Attachment:
     """`B24`. INTERACTIVE clients attached to a session and the epoch of the last input one of them gave it,
@@ -323,11 +333,12 @@ class SessionLayer:
         this distinction rests whether a live pane may be destroyed.
 
         OR-5 (v23-p review). `timeout` (seconds) bounds a tmux that does not answer; the capture then FAILED
-        (None). Passed on only when given, so a probe without the parameter is still called as before.
+        (None). Passed on only when given AND only to a probe that declares the parameter (S6 RV-S6H-1: an injected
+        probe `lambda name: …` got a TypeError, which the launch watch swallowed as "could not be watched").
         """
         if not name:
             raise BadInput("a pane capture needs a session name")
-        if timeout is None:
+        if timeout is None or not _accepts_timeout(self.probes.capture_pane):
             return self.probes.capture_pane(name)
         return self.probes.capture_pane(name, timeout=timeout)
 

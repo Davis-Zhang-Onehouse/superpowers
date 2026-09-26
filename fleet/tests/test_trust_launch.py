@@ -423,7 +423,9 @@ class TestTheWatchLoop(unittest.TestCase):
 
     def test_the_real_trust_frame_is_recognised_after_one_step(self):
         ctx = FakeCtx()
-        with mock.patch("time.sleep", side_effect=AssertionError("a real sleep")):
+        #: S6 RV-S6H-2: the default window, whatever the caller exported (FLEET_TRUST_WATCH_SECONDS=0 failed this).
+        with mock.patch.dict(os.environ, {cli.TRUST_WATCH_SECONDS: "8"}), \
+                mock.patch("time.sleep", side_effect=AssertionError("a real sleep")):
             watch = cli._watch_launch(ctx, FakeLayer(["", TRUST_FRAME]), "dt-x", "claude")
         self.assertEqual("trust-screen", watch.outcome)
         self.assertEqual(TRUST_FRAME_PATH, watch.path)
