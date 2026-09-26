@@ -5,6 +5,7 @@ The layout cases are the MEASURED matrix, not an invented one: each `test_case_*
 the outcome Claude Code 2.1.282 actually showed there (`RESULT.tsv`, 12/12 AGREE). A `.claude.json` is only
 ever written inside the test's own temporary directory; nothing here reads the operator's config.
 """
+import tests  # noqa: F401 — installs the suite's host boundary when this module runs alone (FB-118)
 import json
 import os
 import subprocess
