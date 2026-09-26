@@ -68,14 +68,18 @@ class LiveStoreSnapshot(unittest.TestCase):
     def test_per_run_snapshot_is_gitignored(self):
         #: S6 (0.6.16 gate, coordinator D-141). Asked of the REPO's own .gitignore in a scratch git repo: the gate runs
         #: this suite in the release export, which has no .git, and `git -C <export> check-ignore` answered 128 there.
+        #: RV-33: only the repo's own rule may answer — a global core.excludesFile listing *.sha256 made the positive assert
+        #: pass without it, so git reads no global or system config here.
+        env = dict(os.environ, GIT_CONFIG_GLOBAL="/dev/null", GIT_CONFIG_NOSYSTEM="1")
         with tempfile.TemporaryDirectory(prefix="itf-ignore-", dir="/tmp") as tmp_name:
             tmp = pathlib.Path(tmp_name)
-            subprocess.run(["git", "init", "-q", str(tmp)], check=True, capture_output=True)
+            subprocess.run(["git", "init", "-q", str(tmp)], check=True, capture_output=True, env=env)
             shutil.copyfile(REPO / ".gitignore", tmp / ".gitignore")
             candidate = "fleet/it/live-stores-run-example.sha256"
-            result = subprocess.run(["git", "-C", str(tmp), "check-ignore", "-q", candidate], capture_output=True)
+            result = subprocess.run(["git", "-C", str(tmp), "check-ignore", "-q", candidate], capture_output=True, env=env)
             self.assertEqual(result.returncode, 0, "a normal IT run dirties the slot with a snapshot")
-            control = subprocess.run(["git", "-C", str(tmp), "check-ignore", "-q", "fleet/it/run-A.sh"], capture_output=True)
+            control = subprocess.run(["git", "-C", str(tmp), "check-ignore", "-q", "fleet/it/run-A.sh"], capture_output=True,
+                                     env=env)
             self.assertEqual(control.returncode, 1, "the check must be able to say NOT ignored (a runner is tracked)")
 
     def test_stale_snapshot_is_not_compared_on_new_run(self):
