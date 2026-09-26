@@ -3705,7 +3705,8 @@ def _do_propose(ctx: Ctx, parsed: Parsed) -> int:
         and refused, which is `H2`, the case Plan 6 specified for exactly this and which had never run; and
       * every proposal was attributed to the roadmap's own instant, so the inbox could not say who asked.
 
-    `--to` defaults to `--instant`, so the single-instant form a coordinator uses on itself is unchanged.
+    With no `--to`, origin.json names a dispatched worker's coordinator; an instant with no origin
+    still proposes into its own roadmap.
     """
     proposer = _instant(ctx, parsed)
     #: The destination roadmap, in a fixed order of authority, and WHICH ONE WON is reported. `SI-27`.
@@ -7685,7 +7686,9 @@ VERBS = {spec.name: spec for spec in (
     )),
     _verb("propose", _do_propose, False, "the WORKER's status proposal; never a roadmap write", (
         Flag("--instant", True, True, "the PROPOSING instant — its id is what attributes the proposal"),
-        Flag("--to", True, False, "the instant holding the roadmap to propose INTO; defaults to --instant"),
+        Flag("--to", True, False,
+             "the instant holding the roadmap to propose INTO; defaults to the dispatch origin's coordinator, "
+             "or --instant when there is no origin"),
         Flag("--milestone", True, True, "the milestone id"),
         Flag("--status", True, True, "blocked|ready|running|awaiting-ci|done|dropped"),
         Flag("--evidence", True, True, "an evidence path; repeatable, and at least one is required"),
