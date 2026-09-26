@@ -4476,6 +4476,20 @@ def _session_taken_by(ctx: Ctx, record):
     return _UnreadableOwner(hidden) if hidden else None
 
 
+def _refuse_an_unreadable_owner(ctx: Ctx, record, verb: str) -> None:
+    """S6 workspace review RV-30. When the only records that could own `record`'s session cannot be read, nothing is known
+    about whose it is: ending it, stamping this record over it, or saying it "belongs to" someone would each claim what was
+    never measured. Refused before anything is written, with the file to repair; `--force` does not override it."""
+    taken = _session_taken_by(ctx, record)
+    if getattr(taken, "unreadable", False):
+        raise Refused(
+            f"{verb} of {record.todo_id} refused before doing anything: whether session {record.tmux} is this record's "
+            f"cannot be decided, because {taken.todo_id} could own it and cannot be read. Nothing was closed, stamped, "
+            f"released or written.",
+            clears_when=f"{taken.todo_id} is repaired or removed from the store's records",
+            clears_who="the operator")
+
+
 class _UnreadableOwner:
     """S6 RV-S6S-3. The owner of a session when the only records that could own it cannot be read: every verb that
     asks `_session_taken_by` then leaves the session alone, and says why."""
@@ -4528,6 +4542,8 @@ def _refuse_a_guarded_pane(ctx: Ctx, record, child: Path, verb: str, parsed: Par
     end the same pane `close` ends and used to kill it unasked, discarding a turn in progress, a message somebody
     typed, or a decision on screen. `--force` is the override, as for `close`; it overrides this judgement about
     work in progress and nothing else — never the server check nor the cwd-holder gate (`B10`)."""
+    if record is not None:
+        _refuse_an_unreadable_owner(ctx, record, verb)
     if record is None or parsed.on("force") or _session_taken_by(ctx, record) is not None:
         return                  # V23-T: a pane that is somebody else's is not this verb's to judge, nor to end
     refusal = _pane_refusal(ctx, record, override)
@@ -4870,6 +4886,7 @@ def _do_close(ctx: Ctx, parsed: Parsed) -> int:
     _refuse_a_session_on_another_server(ctx, record)
     child, _ = _child_or_why(ctx, record)
     _refuse_live_complete_watcher(ctx, record, child, "close")
+    _refuse_an_unreadable_owner(ctx, record, "close")
     taken = _session_taken_by(ctx, record)
     refusal = None if parsed.on("force") or taken is not None else _pane_refusal(ctx, record)
 

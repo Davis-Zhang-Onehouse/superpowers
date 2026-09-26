@@ -843,10 +843,10 @@ class OneUnreadableRecordDoesNotStopATeardown(unittest.TestCase):
     the store there). The readable records decide; an unreadable record can own only `dt-<its title>`, and when it
     could, nothing is killed and the lease is kept."""
 
-    def _fleet(self, broken):
+    def _fleet(self, broken, state="abort"):
         fleet = Fleet()
         self.addCleanup(shutil.rmtree, fleet.tmp, True)
-        fleet.worker("solo", state="abort", slot="ws1", pane=IDLE_PANE)
+        fleet.worker("solo", state=state, slot="ws1", pane=IDLE_PANE)
         (fleet.home / "records" / f"{broken}.json").write_text("{ not json")
         return fleet
 
@@ -860,11 +860,28 @@ class OneUnreadableRecordDoesNotStopATeardown(unittest.TestCase):
         self.assertEqual(code, 0, f"rc={code}\n{out}\n{err}")
 
     def test_an_unreadable_record_that_could_own_the_session_fails_closed(self):
-        fleet = self._fleet("solo-09999999")                   # its title is `solo`: it could own dt-solo
-        code, out, err = fleet.run(["close", "--id", fleet.ids["solo"]])
-        self.assertEqual(code, 0, f"rc={code}\n{out}\n{err}")
-        self.assertNotIn("dt-solo", fleet.killed, "a session an unreadable record may own was killed")
-        self.assertIn("an unreadable record (solo-09999999.json)", out)
+        #: S6 workspace review RV-30. It used to close rc 0, stamp closed_at and print the loser note ("started after …, its
+        #: own session is already gone") — two claims nothing measured. An owner that cannot be read now REFUSES, stamps
+        #: nothing, and names the file to repair; `--force` does not override it (it is not a judgement about a pane).
+        for argv in (["close", "--id"], ["close", "--force", "--id"]):
+            fleet = self._fleet("solo-09999999")               # its title is `solo`: it could own dt-solo
+            code, out, err = fleet.run(argv + [fleet.ids["solo"]])
+            self.assertEqual(code, 4, f"{argv} rc={code}\n{out}\n{err}")
+            self.assertNotIn("dt-solo", fleet.killed, "a session an unreadable record may own was killed")
+            self.assertIn("solo-09999999.json", out + err)
+            self.assertNotIn("already gone", out + err)
+            self.assertIsNone(fleet.store.read(fleet.ids["solo"]).closed_at, "the record was stamped closed")
+        fleet = self._fleet("solo-09999999", state="inflight")
+        child = fleet.store.read(fleet.ids["solo"]).child_instant
+        #: abort resolves its record through the whole store, which already refuses the torn file (rc 2, naming it) before
+        #: this check is reached; either refusal is fail-closed and names the file. (harvest --id meets its review gate first
+        #: in this fixture, so it is not a probe of this path; it shares abort's pre-kill guard, _refuse_a_guarded_pane.)
+        for argv in (["abort", "--instant", child, "--reason", "x"],):
+            for dry in (["--dry-run"], []):
+                code, out, err = fleet.run(argv + dry)
+                self.assertIn(code, (2, 4), f"{argv + dry} rc={code}\n{out}\n{err}")
+                self.assertIn("solo-09999999.json", out + err)
+                self.assertNotIn("dt-solo", fleet.killed)
         fleet = self._fleet("solo-09999999")
         code, out, err = fleet.run(["reap", "--all"])
         self.assertEqual(code, 0, f"rc={code}\n{out}\n{err}")
