@@ -725,7 +725,7 @@ class RuntimeTmuxKillAudit(unittest.TestCase):
     """The PATH command must refuse dangerous kills before invoking real tmux."""
 
     def setUp(self):
-        self.tmp = pathlib.Path(tempfile.mkdtemp(prefix="it-kill-audit-"))
+        self.tmp = pathlib.Path(tempfile.mkdtemp(prefix="it-kill-audit-", dir="/tmp"))  # FB-131: short socket paths
         self.addCleanup(shutil.rmtree, self.tmp, True)
         self.private = self.tmp / "private"
         self.private.mkdir()
@@ -1594,7 +1594,7 @@ class NestedSelftestTmuxBoundary(unittest.TestCase):
             os.environ.update(before)
 
     def test_section_refuses_when_runtime_shim_is_missing(self):
-        tmp = pathlib.Path(tempfile.mkdtemp(prefix="it-missing-shim-"))
+        tmp = pathlib.Path(tempfile.mkdtemp(prefix="it-missing-shim-", dir="/tmp"))  # FB-131: short socket paths
         self.addCleanup(shutil.rmtree, tmp, True)
         it = harness_copy(tmp)
         (it / "bin" / "tmux").unlink()
@@ -1602,7 +1602,7 @@ class NestedSelftestTmuxBoundary(unittest.TestCase):
         self.assertNotEqual(result.returncode, 0, result.stdout + result.stderr)
 
     def test_dynamic_section_rerun_replaces_its_kill_audit_row(self):
-        tmp = pathlib.Path(tempfile.mkdtemp(prefix="it-audit-rerun-"))
+        tmp = pathlib.Path(tempfile.mkdtemp(prefix="it-audit-rerun-", dir="/tmp"))  # FB-131: short socket paths
         self.addCleanup(shutil.rmtree, tmp, True)
         it = harness_copy(tmp)
         results = tmp / "results.tsv"
@@ -1616,7 +1616,7 @@ class NestedSelftestTmuxBoundary(unittest.TestCase):
         self.assertEqual(len(rows), 1, rows)
 
     def test_fresh_results_file_claims_its_kill_audit_row(self):
-        tmp = pathlib.Path(tempfile.mkdtemp(prefix="it-audit-fresh-"))
+        tmp = pathlib.Path(tempfile.mkdtemp(prefix="it-audit-fresh-", dir="/tmp"))  # FB-131: short socket paths
         self.addCleanup(shutil.rmtree, tmp, True)
         it = harness_copy(tmp)
         results = tmp / "new-results.tsv"
@@ -1628,8 +1628,30 @@ class NestedSelftestTmuxBoundary(unittest.TestCase):
         self.assertIn("KILL-AUDIT-X\tPASS", rows)
         self.assertNotIn("OWN-KILL-AUDIT-X", rows)
 
+    def test_deep_checkout_short_root_ignores_a_long_tmpdir(self):
+        # FB-131 remainder (D-131): the fallback used ${TMPDIR:-/tmp}, so a long TMPDIR made the "short"
+        # root as long as the one it replaced and it_section refused.
+        tmp = pathlib.Path(tempfile.mkdtemp(prefix="itf-", dir="/tmp"))
+        self.addCleanup(shutil.rmtree, tmp, True)
+        deep = tmp / ("nested" * 15) / "owner"
+        deep.mkdir(parents=True)
+        it = harness_copy(deep)
+        long_tmpdir = tmp / ("t" * 120)
+        long_tmpdir.mkdir()
+        body = (f'. "{it}/lib.sh"\nit_section X\n'
+                'it_tmux new-session -d -s mine "sleep 30"\n'
+                'it_tmux kill-server\n')
+        result = run_bash(body, deep, env={"FLEET_SUITE_TRIPWIRE": "", "TMUX_TMPDIR": "",
+                                           "IT_TMUX_AUDIT_SHORT_ROOT": "", "TMPDIR": str(long_tmpdir)},
+                          home=tmp / "home")
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        rows = [json.loads(line) for line in (it / "X" / "tmux-audit.jsonl").read_text().splitlines()]
+        sockets = [row["socket"] for row in rows if row["command"] in ("new-session", "kill-server")]
+        self.assertTrue(sockets, rows)
+        self.assertTrue(all(sock.startswith("/tmp/itk-X.") for sock in sockets), sockets)
+
     def test_deep_checkout_uses_short_private_socket_root(self):
-        tmp = pathlib.Path(tempfile.mkdtemp(prefix="it-deep-audit-"))
+        tmp = pathlib.Path(tempfile.mkdtemp(prefix="it-deep-audit-", dir="/tmp"))  # FB-131: short socket paths
         self.addCleanup(shutil.rmtree, tmp, True)
         deep = tmp / ("nested" * 15) / "owner"
         deep.mkdir(parents=True)

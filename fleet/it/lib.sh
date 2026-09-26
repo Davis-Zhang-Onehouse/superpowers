@@ -417,7 +417,8 @@ it_section() {            # it_section <name> -> own FLEET_HOME, own slots, own 
     if [ "${#prospective}" -ge 100 ]; then
       # A release verify worktree can be deeper than Unix sun_path permits. Only the socket
       # directory falls back to a fresh short path; all evidence and stores remain in the section.
-      socket_root="${IT_TMUX_AUDIT_SHORT_ROOT:-${TMPDIR:-/tmp}}"
+      # Not ${TMPDIR:-/tmp}: a long TMPDIR would make the fallback as long as what it replaces (FB-131).
+      socket_root="${IT_TMUX_AUDIT_SHORT_ROOT:-/tmp}"
       prospective="$socket_root/itk-$SECTION.XXXXXX/tmux-$(id -u)/itfleet-$SECTION"
       [ "${#prospective}" -lt 100 ] || {
         echo "it_section: no short private tmux socket root is available" >&2; return 2;
