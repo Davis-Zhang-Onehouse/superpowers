@@ -118,7 +118,7 @@ remembering which binary you called.
 
 **Trap 2 — the cut creates the tag; do not pre-create it.** `release-cut --help` says "the tag becomes
 `fleet/vX.Y.Z`", which reads like a precondition. It is not. Under its lock the cut writes the changelog
-section, rewrites `__version__`, commits `fleet vX.Y.Z`, then makes the **annotated** tag — and
+section, rewrites `__version__`, commits the subject **fleet vX.Y.Z**, then makes the **annotated** tag — and
 `annotated_tag` *refuses* if it already exists. Pre-creating it hard-blocks the release. Make only your
 ordinary content commits; touch neither `fleet/CHANGELOG.md` nor `__version__` (a dirty tree is refused
 too).
@@ -126,6 +126,7 @@ too).
 Both refusals here are already inside `release-cut` itself — an existing tag (`_refuse_an_existing_release`)
 and a dirty tree, **including untracked files** (`Repo.dirty()`) — so neither needs a wrapper check written
 around it; the only open question when the cut refuses is which of the two you hit.
+<!-- v2-cite: dirty-tree-refuses-the-cut Q2 -->
 
 **Trap 3 — be SILENT while the gate runs.** `pgrep -x claude` matches on `comm`, and a forked child
 carries its parent's `comm` until it execs — so **every tool call an agent session makes creates a process
@@ -343,7 +344,7 @@ retry until it passes is not a gate.
 A cut stamps **two** version lineages and writes down what it ships:
 
 - `fleet/src/fleet/__init__.py` gets the fleet version (`0.3.8`).
-- The seven manifests in `.version-bump.json` get `<upstream core>+fleet.<fleet version>` —
+- The seven manifests in `.version-bump.json` get `<upstream core>+fleet.<fleet-version>` —
   `6.2.0+fleet.0.3.8`. Build metadata, so the number never decreases and the upstream fork point survives.
   This is what `claude plugin list` reports; before 0.3.8 it read `6.2.0` at every release ever cut.
 - `<release>/.release/PAYLOAD.tsv` records which areas the release actually moves, and the changelog
