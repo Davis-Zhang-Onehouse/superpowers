@@ -928,6 +928,29 @@ sys.exit(0)
                 self.assertEqual(result.returncode, 97, result.stderr)
         self.assertEqual(len(calls.read_text().splitlines()), 1)
 
+    def test_set_option_hook_and_command_alias_operands_are_dispatchers(self):
+        env, calls = self.recording_tmux()
+        ordinary = self.tmux("-L", "own", "set", "-g", "status", "on", env=env)
+        self.assertEqual(ordinary.returncode, 0, ordinary.stderr)
+        forwarded = len(calls.read_text().splitlines())
+        for args in (
+                ("set", "-g", "after-new-window", "kill-server"),
+                ("set-option", "-g", "after-new-window[0]", "kill-server"),
+                ("set", "-g", "after-new-w", "kill-server"),
+                ("setw", "-g", "pane-died", "kill-server"),
+                ("set-window-option", "-g", "window-linked[0]", "kill-server"),
+                ("set", "-s", "command-alias[99]", "x=kill-server"),
+                ("set-option", "-s", "command-alias", "x=kill-server"),
+                ("set", "-u", "after-new-window"),
+                ("set", "-u", "command-alias[99]"),
+                ("set", "-g", "#{?1,after-new-window,status}", "kill-server"),
+                ("set", "-t", "mine", "-g", "after-new-window", "kill-server")):
+            with self.subTest(args=args):
+                result = self.tmux("-L", "own", *args, env=env)
+                self.assertEqual(result.returncode, 97, result.stderr)
+        self.assertEqual(len(calls.read_text().splitlines()), forwarded,
+                         "an option that installs commands reached fake real-tmux")
+
     def test_later_read_aliases_are_canonicalized(self):
         env, calls = self.recording_tmux()
         for alias, operands in (("display", ("-p", "x")),

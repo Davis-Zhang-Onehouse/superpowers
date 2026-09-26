@@ -89,6 +89,24 @@ source=source-file splitw=split-window swapp=swap-pane swapw=swap-window switchc
 unbind=unbind-key wait=wait-for
 """.split())
 
+# tmux 3.2a options-table.c: every OPTIONS_TABLE_{,PANE_,WINDOW_}HOOK entry.
+# cmd-set-option.c sends set-option, set-window-option and set-hook through the
+# same executor, so these option names can install commands too.
+TMUX_HOOK_OPTIONS = frozenset("""
+after-bind-key after-capture-pane after-copy-mode after-display-message after-display-panes
+after-kill-pane after-list-buffers after-list-clients after-list-keys after-list-panes
+after-list-sessions after-list-windows after-load-buffer after-lock-server after-new-session
+after-new-window after-paste-buffer after-pipe-pane after-queue after-refresh-client
+after-rename-session after-rename-window after-resize-pane after-resize-window after-save-buffer
+after-select-layout after-select-pane after-select-window after-send-keys after-set-buffer
+after-set-environment after-set-hook after-set-option after-show-environment after-show-messages
+after-show-options after-split-window after-unbind-key alert-activity alert-bell alert-silence
+client-attached client-detached client-resized client-session-changed pane-died pane-exited
+pane-focus-in pane-focus-out pane-mode-changed pane-set-clipboard pane-title-changed
+session-closed session-created session-renamed session-window-changed window-layout-changed
+window-linked window-pane-changed window-renamed window-unlinked
+""".split())
+
 
 def canonical_command(command):
     if command in TMUX_COMMANDS:
@@ -120,6 +138,29 @@ def nested_kills(rest):
     return found
 
 
+def set_option_operand(words, command):
+    """Find the option name after tmux 3.2a set-option/set-window-option flags."""
+    flags = "aFgopqsuUw" if command == "set-option" else "aFgoqu"
+    i = 0
+    while i < len(words):
+        word = words[i]
+        if word == "--":
+            return words[i + 1] if i + 1 < len(words) else None
+        if not word.startswith("-") or word == "-":
+            return word
+        for offset, flag in enumerate(word[1:], 1):
+            if flag == "t":
+                if offset == len(word) - 1:
+                    i += 1
+                    if i >= len(words):
+                        return None
+                break
+            if flag not in flags:
+                return None
+        i += 1
+    return None
+
+
 def can_dispatch_commands(command, rest):
     # A compound argv can execute a later command after the first one. These tmux commands can
     # execute commands supplied as arguments or from a file; their effect is not proved by argv[0].
@@ -127,7 +168,21 @@ def can_dispatch_commands(command, rest):
                    "set-hook", "command-prompt", "display-menu", "display-popup",
                    "display-panes", "choose-tree", "choose-client", "choose-buffer",
                    "pipe-pane", "detach-client")
-    return command in dispatchers
+    if command in dispatchers:
+        return True
+    if command not in ("set-option", "set-window-option"):
+        return False
+    operand = set_option_operand(rest[1:], command)
+    if operand is None:
+        return True  # An unparsed option list cannot prove the value harmless.
+    if "#" in operand:
+        return True  # tmux expands the option name as a format before matching it.
+    match = re.fullmatch(r"([^\[\]]+)(?:\[\d+\])?", operand)
+    if match is None:
+        return True
+    name = match[1]
+    return any(candidate.startswith(name) for candidate in
+               (*TMUX_HOOK_OPTIONS, "command-alias"))
 
 
 def split_tmux_commands(words):
