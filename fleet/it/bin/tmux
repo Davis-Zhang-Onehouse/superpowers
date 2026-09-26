@@ -300,6 +300,8 @@ def main():
     creates = command in ("new-session", "new")
     indirect = can_dispatch_commands(command, rest)
     leading_separator = not segments[0]
+    # The dispatcher test on a later segment is defence in depth: no read-only command is a dispatcher today, so
+    # a later dispatcher is already refused as non-read-only. It takes the same operand form as the first (C-1).
     compound_unsafe = any(part and (not readonly_command(part[0], part[1:]) or
                                     can_dispatch_commands(part[0], part[1:])) for part in segments[1:])
     hidden_kills = nested_kills([word for part in segments[1:] for word in part]) if compound_unsafe else []
