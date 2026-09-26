@@ -13,6 +13,7 @@ import tempfile
 def parse(argv):
     socket = None
     name = None
+    shell_code = False
     i = 0
     while i < len(argv) and argv[i].startswith("-") and argv[i] not in ("-", "--"):
         option = argv[i]
@@ -26,6 +27,8 @@ def parse(argv):
                     socket = value
                 elif flag == "L":
                     name = value
+                elif flag == "c":
+                    shell_code = True
                 break
         i += 1
     if i < len(argv) and argv[i] == "--":
@@ -48,7 +51,7 @@ def parse(argv):
             socket = os.environ["TMUX"].split(",", 1)[0]
         else:
             socket = os.path.join(directory, f"tmux-{os.getuid()}", "default")
-    return os.path.realpath(socket), command, rest
+    return os.path.realpath(socket), command, rest, shell_code
 
 
 def option(rest, flag):
@@ -155,7 +158,7 @@ def refresh_result(rows):
 
 def main():
     argv = sys.argv[1:]
-    socket, command, rest = parse(argv)
+    socket, command, rest, shell_code = parse(argv)
     real = os.environ.get("IT_TMUX_REAL", "/usr/bin/tmux")
     if os.path.realpath(real) == os.path.realpath(__file__):
         print("IT tmux audit: real tmux resolves to the audit shim", file=sys.stderr)
@@ -231,6 +234,8 @@ def main():
                     row.update(decision="deny", reason="new session has no auditable name")
             if not private and not readonly_command(command, segments[0]):
                 row.update(decision="deny", reason="nonprivate socket permits read-only commands only")
+            if shell_code:
+                row.update(decision="deny", reason="global -c shell command is unauditable")
             if indirect or compound_unsafe:
                 row.update(decision="deny", reason="compound or server-side command dispatch is unauditable")
             if row["decision"] == "noop":

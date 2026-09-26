@@ -833,6 +833,14 @@ sys.exit(0)
         self.assertEqual(result.returncode, 97, result.stderr)
         self.assertFalse(calls.exists())
 
+    def test_global_shell_command_option_is_refused(self):
+        env, calls = self.recording_tmux()
+        for args in (("-c", "tmux kill-server", "list-sessions"),
+                     ("-2c/usr/bin/tmux kill-server", "list-sessions")):
+            with self.subTest(args=args):
+                self.assertEqual(self.tmux(*args, env=env).returncode, 97)
+        self.assertFalse(calls.exists(), "-c reached fake real-tmux")
+
     def test_slow_real_tmux_does_not_hold_the_ledger_lock(self):
         env, calls = self.recording_tmux()
         env["FAKE_TMUX_SLOW_COMMAND"] = "list-clients"
