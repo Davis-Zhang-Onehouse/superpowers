@@ -289,15 +289,15 @@ def main():
     private = name not in ("default", "fleet", "fleet-davis") and any(
         os.path.commonpath((socket, directory)) == directory and socket != directory
         for directory in dirs)
-    segments = split_tmux_commands([command, *rest])
+    raw_segments = split_tmux_commands([command, *rest])
     segments = [[canonical_command(part[0]) or "", *part[1:]] if part else []
-                for part in segments]
+                for part in raw_segments]
     command = segments[0][0] if segments[0] else ""
     rest = segments[0][1:] if segments[0] else []
     destructive = command in ("kill-server", "kill-session")
     creates = command in ("new-session", "new")
     indirect = can_dispatch_commands(command, segments[0])
-    leading_separator = not segments[0] or command in (";", r"\;")
+    leading_separator = not segments[0]
     compound_unsafe = any(part and (not readonly_command(part[0], part[1:]) or
                                     can_dispatch_commands(part[0], part[1:])) for part in segments[1:])
     hidden_kills = nested_kills([word for part in segments[1:] for word in part]) if compound_unsafe else []
@@ -305,6 +305,9 @@ def main():
         hidden_kills.extend(nested_kills(segments[0]))
     if leading_separator:
         hidden_kills.extend(nested_kills(rest))
+    if not command and raw_segments[0]:
+        # A failed name lookup must not erase kill attribution from the raw argv.
+        hidden_kills.extend(nested_kills(raw_segments[0]))
     shell_format = any("#(" in arg for arg in argv)
     if shell_format:
         hidden_kills.extend(nested_kills(rest))

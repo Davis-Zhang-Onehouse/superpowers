@@ -961,6 +961,26 @@ sys.exit(0)
                 self.assertEqual(result.returncode, 0, result.stderr)
         self.assertEqual(len(calls.read_text().splitlines()), 3)
 
+    def test_unknown_kill_prefix_and_escaped_separator_keep_kill_ledger_rows(self):
+        env, calls = self.recording_tmux()
+        results = self.tmp / "kill-attribution.tsv"
+        results.write_text("case\tverdict\tevidence\tnote\n"
+                           "KILL-AUDIT-X\tPASS\tfleet/it/X/tmux-audit.jsonl\t0 kill(s): (none)\n")
+        env.update(IT_TMUX_AUDIT_RESULTS=str(results), IT_TMUX_AUDIT_SECTION="X")
+        for args, expected in (((r"\;", "kill-server"), "kill-server"),
+                               (("kill-s",), "kill-session"),
+                               (("kill-se",), "kill-session")):
+            with self.subTest(args=args):
+                before = len(self.ledger.read_text().splitlines()) if self.ledger.exists() else 0
+                result = self.tmux("-L", "own", *args, env=env)
+                self.assertEqual(result.returncode, 97, result.stderr)
+                rows = [json.loads(line) for line in self.ledger.read_text().splitlines()[before:]]
+                self.assertTrue(any(row["command"] == expected and row["decision"] == "deny"
+                                    for row in rows), rows)
+        self.assertFalse(calls.exists(), "an unknown command reached fake real-tmux")
+        self.assertIn("KILL-AUDIT-X\tFAIL", results.read_text())
+        self.assertNotIn("0 kill(s)", results.read_text())
+
     def test_audit_summary_counts_a_refused_nonkill_command(self):
         tmp = self.tmp / "audit-summary"
         it = harness_copy(tmp)
