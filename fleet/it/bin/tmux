@@ -5,6 +5,7 @@ import fcntl
 import json
 import os
 import re
+import socket as socketlib
 import subprocess
 import sys
 import tempfile
@@ -126,6 +127,16 @@ def session_id(real, socket, name):
     return None
 
 
+def socket_accepts_connection(path):
+    """A failed PID query is not proof of absence if the socket still accepts clients."""
+    try:
+        with socketlib.socket(socketlib.AF_UNIX, socketlib.SOCK_STREAM) as probe:
+            probe.settimeout(0.2)
+            return probe.connect_ex(path) == 0
+    except OSError:
+        return False
+
+
 def refresh_result(rows):
     """A runner may kill in its EXIT trap, after its leave row was written."""
     path = os.environ.get("IT_TMUX_AUDIT_RESULTS")
@@ -201,8 +212,11 @@ def main():
                 current_inode = None
             current_pid = server_pid(real, socket) if private and created and current_inode \
                 and (destructive or creates) else None
+            stale_owned_socket = bool(creates and created and current_inode == owned_inode and
+                                      owned_pid and current_pid is None and
+                                      not socket_accepts_connection(socket))
             unverified_existing = creates and created and current_inode and (
-                owned_pid is None or current_pid is None)
+                owned_pid is None or current_pid is None) and not stale_owned_socket
             session_ids = next((r["session_ids"] for r in reversed(history)
                                 if r.get("socket") == socket and "session_ids" in r), {})
             if destructive or creates:

@@ -758,6 +758,8 @@ else:
     socket = pathlib.Path(os.environ['TMUX_TMPDIR']) / ('tmux-' + str(os.getuid())) / args[1]
     command, rest = args[2], args[3:]
 if command == 'display-message':
+    stale = os.environ.get('FAKE_TMUX_STALE_MARKER')
+    if stale and not pathlib.Path(stale).exists(): sys.exit(1)
     if socket.exists(): print('777'); sys.exit(0)
     sys.exit(1)
 if command == 'list-sessions':
@@ -768,6 +770,8 @@ with open(os.environ['FAKE_TMUX_RECORD'], 'a') as out:
 if command == 'new-session':
     socket.parent.mkdir(parents=True, exist_ok=True)
     socket.touch()
+    if os.environ.get('FAKE_TMUX_STALE_MARKER'):
+        pathlib.Path(os.environ['FAKE_TMUX_STALE_MARKER']).touch()
     sys.exit(0)
 if command == 'kill-server':
     if socket.exists(): socket.unlink(); sys.exit(0)
@@ -792,6 +796,23 @@ sys.exit(0)
         self.assertIn("KILL-AUDIT-X\tPASS", results.read_text())
         rows = [json.loads(line) for line in self.ledger.read_text().splitlines()]
         self.assertEqual(rows[-1]["decision"], "noop")
+
+    def test_section_can_replace_its_own_stale_unanswered_socket(self):
+        env, calls = self.stateful_recording_tmux()
+        socket = self.private / f"tmux-{os.getuid()}" / "own"
+        socket.parent.mkdir()
+        socket.touch()
+        inode = [socket.stat().st_dev, socket.stat().st_ino]
+        self.ledger.write_text(json.dumps({"socket": str(socket), "created": True,
+                                           "socket_inode": inode, "server_pid": "777",
+                                           "session_ids": {}}) + "\n")
+        env["FAKE_TMUX_STALE_MARKER"] = str(self.tmp / "server-alive")
+        made = self.tmux("-L", "own", "new-session", "-d", "-s", "mine", env=env)
+        self.assertEqual(made.returncode, 0, made.stderr)
+        rows = [json.loads(line) for line in self.ledger.read_text().splitlines()]
+        self.assertTrue(rows[-1].get("created"), rows[-1])
+        self.assertEqual(self.tmux("-L", "own", "kill-server", env=env).returncode, 0)
+        self.assertEqual(json.loads(calls.read_text().splitlines()[-1])[-1], "kill-server")
 
     def test_nonprivate_socket_passes_only_explicit_reads(self):
         env, calls = self.recording_tmux()
