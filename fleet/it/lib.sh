@@ -39,7 +39,6 @@ IT_FLEET="$IT_ROOT/bin/it-fleet"; export IT_FLEET
 # The merge into the single RESULTS.tsv is then done by ONE writer, deliberately.
 RESULTS="${IT_RESULTS:-$IT_ROOT/RESULTS.tsv}"
 
-LIVE_SNAPSHOT="$IT_ROOT/live-stores.sha256"
 #: The live-session baseline is keyed PER RUN (FB-60; FB-34 and FB-47 before it). It used to be this one
 #: `live-tmux-sessions.txt` per checkout, written only when absent and never advanced, so its horizon was
 #: "since anyone first ran IT in this slot" while every FAIL it raised says "during this section". In a leased
@@ -61,6 +60,7 @@ LIVE_SNAPSHOT="$IT_ROOT/live-stores.sha256"
 #: forgiven.
 IT_RUN_ID="${IT_RUN_ID:-$(date -u +%Y%m%dT%H%M%SZ)-$$}"
 IT_RUN_ID="$(printf '%s' "$IT_RUN_ID" | tr -c 'A-Za-z0-9._-' '_')"
+LIVE_SNAPSHOT="$IT_ROOT/live-stores-run-$IT_RUN_ID.sha256"
 LIVE_TMUX_SNAPSHOT="$IT_ROOT/live-tmux-sessions-run-$IT_RUN_ID.txt"
 #: The live set at the START of the most recent run in this checkout: what a new run's first check compares
 #: against. It keeps the old baseline's name, so a slot's pre-fix file is read as the first handover.

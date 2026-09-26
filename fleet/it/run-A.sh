@@ -477,7 +477,7 @@ a1() {
 # A2 — the live-store snapshot exists, is compared, and the comparison can FAIL
 # ===================================================================================================
 #
-# `it_assert_isolation` already diffs `live-stores.sha256`, so §A does not re-read the live stores: a
+# `it_assert_isolation` already diffs this run's live-store snapshot, so §A does not re-read the live stores: a
 # second implementation of the check would be a second thing to be wrong, and the contract forbids §A
 # reading `~/.claude-dispatch-board` / `~/.claude-ws-pool` at all. What §A asserts instead is the three
 # properties that make the existing mechanism worth anything.
@@ -490,9 +490,9 @@ a2_snapshot_covers_both_stores() {
   #: sha256sum's own form is `<64 hex>  <path>`; anything else is not a snapshot this check can diff.
   local malformed; malformed="$(grep -cvE '^[0-9a-f]{64}[[:space:]]+/' "$LIVE_SNAPSHOT")"
   if [ "$lines" -gt 0 ] && [ "$board" -gt 0 ] && [ "$pool" -gt 0 ] && [ "$malformed" = 0 ]; then
-    a_pass A2a "fleet/it/live-stores.sha256" "$(sq "the snapshot exists and covers BOTH live stores: $lines sha256 lines, $board dispatch-board + $pool ws-pool entries, 0 malformed")"
+    a_pass A2a "fleet/it/${LIVE_SNAPSHOT##*/}" "$(sq "the snapshot exists and covers BOTH live stores: $lines sha256 lines, $board dispatch-board + $pool ws-pool entries, 0 malformed")"
   else
-    a_fail A2a "fleet/it/live-stores.sha256" "$(sq "snapshot unusable: $lines lines, dispatch-board=$board, ws-pool=$pool, malformed=$malformed — a snapshot missing a store cannot detect a change in it")"
+    a_fail A2a "fleet/it/${LIVE_SNAPSHOT##*/}" "$(sq "snapshot unusable: $lines lines, dispatch-board=$board, ws-pool=$pool, malformed=$malformed — a snapshot missing a store cannot detect a change in it")"
   fi
 }
 
