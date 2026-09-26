@@ -917,7 +917,7 @@ class RealOrphanPipeline(CliCase):
         and signals nothing; the server and its pane live on."""
         import tempfile
         fleet, _ = self.real_fleet()
-        sockdir = tempfile.mkdtemp(prefix="itfleet-v23h-m5-")
+        sockdir = tempfile.mkdtemp(prefix="itfleet-v23h-m5-", dir="/tmp")   # FB-131: an AF_UNIX path stays short under any TMPDIR
         sock = os.path.join(sockdir, "s")
         tmux = ["tmux", "-S", sock]
 
