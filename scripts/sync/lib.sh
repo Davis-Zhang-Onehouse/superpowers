@@ -87,8 +87,11 @@ finalize_live() { # finalize_live NEWTAG RESULT [DETAIL] — adopt sync-rebase i
 # forget_version_only_resolutions REPO — RV-27. rerere records every resolution made during a rebase, including each one
 # resolve_manifest_versions makes, and would REPLAY it (rerere.autoupdate stages it) the next time the identical conflict
 # appears — a stale-base re-run — before the resolver is asked. Drop every recorded resolution whose preimage is a
-# version-only conflict, the exact class the resolver owns, so it stays the only thing that settles one. Resolutions
-# of any other conflict (the operator's README merge) are kept. Prints how many it dropped; never fails the sync.
+# version-only conflict (exactly one differing line, a version value: the resolver's RV-S6Y-2 rule), so it stays the only
+# thing that settles one. Resolutions of any other conflict (the operator's README merge) are kept. Two entries are never
+# touched (S7 review): one without a postimage (it replays nothing), and one a live MERGE_RR still names — a paused
+# rebase's stop — because git's rerere segfaults on the next `rebase --continue` when that directory is gone, and the
+# operator's resolution of the same stop is then never recorded. Prints how many it dropped; never fails the sync.
 forget_version_only_resolutions() {
   local cache
   cache="$(g "$1" rev-parse --path-format=absolute --git-common-dir 2>/dev/null)/rr-cache" || return 0
@@ -103,22 +106,31 @@ def version_only(text):
     hunks = block.findall(text)
     if not hunks:
         return False
+    differing = []
     for ours, theirs in hunks:
         a, b = ours.splitlines(), theirs.splitlines()
         if len(a) != len(b):
             return False
-        differing = [(x, y) for x, y in zip(a, b) if x != y]
-        if not differing:
-            return False
-        for x, y in differing:
-            vx, vy = version.match(x.rstrip("\r")), version.match(y.rstrip("\r"))
-            if not (vx and vy and vx.group(1) == vy.group(1) and vx.group(3) == vy.group(3)):
-                return False
-    return True
+        differing += [(x, y) for x, y in zip(a, b) if x != y]
+    if len(differing) != 1:
+        return False
+    x, y = differing[0]
+    vx, vy = version.match(x.rstrip("\r")), version.match(y.rstrip("\r"))
+    return bool(vx and vy and vx.group(1) == vy.group(1) and vx.group(3) == vy.group(3))
 
+live = set()
+for merge_rr in [cache.parent / "MERGE_RR", *cache.parent.glob("worktrees/*/MERGE_RR")]:
+    try:
+        for record in merge_rr.read_bytes().split(b"\0"):
+            if b"\t" in record:
+                live.add(record.split(b"\t", 1)[0].decode(errors="replace"))
+    except OSError:
+        pass
 dropped = 0
 for entry in sorted(cache.iterdir()):
     pre = entry / "preimage"
+    if entry.name in live or not (entry / "postimage").is_file():
+        continue
     if entry.is_dir() and pre.is_file():
         try:
             text = pre.read_text(errors="replace")
