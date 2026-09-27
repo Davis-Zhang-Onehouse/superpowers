@@ -92,7 +92,7 @@ class Repo:
 
         A patch-id survives a CLEAN replay only (RV-26). The sync auto-resolves every replayed release
         commit's version-manifest conflict to the new upstream version plus our `+fleet.x` suffix, which
-        changes that commit's patch-id, and `cherry` then re-listed all 43 shipped `fleet vX.Y.Z` commits.
+        changes that commit's patch-id, and `cherry` then re-listed all 43 shipped release commits (subject "fleet vX.Y.Z").
         So a `+` commit whose identity -- author email, author date, subject, all of which a rebase keeps
         whatever it does to the diff -- matches a commit reachable from `prev_tag` counts as shipped too.
 
