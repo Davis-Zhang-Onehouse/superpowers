@@ -1138,6 +1138,25 @@ with open(os.environ['IT_TMUX_AUDIT_LEDGER'], 'a') as out:
                 self.assertEqual(recorded[-1]["command"], "list-clients")
                 self.assertEqual(recorded[-1]["status"], 0)
 
+    def test_a_call_that_changes_no_ownership_does_not_parse_the_ledger(self):
+        # S7 §E: every call re-read and re-parsed the whole ledger twice under the lock, so a section's cost grew
+        # with the square of its call count; §E4 (board reads: capture-pane, list-clients) reached 35,932 rows
+        # and ran 34 of 50 iterations in 2 h 22 min. A read neither needs nor records ownership state, so a
+        # pre-existing unparsable row cannot matter to it, while a kill still fails closed on one.
+        env, calls = self.recording_tmux()
+        self.ledger.write_text("{not json\n")
+        read = self.tmux("-L", "own", "list-clients", env=env)
+        self.assertEqual(read.returncode, 0, read.stderr)
+        self.assertEqual(json.loads(calls.read_text().splitlines()[-1]), ["-L", "own", "list-clients"])
+        row = json.loads(self.ledger.read_text().splitlines()[-1])
+        self.assertEqual((row["command"], row["status"]), ("list-clients", 0))
+        self.assertNotIn("session_ids", row)
+        for kill in (("kill-server",), ("kill-session", "-t", "=x"), ("new-session", "-d", "-s", "y")):
+            with self.subTest(kill=kill):
+                refused = self.tmux("-L", "own", *kill, env=env)
+                self.assertEqual(refused.returncode, 97, refused.stderr)
+        self.assertEqual(len(calls.read_text().splitlines()), 1, "a state-changing call ran on an unparsable ledger")
+
     def test_parallel_new_sessions_merge_owned_session_ids(self):
         fake = self.tmp / "parallel-tmux"
         started = self.tmp / "a-started"

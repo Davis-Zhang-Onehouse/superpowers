@@ -298,6 +298,10 @@ def main():
     rest = segments[0][1:] if segments[0] else []
     destructive = command in ("kill-server", "kill-session")
     creates = command in ("new-session", "new")
+    # Only these calls read or change the ownership state the ledger carries. Every other call (capture-pane,
+    # list-*, has-session ...) is decided from argv alone and records no state, so it never parses the ledger:
+    # re-parsing it twice per call made a section's cost grow with the square of its call count (S7 §E).
+    owns_state = destructive or creates or command == "rename-session"
     indirect = can_dispatch_commands(command, rest)
     leading_separator = not segments[0]
     # The dispatcher test on a later segment is defence in depth: no read-only command is a dispatcher today, so
@@ -325,7 +329,7 @@ def main():
         with open(ledger, "a+", encoding="utf-8") as stream:
             fcntl.flock(stream, fcntl.LOCK_EX)
             stream.seek(0)
-            history = [json.loads(line) for line in stream if line.strip()]
+            history = [json.loads(line) for line in stream if line.strip()] if owns_state else []
             created = any(r.get("socket") == socket and r.get("created") for r in history)
             owned_inode = next((r["socket_inode"] for r in reversed(history)
                                 if r.get("socket") == socket and r.get("socket_inode")), None)
@@ -409,6 +413,9 @@ def main():
                     stream.write(json.dumps(denied) + "\n")
                 stream.flush()
                 if destructive or hidden_kills:
+                    if not owns_state:
+                        stream.seek(0)
+                        history = [json.loads(line) for line in stream if line.strip()]
                     refresh_result([*history, *denied_rows])
                 print(f"IT tmux audit: refused {command}: {row['reason']}", file=sys.stderr)
                 return 97
@@ -429,6 +436,16 @@ def main():
                 result = subprocess.run([real, *argv])
             finally:
                 fcntl.flock(stream, fcntl.LOCK_EX)
+            stream.seek(0, os.SEEK_END)
+            size = stream.tell()
+            needs_newline = size > 0 and os.pread(stream.fileno(), 1, size - 1) != b"\n"
+            if not owns_state:
+                row["status"] = result.returncode
+                if needs_newline:
+                    stream.write("\n")
+                stream.write(json.dumps(row) + "\n")
+                stream.flush()
+                return result.returncode
             stream.seek(0)
             latest = []
             invalid_rows = 0
