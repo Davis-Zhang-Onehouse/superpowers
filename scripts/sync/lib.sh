@@ -92,6 +92,9 @@ finalize_live() { # finalize_live NEWTAG RESULT [DETAIL] — adopt sync-rebase i
 # touched (S7 review): one without a postimage (it replays nothing), and one a live MERGE_RR still names — a paused
 # rebase's stop — because git's rerere segfaults on the next `rebase --continue` when that directory is gone, and the
 # operator's resolution of the same stop is then never recorded. Prints how many it dropped; never fails the sync.
+# Trade-off (S7 review CR-5): rr-cache records no path, so a hand resolution of a version-only conflict in a file that
+# .version-bump.json does not name (a nested package.json) is purged too. The cost is a pause on the next run that meets
+# that conflict — it fails safe, never wrong content — and the resolver cannot own such a file anyway.
 forget_version_only_resolutions() {
   local cache
   cache="$(g "$1" rev-parse --path-format=absolute --git-common-dir 2>/dev/null)/rr-cache" || return 0
