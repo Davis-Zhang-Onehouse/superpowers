@@ -123,22 +123,31 @@ for merge_rr in [cache.parent / "MERGE_RR", *cache.parent.glob("worktrees/*/MERG
     try:
         for record in merge_rr.read_bytes().split(b"\0"):
             if b"\t" in record:
-                live.add(record.split(b"\t", 1)[0].decode(errors="replace"))
+                # "<id>.<N>" names conflict variant N of rr-cache/<id> (S7 review CR-1)
+                live.add(record.split(b"\t", 1)[0].split(b".", 1)[0].decode(errors="replace"))
     except OSError:
         pass
 dropped = 0
 for entry in sorted(cache.iterdir()):
-    pre = entry / "preimage"
-    if entry.name in live or not (entry / "postimage").is_file():
+    if not entry.is_dir() or entry.name in live:
         continue
-    if entry.is_dir() and pre.is_file():
+    # rerere keeps variants beside variant 0: preimage.N / postimage.N. An entry is dropped when some variant holds a
+    # recorded version-only resolution (it would replay) and no variant holds a recorded resolution of anything else.
+    replays_version, keeps_other = False, False
+    for post in entry.glob("postimage*"):
+        pre = entry / post.name.replace("postimage", "preimage", 1)
         try:
             text = pre.read_text(errors="replace")
         except OSError:
+            keeps_other = True
             continue
         if version_only(text):
-            shutil.rmtree(entry, ignore_errors=True)
-            dropped += 1
+            replays_version = True
+        else:
+            keeps_other = True
+    if replays_version and not keeps_other:
+        shutil.rmtree(entry, ignore_errors=True)
+        dropped += 1
 print(dropped)
 PY
 }
