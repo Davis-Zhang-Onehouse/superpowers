@@ -54,7 +54,7 @@ J_FAKE_PIDS=""
 cleanup_J() {
   for pid in $J_FAKE_PIDS; do kill -9 "$pid" 2>/dev/null; done
   it_cleanup_tmux
-  tmux -L "$IT_TMUX_SOCKET" kill-server 2>/dev/null
+  { it_tmux list-sessions >/dev/null 2>&1 && tmux -L "$IT_TMUX_SOCKET" kill-server 2>/dev/null; }
   # Verified, not assumed: a leftover process named `claude` is exactly the confusion SI-25 was about.
   for pid in $J_FAKE_PIDS; do
     #: A zombie is gone as far as the box is concerned — it holds no resources and `pgrep -x claude` does not

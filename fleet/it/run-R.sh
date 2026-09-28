@@ -28,7 +28,7 @@ it_fresh_store
 # The derived sockets are real tmux servers (R2). They are outside `$TMUX_PREFIX`, so `it_cleanup_tmux`
 # cannot see them and they are torn down by name.
 trap 'it_cleanup_tmux; for s in fleet-itr1 fleet-itr2; do tmux -L "$s" kill-server 2>/dev/null; done;
-      tmux -L "$IT_TMUX_SOCKET" kill-server 2>/dev/null' EXIT
+      { it_tmux list-sessions >/dev/null 2>&1 && tmux -L "$IT_TMUX_SOCKET" kill-server 2>/dev/null; }' EXIT
 
 OUT="$EV/out"; rm -rf "$OUT"; mkdir -p "$OUT"
 bash "$IT_ROOT/bin/source-pin.sh" before "$OUT" || exit 2

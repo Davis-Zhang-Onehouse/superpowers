@@ -39,7 +39,7 @@ P_TIMEOUT="${P_TIMEOUT:-900}"
 P_DIR=""
 cleanup_P() {
   it_cleanup_tmux
-  tmux -L "$IT_TMUX_SOCKET" kill-server 2>/dev/null
+  { it_tmux list-sessions >/dev/null 2>&1 && tmux -L "$IT_TMUX_SOCKET" kill-server 2>/dev/null; }
   #: V23-P. The slot now lives OUTSIDE the checkout, so it is not swept with `$OUT`. Removed only when the path has
   #: the shape `it_outside_checkout_dir` gives it: a bad or empty variable must never reach an `rm -rf`.
   case "$P_DIR" in */fleet-it-P) rm -rf "$P_DIR" ;; esac

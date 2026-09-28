@@ -43,7 +43,7 @@ PATH="$IT_ROOT/bin:$PATH"; export PATH
 # on a socket nothing else can reach, and leaving them would accumulate one per run.
 cleanup_F() {
   it_cleanup_tmux
-  tmux -L "$IT_TMUX_SOCKET" kill-server 2>/dev/null
+  { it_tmux list-sessions >/dev/null 2>&1 && tmux -L "$IT_TMUX_SOCKET" kill-server 2>/dev/null; }
   #: `RV-C7`. F2c's watcher stand-in, if a run is interrupted between its spawn and its inline kill. Only
   #: ever this section's own `$!`, cleared the moment it is reaped, so a recycled pid is never signalled.
   [ -n "${F2C_PID:-}" ] && kill "$F2C_PID" 2>/dev/null

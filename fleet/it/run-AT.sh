@@ -44,7 +44,7 @@ CLIENTS=()
 at_cleanup() {
   local p
   for p in "${CLIENTS[@]}"; do kill "$p" 2>/dev/null; done
-  tmux -L "$IT_TMUX_SOCKET" kill-server 2>/dev/null
+  { it_tmux list-sessions >/dev/null 2>&1 && tmux -L "$IT_TMUX_SOCKET" kill-server 2>/dev/null; }
   for p in "${CLIENTS[@]}"; do kill -9 "$p" 2>/dev/null; wait "$p" 2>/dev/null; done
   rm -f "${TMUX_TMPDIR:-/tmp}/tmux-$(id -u)/$IT_TMUX_SOCKET"
 }
