@@ -1,5 +1,86 @@
 # fleet — changelog
 
+## fleet/v0.6.18 — 2026-09-28T01:26:33Z
+Cut from 0d6b39d on `live` (upstream base snapshot/2026-09-26-185439). 71 commit(s) since fleet/v0.6.17.
+
+Every release ships the whole repository — all skills, `commands/`, `hooks/` and the plugin manifest, not only `fleet/`.
+Payload: fleet (30 files), skills (4 files), scripts (4 files), tests (3 files), docs (3 files), other (2 files).
+Skills changed: releasing-fleet, writing-plans.
+
+> fleet/v0.6.17 is no longer an ancestor of `live` — an upstream rebase rewrote the commits between. This delta was computed by patch-id and author identity, not by ancestry.
+
+- 8ca22db Release v6.4.2: leaner plans from writing-plans (#2384)
+- 9e4d3af RV-30: an owner that cannot be read refuses close instead of stamping it closed and reporting success
+- 4aa0bbd RV-32: a record that is not a JSON object, or misses a field, is refused as BadInput
+- e98c950 RV-31: the recreated-merge case conflicts only on version lines, so the MERGE_HEAD guard is what it tests
+- e291222 RV-33: the snapshot ignore test reads no global or system git config
+- 0cb58cf RV-35: a revive whose start tmux refuses also restores the child_instant its early write persisted
+- 4f8748a RV-36: the unreadable-record test class sits above the __main__ guard
+- 43e76d9 RV-34: claude_echoes says why a rule line inside a draft fails safe
+- f63e395 RV-37: refresh-control removes its temp file when a copy fails; the skill says when --check reads DIFFERS
+- aef5509 RV-39: the snapshot ignore test also disables git's default excludes file and strips inherited GIT_* variables
+- 3a4b0ff RV-40: a test reaches harvest's refusal on an unreadable possible owner
+- c96ac62 RV-41: the refresh-control temp-file case fails the copy with a cp stub, not chmod 000
+- 71757a6 Audit IT tmux kills at runtime
+- e36f44e Keep runtime audit rows current across section reruns
+- 0cb6b7c Keep IT sockets short in deep checkouts
+- 30ef6a3 Bind session kills to sessions the IT shim created
+- 82ea733 Refuse tmux command streams that hide kills
+- 5da01db Keep kill audit ownership sound on fresh results and missing PIDs
+- 8cf16a2 Refuse broad session kills and isolate nested IT selftests
+- fa912b1 Drop inherited real tmux from nested harness fixtures
+- e82b6b8 OR-1: classify kills after tmux end-of-options
+- abbf515 OR-2: distinguish tmux separators from shell command data
+- d4460ed OR-3: record already-gone owned server kills as noops
+- 99fdc3c OR-4: restrict nonprivate tmux calls to reads
+- 2ac2dad OR-5: reject shim recursion and release ledger during client call
+- a8912a3 OR-7: remove generated section socket directories after guardian exit
+- ccbbe91 OR-6: scope static -c operands to their invoking program
+- e46f693 OR-8: cover socket parse and component boundary with fake tmux
+- 8833ec1 OR-9: refuse tmux global shell command option
+- ff018df OR-10: prove stale owned socket before adopting recreated server
+- c963dc6 OR-3b: serialize all section results rewrites with audit refresh
+- 81b405e OR-12: record repeated owned exact session kills as noops
+- df99b61 OR-13: treat stale owned server sockets as already gone
+- 5e83dd0 OR-14: refuse leading tmux separators before real execution
+- c5e45d3 OR-6b: scope static c operand to tmux global options
+- 536895e OR-15: require an explicit print flag on nonprivate reads
+- 17ffcfa OR-16: refuse shell formats before real tmux
+- 0917f85 Classify tmux commands after trailing argv separators
+- 76732d4 Resolve tmux display alias before dispatch classification
+- 5f9b00e Refuse tmux control mode on foreign sockets
+- 7af03db Merge concurrent session changes into current tmux ledger
+- 12c81f4 Keep guardian socket directory when kill is refused
+- 01ac43e Keep escaped tmux semicolons as literal argv data
+- 2ec87be Count non-kill refusals in tmux audit verdicts
+- 2cab493 Handle legacy ownership rows in audit summaries
+- e4c2535 fix(it): skip guardian kill when no server was created
+- 68238f8 fix(it): classify popup and menu command aliases
+- faa23ec fix(it): record completed tmux calls after ledger damage
+- 50e3a05 Guard tmux command templates in the IT shim
+- 4a30cb9 Resolve tmux names before classifying dispatchers
+- 88e9836 Canonicalize every tmux command segment
+- 5bcd7c8 Classify hook and command-alias set options as dispatchers (W-1)
+- 1279e6f Document allowed pane shell operands in the IT shim (W-2)
+- 7bb3540 Keep kill attribution for unknown tmux words (W-3)
+- e631e28 C-1: classify every tmux segment's dispatch from its operands alone
+- 1e73a9d OI-13: run tests/sync in the release gate roster
+- 6cc8924 OI-11: releasing-fleet passes lint-skill V1/V2, and lints itself
+- 495f85e FB-131 remainder: v23-r's socket roots stay short under a long TMPDIR
+- b916ba3 RV-26: a changelog delta survives a rebase that changed a shipped commit's diff
+- 0e33091 RV-27: no version-only rerere resolution outlives a sync run
+- 20a7bb1 RV-27 review: never purge an rr-cache entry a paused rebase still names
+- d6a9c52 RV-26 review: say what the identity match trades, and name it in the rebase note
+- 60c72ad OI-13 review: §SYNC records rows through the harness, runs standalone, and times out
+- 3dc2328 C-1 review: say that the later-segment dispatcher test is defence in depth
+- 74badda Harness copies stay writable inside a read-only release export
+- eafa308 IT exit traps kill their private server only when it is up
+- 6d9239f A7 and N9 read the live server after it_section, not the section's socket dir
+- 00b8593 Ignore the IT results row locks
+- 8e40b56 RV-26: the delta docstring names release commits without a fleet-verb code span
+- 8b115e6 IT tmux shim: a call that changes no ownership never parses the ledger
+- 0d6b39d IT: guard the remaining $IT_TMUX_SOCKET kill-server sites
+
 ## fleet/v0.6.17 — 2026-09-26T07:57:03Z
 Cut from 907af01 on `stack/0.6.16` (upstream base snapshot/2026-09-22-152849). 1 commit(s) since fleet/v0.6.16.
 
