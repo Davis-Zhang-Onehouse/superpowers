@@ -89,7 +89,7 @@ finalize_live() { # finalize_live NEWTAG RESULT [DETAIL] — adopt sync-rebase i
 # appears — a stale-base re-run — before the resolver is asked. Drop every recorded resolution whose preimage is a
 # version-only conflict (exactly one differing line, a version value: the resolver's RV-S6Y-2 rule), so it stays the only
 # thing that settles one. Resolutions of any other conflict (the operator's README merge) are kept. Two entries are never
-# touched (S7 review): one without a postimage (it replays nothing), and one a live MERGE_RR still names — a paused
+# touched (S7 review): one with no postimage in any variant (it replays nothing), and one a live MERGE_RR still names — a paused
 # rebase's stop — because git's rerere segfaults on the next `rebase --continue` when that directory is gone, and the
 # operator's resolution of the same stop is then never recorded. Prints how many it dropped; never fails the sync.
 # Trade-off (S7 review CR-5): rr-cache records no path, so a hand resolution of a version-only conflict in a file that
